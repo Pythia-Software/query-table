@@ -1,0 +1,108 @@
+{
+  "$schema": "../query-table.schema.json",
+  "name": "runs",
+  "version": 1,
+  "idField": "id",
+  "defaultLimit": 100,
+  "defaultSort": [{ "field": "enqueued_at", "dir": "desc", "nulls": "last" }],
+  "tiebreakSort": [{ "field": "id", "dir": "desc" }],
+  "defaultSelect": [
+    { "field": "workbook_case_name" },
+    { "field": "platform" },
+    { "field": "overall" },
+    { "field": "total_ms" },
+    { "field": "is_starred", "width": 40 }
+  ],
+  "fields": [
+    {
+      "name": "id",
+      "label": "Run",
+      "type": "number",
+      "render": "link_run",
+      "select": { "default": false },
+      "bindings": { "postgres": { "expr": "vr.id" } }
+    },
+    {
+      "name": "workbook_case_name",
+      "label": "Case",
+      "type": "text",
+      "group": "core",
+      "select": { "default": true },
+      "bindings": { "postgres": { "expr": "w.corpus_case_name" } }
+    },
+    {
+      "name": "platform",
+      "label": "Platform",
+      "type": "enum",
+      "group": "core",
+      "select": { "default": true },
+      "filter": { "values": { "source": "static", "options": ["windows", "macos", "linux"] } },
+      "bindings": { "postgres": { "expr": "vr.platform" } }
+    },
+    {
+      "name": "overall",
+      "label": "Overall",
+      "type": "enum",
+      "group": "core",
+      "render": "overall_pill",
+      "select": { "default": true },
+      "filter": { "values": { "source": "static", "options": ["PASS", "FAIL", "DIFFERENCES"] } },
+      "bindings": { "postgres": { "expr": "vr.overall" } }
+    },
+    {
+      "name": "total_ms",
+      "label": "Total",
+      "type": "number",
+      "group": "core",
+      "render": "duration_ms",
+      "select": { "default": true, "align": "right" },
+      "bindings": { "postgres": { "expr": "vr.total_ms" } }
+    },
+    {
+      "name": "engine_key",
+      "label": "Engine",
+      "type": "text",
+      "group": "core",
+      "aliases": ["runner", "backend"],
+      "bindings": { "postgres": { "expr": "vr.engine_key" } }
+    },
+    {
+      "name": "enqueued_at",
+      "label": "Enqueued",
+      "type": "datetime",
+      "group": "core",
+      "render": "datetime_rel",
+      "source": { "kind": "backend", "path": "enqueued_at.Time" },
+      "bindings": { "postgres": { "expr": "vr.enqueued_at" } }
+    },
+    {
+      "name": "is_starred",
+      "label": "★",
+      "type": "bool",
+      "group": "tagging",
+      "render": "tag_marker",
+      "select": { "width": 40 },
+      "sort": { "field": "is_starred" },
+      "source": { "kind": "backend", "synthetic": true },
+      "bindings": { "postgres": { "expr": "(w.tags ? 'rerun-after-deploy')", "synthetic": true } }
+    },
+    {
+      "name": "failed_steps",
+      "label": "Failed steps",
+      "type": "textarray",
+      "group": "analysis",
+      "render": "step_tags",
+      "filter": { "pushdown": false },
+      "bindings": { "postgres": { "expr": "vr.failed_steps" } }
+    },
+    {
+      "name": "deviations",
+      "label": "deviations",
+      "type": "text",
+      "group": "analysis",
+      "render": "artifact_link",
+      "source": "derived",
+      "sort": { "enabled": false }
+    }
+  ]
+}

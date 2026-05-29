@@ -1,0 +1,162 @@
+// encode.ts — URL serialization + the server-bound query subset.
+//
+// Two distinct serializations, deliberately kept apart:
+//
+//   1. encodeQuery / decodeQuery  — the *whole* QueryState (incl. view state:
+//      select columns + widths) ⇄ a base64url `?q=` token. This is what makes
+//      reload, back/forward, bookmarks, and "send a coworker your view" all work
+//      (decisions #4 + #5). Defaults are omitted to keep the token short.
+//
+//   2. toServerQuery              — the subset the backend acts on: pushdown
+//      WHERE clauses, server-sortable ORDER BY (remapped through sort.field), the
+//      page window, and the field names to SELECT (so the backend evaluates the
+//      computed/synthetic columns the view needs — requested ∪ always-needed,
+//      design decision #2). Per-column widths never leave the client.
+//
+// Back-compat: decodeQuery accepts the legacy compact shapes from both source
+// projects — `o` as a single object (pre-multi-sort) and `c`/`s` as a string[]
+// (pre-width) — so existing xplo-perf / xlsx-collect bookmarks keep working.
+
+import { EMPTY_QUERY } from "./query";
+import type { QueryState, WhereClause, OrderByClause, SelectColumn } from "./query";
+import type { FieldSchema } from "./schema";
+import { indexFields, isFilterable, isPushdownFilter, isSortable, selectedFields } from "./schema";
+
+// ---- base64url (browser + node) -------------------------------------------
+
+function toBase64Url(json: string): string {
+  let b64: string;
+  if (typeof Buffer !== "undefined") {
+    b64 = Buffer.from(json, "utf8").toString("base64");
+  } else {
+    const bytes = new TextEncoder().encode(json);
+    let bin = "";
+    for (const b of bytes) bin += String.fromCharCode(b);
+    b64 = btoa(bin);
+  }
+  return b64.replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
+}
+
+function fromBase64Url(s: string): string {
+  const b64 = s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4);
+  if (typeof Buffer !== "undefined") return Buffer.from(b64, "base64").toString("utf8");
+  const bin = atob(b64);
+  const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
+// ---- compact wire form ----------------------------------------------------
+// Keys are short to keep `?q=` small; any field at its default is omitted.
+//   s = select (as [field] or [field, width] tuples)
+//   w = where, o = orderBy, l = limit, f = offset
+
+interface CompactQuery {
+  s?: Array<[string] | [string, number]> | string[]; // string[] = legacy
+  w?: WhereClause[];
+  o?: OrderByClause[] | OrderByClause; // object accepted for legacy decode
+  l?: number;
+  f?: number;
+  c?: string[]; // legacy alias for select column names
+}
+
+/** QueryState → base64url token (omitting defaults). All-default query → "". */
+export function encodeQuery(q: QueryState): string {
+  const c: CompactQuery = {};
+  if (q.select.length)
+    c.s = q.select.map((col): [string] | [string, number] => (col.width != null ? [col.field, col.width] : [col.field]));
+  if (q.where.length) c.w = q.where;
+  if (q.orderBy.length) c.o = q.orderBy;
+  if (q.limit !== EMPTY_QUERY.limit) c.l = q.limit;
+  if (q.offset) c.f = q.offset;
+  if (Object.keys(c).length === 0) return "";
+  return toBase64Url(JSON.stringify(c));
+}
+
+/** base64url token → QueryState. Tolerant: bad input and legacy shapes both
+ *  normalize to a valid QueryState (never throws). */
+export function decodeQuery(token: string): QueryState {
+  if (!token) return { ...EMPTY_QUERY };
+  try {
+    const c = JSON.parse(fromBase64Url(token)) as CompactQuery;
+    return {
+      select: normalizeSelect(c.s ?? c.c),
+      where: Array.isArray(c.w) ? c.w : [],
+      orderBy: normalizeOrderBy(c.o),
+      limit: typeof c.l === "number" ? c.l : EMPTY_QUERY.limit,
+      offset: typeof c.f === "number" ? c.f : 0,
+    };
+  } catch {
+    return { ...EMPTY_QUERY };
+  }
+}
+
+function normalizeSelect(s: CompactQuery["s"] | CompactQuery["c"]): SelectColumn[] {
+  if (!Array.isArray(s)) return [];
+  return s
+    .map((item): SelectColumn | null => {
+      if (typeof item === "string") return { field: item }; // legacy string[]
+      if (Array.isArray(item) && typeof item[0] === "string") {
+        return typeof item[1] === "number" ? { field: item[0], width: item[1] } : { field: item[0] };
+      }
+      return null;
+    })
+    .filter((x): x is SelectColumn => x != null);
+}
+
+function normalizeOrderBy(o: CompactQuery["o"]): OrderByClause[] {
+  if (!o) return [];
+  if (Array.isArray(o)) return o;
+  return [o]; // legacy single-object form → one-element array
+}
+
+// ---- server-bound subset --------------------------------------------------
+
+/** The backend request derived from a QueryState + its schema. Mirrors the Go
+ *  `WireQuery`. View-only state (column widths) is intentionally absent. */
+export interface ServerQuery {
+  /** field names to return — visible columns ∪ fields referenced by where/orderBy. */
+  select: string[];
+  /** only clauses on pushdown-filterable fields. */
+  where: WhereClause[];
+  /** only terms on server-sortable fields, with `field` already remapped to the
+   *  field's server sort key (FieldDef.sort.field) when set. */
+  orderBy: OrderByClause[];
+  limit: number;
+  offset: number;
+}
+
+/** Project a QueryState into the server request, dropping client-only filters,
+ *  client-only sorts, and remapping sort fields through `sort.field`. */
+export function toServerQuery<Row>(q: QueryState, schema: FieldSchema<Row>): ServerQuery {
+  const byName = indexFields(schema);
+
+  const where = q.where.filter((cl) => {
+    const f = byName.get(cl.field);
+    return f != null && isPushdownFilter(f);
+  });
+
+  const orderBy: OrderByClause[] = [];
+  for (const term of q.orderBy) {
+    const f = byName.get(term.field);
+    if (!f || !isSortable(f) || f.source.kind !== "backend") continue;
+    orderBy.push({ ...term, field: f.sort?.field ?? term.field });
+  }
+
+  // SELECT = the BACKEND columns the response rows must carry: visible backend
+  // columns, the id (for selection/refresh), and any backend column a
+  // CLIENT-SIDE filter reads. Derived/render-only columns are computed on the
+  // client and have no SQL to select; pushdown filters/sorts run in SQL and need
+  // not be returned (design decision #2: requested ∪ always-needed).
+  const select = new Set<string>(
+    selectedFields(schema, q)
+      .filter((f) => f.source.kind === "backend")
+      .map((f) => f.name),
+  );
+  select.add(schema.idField);
+  for (const cl of q.where) {
+    const f = byName.get(cl.field);
+    if (f && isFilterable(f) && !isPushdownFilter(f) && f.source.kind === "backend") select.add(cl.field);
+  }
+
+  return { select: [...select], where, orderBy, limit: q.limit, offset: q.offset };
+}

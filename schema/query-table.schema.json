@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Pythia-Software/query-table/schema/query-table.schema.json",
+  "title": "query-table field schema",
+  "description": "A dataset's field schema: the single source of truth that codegen projects into the TS catalog (@query-table/core FieldDef[]) and the backend schema (backends/go FieldSpec). Backend-specific SQL lives under each field's `bindings`, so non-SQL/non-Go backends can bind the same document later.",
+  "type": "object",
+  "required": ["name", "idField", "fields"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "name": {
+      "type": "string",
+      "description": "Dataset id; also the localStorage namespace for saved queries.",
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "version": { "type": "integer", "minimum": 1, "default": 1 },
+    "idField": { "type": "string", "description": "Field whose value is a row's stable id (selection, per-row refresh)." },
+    "defaultLimit": { "type": "integer", "minimum": 1, "default": 100 },
+    "defaultSort": {
+      "type": "array",
+      "description": "ORDER BY applied when the query's orderBy is empty.",
+      "items": { "$ref": "#/$defs/orderByClause" }
+    },
+    "tiebreakSort": {
+      "type": "array",
+      "description": "Always appended after the user's sort so paging is deterministic (e.g. [{field:id,dir:asc}]).",
+      "items": { "$ref": "#/$defs/orderByClause" }
+    },
+    "defaultSelect": {
+      "type": "array",
+      "description": "Visible columns when the query's select is empty (in display order).",
+      "items": { "$ref": "#/$defs/selectColumn" }
+    },
+    "fields": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/field" } }
+  },
+  "$defs": {
+    "fieldType": { "enum": ["text", "number", "enum", "datetime", "bool", "textarray"] },
+    "filterOp": {
+      "enum": ["=", "!=", ">", ">=", "<", "<=", "contains", "starts_with", "ends_with", "includes", "is_null", "is_not_null"]
+    },
+    "orderByClause": {
+      "type": "object",
+      "required": ["field", "dir"],
+      "additionalProperties": false,
+      "properties": {
+        "field": { "type": "string" },
+        "dir": { "enum": ["asc", "desc"] },
+        "nulls": { "enum": ["first", "last"] }
+      }
+    },
+    "selectColumn": {
+      "type": "object",
+      "required": ["field"],
+      "additionalProperties": false,
+      "properties": { "field": { "type": "string" }, "width": { "type": "number", "minimum": 1 } }
+    },
+    "field": {
+      "type": "object",
+      "required": ["name", "label", "type"],
+      "additionalProperties": false,
+      "description": "One field. `source` says WHAT KIND of field it is (the value origin + server capability); `filter`/`sort`/`select` are declarative capability config; `render` is a registry key the frontend resolves to a renderer; `bindings` is the backend SQL.",
+      "properties": {
+        "name": { "type": "string", "description": "Canonical id; matches Where/OrderBy field + the backend binding key." },
+        "label": { "type": "string" },
+        "type": { "$ref": "#/$defs/fieldType" },
+        "source": {
+          "description": "Value origin. String shorthand or object. Omitted ⇒ inferred: `backend` if `bindings` present, else `derived`. (A derived field's `accessor` is code and is attached at runtime, never in JSON.)",
+          "oneOf": [
+            { "enum": ["backend", "derived"] },
+            {
+              "type": "object",
+              "required": ["kind"],
+              "additionalProperties": false,
+              "properties": {
+                "kind": { "enum": ["backend", "derived"] },
+                "path": { "type": "string", "description": "Dotted path into the API row when it differs from `name`." },
+                "synthetic": { "type": "boolean", "description": "Computed SQL with no backing column." }
+              }
+            }
+          ]
+        },
+        "filter": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean", "description": "Default: backend ⇒ true, derived ⇒ false." },
+            "pushdown": { "type": "boolean", "description": "Evaluate on the backend? Default backend ⇒ true. false ⇒ applied client-side by applyQuery." },
+            "ops": { "type": "array", "items": { "$ref": "#/$defs/filterOp" } },
+            "values": { "$ref": "#/$defs/filterValues" }
+          }
+        },
+        "sort": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean", "description": "Default: backend ⇒ true, derived ⇒ false." },
+            "field": { "type": "string", "description": "Server field to ORDER BY when it differs from the display field." }
+          }
+        },
+        "select": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean", "description": "Can it be a visible column? Default true. false ⇒ filter-only." },
+            "default": { "type": "boolean", "description": "Shown when the query's select is empty." },
+            "width": { "type": "number", "minimum": 1 },
+            "align": { "enum": ["left", "right", "center"] }
+          }
+        },
+        "group": { "type": "string", "description": "Field-picker grouping bucket." },
+        "aliases": { "type": "array", "items": { "type": "string" }, "description": "Extra search terms for the picker." },
+        "render": { "type": "string", "description": "Render-registry key resolved on the frontend (code, not data — only the key is stored)." },
+        "bindings": {
+          "type": "object",
+          "description": "Per-backend binding, keyed by backend id so one schema can serve several backends.",
+          "additionalProperties": false,
+          "properties": { "postgres": { "$ref": "#/$defs/sqlBinding" } }
+        }
+      }
+    },
+    "filterValues": {
+      "description": "How filter-value candidates are offered. Default everywhere is autocomplete (backend distinct-value search, refined per keystroke).",
+      "oneOf": [
+        { "type": "object", "required": ["source"], "additionalProperties": false, "properties": { "source": { "const": "autocomplete" } } },
+        {
+          "type": "object",
+          "required": ["source", "options"],
+          "additionalProperties": false,
+          "properties": { "source": { "const": "static" }, "options": { "type": "array", "items": { "type": "string" } } }
+        },
+        { "type": "object", "required": ["source"], "additionalProperties": false, "properties": { "source": { "const": "freeform" } } }
+      ]
+    },
+    "sqlBinding": {
+      "type": "object",
+      "required": ["expr"],
+      "additionalProperties": false,
+      "properties": {
+        "expr": {
+          "type": "string",
+          "description": "Server-defined SQL expression (e.g. \"vr.code_sha\" or \"(m.metrics->>'parse_duration_ms')::numeric\"). NEVER derived from request input — it and the validated operator are the only request-influenced tokens that reach SQL; values are always bound parameters."
+        },
+        "synthetic": { "type": "boolean", "default": false, "description": "Computed expression with no backing column (e.g. \"(w.tags ? 'rerun')\")." },
+        "kind": {
+          "enum": ["text", "number", "datetime", "bool", "enum", "textarray"],
+          "description": "SQL coercion path. Defaults to the field's `type`; override when the column's SQL type differs."
+        }
+      }
+    }
+  }
+}
