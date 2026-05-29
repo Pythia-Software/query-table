@@ -1,0 +1,15 @@
+{
+  "name": "@query-table/schema-codegen",
+  "version": "0.0.0",
+  "description": "Generate the TS catalog + Go schema from a query-table JSON schema document.",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "bin": { "query-table-codegen": "./dist/cli.js" },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@query-table/core": "0.0.0"
+  }
+}

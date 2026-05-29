@@ -1,0 +1,28 @@
+{
+  "name": "@query-table/ui",
+  "version": "0.0.0",
+  "description": "Schema-driven data table — opinionated, themeable React components.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./theme.css": "./src/theme.css"
+  },
+  "files": ["dist", "src/theme.css"],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@query-table/core": "0.0.0",
+    "@query-table/react": "0.0.0"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  }
+}
