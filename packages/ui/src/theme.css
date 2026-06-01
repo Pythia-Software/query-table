@@ -55,10 +55,20 @@
 .qt-link-btn:hover:not(:disabled) { color: var(--qt-text); }
 
 /* ---- table ---- */
-.qt-table-wrap { position: relative; }
+.qt-table-wrap {
+  position: relative;
+  display: block;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior: contain;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
+}
 .qt-table-wrap--loading .qt-row { opacity: 0.55; transition: opacity 120ms ease-in; }
 .qt-table {
-  width: 100%;
+  min-width: 100%;
+  width: max-content;
   border-collapse: collapse;
   border: 1px solid var(--qt-border);
   border-radius: var(--qt-radius);
@@ -93,7 +103,15 @@
   white-space: nowrap;
 }
 .qt-cell:hover { background: var(--qt-cell-hover); }
-.qt-checkbox-cell { width: 36px; text-align: center; }
+.qt-checkbox-cell {
+  width: 36px;
+  text-align: center;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+  padding-left: 8px;
+  padding-right: 8px;
+}
 .qt-checkbox-cell:hover { background: transparent; }
 .qt-row--selected { background: var(--qt-row-selected-bg); }
 .qt-row--selected .qt-cell:hover { background: var(--qt-row-selected-bg); }

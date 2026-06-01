@@ -7,7 +7,7 @@
 // and emits intents through onQueryChange. It deliberately mirrors the props
 // shape of xplo-perf's DataTable so porting is mechanical.
 
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode, type SetStateAction } from "react";
 import type { OrderByClause, QueryState, FieldDef, RowId, SelectColumn, WhereClause } from "@query-table/core";
 import { isSortable, readFieldValue } from "@query-table/core";
 import type { SelectionApi } from "@query-table/react";
@@ -20,7 +20,7 @@ export interface DataTableProps<Row> {
   fields: FieldDef<Row>[];
   rows: Row[];
   query: QueryState;
-  onQueryChange: (q: QueryState) => void;
+  onQueryChange: (q: SetStateAction<QueryState>) => void;
 
   /** Resolves FieldDef.render keys. Pass `{ ...defaultRenderers, ...yours }`. */
   renderers: RenderRegistry<Row>;
@@ -71,6 +71,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
 
   const [menu, setMenu] = useState<MenuState<Row> | null>(null);
   const dragField = useRef<string | null>(null);
+  const tableWrapRef = useRef<HTMLDivElement>(null);
   const [dragSlotIndex, setDragSlotIndex] = useState<number | null>(null);
 
   const pageIds = rows.map(rowId).filter((id): id is RowId => id != null);
@@ -162,11 +163,43 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     setMenu({ field: f, value: readFieldValue(f, row), x: e.clientX, y: e.clientY });
   }
 
+  function onTableWheel(e: React.WheelEvent<HTMLDivElement>) {
+    const wrap = tableWrapRef.current;
+    if (!wrap) return;
+
+    const canScrollHorizontally = wrap.scrollWidth > wrap.clientWidth;
+    if (!canScrollHorizontally) return;
+
+    const dx = e.deltaX;
+    const dy = e.deltaY;
+    const absDx = Math.abs(dx);
+    const absDy = Math.abs(dy);
+
+    if (dx === 0 && !e.shiftKey) return;
+
+    if (dx === 0 && e.shiftKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      wrap.scrollLeft += dy;
+      return;
+    }
+
+    if (absDx >= absDy || e.shiftKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      wrap.scrollLeft += dx;
+    }
+  }
+
   const totalCols = fields.length + (showSel ? 1 : 0) + (trailing ? 1 : 0);
 
   return (
     <>
-      <div className={cx("qt-table-wrap", loading && "qt-table-wrap--loading", classNames?.wrap)}>
+      <div
+        ref={tableWrapRef}
+        className={cx("qt-table-wrap", loading && "qt-table-wrap--loading", classNames?.wrap)}
+        onWheel={onTableWheel}
+      >
         {loading && (
           <div className={cx("qt-loading-bar", classNames?.loadingBar)} role="progressbar" aria-label="loading" />
         )}
@@ -345,9 +378,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
           value={menu.value}
           x={menu.x}
           y={menu.y}
-          onAddFilter={(clause: WhereClause) =>
-            onQueryChange({ ...query, offset: 0, where: [...query.where, clause] })
-          }
+          onAddFilter={(clause: WhereClause) => onQueryChange((prev) => ({ ...prev, offset: 0, where: [...prev.where, clause] }))}
           onClose={() => setMenu(null)}
         />
       )}
