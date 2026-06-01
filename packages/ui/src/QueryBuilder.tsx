@@ -366,20 +366,34 @@ function WhereRow<Row>({
     setAdding(false);
   }
 
+  const groupedWhere = useMemo(() => {
+    const groups = new Map<string, { field: string; clauses: { clause: WhereClause; index: number }[] }>();
+    const order: string[] = [];
+
+    api.query.where.forEach((c, i) => {
+      if (!groups.has(c.field)) order.push(c.field);
+      const group = groups.get(c.field) ?? { field: c.field, clauses: [] };
+      group.clauses.push({ clause: c, index: i });
+      groups.set(c.field, group);
+    });
+
+    return order.map((fieldName) => groups.get(fieldName)!);
+  }, [api.query.where]);
+
   return (
     <div className="qt-qb-row">
       <span className="qt-qb-kw">where</span>
       {api.query.where.length === 0 && !adding && <span className="qt-qb-hint">all rows</span>}
-      {api.query.where.map((c, i) => (
+      {groupedWhere.map((g) => (
         <ClauseChip
-          key={i}
+          key={g.field}
           api={api}
-          field={byName.get(c.field)}
-          clause={c}
+          field={byName.get(g.field)}
+          clauses={g.clauses}
           classNames={classNames}
           disabled={disabled}
-          onChange={(next) => api.updateFilter(i, next)}
-          onRemove={() => api.removeFilter(i)}
+          onChange={(index, next) => api.updateFilter(index, next)}
+          onRemove={(index) => api.removeFilter(index)}
         />
       ))}
       {api.query.where.length > 0 && (
@@ -406,7 +420,7 @@ function WhereRow<Row>({
 function ClauseChip<Row>({
   api,
   field,
-  clause,
+  clauses,
   classNames,
   disabled,
   onChange,
@@ -414,49 +428,64 @@ function ClauseChip<Row>({
 }: {
   api: QueryTableApi<Row>;
   field: FieldDef<Row> | undefined;
-  clause: WhereClause;
+  clauses: Array<{ clause: WhereClause; index: number }>;
   classNames: QueryBuilderClassNames | undefined;
   disabled: boolean | undefined;
-  onChange: (c: WhereClause) => void;
-  onRemove: () => void;
+  onChange: (index: number, c: WhereClause) => void;
+  onRemove: (index: number) => void;
 }) {
+  const labelField = field?.label;
+  const fieldName = clauses[0]?.clause.field;
   const fieldHasNull = useFieldHasNull(api, field?.name);
 
-  const ops = useMemo(() => {
-    const base: FilterOp[] = field ? opsForField(field) : [clause.op];
-    const filtered = fieldHasNull === false ? base.filter((op) => !NULLARY_OPS.has(op)) : base;
-    return filtered.includes(clause.op) ? filtered : [...filtered, clause.op];
-  }, [clause.op, field, fieldHasNull]);
-
-  const needsValue = !NULLARY_OPS.has(clause.op);
-
   return (
-    <span className={cx("qt-chip", classNames?.chip)}>
-      <span className="qt-chip-field">{field?.label ?? clause.field}</span>
-      <select
-        className={cx("qt-chip-op", classNames?.select)}
-        value={clause.op}
-        disabled={disabled}
-        onChange={(e) => onChange({ ...clause, op: e.target.value as FilterOp })}
-      >
-        {ops.map((op) => (
-          <option key={op} value={op}>
-            {op}
-          </option>
-        ))}
-      </select>
-      {needsValue && (
-        <ValueInput
-          api={api}
-          field={field}
-          value={clause.value}
-          classNames={classNames}
-          onChange={(v) => onChange({ ...clause, value: v })}
-        />
-      )}
-      <button type="button" className="qt-chip-x" onClick={onRemove} disabled={disabled}>
-        ✕
-      </button>
+    <span className={cx("qt-chip", "qt-chip--where", classNames?.chip)}>
+      <span className="qt-chip-field">{labelField ?? fieldName}</span>
+      <span className="qt-chip-where-list">
+        {clauses.map((entry, idx) => {
+          const clause = entry.clause;
+          const baseOps: FilterOp[] = field ? opsForField(field) : [clause.op];
+          const filteredBaseOps = fieldHasNull === false ? baseOps.filter((op) => !NULLARY_OPS.has(op)) : baseOps;
+          const clauseOps: FilterOp[] = filteredBaseOps.includes(clause.op)
+            ? filteredBaseOps
+            : [...filteredBaseOps, clause.op];
+          const needsValue = !NULLARY_OPS.has(clause.op);
+          return (
+            <span className="qt-chip-where-clause" key={entry.index}>
+              {idx > 0 && <span className="qt-chip-and">and</span>}
+              <select
+                className={cx("qt-chip-op", classNames?.select)}
+                value={clause.op}
+                disabled={disabled}
+                onChange={(e) => onChange(entry.index, { ...clause, op: e.target.value as FilterOp })}
+              >
+                {clauseOps.map((op) => (
+                  <option key={op} value={op}>
+                    {op}
+                  </option>
+                ))}
+              </select>
+              {needsValue && (
+                <ValueInput
+                  api={api}
+                  field={field}
+                  value={clause.value}
+                  classNames={classNames}
+                  onChange={(v) => onChange(entry.index, { ...clause, value: v })}
+                />
+              )}
+              <button
+                type="button"
+                className="qt-chip-x"
+                onClick={() => onRemove(entry.index)}
+                disabled={disabled}
+              >
+                ✕
+              </button>
+            </span>
+          );
+        })}
+      </span>
     </span>
   );
 }

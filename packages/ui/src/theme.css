@@ -202,8 +202,12 @@
 .qt-chip-grip { color: var(--qt-border); user-select: none; }
 .qt-chip-priority { background: var(--qt-accent); color: #fff; border-radius: 999px; font-size: 10px; padding: 0 5px; }
 .qt-chip-field { font-weight: 600; }
+.qt-chip--where { align-items: flex-start; }
 .qt-chip-op,
 .qt-chip-val { font: inherit; font-size: 12px; border: 1px solid var(--qt-border); border-radius: 4px; padding: 1px 4px; background: #fff; }
+.qt-chip-where-list { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.qt-chip-where-clause { display: inline-flex; align-items: center; gap: 4px; }
+.qt-chip-and { color: var(--qt-muted); font-size: 11px; padding: 0 1px; white-space: nowrap; }
 .qt-chip-op-btn { font: inherit; font-size: 11px; border: 1px solid var(--qt-border); border-radius: 4px; background: #fff; cursor: pointer; padding: 1px 5px; }
 .qt-chip-x { border: 0; background: transparent; cursor: pointer; color: var(--qt-muted); font-size: 11px; padding: 0 2px; }
 .qt-chip-x:hover { color: var(--qt-fail-fg); }
