@@ -120,10 +120,15 @@ function SelectRow<Row>({
             e.dataTransfer.setData("text/plain", f.name);
           }}
           onDragOver={(e) => {
-            if (dragField.current && dragField.current !== f.name) e.preventDefault();
+            if (dragField.current && dragField.current !== f.name) {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              reorder(dragField.current, f.name);
+            }
           }}
           onDrop={(e) => {
             e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
             const from = dragField.current || e.dataTransfer.getData("text/plain");
             if (from) reorder(from, f.name);
             dragField.current = null;
