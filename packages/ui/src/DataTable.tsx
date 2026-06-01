@@ -1,13 +1,13 @@
 // DataTable — the table renderer.
 //
-// Presentation only: it draws headers (sort affordances incl. shift-click
-// multi-sort), the checkbox column, cells (via the render registry), the
-// right-click CellMenu, column resize handles, and the loading bar. All state
+// Presentation only: it draws headers (sort affordances), the checkbox column,
+// cells (via the render registry), the right-click CellMenu, column resize
+// handles, and the loading bar. All state
 // lives in the @query-table/react hook; DataTable receives the resolved view
 // and emits intents through onQueryChange. It deliberately mirrors the props
 // shape of xplo-perf's DataTable so porting is mechanical.
 
-import { useMemo, useRef, useState, type ReactNode, type SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type SetStateAction } from "react";
 import type { OrderByClause, QueryState, FieldDef, RowId, SelectColumn, WhereClause } from "@query-table/core";
 import { isSortable, readFieldValue } from "@query-table/core";
 import type { SelectionApi } from "@query-table/react";
@@ -45,10 +45,14 @@ const cx = (...parts: Array<string | undefined | false>): string =>
 
 const MIN_WIDTH = 50;
 const MAX_WIDTH = 800;
+const MENU_WIDTH = 240;
+const MENU_ROW_HEIGHT = 32;
+type HeaderSortPlacement = "set" | "append" | "prepend";
 
 interface MenuState<Row> {
+  kind: "cell" | "header";
   field: FieldDef<Row>;
-  value: unknown;
+  value?: unknown;
   x: number;
   y: number;
 }
@@ -78,13 +82,26 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
   const headerState = selection ? selection.pageState(pageIds) : "none";
   const showSel = selection != null;
 
-  // ---- sort (multi-sort; mirrors react's nextOrderBy) ----
+  // ---- sort state (used only for indicators + header menu actions) ----
   function sortKeyFor(f: FieldDef<Row>): string {
     return f.sort?.field ?? f.name;
   }
-  function sortBy(f: FieldDef<Row>, additive: boolean) {
+  function applyHeaderSort(f: FieldDef<Row>, dir: "asc" | "desc", placement: HeaderSortPlacement) {
     if (!isSortable(f)) return;
-    onQueryChange({ ...query, offset: 0, orderBy: nextOrderBy(query.orderBy, sortKeyFor(f), additive) });
+    onQueryChange({
+      ...query,
+      offset: 0,
+      orderBy: nextHeaderOrderBy(query.orderBy, sortKeyFor(f), dir, placement),
+    });
+    setMenu(null);
+  }
+  function removeColumn(f: FieldDef<Row>) {
+    const explicit = materialize(query.select, fields);
+    const nextSelect = explicit.filter((c) => c.field !== f.name);
+    const nextOrderBy = query.orderBy.filter((s) => s.field !== sortKeyFor(f));
+    if (nextSelect.length === 0) return;
+    onQueryChange({ ...query, select: nextSelect, orderBy: nextOrderBy });
+    setMenu(null);
   }
   function sortInfo(f: FieldDef<Row>): { dir: "asc" | "desc"; priority: number | null } | null {
     const key = sortKeyFor(f);
@@ -160,7 +177,13 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     const tag = (e.target as HTMLElement).tagName;
     if (tag === "A" || tag === "BUTTON" || tag === "INPUT" || tag === "SELECT") return;
     e.preventDefault();
-    setMenu({ field: f, value: readFieldValue(f, row), x: e.clientX, y: e.clientY });
+    setMenu({ kind: "cell", field: f, value: readFieldValue(f, row), x: e.clientX, y: e.clientY });
+  }
+  function openHeaderMenu(e: React.MouseEvent, f: FieldDef<Row>) {
+    const tag = (e.target as HTMLElement).tagName;
+    if (tag === "A" || tag === "BUTTON" || tag === "INPUT" || tag === "SELECT") return;
+    e.preventDefault();
+    setMenu({ kind: "header", field: f, x: e.clientX, y: e.clientY });
   }
 
   function onTableWheel(e: React.WheelEvent<HTMLDivElement>) {
@@ -295,9 +318,9 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                   >
                     <span
                       className="qt-th-label"
-                      onClick={(e) => sortable && sortBy(f, e.shiftKey)}
-                      style={sortable ? { cursor: "pointer" } : undefined}
-                      title={sortable ? "Click to sort, shift-click to add a secondary sort" : undefined}
+                      onClick={(e) => openHeaderMenu(e, f)}
+                      style={{ cursor: "pointer" }}
+                      title="Click to open column actions"
                     >
                       {f.label}
                       {info && (
@@ -373,37 +396,145 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
         </table>
       </div>
       {menu && (
-        <CellMenu
-          field={menu.field}
-          value={menu.value}
-          x={menu.x}
-          y={menu.y}
-          onAddFilter={(clause: WhereClause) => onQueryChange((prev) => ({ ...prev, offset: 0, where: [...prev.where, clause] }))}
-          onClose={() => setMenu(null)}
-        />
+        menu.kind === "cell" ? (
+          <CellMenu
+            field={menu.field}
+            value={menu.value}
+            x={menu.x}
+            y={menu.y}
+            onAddFilter={(clause: WhereClause) =>
+              onQueryChange((prev) => ({ ...prev, offset: 0, where: [...prev.where, clause] }))
+            }
+            onClose={() => setMenu(null)}
+          />
+        ) : (
+          <HeaderMenu
+            field={menu.field}
+            x={menu.x}
+            y={menu.y}
+            sortable={isSortable(menu.field)}
+            canRemoveColumn={fields.length > 1}
+            onSetSort={(placement, dir) => applyHeaderSort(menu.field, dir, placement)}
+            onRemove={() => removeColumn(menu.field)}
+            onClose={() => setMenu(null)}
+          />
+        )
       )}
     </>
   );
 }
 
-/** Multi-sort header click logic — kept in lockstep with react's nextOrderBy. */
-function nextOrderBy(existing: OrderByClause[], field: string, additive: boolean): OrderByClause[] {
-  const i = existing.findIndex((s) => s.field === field);
-  if (!additive) {
-    if (i === 0 && existing.length === 1) {
-      const flipped: "asc" | "desc" = existing[0]!.dir === "desc" ? "asc" : "desc";
-      return [{ field, dir: flipped }];
+function HeaderMenu<Row>({
+  field,
+  x,
+  y,
+  sortable,
+  canRemoveColumn,
+  onSetSort,
+  onRemove,
+  onClose,
+}: {
+  field: FieldDef<Row>;
+  x: number;
+  y: number;
+  sortable: boolean;
+  canRemoveColumn: boolean;
+  onSetSort: (placement: HeaderSortPlacement, dir: "asc" | "desc") => void;
+  onRemove: () => void;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
     }
-    return [{ field, dir: "desc" }];
+    function onDocClick() {
+      onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    const t = setTimeout(() => window.addEventListener("click", onDocClick), 0);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("click", onDocClick);
+      clearTimeout(t);
+    };
+  }, [onClose]);
+
+  const items: ReactNode[] = [];
+  const addSortItem = (placement: HeaderSortPlacement, dir: "asc" | "desc", label: string) =>
+    items.push(
+      <MenuItem key={`${placement}-${dir}`} disabled={!sortable} onClick={() => onSetSort(placement, dir)}>
+        {label}
+      </MenuItem>,
+    );
+
+  addSortItem("set", "asc", "Set Sort (Asc)");
+  addSortItem("set", "desc", "Set Sort (Desc)");
+  addSortItem("append", "asc", "Append Sort (Asc)");
+  addSortItem("append", "desc", "Append Sort (Desc)");
+  addSortItem("prepend", "asc", "Prepend Sort (Asc)");
+  addSortItem("prepend", "desc", "Prepend Sort (Desc)");
+
+  items.push(<div key="sep" className="qt-cm-sep" />);
+  items.push(
+    <MenuItem key="remove" disabled={!canRemoveColumn} onClick={onRemove}>
+      Remove Column
+    </MenuItem>,
+  );
+
+  const vw = typeof window !== "undefined" ? window.innerWidth : 9999;
+  const vh = typeof window !== "undefined" ? window.innerHeight : 9999;
+  const left = Math.max(8, Math.min(x, vw - MENU_WIDTH - 8));
+  const top = Math.max(8, Math.min(y, vh - MENU_ROW_HEIGHT * items.length - 8));
+
+  return (
+    <div
+      className="qt-cell-menu"
+      style={{ left, top, width: MENU_WIDTH }}
+      onClick={(e) => e.stopPropagation()}
+      onContextMenu={(e) => e.preventDefault()}
+      role="menu"
+    >
+      <div className="qt-cm-header">
+        <span className="qt-cm-field">{field.label}</span>
+      </div>
+      {items}
+    </div>
+  );
+}
+
+function MenuItem({
+  children,
+  onClick,
+  disabled,
+}: {
+  children: ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      className="qt-cm-item"
+      onClick={onClick}
+      role="menuitem"
+      disabled={disabled}
+    >
+      {children}
+    </button>
   }
-  if (i === -1) return [...existing, { field, dir: "desc" }];
-  const cur = existing[i]!;
-  if (cur.dir === "desc") {
-    const next = [...existing];
-    next[i] = { field, dir: "asc" };
-    return next;
-  }
-  return existing.filter((_, k) => k !== i); // asc → remove
+}
+
+/** Header menu sort helper for set / append / prepend actions. */
+function nextHeaderOrderBy(
+  existing: OrderByClause[],
+  field: string,
+  dir: "asc" | "desc",
+  placement: HeaderSortPlacement,
+): OrderByClause[] {
+  const next = existing.filter((s) => s.field !== field);
+  if (placement === "set") return [{ field, dir }];
+  if (placement === "append") return [...next, { field, dir }];
+  return [{ field, dir }, ...next];
 }
 
 /** Materialize the current visible order into SelectColumn[] so width/order
