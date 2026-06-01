@@ -39,11 +39,13 @@ const transport: Transport<Run> = {
   },
   // Powers filter-value autocomplete: the backend matches `search` (ILIKE) and
   // returns the top matches + whether it truncated (so the UI says "keep typing").
+  // If available, include `hasNull` to let the UI suppress null-only operators /
+  // order controls when a column is guaranteed non-null.
   async fetchDistinctValues(q, signal) {
     const res = await fetch(`/api/v1/runs/distinct?f=${q.field}&q=${encodeURIComponent(q.search)}`, {
       signal: signal ?? null,
     });
-    return res.json(); // { values, hasMore }
+    return res.json(); // { values, hasMore, hasNull? }
   },
 };
 

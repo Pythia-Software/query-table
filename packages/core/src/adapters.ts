@@ -32,6 +32,10 @@ export interface DistinctValuesResult {
   values: string[];
   /** true when more matches exist than were returned — refine by typing. */
   hasMore: boolean;
+  /** True if the selected field has at least one NULL in the source dataset.
+   *  False if that field is guaranteed non-null. Omitted when the backend does
+   *  not compute this metadata. */
+  hasNull?: boolean;
 }
 
 /** Per-field metadata for the field picker (xlsx-collect's distinct/min/max). */

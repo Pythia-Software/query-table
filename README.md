@@ -112,6 +112,8 @@ interface FieldDef<Row = any, V = unknown> {
 
 // Filter values are AUTOCOMPLETE by default — a backend distinct-value search
 // refined per keystroke. `static` is a closed option list; `freeform` opts out.
+// The response may optionally include `hasNull` (boolean), computed once from the
+// distinct query, so the WHERE and ORDER BY chips can hide null-specific controls.
 type FilterValues =
   | { source: "autocomplete" } | { source: "static"; options: string[] } | { source: "freeform" };
 ```
