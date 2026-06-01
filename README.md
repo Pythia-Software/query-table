@@ -26,8 +26,8 @@ is the union of their power-user features, extracted so it can be reused.
    validated against `schema/query-table.schema.json`. SQL/backend details live
    in a per-backend `bindings` block, so non-Go/non-SQL backends can bind the
    same schema later. Codegen projects a document into a TS catalog and a Go schema.
-3. **Multi-sort** via shift-click on headers (primary → append secondary), plus an
-   ordered, reorderable sort list in the QueryBuilder. State is `orderBy: SortClause[]`.
+3. **Multi-sort** via header menu on column headings (set/append/prepend, asc/desc), plus
+   an ordered, reorderable sort list in the QueryBuilder. State is `orderBy: SortClause[]`.
 4. **Saved queries** default to `localStorage`, with an optional backend store when
    the data layer implements `StorageAdapter`. **The current view always lives in
    the URL** (`?q=` base64url), so reload / back-forward / bookmarks all work, and a

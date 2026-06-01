@@ -247,6 +247,8 @@
 .qt-cm-sep { height: 1px; background: var(--qt-border-subtle); margin: 4px 0; }
 .qt-cm-item { display: block; width: 100%; padding: 6px 10px; background: transparent; border: 0; text-align: left; cursor: pointer; color: var(--qt-text); font-size: 13px; border-radius: 4px; }
 .qt-cm-item:hover { background: var(--qt-header-bg); }
+.qt-cm-item:disabled { cursor: default; opacity: 0.45; color: var(--qt-muted); }
+.qt-cm-item:disabled:hover { background: transparent; }
 .qt-cm-item code { background: var(--qt-border-subtle); padding: 1px 4px; border-radius: 3px; font-size: 11px; }
 
 /* ---- selection toolbar ---- */
