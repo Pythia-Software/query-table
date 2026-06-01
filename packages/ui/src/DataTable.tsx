@@ -7,7 +7,7 @@
 // and emits intents through onQueryChange. It deliberately mirrors the props
 // shape of xplo-perf's DataTable so porting is mechanical.
 
-import { useRef, useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode, type SetStateAction } from "react";
 import type { OrderByClause, QueryState, FieldDef, RowId, SelectColumn, WhereClause } from "@query-table/core";
 import { isSortable, readFieldValue } from "@query-table/core";
 import type { SelectionApi } from "@query-table/react";
@@ -20,7 +20,7 @@ export interface DataTableProps<Row> {
   fields: FieldDef<Row>[];
   rows: Row[];
   query: QueryState;
-  onQueryChange: (q: QueryState) => void;
+  onQueryChange: (q: SetStateAction<QueryState>) => void;
 
   /** Resolves FieldDef.render keys. Pass `{ ...defaultRenderers, ...yours }`. */
   renderers: RenderRegistry<Row>;
@@ -292,9 +292,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
           value={menu.value}
           x={menu.x}
           y={menu.y}
-          onAddFilter={(clause: WhereClause) =>
-            onQueryChange({ ...query, offset: 0, where: [...query.where, clause] })
-          }
+          onAddFilter={(clause: WhereClause) => onQueryChange((prev) => ({ ...prev, offset: 0, where: [...prev.where, clause] }))}
           onClose={() => setMenu(null)}
         />
       )}
