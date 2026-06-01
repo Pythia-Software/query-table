@@ -39,8 +39,13 @@ export function useSelection(displayedIds: RowId[]): SelectionApi {
           const j = displayedIds.indexOf(id);
           if (i !== -1 && j !== -1) {
             const [lo, hi] = i <= j ? [i, j] : [j, i];
-            // Extend selection (turn the whole span on) — matches xplo-perf.
-            for (let k = lo; k <= hi; k++) next.add(displayedIds[k]!);
+            const span = displayedIds.slice(lo, hi + 1);
+            const allChecked = span.every((rowId) => prev.has(rowId));
+            for (const rowId of span) {
+              if (allChecked) next.delete(rowId);
+              else next.add(rowId);
+            }
+            anchor.current = id;
             return next;
           }
         }
