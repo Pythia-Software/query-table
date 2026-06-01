@@ -254,6 +254,10 @@ type DistinctCompile struct {
 	Args      []any
 }
 
+type DistinctHasNullCompile struct {
+	IsNullExpr string
+}
+
 // CompileDistinct builds the fragments to back filter-value autocomplete for a
 // field (design feedback: every field is an autocomplete by default). The search
 // is a literal case-insensitive substring (no wildcard injection).
@@ -270,6 +274,18 @@ func CompileDistinct(field, search string, schema Schema, startIdx int) (Distinc
 		idx++
 	}
 	return dc, idx, nil
+}
+
+// CompileDistinctHasNull builds the nullability expression for the same field-aware
+// distinct path used by value autocomplete. It is intended for a lightweight
+// metadata query that answers “does this field have any nulls?” without another
+// independent field lookup path in callers.
+func CompileDistinctHasNull(field string, schema Schema) (DistinctHasNullCompile, error) {
+	spec, ok := schema.Fields[field]
+	if !ok {
+		return DistinctHasNullCompile{}, fmt.Errorf("unknown field %q", field)
+	}
+	return DistinctHasNullCompile{IsNullExpr: spec.Expr + " IS NULL"}, nil
 }
 
 func kindName(k FieldKind) string {

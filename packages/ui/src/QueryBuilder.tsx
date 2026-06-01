@@ -43,6 +43,32 @@ export interface QueryBuilderProps<Row> {
 const cx = (...parts: Array<string | undefined | false>): string =>
   parts.filter((p): p is string => Boolean(p)).join(" ");
 
+function useFieldHasNull(api: QueryTableApi<unknown>, fieldName: string | undefined): boolean | undefined {
+  const [hasNull, setHasNull] = useState<boolean | undefined>(undefined);
+
+  useEffect(() => {
+    if (!fieldName) return;
+    let cancelled = false;
+
+    void api
+      .filterValues(fieldName, "")
+      .then((r) => {
+        if (!cancelled && typeof r.hasNull === "boolean") {
+          setHasNull(r.hasNull);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setHasNull(undefined);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [api, fieldName]);
+
+  return hasNull;
+}
+
 export function QueryBuilder<Row>({ api, fields, total, running, classNames }: QueryBuilderProps<Row>): ReactNode {
   const [showSaved, setShowSaved] = useState(false);
   const byName = useMemo(() => new Map(fields.map((f) => [f.name, f])), [fields]);
@@ -284,7 +310,14 @@ function ClauseChip<Row>({
   onChange: (c: WhereClause) => void;
   onRemove: () => void;
 }) {
-  const ops: FilterOp[] = field ? opsForField(field) : [clause.op];
+  const fieldHasNull = useFieldHasNull(api, field?.name);
+
+  const ops = useMemo(() => {
+    const base: FilterOp[] = field ? opsForField(field) : [clause.op];
+    const filtered = fieldHasNull === false ? base.filter((op) => !NULLARY_OPS.has(op)) : base;
+    return filtered.includes(clause.op) ? filtered : [...filtered, clause.op];
+  }, [clause.op, field, fieldHasNull]);
+
   const needsValue = !NULLARY_OPS.has(clause.op);
 
   return (
@@ -424,7 +457,90 @@ function AutocompleteInput<Row>({
 
 // ---- ORDER BY (multi-sort, reorderable) -----------------------------------
 
-  function OrderRow<Row>({
+function OrderTermChip<Row>({
+  api,
+  field,
+  term,
+  index,
+  dragIdx,
+  onMoveStart,
+  onDrop,
+  onMoveEnd,
+  disabled,
+  updateTerm,
+  removeTerm,
+  classNames,
+  label,
+  showPriority,
+}: {
+  api: QueryTableApi<Row>;
+  field: FieldDef<Row> | undefined;
+  term: OrderByClause;
+  index: number;
+  dragIdx: React.RefObject<number | null>;
+  onMoveStart: (index: number) => void;
+  onDrop: (index: number) => void;
+  onMoveEnd: () => void;
+  disabled: boolean | undefined;
+  updateTerm: (i: number, patch: Partial<OrderByClause>) => void;
+  removeTerm: (i: number) => void;
+  classNames: QueryBuilderClassNames | undefined;
+  label: string;
+  showPriority: boolean;
+}) {
+  const fieldHasNull = useFieldHasNull(api, field?.name);
+
+  return (
+    <span
+      className={cx("qt-chip", "qt-chip--col", "qt-chip--sort", classNames?.chip)}
+      draggable={!disabled}
+      onDragStart={() => {
+        onMoveStart(index);
+      }}
+      onDragOver={(e) => {
+        if (dragIdx.current != null && dragIdx.current !== index) e.preventDefault();
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        onDrop(index);
+      }}
+      onDragEnd={() => {
+        onMoveEnd();
+      }}
+      title="drag to reorder sort priority"
+    >
+      <span aria-hidden className="qt-chip-grip">
+        ⋮⋮
+      </span>
+      {showPriority && <span className="qt-chip-priority">{index + 1}</span>}
+      <span className="qt-chip-field">{label}</span>
+      <button
+        type="button"
+        className="qt-chip-op-btn"
+        disabled={disabled}
+        onClick={() => updateTerm(index, { dir: term.dir === "asc" ? "desc" : "asc" })}
+      >
+        {term.dir === "asc" ? "↑ asc" : "↓ desc"}
+      </button>
+      {fieldHasNull !== false && (
+        <button
+          type="button"
+          className="qt-chip-op-btn"
+          disabled={disabled}
+          title="where NULL values sort"
+          onClick={() => updateTerm(index, { nulls: (term.nulls ?? "last") === "last" ? "first" : "last" })}
+        >
+          nulls {term.nulls ?? "last"}
+        </button>
+      )}
+      <button type="button" className="qt-chip-x" onClick={() => removeTerm(index)} disabled={disabled}>
+        ✕
+      </button>
+    </span>
+  );
+}
+
+function OrderRow<Row>({
   api,
   fields,
   classNames,
@@ -480,54 +596,32 @@ function AutocompleteInput<Row>({
     <div className="qt-qb-row">
       <span className="qt-qb-kw">order by</span>
       {orderBy.length === 0 && !adding && <span className="qt-qb-hint">(default)</span>}
-      {orderBy.map((o, i) => {
-        const label = byName.get(o.field)?.label ?? o.field;
-        return (
-          <span
-            key={`${o.field}-${i}`}
-            className={cx("qt-chip", "qt-chip--sort", classNames?.chip)}
-            draggable={!disabled}
-            onDragStart={() => {
-              dragIdx.current = i;
-            }}
-            onDragOver={(e) => {
-              if (dragIdx.current != null && dragIdx.current !== i) e.preventDefault();
-            }}
-            onDrop={(e) => {
-              e.preventDefault();
-              if (dragIdx.current != null) reorder(dragIdx.current, i);
-              dragIdx.current = null;
-            }}
-            onDragEnd={() => {
-              dragIdx.current = null;
-            }}
-            title="drag to reorder sort priority"
-          >
-            {orderBy.length > 1 && <span className="qt-chip-priority">{i + 1}</span>}
-            <span className="qt-chip-field">{label}</span>
-            <button
-              type="button"
-              className="qt-chip-op-btn"
-              disabled={disabled}
-              onClick={() => updateTerm(i, { dir: o.dir === "asc" ? "desc" : "asc" })}
-            >
-              {o.dir === "asc" ? "↑ asc" : "↓ desc"}
-            </button>
-            <button
-              type="button"
-              className="qt-chip-op-btn"
-              disabled={disabled}
-              title="where NULL values sort"
-              onClick={() => updateTerm(i, { nulls: (o.nulls ?? "last") === "last" ? "first" : "last" })}
-            >
-              nulls {o.nulls ?? "last"}
-            </button>
-            <button type="button" className="qt-chip-x" onClick={() => removeTerm(i)} disabled={disabled}>
-              ✕
-            </button>
-          </span>
-        );
-      })}
+      {orderBy.map((o, i) => (
+        <OrderTermChip
+          key={`${o.field}-${i}`}
+          api={api}
+          field={byName.get(o.field)}
+          term={o}
+          index={i}
+          dragIdx={dragIdx}
+          onMoveStart={(from) => {
+            dragIdx.current = from;
+          }}
+          onDrop={(to) => {
+            if (dragIdx.current != null) reorder(dragIdx.current, to);
+            dragIdx.current = null;
+          }}
+          onMoveEnd={() => {
+            dragIdx.current = null;
+          }}
+          disabled={disabled}
+          updateTerm={updateTerm}
+          removeTerm={removeTerm}
+          classNames={classNames}
+          label={byName.get(o.field)?.label ?? o.field}
+          showPriority={orderBy.length > 1}
+        />
+      ))}
       {adding ? (
         <FieldPicker fields={sortable} onPick={addTerm} onClose={() => setAdding(false)} />
       ) : (
