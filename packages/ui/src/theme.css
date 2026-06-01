@@ -96,7 +96,15 @@
   white-space: nowrap;
 }
 .qt-cell:hover { background: var(--qt-cell-hover); }
-.qt-checkbox-cell { width: 36px; text-align: center; }
+.qt-checkbox-cell {
+  width: 36px;
+  text-align: center;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+  padding-left: 8px;
+  padding-right: 8px;
+}
 .qt-checkbox-cell:hover { background: transparent; }
 .qt-row--selected { background: var(--qt-row-selected-bg); }
 .qt-row--selected .qt-cell:hover { background: var(--qt-row-selected-bg); }
