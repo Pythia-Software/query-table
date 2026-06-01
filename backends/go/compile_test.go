@@ -172,6 +172,22 @@ func TestCompileDistinct(t *testing.T) {
 	}
 }
 
+func TestCompileDistinctHasNull(t *testing.T) {
+	s := mustSchema(t)
+	nh, err := CompileDistinctHasNull("overall", s)
+	if err != nil {
+		t.Fatalf("CompileDistinctHasNull: %v", err)
+	}
+	if nh.IsNullExpr != "vr.overall IS NULL" {
+		t.Errorf("expr = %q", nh.IsNullExpr)
+	}
+
+	_, err = CompileDistinctHasNull("missing", s)
+	if err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Errorf("want unknown-field error, got %v", err)
+	}
+}
+
 // b64url mimics @query-table/core encodeQuery's charset (base64url, no padding).
 func b64url(json string) string {
 	s := base64.StdEncoding.EncodeToString([]byte(json))
