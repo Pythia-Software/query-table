@@ -67,8 +67,8 @@ export function QueryBuilder<Row>({ api, fields, total, running, classNames }: Q
         <button type="button" className={cx("qt-btn", classNames?.button)} onClick={() => setShowSaved(true)}>
           ≡ saved{api.saved.items.length > 0 ? ` (${api.saved.items.length})` : ""}
         </button>
-        <button type="button" className={cx("qt-btn", classNames?.button)} onClick={api.clearFilters} disabled={running}>
-          clear filters
+        <button type="button" className={cx("qt-btn", classNames?.button)} onClick={api.resetAll} disabled={running}>
+          Reset All
         </button>
       </div>
 
@@ -246,6 +246,11 @@ function WhereRow<Row>({
           onRemove={() => api.removeFilter(i)}
         />
       ))}
+      {api.query.where.length > 0 && (
+        <button type="button" className="qt-link-btn" onClick={api.clearFilters} disabled={disabled} title="Reset filters">
+          reset
+        </button>
+      )}
       {adding ? (
         <FieldPicker
           fields={fields.filter(isFilterable)}
@@ -419,7 +424,7 @@ function AutocompleteInput<Row>({
 
 // ---- ORDER BY (multi-sort, reorderable) -----------------------------------
 
-function OrderRow<Row>({
+  function OrderRow<Row>({
   api,
   fields,
   classNames,
@@ -460,6 +465,16 @@ function OrderRow<Row>({
   }
 
   const sortable = fields.filter(isSortable);
+  const isDefaultOrderBy =
+    orderBy.length === api.defaults.orderBy.length &&
+    orderBy.every((term, i) => {
+      const next = api.defaults.orderBy[i];
+      return (
+        term.field === next?.field &&
+        term.dir === next?.dir &&
+        (term.nulls ?? "last") === (next?.nulls ?? "last")
+      );
+    });
 
   return (
     <div className="qt-qb-row">
@@ -520,13 +535,18 @@ function OrderRow<Row>({
           + add sort
         </button>
       )}
+      {!isDefaultOrderBy && (
+        <button type="button" className="qt-link-btn" onClick={() => api.setSort(api.defaults.orderBy)} disabled={disabled}>
+          reset
+        </button>
+      )}
     </div>
   );
 }
 
 // ---- LIMIT / OFFSET -------------------------------------------------------
 
-function WindowRow<Row>({
+  function WindowRow<Row>({
   api,
   total,
   classNames,
@@ -547,6 +567,8 @@ function WindowRow<Row>({
   const [offsetDraft, setOffsetDraft] = useState(String(query.offset));
   useEffect(() => setLimitDraft(String(query.limit)), [query.limit]);
   useEffect(() => setOffsetDraft(String(query.offset)), [query.offset]);
+  const hasLimitDefault = query.limit === api.defaults.limit;
+  const hasOffsetDefault = query.offset === api.defaults.offset;
 
   function commitLimit() {
     api.setLimit(Math.max(1, Number(limitDraft) || query.limit));
@@ -568,6 +590,17 @@ function WindowRow<Row>({
         onBlur={commitLimit}
         onKeyDown={(e) => e.key === "Enter" && commitLimit()}
       />
+      {!hasLimitDefault && (
+        <button
+          type="button"
+          className="qt-link-btn"
+          onClick={() => api.setLimit(api.defaults.limit)}
+          disabled={disabled}
+          title="Reset to default limit"
+        >
+          reset
+        </button>
+      )}
       <span className="qt-qb-kw">offset</span>
       <input
         className={cx("qt-qb-num", classNames?.input)}
@@ -579,6 +612,17 @@ function WindowRow<Row>({
         onBlur={commitOffset}
         onKeyDown={(e) => e.key === "Enter" && commitOffset()}
       />
+      {!hasOffsetDefault && (
+        <button
+          type="button"
+          className="qt-link-btn"
+          onClick={() => api.setOffset(api.defaults.offset)}
+          disabled={disabled}
+          title="Reset to default offset"
+        >
+          reset
+        </button>
+      )}
       <button type="button" className={cx("qt-btn", classNames?.button)} disabled={disabled || !canPrev} onClick={api.prevPage}>
         ← prev
       </button>

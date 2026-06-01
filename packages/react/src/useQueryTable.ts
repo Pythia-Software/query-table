@@ -54,6 +54,8 @@ export interface UseQueryTableOptions<Row> {
 export interface QueryTableApi<Row> {
   // state
   query: QueryState;
+  /** Schema defaults used for reset controls. */
+  defaults: QueryState;
   setQuery: (next: QueryState | ((prev: QueryState) => QueryState)) => void;
 
   // data
@@ -69,6 +71,8 @@ export interface QueryTableApi<Row> {
   updateFilter: (index: number, clause: WhereClause) => void;
   removeFilter: (index: number) => void;
   clearFilters: () => void;
+  /** Reset the complete query state back to schema defaults. */
+  resetAll: () => void;
   /** Keystroke-driven filter-value autocomplete (Transport.fetchDistinctValues). */
   filterValues: (field: string, search: string) => Promise<DistinctValuesResult>;
 
@@ -100,6 +104,16 @@ function defaultsFor<Row>(schema: FieldSchema<Row>): QueryState {
   };
 }
 
+function cloneQueryState(q: QueryState): QueryState {
+  return {
+    select: q.select.map((column) => ({ ...column })),
+    where: q.where.map((clause) => ({ ...clause })),
+    orderBy: q.orderBy.map((term) => ({ ...term })),
+    limit: q.limit,
+    offset: q.offset,
+  };
+}
+
 function resolveInitial<Row>(opts: UseQueryTableOptions<Row>): { q: QueryState; fromUrl: boolean } {
   if (opts.initialQuery) return { q: opts.initialQuery, fromUrl: false };
   if (typeof window !== "undefined") {
@@ -113,6 +127,7 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
   const { schema, transport, clientRows, initialQuery, syncUrl = true, debounceMs = 200 } = opts;
   const storage = useMemo(() => opts.storage ?? localStorageAdapter(), [opts.storage]);
   const now = opts.now ?? Date.now;
+  const defaults = useMemo(() => defaultsFor(schema), [schema]);
 
   const initRef = useRef(resolveInitial(opts));
   const [query, setQueryState] = useState<QueryState>(initRef.current.q);
@@ -227,6 +242,7 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
     [setQuery],
   );
   const clearFilters = useCallback(() => setQuery((q) => ({ ...q, offset: 0, where: [] })), [setQuery]);
+  const resetAll = useCallback(() => setQuery(() => cloneQueryState(defaults)), [setQuery, defaults]);
 
   const setSort = useCallback((orderBy: OrderByClause[]) => setQuery((q) => ({ ...q, offset: 0, orderBy })), [setQuery]);
   const toggleSort = useCallback(
@@ -262,6 +278,7 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
 
   return {
     query,
+    defaults,
     setQuery,
     rows,
     total,
@@ -273,6 +290,7 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
     updateFilter,
     removeFilter,
     clearFilters,
+    resetAll,
     filterValues,
     toggleSort,
     setSort,
