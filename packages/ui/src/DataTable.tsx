@@ -7,7 +7,7 @@
 // and emits intents through onQueryChange. It deliberately mirrors the props
 // shape of xplo-perf's DataTable so porting is mechanical.
 
-import { useRef, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import type { OrderByClause, QueryState, FieldDef, RowId, SelectColumn, WhereClause } from "@query-table/core";
 import { isSortable, readFieldValue } from "@query-table/core";
 import type { SelectionApi } from "@query-table/react";
@@ -71,6 +71,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
 
   const [menu, setMenu] = useState<MenuState<Row> | null>(null);
   const dragField = useRef<string | null>(null);
+  const [dragSlotIndex, setDragSlotIndex] = useState<number | null>(null);
 
   const pageIds = rows.map(rowId).filter((id): id is RowId => id != null);
   const headerState = selection ? selection.pageState(pageIds) : "none";
@@ -126,6 +127,27 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     onQueryChange({ ...query, select: reorderSelect(query.select, fields, order) });
   }
 
+  function reorderByIndex(from: string, toIndex: number) {
+    const order = fields.map((f) => f.name);
+    const fromIdx = order.indexOf(from);
+    if (fromIdx < 0) return;
+    const insertionIndex = Math.max(0, Math.min(toIndex, order.length - 1));
+    order.splice(insertionIndex, 0, order.splice(fromIdx, 1)[0]!);
+    onQueryChange({ ...query, select: reorderSelect(query.select, fields, order) });
+  }
+
+  const fieldByName = useMemo(() => new Map(fields.map((f) => [f.name, f])), [fields]);
+  const fieldNames = useMemo(() => fields.map((f) => f.name), [fields]);
+  const dragSource = dragField.current;
+  const slotIndex = dragSlotIndex;
+  type HeaderItem = { kind: "slot" } | { kind: "field"; name: string };
+  const renderedHeaders = useMemo<HeaderItem[]>(() => {
+    if (!dragSource) return fieldNames.map((name) => ({ kind: "field", name }));
+    const withoutDragged = fieldNames.filter((name) => name !== dragSource);
+    if (slotIndex == null) return withoutDragged.map((name) => ({ kind: "field", name }));
+    return [...withoutDragged.slice(0, slotIndex), { kind: "slot" }, ...withoutDragged.slice(slotIndex)];
+  }, [dragSource, fieldNames, slotIndex]);
+
   // ---- selection ----
   function toggleHeader() {
     if (!selection) return;
@@ -172,12 +194,35 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                   />
                 </th>
               )}
-              {fields.map((f) => {
+              {renderedHeaders.map((item, idx) => {
+                if (item.kind === "slot") {
+                  return (
+                    <th
+                      key={`drag-slot-${idx}`}
+                      className="qt-th qt-th-drop-slot"
+                      onDragOver={(e) => {
+                        if (!dragField.current) return;
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "move";
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        const from = dragField.current || e.dataTransfer.getData("text/plain");
+                        if (from && slotIndex != null) reorderByIndex(from, slotIndex);
+                        dragField.current = null;
+                        setDragSlotIndex(null);
+                      }}
+                    />
+                  );
+                }
+
+                const f = fieldByName.get(item.name);
+                if (!f) return null;
                 const info = sortInfo(f);
                 const sortable = isSortable(f);
                 return (
                   <th
-                    key={f.name}
+                    key={`${f.name}-${idx}`}
                     className={cx(
                       "qt-th",
                       sortable && "qt-th--sortable",
@@ -188,6 +233,8 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                     draggable
                     onDragStart={(e) => {
                       dragField.current = f.name;
+                      const next = fieldNames.indexOf(f.name);
+                      setDragSlotIndex(next >= 0 ? next : null);
                       e.dataTransfer.effectAllowed = "move";
                       e.dataTransfer.setData("text/plain", f.name);
                     }}
@@ -195,16 +242,22 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                       if (dragField.current && dragField.current !== f.name) {
                         e.preventDefault();
                         e.dataTransfer.dropEffect = "move";
+                        const withoutDragged = fieldNames.filter((name) => name !== dragField.current);
+                        const next = withoutDragged.indexOf(f.name);
+                        if (next >= 0) setDragSlotIndex(next);
                       }
                     }}
                     onDrop={(e) => {
                       e.preventDefault();
+                      e.dataTransfer.dropEffect = "move";
                       const from = dragField.current || e.dataTransfer.getData("text/plain");
                       if (from && from !== f.name) reorder(from, f.name);
                       dragField.current = null;
+                      setDragSlotIndex(null);
                     }}
                     onDragEnd={() => {
                       dragField.current = null;
+                      setDragSlotIndex(null);
                     }}
                   >
                     <span

@@ -75,6 +75,13 @@
   border-bottom: 1px solid var(--qt-border);
 }
 .qt-th--dragging { opacity: 0.5; }
+.qt-th-drop-slot {
+  width: 120px;
+  min-height: 36px;
+  background: transparent;
+  border: 1px dashed var(--qt-accent);
+  box-sizing: border-box;
+}
 .qt-th-label:hover { color: var(--qt-accent); }
 .qt-sort-indicator { color: var(--qt-accent); }
 .qt-sort-priority { font-size: 9px; margin-left: 1px; }
