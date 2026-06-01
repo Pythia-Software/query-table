@@ -12,7 +12,7 @@ import type { QueryState, SavedQuery, StorageAdapter } from "@query-table/core";
 export interface SavedQueriesApi {
   items: SavedQuery[];
   loading: boolean;
-  /** Persist the current query under a name. */
+  /** Persist the current query under a name. Rejects on duplicate names. */
   save: (name: string) => Promise<void>;
   /** Load a saved query into the live controller (and thus the URL). */
   load: (id: string) => void;

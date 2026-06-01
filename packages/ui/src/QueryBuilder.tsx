@@ -18,6 +18,7 @@ import type {
 import {
   NULLARY_OPS,
   filterValues as filterValuesFor,
+  queriesEqual,
   isFilterable,
   isSelectable,
   isSortable,
@@ -43,20 +44,149 @@ export interface QueryBuilderProps<Row> {
 const cx = (...parts: Array<string | undefined | false>): string =>
   parts.filter((p): p is string => Boolean(p)).join(" ");
 
+function useFieldHasNull(api: QueryTableApi<unknown>, fieldName: string | undefined): boolean | undefined {
+  const [hasNull, setHasNull] = useState<boolean | undefined>(undefined);
+
+  useEffect(() => {
+    if (!fieldName) return;
+    let cancelled = false;
+
+    void api
+      .filterValues(fieldName, "")
+      .then((r) => {
+        if (!cancelled && typeof r.hasNull === "boolean") {
+          setHasNull(r.hasNull);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setHasNull(undefined);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [api, fieldName]);
+
+  return hasNull;
+}
+
 export function QueryBuilder<Row>({ api, fields, total, running, classNames }: QueryBuilderProps<Row>): ReactNode {
   const [showSaved, setShowSaved] = useState(false);
+  const [editingSavedId, setEditingSavedId] = useState<string | null>(null);
+  const [editingSavedName, setEditingSavedName] = useState("");
+  const [collapsed, setCollapsed] = useState(false);
   const byName = useMemo(() => new Map(fields.map((f) => [f.name, f])), [fields]);
+  const activeSavedQuery = useMemo(
+    () => api.saved.items.find((item) => queriesEqual(item.query, api.query)),
+    [api.query, api.saved.items],
+  );
+  const bodyId = useId();
+  const isEditingSaved = editingSavedId != null && activeSavedQuery?.id === editingSavedId;
+
+  useEffect(() => {
+    if (editingSavedId != null && activeSavedQuery?.id !== editingSavedId) {
+      cancelRenameActiveSaved();
+    }
+    // activeSavedQuery can become null if edits/loads shift to unsaved or another query
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSavedQuery]);
+
+  function saveFailed(error: unknown): void {
+    const message = error instanceof Error ? error.message : "Failed to save query.";
+    if (typeof window !== "undefined") window.alert(message);
+  }
 
   function save() {
     const name = typeof window !== "undefined" ? window.prompt("Save query as…") : null;
-    if (name && name.trim()) void api.saved.save(name.trim());
+    if (name && name.trim()) void api.saved.save(name.trim()).catch(saveFailed);
   }
+
+  function beginRenameActiveSaved() {
+    if (!activeSavedQuery) return;
+    setEditingSavedId(activeSavedQuery.id);
+    setEditingSavedName(activeSavedQuery.name);
+  }
+
+  function cancelRenameActiveSaved() {
+    setEditingSavedId(null);
+    setEditingSavedName("");
+  }
+
+  function commitRenameActiveSaved() {
+    if (!isEditingSaved || !activeSavedQuery) return;
+    const trimmed = editingSavedName.trim();
+    if (!trimmed || trimmed === activeSavedQuery.name) {
+      cancelRenameActiveSaved();
+      return;
+    }
+    void api.saved
+      .save(trimmed)
+      .then(() => void api.saved.remove(activeSavedQuery.id))
+      .catch(saveFailed);
+    cancelRenameActiveSaved();
+  }
+
+  useEffect(() => {
+    if (collapsed) setShowSaved(false);
+  }, [collapsed]);
 
   return (
     <div className={cx("qt-qb", classNames?.root)}>
       <div className="qt-qb-row qt-qb-actions">
-        <span className="qt-qb-count">
-          {api.loading ? "loading…" : `${api.rows.length} of ${total ?? "?"}`}
+        <button
+          type="button"
+          className={cx("qt-btn", classNames?.button)}
+          onClick={() => setCollapsed((next) => !next)}
+          aria-expanded={!collapsed}
+          aria-controls={bodyId}
+          title={collapsed ? "Expand query builder" : "Collapse query builder"}
+        >
+          {collapsed ? "Show query builder" : "Hide query builder"}
+        </button>
+        {collapsed ? null : (
+          <>
+        <span className="qt-qb-left">
+          <span className="qt-qb-count">{api.loading ? "loading…" : `${api.rows.length} of ${total ?? "?"}`}</span>
+          {activeSavedQuery && (
+            <span className="qt-qb-saved">
+              <span className="qt-qb-saved-star" aria-hidden>
+                ★
+              </span>
+              {isEditingSaved ? (
+                <input
+                  type="text"
+                  className="qt-qb-saved-input"
+                  value={editingSavedName}
+                  disabled={running}
+                  autoFocus
+                  onChange={(e) => setEditingSavedName(e.target.value)}
+                  onBlur={commitRenameActiveSaved}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      commitRenameActiveSaved();
+                    }
+                    if (e.key === "Escape") {
+                      e.preventDefault();
+                      cancelRenameActiveSaved();
+                    }
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              ) : (
+                <strong className="qt-qb-saved-name">{activeSavedQuery.name}</strong>
+              )}
+              <button
+                type="button"
+                className="qt-qb-saved-edit"
+                title="Rename saved query"
+                disabled={running}
+                onClick={beginRenameActiveSaved}
+              >
+                ✎
+              </button>
+            </span>
+          )}
         </span>
         <button type="button" className={cx("qt-btn", classNames?.button)} onClick={api.refresh} disabled={running}>
           ↻ refresh
@@ -70,14 +200,20 @@ export function QueryBuilder<Row>({ api, fields, total, running, classNames }: Q
         <button type="button" className={cx("qt-btn", classNames?.button)} onClick={api.resetAll} disabled={running}>
           Reset All
         </button>
+          </>
+        )}
       </div>
 
-      <SelectRow api={api} fields={fields} classNames={classNames} disabled={running} />
-      <WhereRow api={api} byName={byName} fields={fields} classNames={classNames} disabled={running} />
-      <OrderRow api={api} fields={fields} classNames={classNames} disabled={running} />
-      <WindowRow api={api} total={total} classNames={classNames} disabled={running} />
+      <div id={bodyId} hidden={collapsed}>
+        <SelectRow api={api} fields={fields} classNames={classNames} disabled={running} />
+        <WhereRow api={api} byName={byName} fields={fields} classNames={classNames} disabled={running} />
+        <OrderRow api={api} fields={fields} classNames={classNames} disabled={running} />
+        <WindowRow api={api} total={total} classNames={classNames} disabled={running} />
+      </div>
 
-      {showSaved && <SavedQueriesModal saved={api.saved} onClose={() => setShowSaved(false)} />}
+      {!collapsed && showSaved ? (
+        <SavedQueriesModal saved={api.saved} onClose={() => setShowSaved(false)} />
+      ) : null}
     </div>
   );
 }
@@ -300,6 +436,7 @@ function ClauseChip<Row>({
 }) {
   const labelField = field?.label;
   const fieldName = clauses[0]?.clause.field;
+  const fieldHasNull = useFieldHasNull(api, field?.name);
 
   return (
     <span className={cx("qt-chip", "qt-chip--where", classNames?.chip)}>
@@ -307,7 +444,11 @@ function ClauseChip<Row>({
       <span className="qt-chip-where-list">
         {clauses.map((entry, idx) => {
           const clause = entry.clause;
-          const ops: FilterOp[] = field ? opsForField(field) : [clause.op];
+          const baseOps: FilterOp[] = field ? opsForField(field) : [clause.op];
+          const filteredBaseOps = fieldHasNull === false ? baseOps.filter((op) => !NULLARY_OPS.has(op)) : baseOps;
+          const clauseOps: FilterOp[] = filteredBaseOps.includes(clause.op)
+            ? filteredBaseOps
+            : [...filteredBaseOps, clause.op];
           const needsValue = !NULLARY_OPS.has(clause.op);
           return (
             <span className="qt-chip-where-clause" key={entry.index}>
@@ -318,7 +459,7 @@ function ClauseChip<Row>({
                 disabled={disabled}
                 onChange={(e) => onChange(entry.index, { ...clause, op: e.target.value as FilterOp })}
               >
-                {ops.map((op) => (
+                {clauseOps.map((op) => (
                   <option key={op} value={op}>
                     {op}
                   </option>
@@ -455,7 +596,90 @@ function AutocompleteInput<Row>({
 
 // ---- ORDER BY (multi-sort, reorderable) -----------------------------------
 
-  function OrderRow<Row>({
+function OrderTermChip<Row>({
+  api,
+  field,
+  term,
+  index,
+  dragIdx,
+  onMoveStart,
+  onDrop,
+  onMoveEnd,
+  disabled,
+  updateTerm,
+  removeTerm,
+  classNames,
+  label,
+  showPriority,
+}: {
+  api: QueryTableApi<Row>;
+  field: FieldDef<Row> | undefined;
+  term: OrderByClause;
+  index: number;
+  dragIdx: React.RefObject<number | null>;
+  onMoveStart: (index: number) => void;
+  onDrop: (index: number) => void;
+  onMoveEnd: () => void;
+  disabled: boolean | undefined;
+  updateTerm: (i: number, patch: Partial<OrderByClause>) => void;
+  removeTerm: (i: number) => void;
+  classNames: QueryBuilderClassNames | undefined;
+  label: string;
+  showPriority: boolean;
+}) {
+  const fieldHasNull = useFieldHasNull(api, field?.name);
+
+  return (
+    <span
+      className={cx("qt-chip", "qt-chip--col", "qt-chip--sort", classNames?.chip)}
+      draggable={!disabled}
+      onDragStart={() => {
+        onMoveStart(index);
+      }}
+      onDragOver={(e) => {
+        if (dragIdx.current != null && dragIdx.current !== index) e.preventDefault();
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        onDrop(index);
+      }}
+      onDragEnd={() => {
+        onMoveEnd();
+      }}
+      title="drag to reorder sort priority"
+    >
+      <span aria-hidden className="qt-chip-grip">
+        ⋮⋮
+      </span>
+      {showPriority && <span className="qt-chip-priority">{index + 1}</span>}
+      <span className="qt-chip-field">{label}</span>
+      <button
+        type="button"
+        className="qt-chip-op-btn"
+        disabled={disabled}
+        onClick={() => updateTerm(index, { dir: term.dir === "asc" ? "desc" : "asc" })}
+      >
+        {term.dir === "asc" ? "↑ asc" : "↓ desc"}
+      </button>
+      {fieldHasNull !== false && (
+        <button
+          type="button"
+          className="qt-chip-op-btn"
+          disabled={disabled}
+          title="where NULL values sort"
+          onClick={() => updateTerm(index, { nulls: (term.nulls ?? "last") === "last" ? "first" : "last" })}
+        >
+          nulls {term.nulls ?? "last"}
+        </button>
+      )}
+      <button type="button" className="qt-chip-x" onClick={() => removeTerm(index)} disabled={disabled}>
+        ✕
+      </button>
+    </span>
+  );
+}
+
+function OrderRow<Row>({
   api,
   fields,
   classNames,
@@ -511,54 +735,32 @@ function AutocompleteInput<Row>({
     <div className="qt-qb-row">
       <span className="qt-qb-kw">order by</span>
       {orderBy.length === 0 && !adding && <span className="qt-qb-hint">(default)</span>}
-      {orderBy.map((o, i) => {
-        const label = byName.get(o.field)?.label ?? o.field;
-        return (
-          <span
-            key={`${o.field}-${i}`}
-            className={cx("qt-chip", "qt-chip--sort", classNames?.chip)}
-            draggable={!disabled}
-            onDragStart={() => {
-              dragIdx.current = i;
-            }}
-            onDragOver={(e) => {
-              if (dragIdx.current != null && dragIdx.current !== i) e.preventDefault();
-            }}
-            onDrop={(e) => {
-              e.preventDefault();
-              if (dragIdx.current != null) reorder(dragIdx.current, i);
-              dragIdx.current = null;
-            }}
-            onDragEnd={() => {
-              dragIdx.current = null;
-            }}
-            title="drag to reorder sort priority"
-          >
-            {orderBy.length > 1 && <span className="qt-chip-priority">{i + 1}</span>}
-            <span className="qt-chip-field">{label}</span>
-            <button
-              type="button"
-              className="qt-chip-op-btn"
-              disabled={disabled}
-              onClick={() => updateTerm(i, { dir: o.dir === "asc" ? "desc" : "asc" })}
-            >
-              {o.dir === "asc" ? "↑ asc" : "↓ desc"}
-            </button>
-            <button
-              type="button"
-              className="qt-chip-op-btn"
-              disabled={disabled}
-              title="where NULL values sort"
-              onClick={() => updateTerm(i, { nulls: (o.nulls ?? "last") === "last" ? "first" : "last" })}
-            >
-              nulls {o.nulls ?? "last"}
-            </button>
-            <button type="button" className="qt-chip-x" onClick={() => removeTerm(i)} disabled={disabled}>
-              ✕
-            </button>
-          </span>
-        );
-      })}
+      {orderBy.map((o, i) => (
+        <OrderTermChip
+          key={`${o.field}-${i}`}
+          api={api}
+          field={byName.get(o.field)}
+          term={o}
+          index={i}
+          dragIdx={dragIdx}
+          onMoveStart={(from) => {
+            dragIdx.current = from;
+          }}
+          onDrop={(to) => {
+            if (dragIdx.current != null) reorder(dragIdx.current, to);
+            dragIdx.current = null;
+          }}
+          onMoveEnd={() => {
+            dragIdx.current = null;
+          }}
+          disabled={disabled}
+          updateTerm={updateTerm}
+          removeTerm={removeTerm}
+          classNames={classNames}
+          label={byName.get(o.field)?.label ?? o.field}
+          showPriority={orderBy.length > 1}
+        />
+      ))}
       {adding ? (
         <FieldPicker fields={sortable} onPick={addTerm} onClose={() => setAdding(false)} />
       ) : (

@@ -32,6 +32,10 @@ export interface DistinctValuesResult {
   values: string[];
   /** true when more matches exist than were returned — refine by typing. */
   hasMore: boolean;
+  /** True if the selected field has at least one NULL in the source dataset.
+   *  False if that field is guaranteed non-null. Omitted when the backend does
+   *  not compute this metadata. */
+  hasNull?: boolean;
 }
 
 /** Per-field metadata for the field picker (xlsx-collect's distinct/min/max). */
@@ -79,6 +83,8 @@ export interface StorageAdapter {
   saveLast(key: string, query: QueryState): Promise<void>;
 
   listSaved(key: string): Promise<SavedQuery[]>;
+  /** Persist a named query snapshot. Rejects when a saved query with the same
+   *  name already exists in the key namespace. */
   saveNamed(key: string, name: string, query: QueryState, savedAt: number): Promise<SavedQuery>;
   deleteSaved(key: string, id: string): Promise<void>;
 }
@@ -124,12 +130,15 @@ export function localStorageAdapter(): StorageAdapter {
     async saveLast(key, query) {
       if (ls) ls.setItem(LAST_PREFIX + key, JSON.stringify(query));
     },
-    async listSaved(key) {
+  async listSaved(key) {
       return readSaved(key).sort((a, b) => b.savedAt - a.savedAt);
     },
     async saveNamed(key, name, query, savedAt) {
+      const items = readSaved(key);
+      if (items.some((q) => q.name === name)) {
+        throw new Error(`Saved query "${name}" already exists.`);
+      }
       const item: SavedQuery = { id: `${savedAt}-${Math.round((savedAt * 9301 + 49297) % 233280)}`, name, savedAt, query };
-      const items = readSaved(key).filter((q) => q.name !== name); // newest-by-name wins
       items.push(item);
       writeSaved(key, items);
       return item;
