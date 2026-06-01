@@ -98,6 +98,8 @@ function SelectRow<Row>({
   const { select } = api;
   const [adding, setAdding] = useState(false);
   const dragField = useRef<string | null>(null);
+  const [dragSlotIndex, setDragSlotIndex] = useState<number | null>(null);
+  const fieldLabelByName = useMemo(() => new Map(select.fields.map((f) => [f.name, f.label]), [select.fields]);
 
   function reorder(from: string, to: string) {
     if (from === to) return;
@@ -106,47 +108,77 @@ function SelectRow<Row>({
     select.move(from, toIdx);
   }
 
+  const fieldNames = select.visible.map((c) => c.field);
+  const dragSource = dragField.current;
+  const slotIndex = dragSlotIndex;
+
+  const rendered = useMemo(() => {
+    if (!dragSource) return fieldNames.map((name) => ({ kind: "field" as const, name }));
+
+    const withoutDragged = fieldNames.filter((name) => name !== dragSource);
+    const slot = slotIndex == null ? withoutDragged : [...withoutDragged.slice(0, slotIndex), { kind: "slot" as const }, ...withoutDragged.slice(slotIndex)];
+    return slot;
+  }, [fieldNames, dragSource, slotIndex]);
+
   return (
     <div className="qt-qb-row">
       <span className="qt-qb-kw">select</span>
-      {select.fields.map((f) => (
+      {rendered.map((item, idx) => {
+        if (item.kind === "slot") {
+          return (
+            <span key="drag-slot" className="qt-chip qt-chip-drop-slot">
+              {"\u00a0"}
+            </span>
+          );
+        }
+
+        const label = fieldLabelByName.get(item.name) ?? item.name;
+
+        return (
         <span
-          key={f.name}
+          key={`${item.name}-${idx}`}
           className={cx("qt-chip", "qt-chip--col", classNames?.columnChip ?? classNames?.chip)}
           draggable={!disabled}
           onDragStart={(e) => {
-            dragField.current = f.name;
+            dragField.current = item.name;
+            const next = fieldNames.indexOf(item.name);
+            setDragSlotIndex(next >= 0 ? next : null);
             e.dataTransfer.effectAllowed = "move";
-            e.dataTransfer.setData("text/plain", f.name);
+            e.dataTransfer.setData("text/plain", item.name);
           }}
           onDragOver={(e) => {
-            if (dragField.current && dragField.current !== f.name) {
+            if (dragField.current && dragField.current !== item.name) {
               e.preventDefault();
               e.dataTransfer.dropEffect = "move";
-              reorder(dragField.current, f.name);
+              const withoutDragged = fieldNames.filter((name) => name !== dragField.current);
+              const next = withoutDragged.indexOf(item.name);
+              if (next >= 0) setDragSlotIndex(next);
             }
           }}
           onDrop={(e) => {
             e.preventDefault();
             e.dataTransfer.dropEffect = "move";
             const from = dragField.current || e.dataTransfer.getData("text/plain");
-            if (from) reorder(from, f.name);
+            if (from) reorder(from, item.name);
             dragField.current = null;
+            setDragSlotIndex(null);
           }}
           onDragEnd={() => {
             dragField.current = null;
+            setDragSlotIndex(null);
           }}
           title="drag to reorder"
         >
           <span aria-hidden className="qt-chip-grip">
             ⋮⋮
           </span>
-          {f.label}
-          <button type="button" className="qt-chip-x" onClick={() => select.hide(f.name)} disabled={disabled}>
+          {label}
+          <button type="button" className="qt-chip-x" onClick={() => select.hide(item.name)} disabled={disabled}>
             ✕
           </button>
         </span>
-      ))}
+        );
+      })}
       {adding ? (
         <FieldPicker
           fields={select.hidden.filter(isSelectable)}

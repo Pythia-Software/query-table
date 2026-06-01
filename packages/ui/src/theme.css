@@ -149,6 +149,16 @@
   font-size: 12px;
 }
 .qt-chip--col { cursor: grab; }
+.qt-chip-drop-slot {
+  min-width: 44px;
+  min-height: 20px;
+  background: transparent;
+  border: 1px dashed var(--qt-accent);
+  border-radius: var(--qt-radius);
+  padding: 2px 10px;
+  color: transparent;
+  box-sizing: border-box;
+}
 .qt-chip-grip { color: var(--qt-border); user-select: none; }
 .qt-chip-priority { background: var(--qt-accent); color: #fff; border-radius: 999px; font-size: 10px; padding: 0 5px; }
 .qt-chip-field { font-weight: 600; }
