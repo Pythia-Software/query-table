@@ -18,6 +18,7 @@ import type {
 import {
   NULLARY_OPS,
   filterValues as filterValuesFor,
+  queriesEqual,
   isFilterable,
   isSelectable,
   isSortable,
@@ -71,18 +72,121 @@ function useFieldHasNull(api: QueryTableApi<unknown>, fieldName: string | undefi
 
 export function QueryBuilder<Row>({ api, fields, total, running, classNames }: QueryBuilderProps<Row>): ReactNode {
   const [showSaved, setShowSaved] = useState(false);
+  const [editingSavedId, setEditingSavedId] = useState<string | null>(null);
+  const [editingSavedName, setEditingSavedName] = useState("");
+  const [collapsed, setCollapsed] = useState(false);
   const byName = useMemo(() => new Map(fields.map((f) => [f.name, f])), [fields]);
+  const activeSavedQuery = useMemo(
+    () => api.saved.items.find((item) => queriesEqual(item.query, api.query)),
+    [api.query, api.saved.items],
+  );
+  const bodyId = useId();
+  const isEditingSaved = editingSavedId != null && activeSavedQuery?.id === editingSavedId;
+
+  useEffect(() => {
+    if (editingSavedId != null && activeSavedQuery?.id !== editingSavedId) {
+      cancelRenameActiveSaved();
+    }
+    // activeSavedQuery can become null if edits/loads shift to unsaved or another query
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSavedQuery]);
+
+  function saveFailed(error: unknown): void {
+    const message = error instanceof Error ? error.message : "Failed to save query.";
+    if (typeof window !== "undefined") window.alert(message);
+  }
 
   function save() {
     const name = typeof window !== "undefined" ? window.prompt("Save query as…") : null;
-    if (name && name.trim()) void api.saved.save(name.trim());
+    if (name && name.trim()) void api.saved.save(name.trim()).catch(saveFailed);
   }
+
+  function beginRenameActiveSaved() {
+    if (!activeSavedQuery) return;
+    setEditingSavedId(activeSavedQuery.id);
+    setEditingSavedName(activeSavedQuery.name);
+  }
+
+  function cancelRenameActiveSaved() {
+    setEditingSavedId(null);
+    setEditingSavedName("");
+  }
+
+  function commitRenameActiveSaved() {
+    if (!isEditingSaved || !activeSavedQuery) return;
+    const trimmed = editingSavedName.trim();
+    if (!trimmed || trimmed === activeSavedQuery.name) {
+      cancelRenameActiveSaved();
+      return;
+    }
+    void api.saved
+      .save(trimmed)
+      .then(() => void api.saved.remove(activeSavedQuery.id))
+      .catch(saveFailed);
+    cancelRenameActiveSaved();
+  }
+
+  useEffect(() => {
+    if (collapsed) setShowSaved(false);
+  }, [collapsed]);
 
   return (
     <div className={cx("qt-qb", classNames?.root)}>
       <div className="qt-qb-row qt-qb-actions">
-        <span className="qt-qb-count">
-          {api.loading ? "loading…" : `${api.rows.length} of ${total ?? "?"}`}
+        <button
+          type="button"
+          className={cx("qt-btn", classNames?.button)}
+          onClick={() => setCollapsed((next) => !next)}
+          aria-expanded={!collapsed}
+          aria-controls={bodyId}
+          title={collapsed ? "Expand query builder" : "Collapse query builder"}
+        >
+          {collapsed ? "Show query builder" : "Hide query builder"}
+        </button>
+        {collapsed ? null : (
+          <>
+        <span className="qt-qb-left">
+          <span className="qt-qb-count">{api.loading ? "loading…" : `${api.rows.length} of ${total ?? "?"}`}</span>
+          {activeSavedQuery && (
+            <span className="qt-qb-saved">
+              <span className="qt-qb-saved-star" aria-hidden>
+                ★
+              </span>
+              {isEditingSaved ? (
+                <input
+                  type="text"
+                  className="qt-qb-saved-input"
+                  value={editingSavedName}
+                  disabled={running}
+                  autoFocus
+                  onChange={(e) => setEditingSavedName(e.target.value)}
+                  onBlur={commitRenameActiveSaved}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      commitRenameActiveSaved();
+                    }
+                    if (e.key === "Escape") {
+                      e.preventDefault();
+                      cancelRenameActiveSaved();
+                    }
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              ) : (
+                <strong className="qt-qb-saved-name">{activeSavedQuery.name}</strong>
+              )}
+              <button
+                type="button"
+                className="qt-qb-saved-edit"
+                title="Rename saved query"
+                disabled={running}
+                onClick={beginRenameActiveSaved}
+              >
+                ✎
+              </button>
+            </span>
+          )}
         </span>
         <button type="button" className={cx("qt-btn", classNames?.button)} onClick={api.refresh} disabled={running}>
           ↻ refresh
@@ -96,14 +200,20 @@ export function QueryBuilder<Row>({ api, fields, total, running, classNames }: Q
         <button type="button" className={cx("qt-btn", classNames?.button)} onClick={api.resetAll} disabled={running}>
           Reset All
         </button>
+          </>
+        )}
       </div>
 
-      <SelectRow api={api} fields={fields} classNames={classNames} disabled={running} />
-      <WhereRow api={api} byName={byName} fields={fields} classNames={classNames} disabled={running} />
-      <OrderRow api={api} fields={fields} classNames={classNames} disabled={running} />
-      <WindowRow api={api} total={total} classNames={classNames} disabled={running} />
+      <div id={bodyId} hidden={collapsed}>
+        <SelectRow api={api} fields={fields} classNames={classNames} disabled={running} />
+        <WhereRow api={api} byName={byName} fields={fields} classNames={classNames} disabled={running} />
+        <OrderRow api={api} fields={fields} classNames={classNames} disabled={running} />
+        <WindowRow api={api} total={total} classNames={classNames} disabled={running} />
+      </div>
 
-      {showSaved && <SavedQueriesModal saved={api.saved} onClose={() => setShowSaved(false)} />}
+      {!collapsed && showSaved ? (
+        <SavedQueriesModal saved={api.saved} onClose={() => setShowSaved(false)} />
+      ) : null}
     </div>
   );
 }
