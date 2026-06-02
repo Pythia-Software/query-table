@@ -255,10 +255,11 @@ function SelectRow<Row>({
 
     const withoutDragged = fieldNames.filter((name) => name !== dragSource);
     const withoutDraggedFieldItems = asFieldItems(withoutDragged);
+    const slotItem: HeaderItem = { kind: "slot" };
     const slot =
       slotIndex == null
         ? withoutDraggedFieldItems
-        : [...withoutDraggedFieldItems.slice(0, slotIndex), { kind: "slot" }, ...withoutDraggedFieldItems.slice(slotIndex)];
+        : [...withoutDraggedFieldItems.slice(0, slotIndex), slotItem, ...withoutDraggedFieldItems.slice(slotIndex)];
     return slot;
   }, [fieldNames, dragSource, slotIndex]);
 
