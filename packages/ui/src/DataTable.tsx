@@ -348,7 +348,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
         className={cx(
           "qt-table-wrap",
           loading && "qt-table-wrap--loading",
-          resizingField && "qt-table-wrap--resizing",
+          !!resizingField && "qt-table-wrap--resizing",
           classNames?.wrap,
         )}
         onWheel={onTableWheel}
