@@ -11,6 +11,7 @@
   "scripts": {
     "build:core": "tsc -p packages/core",
     "build": "npm run build:core && tsc -p packages/react && tsc -p packages/ui",
+    "lint": "npm run typecheck",
     "typecheck": "npm run build:core && tsc --noEmit -p packages/core/tsconfig.test.json && tsc --noEmit -p packages/react && tsc --noEmit -p packages/ui",
     "test": "vitest run"
   },
