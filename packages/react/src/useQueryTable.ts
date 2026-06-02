@@ -207,17 +207,20 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
     });
   }, []);
 
-  // Restore the last query on mount when nothing seeded the view.
+  // Restore the default saved query (preferred) or last query on mount when
+  // nothing explicit seeded the view.
   useEffect(() => {
     if (initRef.current.fromUrl || initialQuery) return;
     let cancelled = false;
-    void storage.loadLast(schema.name).then((last) => {
-      if (!cancelled && last) {
-        undoStack.current = [cloneQueryState(last)];
+    void (async () => {
+      const defaultSaved = await storage.loadDefaultSaved?.(schema.name);
+      const restored = defaultSaved?.query ?? (await storage.loadLast(schema.name));
+      if (!cancelled && restored) {
+        undoStack.current = [cloneQueryState(restored)];
         redoStack.current = [];
-        setQueryState(last);
+        setQueryState(restored);
       }
-    });
+    })();
     return () => {
       cancelled = true;
     };

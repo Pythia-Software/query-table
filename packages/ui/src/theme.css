@@ -331,6 +331,8 @@
 .qt-saved-pick:hover { background: var(--qt-header-bg); }
 .qt-saved-name { display: block; font-weight: 600; font-size: 13px; }
 .qt-saved-meta { font-size: 11px; }
+.qt-saved-default { white-space: nowrap; }
+.qt-qb-saved-default { color: var(--qt-muted); font-weight: 400; font-size: 11px; }
 
 /* ---- status pills (consumer-overridable palette hooks) ---- */
 .qt-pill--pass { color: var(--qt-pass-fg); background: var(--qt-pass-bg); }

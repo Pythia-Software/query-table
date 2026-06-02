@@ -30,6 +30,7 @@ export function SavedQueriesModal({ saved, onClose }: SavedQueriesModalProps): R
           <ul className="qt-saved-list">
             {saved.items.map((s) => {
               const filters = s.query.where.length;
+              const isDefault = saved.defaultId === s.id;
               return (
                 <li key={s.id} className="qt-saved-item">
                   <button
@@ -42,9 +43,29 @@ export function SavedQueriesModal({ saved, onClose }: SavedQueriesModalProps): R
                   >
                     <span className="qt-saved-name">{s.name}</span>
                     <span className="qt-saved-meta qt-muted">
+                      {isDefault ? "Default view · " : ""}
                       {new Date(s.savedAt).toLocaleString()} · {filters} filter{filters === 1 ? "" : "s"}
                     </span>
                   </button>
+                  {isDefault ? (
+                    <button
+                      type="button"
+                      className="qt-btn qt-saved-default"
+                      title="Clear default view"
+                      onClick={() => void saved.clearDefault()}
+                    >
+                      default
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="qt-btn qt-saved-default"
+                      title="Use as default view"
+                      onClick={() => void saved.setDefault(s.id)}
+                    >
+                      make default
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="qt-btn qt-saved-delete"

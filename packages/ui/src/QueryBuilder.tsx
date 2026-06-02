@@ -240,7 +240,12 @@ export function QueryBuilder<Row>({ api, fields, total, running, classNames }: Q
                       onClick={(e) => e.stopPropagation()}
                     />
                   ) : (
-                    <strong className="qt-qb-saved-name">{activeSavedQuery.name}</strong>
+                    <strong className="qt-qb-saved-name">
+                      {activeSavedQuery.name}
+                      {api.saved.defaultId === activeSavedQuery.id ? (
+                        <span className="qt-qb-saved-default"> default</span>
+                      ) : null}
+                    </strong>
                   )}
                   <button
                     type="button"
