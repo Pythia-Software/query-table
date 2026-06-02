@@ -83,6 +83,11 @@ export interface StorageAdapter {
   saveLast(key: string, query: QueryState): Promise<void>;
 
   listSaved(key: string): Promise<SavedQuery[]>;
+  /** Load the saved query selected as the default view for this key. Optional so
+   *  existing backend adapters keep working until they add first-class support. */
+  loadDefaultSaved?(key: string): Promise<SavedQuery | null>;
+  /** Set or clear the saved query used as the default view for this key. */
+  setDefaultSaved?(key: string, id: string | null): Promise<void>;
   /** Persist a named query snapshot. Rejects when a saved query with the same
    *  name already exists in the key namespace. */
   saveNamed(key: string, name: string, query: QueryState, savedAt: number): Promise<SavedQuery>;
@@ -91,6 +96,7 @@ export interface StorageAdapter {
 
 const LAST_PREFIX = "query-table:last:";
 const SAVED_PREFIX = "query-table:saved:";
+const DEFAULT_PREFIX = "query-table:default:";
 
 /** Default StorageAdapter over window.localStorage. Returns a no-op adapter when
  *  localStorage is unavailable (SSR / sandboxed). */
@@ -116,6 +122,15 @@ export function localStorageAdapter(): StorageAdapter {
   const writeSaved = (key: string, items: SavedQuery[]): void => {
     if (ls) ls.setItem(SAVED_PREFIX + key, JSON.stringify(items));
   };
+  const readDefaultId = (key: string): string | null => {
+    if (!ls) return null;
+    return ls.getItem(DEFAULT_PREFIX + key);
+  };
+  const writeDefaultId = (key: string, id: string | null): void => {
+    if (!ls) return;
+    if (id) ls.setItem(DEFAULT_PREFIX + key, id);
+    else ls.removeItem(DEFAULT_PREFIX + key);
+  };
 
   return {
     async loadLast(key) {
@@ -130,8 +145,21 @@ export function localStorageAdapter(): StorageAdapter {
     async saveLast(key, query) {
       if (ls) ls.setItem(LAST_PREFIX + key, JSON.stringify(query));
     },
-  async listSaved(key) {
+    async listSaved(key) {
       return readSaved(key).sort((a, b) => b.savedAt - a.savedAt);
+    },
+    async loadDefaultSaved(key) {
+      const id = readDefaultId(key);
+      if (!id) return null;
+      const found = readSaved(key).find((q) => q.id === id);
+      if (!found) writeDefaultId(key, null);
+      return found ?? null;
+    },
+    async setDefaultSaved(key, id) {
+      if (id && !readSaved(key).some((q) => q.id === id)) {
+        throw new Error(`Saved query "${id}" does not exist.`);
+      }
+      writeDefaultId(key, id);
     },
     async saveNamed(key, name, query, savedAt) {
       const items = readSaved(key);
@@ -148,6 +176,7 @@ export function localStorageAdapter(): StorageAdapter {
         key,
         readSaved(key).filter((q) => q.id !== id),
       );
+      if (readDefaultId(key) === id) writeDefaultId(key, null);
     },
   };
 }
