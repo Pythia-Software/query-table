@@ -74,8 +74,13 @@ your own markup, or just `@query-table/core` for the wire types in another stack
 | `@query-table/ui` | The opinionated components. Themeable via CSS variables **or** a `classNames` slot map (Tailwind-friendly). | core, react, react (peer) |
 | `backends/go` | `querytable` Go module: compiles a `WireQuery` to parameterized SQL against a schema allowlist. | — |
 | `tools/schema-codegen` | Emits the TS catalog + Go schema from a JSON schema document. | core |
+| `demo` | Runnable Vite playground over an in-memory dataset, for seeing UI changes live and manual testing. | core, react, ui |
 
 React is a **peer dependency `>=18`** (xlsx-collect is on 19, explo on 18).
+
+Run the playground with `npm run demo` (serves http://localhost:5179). See
+[`demo/README.md`](demo/README.md), including the headless drag-and-drop
+regression check (`node demo/dnd-test.mjs`).
 
 ---
 

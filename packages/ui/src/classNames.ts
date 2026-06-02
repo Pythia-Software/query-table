@@ -23,6 +23,11 @@ export interface TableClassNames {
   checkboxCell?: string;
   loadingBar?: string;
   empty?: string;
+  summaryRow?: string;
+  summaryCell?: string;
+  summaryControls?: string;
+  summaryHint?: string;
+  summaryButton?: string;
 }
 
 export interface QueryBuilderClassNames {

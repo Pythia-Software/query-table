@@ -95,6 +95,7 @@ export function RunsTable({ initialQuery }: { initialQuery?: QueryState }) {
         rows={api.rows}
         query={api.query}
         onQueryChange={api.setQuery}
+        total={api.total}
         renderers={renderers}
         rowId={(r: Run) => r.id}
         selection={api.selection}
