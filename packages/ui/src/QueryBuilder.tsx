@@ -235,7 +235,7 @@ function SelectRow<Row>({
   const [adding, setAdding] = useState(false);
   const dragField = useRef<string | null>(null);
   const [dragSlotIndex, setDragSlotIndex] = useState<number | null>(null);
-  const fieldLabelByName = useMemo(() => new Map(select.fields.map((f) => [f.name, f.label]), [select.fields]);
+  const fieldLabelByName = useMemo(() => new Map(select.fields.map((f) => [f.name, f.label])), [select.fields]);
 
   function reorder(from: string, to: string) {
     if (from === to) return;

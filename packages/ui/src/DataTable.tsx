@@ -521,7 +521,7 @@ function MenuItem({
     >
       {children}
     </button>
-  }
+  );
 }
 
 /** Header menu sort helper for set / append / prepend actions. */
