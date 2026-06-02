@@ -6,7 +6,8 @@
   "license": "MIT",
   "workspaces": [
     "packages/*",
-    "tools/*"
+    "tools/*",
+    "demo"
   ],
   "scripts": {
     "build:core": "tsc -p packages/core",
@@ -14,13 +15,17 @@
     "lint": "npm run typecheck",
     "typecheck": "npm run build:core && tsc --noEmit -p packages/core/tsconfig.test.json && tsc --noEmit -p packages/react && tsc --noEmit -p packages/ui",
     "test": "vitest run",
+    "demo": "npm run dev --workspace @query-table/demo",
+    "test:dnd": "node demo/dnd-test.mjs",
     "prepare": "husky"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@types/node": "^20.11.30",
     "@types/react": "^18.3.0",
     "ajv": "^8.20.0",
     "husky": "^9.1.7",
+    "playwright": "^1.60.0",
     "react": "^18.3.1",
     "typescript": "^5.6.3",
     "vitest": "^2.1.8"

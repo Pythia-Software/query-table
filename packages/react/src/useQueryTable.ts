@@ -16,7 +16,10 @@ import {
   readFieldValue,
   selectedFields,
   toServerQuery,
+  queriesEqual,
 } from "@query-table/core";
+
+const AUTOCOMPLETE_LIMIT = 50;
 import type {
   QueryState,
   WhereClause,
@@ -30,6 +33,7 @@ import type {
 } from "@query-table/core";
 import { useSelection, type SelectionApi } from "./useSelection";
 import { useSelect, type SelectApi } from "./useSelect";
+import { useColumnDrag, type ColumnDragApi } from "./useColumnDrag";
 import { useSavedQueries, type SavedQueriesApi } from "./useSavedQueries";
 
 export interface UseQueryTableOptions<Row> {
@@ -57,6 +61,14 @@ export interface QueryTableApi<Row> {
   /** Schema defaults used for reset controls. */
   defaults: QueryState;
   setQuery: (next: QueryState | ((prev: QueryState) => QueryState)) => void;
+  /** Can move back to a previously applied local query state. */
+  canUndo: boolean;
+  /** Can move forward to a previously undone local query state. */
+  canRedo: boolean;
+  /** Move backward through local, unsaved query history. */
+  undo: () => void;
+  /** Move forward through local, unsaved query history. */
+  redo: () => void;
 
   // data
   rows: Row[];
@@ -88,6 +100,8 @@ export interface QueryTableApi<Row> {
   prevPage: () => void;
   selection: SelectionApi;
   saved: SavedQueriesApi;
+  /** Shared, transient column-reorder drag state (table headers + select chips). */
+  columnDrag: ColumnDragApi;
 
   // resolved view
   visibleFields: FieldDef<Row>[];
@@ -114,6 +128,49 @@ function cloneQueryState(q: QueryState): QueryState {
   };
 }
 
+function isNullLike(value: unknown): boolean {
+  return value == null || (Array.isArray(value) && value.length === 0);
+}
+
+function asDistinctValue(value: unknown): string | null {
+  if (isNullLike(value)) return null;
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return null;
+}
+
+function fieldHasNullInRows<Row>(field: FieldDef<Row>, rows: Row[]): boolean {
+  for (const row of rows) {
+    if (isNullLike(readFieldValue(field, row))) return true;
+  }
+  return false;
+}
+
+function distinctValuesFromRows<Row>(field: FieldDef<Row>, rows: Row[], search: string): { values: string[]; hasMore: boolean } {
+  const target = search.trim().toLowerCase();
+  const values: string[] = [];
+  const seen = new Set<string>();
+  let hasMore = false;
+
+  for (const row of rows) {
+    const raw = asDistinctValue(readFieldValue(field, row));
+    if (raw == null || seen.has(raw)) continue;
+    if (target && !raw.toLowerCase().includes(target)) continue;
+
+    if (values.length < AUTOCOMPLETE_LIMIT) {
+      seen.add(raw);
+      values.push(raw);
+      continue;
+    }
+
+    hasMore = true;
+    break;
+  }
+
+  return { values: values.sort((a, b) => a.localeCompare(b)), hasMore };
+}
+
 function resolveInitial<Row>(opts: UseQueryTableOptions<Row>): { q: QueryState; fromUrl: boolean } {
   if (opts.initialQuery) return { q: opts.initialQuery, fromUrl: false };
   if (typeof window !== "undefined") {
@@ -128,9 +185,12 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
   const storage = useMemo(() => opts.storage ?? localStorageAdapter(), [opts.storage]);
   const now = opts.now ?? Date.now;
   const defaults = useMemo(() => defaultsFor(schema), [schema]);
+  const byName = useMemo(() => new Map(schema.fields.map((f) => [f.name, f])), [schema]);
 
   const initRef = useRef(resolveInitial(opts));
   const [query, setQueryState] = useState<QueryState>(initRef.current.q);
+  const undoStack = useRef<QueryState[]>([cloneQueryState(initRef.current.q)]);
+  const redoStack = useRef<QueryState[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
   const [total, setTotal] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
@@ -138,7 +198,13 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
   const [nonce, setNonce] = useState(0);
 
   const setQuery = useCallback<QueryTableApi<Row>["setQuery"]>((next) => {
-    setQueryState((prev) => (typeof next === "function" ? (next as (p: QueryState) => QueryState)(prev) : next));
+    setQueryState((prev) => {
+      const nextQuery = typeof next === "function" ? (next as (p: QueryState) => QueryState)(prev) : next;
+      if (queriesEqual(prev, nextQuery)) return prev;
+      undoStack.current.push(cloneQueryState(prev));
+      redoStack.current = [];
+      return cloneQueryState(nextQuery);
+    });
   }, []);
 
   // Restore the last query on mount when nothing seeded the view.
@@ -146,7 +212,11 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
     if (initRef.current.fromUrl || initialQuery) return;
     let cancelled = false;
     void storage.loadLast(schema.name).then((last) => {
-      if (!cancelled && last) setQueryState(last);
+      if (!cancelled && last) {
+        undoStack.current = [cloneQueryState(last)];
+        redoStack.current = [];
+        setQueryState(last);
+      }
     });
     return () => {
       cancelled = true;
@@ -220,13 +290,35 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
   const displayedIds = useMemo(() => rows.map(rowId).filter((id): id is RowId => id != null), [rows, rowId]);
   const selection = useSelection(displayedIds);
   const select = useSelect(query, setQuery, schema);
+  const columnDrag = useColumnDrag();
   const saved = useSavedQueries(
     schema.name,
     query,
-    (q) => setQueryState(q),
+    (q) => setQuery(q),
     storage,
     now,
   );
+
+  const canUndo = undoStack.current.length > 0;
+  const canRedo = redoStack.current.length > 0;
+
+  const undo = useCallback(() => {
+    setQueryState((prev) => {
+      const previous = undoStack.current.pop();
+      if (!previous) return prev;
+      redoStack.current.push(cloneQueryState(prev));
+      return cloneQueryState(previous);
+    });
+  }, []);
+
+  const redo = useCallback(() => {
+    setQueryState((prev) => {
+      const next = redoStack.current.pop();
+      if (!next) return prev;
+      undoStack.current.push(cloneQueryState(prev));
+      return cloneQueryState(next);
+    });
+  }, []);
 
   // ---- intent helpers (keep offset/url/storage coherent) ----
   const patch = useCallback((p: Partial<QueryState>) => setQuery((prev) => ({ ...prev, ...p })), [setQuery]);
@@ -258,10 +350,22 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
 
   const filterValues = useCallback(
     async (field: string, search: string): Promise<DistinctValuesResult> => {
-      if (!transport?.fetchDistinctValues) return { values: [], hasMore: false };
+      if (!transport?.fetchDistinctValues) {
+        const f = byName.get(field);
+        if (!f || !clientRows) return { values: [], hasMore: false };
+
+        const fieldHasNull = fieldHasNullInRows(f, clientRows);
+        const matches = distinctValuesFromRows(f, clientRows, search);
+
+        return {
+          values: matches.values,
+          hasMore: matches.hasMore,
+          hasNull: fieldHasNull,
+        };
+      }
       return transport.fetchDistinctValues({ field, search });
     },
-    [transport],
+    [transport, byName, clientRows],
   );
 
   const refresh = useCallback(() => setNonce((n) => n + 1), []);
@@ -284,6 +388,10 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
     total,
     loading,
     error,
+    canUndo,
+    canRedo,
+    undo,
+    redo,
     refresh,
     refreshRow,
     addFilter,
@@ -301,6 +409,7 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
     prevPage,
     selection,
     saved,
+    columnDrag,
     visibleFields,
     rowId,
   };

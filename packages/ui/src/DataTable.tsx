@@ -10,7 +10,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type SetStateAction } from "react";
 import type { OrderByClause, QueryState, FieldDef, RowId, SelectColumn, WhereClause } from "@query-table/core";
 import { isSortable, readFieldValue } from "@query-table/core";
-import type { SelectionApi } from "@query-table/react";
+import { useColumnDrag, type SelectionApi, type ColumnDragApi } from "@query-table/react";
 import { resolveRenderer, type RenderRegistry } from "./renderers";
 import type { TableClassNames } from "./classNames";
 import { CellMenu } from "./CellMenu";
@@ -30,9 +30,17 @@ export interface DataTableProps<Row> {
   /** Optional checkbox column + selection behavior (from `api.selection`). */
   selection?: SelectionApi;
 
+  /** Shared column-reorder drag state (`api.columnDrag`). Pass it so dragging a
+   *  table header also live-previews/dims the matching QueryBuilder select chip
+   *  (and vice versa). Omit for a self-contained, table-only drag. */
+  columnDrag?: ColumnDragApi;
+
   /** Always-visible trailing column (row actions, links). */
   trailing?: (row: Row) => ReactNode;
   trailingLabel?: string;
+
+  /** Total matching rows before pagination, when known. */
+  total?: number | null;
 
   loading?: boolean;
   emptyMessage?: string;
@@ -43,10 +51,15 @@ export interface DataTableProps<Row> {
 const cx = (...parts: Array<string | undefined | false>): string =>
   parts.filter((p): p is string => Boolean(p)).join(" ");
 
-const MIN_WIDTH = 50;
+const MIN_WIDTH = 1;
+const MIN_SELECTION_WIDTH = 1;
 const MAX_WIDTH = 800;
+const DEFAULT_WIDTH = 120;
+const DEFAULT_SELECTION_WIDTH = 36;
+const AUTOFIT_EXTRA_PX = 16;
 const MENU_WIDTH = 240;
 const MENU_ROW_HEIGHT = 32;
+const SELECTION_COLUMN = "__qt_selection__";
 type HeaderSortPlacement = "set" | "append" | "prepend";
 
 interface MenuState<Row> {
@@ -68,15 +81,25 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     selection,
     trailing,
     trailingLabel,
+    total = null,
     loading,
     emptyMessage,
     classNames,
   } = props;
 
   const [menu, setMenu] = useState<MenuState<Row> | null>(null);
-  const dragField = useRef<string | null>(null);
+  const [resizingField, setResizingField] = useState<string | null>(null);
+  const [draftWidths, setDraftWidths] = useState<Record<string, number>>({});
+  const [selectionColumnWidth, setSelectionColumnWidth] = useState(DEFAULT_SELECTION_WIDTH);
+  const [tableColumnOrder, setTableColumnOrder] = useState<string[]>([]);
   const tableWrapRef = useRef<HTMLDivElement>(null);
-  const [dragSlotIndex, setDragSlotIndex] = useState<number | null>(null);
+  const resizeCommitRef = useRef<{ name: string; width: number } | null>(null);
+  const resizingFieldRef = useRef<string | null>(null);
+  // Shared drag state when the host passes `api.columnDrag`; otherwise a local
+  // instance keeps the table self-contained. (The hook is always called to obey
+  // the rules of hooks; the local one is unused when a shared one is provided.)
+  const localColumnDrag = useColumnDrag();
+  const columnDrag = props.columnDrag ?? localColumnDrag;
 
   const pageIds = rows.map(rowId).filter((id): id is RowId => id != null);
   const headerState = selection ? selection.pageState(pageIds) : "none";
@@ -116,61 +139,133 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     const col = query.select.find((c) => c.field === name);
     return col?.width ?? f.select?.width;
   }
-  function setWidth(name: string, width: number) {
-    const px = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.round(width)));
-    onQueryChange({ ...query, select: writeWidth(query.select, fields, name, px) });
+  function resolvedWidthFor(name: string, f: FieldDef<Row>): number | undefined {
+    return draftWidths[name] ?? widthFor(name, f);
   }
-  function startResize(name: string, f: FieldDef<Row>, e: React.MouseEvent) {
+  function resolvedColumnWidthFor(name: string, f?: FieldDef<Row>): number | undefined {
+    if (name === SELECTION_COLUMN) return draftWidths[name] ?? selectionColumnWidth;
+    return f ? resolvedWidthFor(name, f) : draftWidths[name];
+  }
+  function clampWidth(width: number): number {
+    return Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.round(width)));
+  }
+  function clampColumnWidth(name: string, width: number): number {
+    const min = name === SELECTION_COLUMN ? MIN_SELECTION_WIDTH : MIN_WIDTH;
+    return Math.max(min, Math.min(MAX_WIDTH, Math.round(width)));
+  }
+  function commitColumnWidth(name: string, width: number) {
+    if (name === SELECTION_COLUMN) {
+      setSelectionColumnWidth(clampColumnWidth(name, width));
+      return;
+    }
+    setWidth(name, width);
+  }
+  function setWidth(name: string, width: number) {
+    const px = clampWidth(width);
+    onQueryChange((prev) => ({ ...prev, select: writeWidth(prev.select, fields, name, px) }));
+  }
+  function setDraftWidth(name: string, width: number) {
+    setDraftWidths((prev) => (prev[name] === width ? prev : { ...prev, [name]: width }));
+  }
+  function clearDraftWidth(name: string) {
+    setDraftWidths((prev) => {
+      if (!(name in prev)) return prev;
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
+  }
+  function startResize(name: string, startWidth: number | undefined, e: React.PointerEvent<HTMLSpanElement>) {
     e.preventDefault();
     e.stopPropagation();
     const startX = e.clientX;
-    const startW = widthFor(name, f) ?? 120;
-    const onMove = (ev: MouseEvent) => setWidth(name, startW + (ev.clientX - startX));
-    const onUp = () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
+    const startW = startWidth ?? e.currentTarget.parentElement?.getBoundingClientRect().width ?? DEFAULT_WIDTH;
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    resizeCommitRef.current = null;
+    resizingFieldRef.current = name;
+    setResizingField(name);
+    setDraftWidth(name, clampColumnWidth(name, startW));
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    const finish = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      const commit = resizeCommitRef.current;
+      resizeCommitRef.current = null;
+      resizingFieldRef.current = null;
+      setResizingField(null);
+      clearDraftWidth(name);
+      if (commit) commitColumnWidth(commit.name, commit.width);
     };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    const onMove = (ev: PointerEvent) => {
+      const next = clampColumnWidth(name, startW + (ev.clientX - startX));
+      resizeCommitRef.current = { name, width: next };
+      setDraftWidth(name, next);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
+  }
+  function autofitColumn(name: string) {
+    const wrap = tableWrapRef.current;
+    if (!wrap) return;
+    const selector = `[data-qt-field="${cssAttributeValue(name)}"]`;
+    let width = 0;
+    wrap.querySelectorAll<HTMLElement>(selector).forEach((el) => {
+      width = Math.max(width, el.scrollWidth);
+    });
+    if (width > 0) setWidth(name, width + AUTOFIT_EXTRA_PX);
+  }
+  function resizeWithKeyboard(name: string, startWidth: number | undefined, e: React.KeyboardEvent<HTMLSpanElement>) {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight" && e.key !== "Enter") return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.key === "Enter") {
+      autofitColumn(name);
+      return;
+    }
+    const step = e.shiftKey ? 25 : 10;
+    const direction = e.key === "ArrowRight" ? 1 : -1;
+    commitColumnWidth(name, (startWidth ?? DEFAULT_WIDTH) + step * direction);
   }
 
   // ---- reorder (drag headers; writes the new SELECT order) ----
-  function reorder(from: string, to: string) {
-    if (from === to) return;
-    const order = fields.map((f) => f.name);
-    const fromIdx = order.indexOf(from);
-    const toIdx = order.indexOf(to);
-    if (fromIdx < 0 || toIdx < 0) return;
-    order.splice(toIdx, 0, order.splice(fromIdx, 1)[0]!);
-    onQueryChange({ ...query, select: reorderSelect(query.select, fields, order) });
-  }
-
-  function reorderByIndex(from: string, toIndex: number) {
-    const order = fields.map((f) => f.name);
-    const fromIdx = order.indexOf(from);
-    if (fromIdx < 0) return;
-    const insertionIndex = Math.max(0, Math.min(toIndex, order.length - 1));
-    order.splice(insertionIndex, 0, order.splice(fromIdx, 1)[0]!);
-    onQueryChange({ ...query, select: reorderSelect(query.select, fields, order) });
+  // `overIndex` is a position in the list with the dragged column removed, which
+  // is exactly where the live preview shows the dragged header, so the committed
+  // order can never disagree with what the user saw.
+  function reorderByIndex(from: string, overIndex: number) {
+    const withoutDragged = tableColumnNames.filter((n) => n !== from);
+    if (withoutDragged.length === tableColumnNames.length) return; // `from` not visible
+    const at = Math.max(0, Math.min(overIndex, withoutDragged.length));
+    withoutDragged.splice(at, 0, from);
+    setTableColumnOrder(withoutDragged);
+    const nextFieldOrder = withoutDragged.filter((name) => name !== SELECTION_COLUMN);
+    if (!sameOrder(nextFieldOrder, fieldNames)) {
+      onQueryChange({ ...query, select: reorderSelect(query.select, fields, nextFieldOrder) });
+    }
   }
 
   const fieldByName = useMemo(() => new Map(fields.map((f) => [f.name, f])), [fields]);
   const fieldNames = useMemo(() => fields.map((f) => f.name), [fields]);
-  const dragSource = dragField.current;
-  const slotIndex = dragSlotIndex;
-  type HeaderItem = { kind: "slot" } | { kind: "field"; name: string };
-  const renderedHeaders = useMemo<HeaderItem[]>(() => {
-    const asFieldItems = (names: string[]): HeaderItem[] => names.map((name) => ({ kind: "field", name }));
-    if (!dragSource) return asFieldItems(fieldNames);
-    const withoutDragged = fieldNames.filter((name) => name !== dragSource);
-    const withoutDraggedFieldItems = asFieldItems(withoutDragged);
-    if (slotIndex == null) return withoutDraggedFieldItems;
-    return [
-      ...withoutDraggedFieldItems.slice(0, slotIndex),
-      { kind: "slot" },
-      ...withoutDraggedFieldItems.slice(slotIndex),
-    ];
-  }, [dragSource, fieldNames, slotIndex]);
+  const tableColumnNames = useMemo(() => {
+    if (!showSel) return fieldNames;
+    const defaultOrder = [SELECTION_COLUMN, ...fieldNames];
+    const valid = new Set(defaultOrder);
+    const kept = tableColumnOrder.filter((name) => valid.has(name));
+    const missing = defaultOrder.filter((name) => !kept.includes(name));
+    return [...kept, ...missing];
+  }, [fieldNames, showSel, tableColumnOrder]);
+  const dragSource = columnDrag.source;
+  // While dragging, render the WHOLE column (header + body cells + width) in the
+  // order a drop would commit: the dragged column stays MOUNTED (removing the
+  // drag-source node mid-drag aborts the native HTML5 drag) but slides to the
+  // hovered slot and is dimmed. Because the rendered order IS the would-be
+  // result, the live preview can never disagree with where the drop lands.
+  const renderedColumnNames = useMemo(() => columnDrag.preview(tableColumnNames), [columnDrag, tableColumnNames]);
 
   // ---- selection ----
   function toggleHeader() {
@@ -220,13 +315,42 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     }
   }
 
+  function resizeHandle(name: string, label: string, width: number | undefined): ReactNode {
+    return (
+      <span
+        className={cx("qt-resize-handle", classNames?.resizeHandle)}
+        role="separator"
+        aria-orientation="vertical"
+        aria-label={`Resize ${label} column`}
+        title="Drag to resize. Press Enter to auto-fit."
+        tabIndex={0}
+        onPointerDown={(e) => startResize(name, width, e)}
+        onKeyDown={(e) => resizeWithKeyboard(name, width, e)}
+        onClick={(e) => e.stopPropagation()}
+      />
+    );
+  }
+
   const totalCols = fields.length + (showSel ? 1 : 0) + (trailing ? 1 : 0);
+  const start = query.offset;
+  const end = total != null ? Math.min(start + query.limit, total) : start + rows.length;
+  const canPrev = start > 0;
+  const canNext = total != null ? end < total : rows.length >= query.limit;
+  const prevPage = () => onQueryChange((prev) => ({ ...prev, offset: Math.max(0, prev.offset - prev.limit) }));
+  const nextPage = () => onQueryChange((prev) => ({ ...prev, offset: prev.offset + prev.limit }));
+  const summaryText =
+    total == null || total === 0 ? `${rows.length} rows` : `${start + 1}–${end} of ${total}`;
 
   return (
     <>
       <div
         ref={tableWrapRef}
-        className={cx("qt-table-wrap", loading && "qt-table-wrap--loading", classNames?.wrap)}
+        className={cx(
+          "qt-table-wrap",
+          loading && "qt-table-wrap--loading",
+          !!resizingField && "qt-table-wrap--resizing",
+          classNames?.wrap,
+        )}
         onWheel={onTableWheel}
       >
         {loading && (
@@ -234,93 +358,132 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
         )}
         <table className={cx("qt-table", classNames?.table)}>
           <colgroup>
-            {showSel && <col style={{ width: 36 }} />}
-            {fields.map((f) => {
-              const w = widthFor(f.name, f);
+            {renderedColumnNames.map((name) => {
+              const f = fieldByName.get(name);
+              const w = resolvedColumnWidthFor(name, f);
+              if (name === SELECTION_COLUMN) return <col key={name} style={{ width: w ?? DEFAULT_SELECTION_WIDTH }} />;
+              if (!f) return null;
               return <col key={f.name} style={w != null ? { width: w } : undefined} />;
             })}
             {trailing && <col style={{ width: 40 }} />}
           </colgroup>
           <thead className={classNames?.thead}>
             <tr className={classNames?.headerRow}>
-              {showSel && (
-                <th className={cx("qt-th", "qt-checkbox-cell", classNames?.th, classNames?.checkboxCell)}>
-                  <input
-                    type="checkbox"
-                    checked={headerState === "all"}
-                    ref={(el) => {
-                      if (el) el.indeterminate = headerState === "some";
-                    }}
-                    onChange={toggleHeader}
-                    aria-label="select all on page"
-                  />
-                </th>
-              )}
-              {renderedHeaders.map((item, idx) => {
-                if (item.kind === "slot") {
+              {renderedColumnNames.map((name) => {
+                if (name === SELECTION_COLUMN) {
                   return (
                     <th
-                      key={`drag-slot-${idx}`}
-                      className="qt-th qt-th-drop-slot"
+                      key={name}
+                      data-qt-field={name}
+                      className={cx(
+                        "qt-th",
+                        "qt-checkbox-cell",
+                        dragSource === name && "qt-th--dragging",
+                        resizingField === name && "qt-th--resizing",
+                        classNames?.th,
+                        classNames?.checkboxCell,
+                      )}
+                      draggable={resizingField == null}
+                      onDragStart={(e) => {
+                        if (resizingFieldRef.current) {
+                          e.preventDefault();
+                          return;
+                        }
+                        columnDrag.start(name, tableColumnNames.indexOf(name));
+                        e.dataTransfer.effectAllowed = "move";
+                        e.dataTransfer.setData("text/plain", name);
+                      }}
                       onDragOver={(e) => {
-                        if (!dragField.current) return;
+                        if (!columnDrag.source) return;
                         e.preventDefault();
                         e.dataTransfer.dropEffect = "move";
+                        if (columnDrag.source !== name) {
+                          const withoutDragged = tableColumnNames.filter((n) => n !== columnDrag.source);
+                          let next = withoutDragged.indexOf(name);
+                          if (next >= 0) {
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            if (e.clientX > rect.left + rect.width / 2) next += 1;
+                            columnDrag.over(next);
+                          }
+                        }
                       }}
                       onDrop={(e) => {
                         e.preventDefault();
-                        const from = dragField.current || e.dataTransfer.getData("text/plain");
-                        if (from && slotIndex != null) reorderByIndex(from, slotIndex);
-                        dragField.current = null;
-                        setDragSlotIndex(null);
+                        e.dataTransfer.dropEffect = "move";
+                        const from = columnDrag.source || e.dataTransfer.getData("text/plain");
+                        if (from && columnDrag.overIndex != null) reorderByIndex(from, columnDrag.overIndex);
+                        columnDrag.end();
                       }}
-                    />
+                      onDragEnd={() => columnDrag.end()}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={headerState === "all"}
+                        ref={(el) => {
+                          if (el) el.indeterminate = headerState === "some";
+                        }}
+                        onChange={toggleHeader}
+                        aria-label="select all on page"
+                      />
+                      {resizeHandle(name, "selection", resolvedColumnWidthFor(name))}
+                    </th>
                   );
                 }
-
-                const f = fieldByName.get(item.name);
+                const f = fieldByName.get(name);
                 if (!f) return null;
                 const info = sortInfo(f);
                 const sortable = isSortable(f);
                 return (
                   <th
-                    key={`${f.name}-${idx}`}
+                    // Stable key (not index-based): while dragging, React must
+                    // MOVE the dragged <th>, not remount it — a remount removes
+                    // the drag source and aborts the native drag.
+                    key={f.name}
+                    data-qt-field={f.name}
                     className={cx(
                       "qt-th",
                       sortable && "qt-th--sortable",
-                      dragField.current === f.name && "qt-th--dragging",
+                      dragSource === f.name && "qt-th--dragging",
+                      resizingField === f.name && "qt-th--resizing",
                       classNames?.th,
                     )}
                     style={f.select?.align ? { textAlign: f.select.align } : undefined}
-                    draggable
+                    draggable={resizingField == null}
                     onDragStart={(e) => {
-                      dragField.current = f.name;
-                      const next = fieldNames.indexOf(f.name);
-                      setDragSlotIndex(next >= 0 ? next : null);
+                      if (resizingFieldRef.current) {
+                        e.preventDefault();
+                        return;
+                      }
+                      columnDrag.start(f.name, tableColumnNames.indexOf(f.name));
                       e.dataTransfer.effectAllowed = "move";
                       e.dataTransfer.setData("text/plain", f.name);
                     }}
                     onDragOver={(e) => {
-                      if (dragField.current && dragField.current !== f.name) {
-                        e.preventDefault();
-                        e.dataTransfer.dropEffect = "move";
-                        const withoutDragged = fieldNames.filter((name) => name !== dragField.current);
-                        const next = withoutDragged.indexOf(f.name);
-                        if (next >= 0) setDragSlotIndex(next);
+                      if (!columnDrag.source) return;
+                      // preventDefault on every header (incl. the dragged one) so
+                      // there is no dead drop zone anywhere along the row.
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "move";
+                      if (columnDrag.source !== f.name) {
+                        const withoutDragged = tableColumnNames.filter((n) => n !== columnDrag.source);
+                        let next = withoutDragged.indexOf(f.name);
+                        if (next >= 0) {
+                          // Drop after the hovered header when past its midpoint,
+                          // so a column can be moved into the last slot.
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          if (e.clientX > rect.left + rect.width / 2) next += 1;
+                          columnDrag.over(next);
+                        }
                       }
                     }}
                     onDrop={(e) => {
                       e.preventDefault();
                       e.dataTransfer.dropEffect = "move";
-                      const from = dragField.current || e.dataTransfer.getData("text/plain");
-                      if (from && from !== f.name) reorder(from, f.name);
-                      dragField.current = null;
-                      setDragSlotIndex(null);
+                      const from = columnDrag.source || e.dataTransfer.getData("text/plain");
+                      if (from && columnDrag.overIndex != null) reorderByIndex(from, columnDrag.overIndex);
+                      columnDrag.end();
                     }}
-                    onDragEnd={() => {
-                      dragField.current = null;
-                      setDragSlotIndex(null);
-                    }}
+                    onDragEnd={() => columnDrag.end()}
                   >
                     <span
                       className="qt-th-label"
@@ -336,11 +499,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                         </span>
                       )}
                     </span>
-                    <span
-                      className={cx("qt-resize-handle", classNames?.resizeHandle)}
-                      onMouseDown={(e) => startResize(f.name, f, e)}
-                      onClick={(e) => e.stopPropagation()}
-                    />
+                    {resizeHandle(f.name, f.label, resolvedColumnWidthFor(f.name, f))}
                   </th>
                 );
               })}
@@ -363,29 +522,44 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                   key={id != null ? String(id) : i}
                   className={cx("qt-row", selected && "qt-row--selected", classNames?.row, selected && classNames?.rowSelected)}
                 >
-                  {showSel && (
-                    <td className={cx("qt-cell", "qt-checkbox-cell", classNames?.cell, classNames?.checkboxCell)}>
-                      {id != null && (
-                        <input
-                          type="checkbox"
-                          checked={selected}
-                          // Shift-range select is handled inside selection.toggle.
-                          onClick={(e) => selection!.toggle(id, e.shiftKey)}
-                          onChange={() => {
-                            /* state owned by selection; onClick drives it */
-                          }}
-                          aria-label={`select row ${String(id)}`}
-                        />
-                      )}
-                    </td>
-                  )}
-                  {fields.map((f) => {
+                  {renderedColumnNames.map((name) => {
+                    if (name === SELECTION_COLUMN) {
+                      return (
+                        <td
+                          key={name}
+                          data-qt-field={name}
+                          className={cx(
+                            "qt-cell",
+                            "qt-checkbox-cell",
+                            dragSource === name && "qt-cell--dragging",
+                            classNames?.cell,
+                            classNames?.checkboxCell,
+                          )}
+                        >
+                          {id != null && (
+                            <input
+                              type="checkbox"
+                              checked={selected}
+                              // Shift-range select is handled inside selection.toggle.
+                              onClick={(e) => selection!.toggle(id, e.shiftKey)}
+                              onChange={() => {
+                                /* state owned by selection; onClick drives it */
+                              }}
+                              aria-label={`select row ${String(id)}`}
+                            />
+                          )}
+                        </td>
+                      );
+                    }
+                    const f = fieldByName.get(name);
+                    if (!f) return null;
                     const render = resolveRenderer(f, renderers);
                     const value = readFieldValue(f, row);
                     return (
                       <td
                         key={f.name}
-                        className={cx("qt-cell", classNames?.cell)}
+                        data-qt-field={f.name}
+                        className={cx("qt-cell", dragSource === f.name && "qt-cell--dragging", classNames?.cell)}
                         style={f.select?.align ? { textAlign: f.select.align } : undefined}
                         onClick={(e) => openMenu(e, f, row)}
                         onContextMenu={(e) => openMenu(e, f, row)}
@@ -399,6 +573,31 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
               );
             })}
           </tbody>
+          <tfoot>
+            <tr className={cx("qt-table-summary-row", classNames?.summaryRow)}>
+              <td colSpan={totalCols} className={cx("qt-cell", "qt-table-summary-cell", classNames?.summaryCell)}>
+                <div className={cx("qt-table-summary", classNames?.summaryControls)}>
+                  <button
+                    type="button"
+                    className={cx("qt-btn", classNames?.summaryButton)}
+                    disabled={loading || !canPrev}
+                    onClick={prevPage}
+                  >
+                    ← prev
+                  </button>
+                  <span className={cx("qt-table-summary-hint", classNames?.summaryHint)}>{summaryText}</span>
+                  <button
+                    type="button"
+                    className={cx("qt-btn", classNames?.summaryButton)}
+                    disabled={loading || !canNext}
+                    onClick={nextPage}
+                  >
+                    next →
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </tfoot>
         </table>
       </div>
       {menu && (
@@ -566,4 +765,12 @@ function reorderSelect<Row>(select: SelectColumn[], fields: FieldDef<Row>[], ord
   const cols = materialize(select, fields);
   const byName = new Map(cols.map((c) => [c.field, c]));
   return order.map((name) => byName.get(name) ?? { field: name });
+}
+
+function cssAttributeValue(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+function sameOrder(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
 }

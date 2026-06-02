@@ -9,5 +9,8 @@ export { useSelection } from "./useSelection";
 export type { SelectApi } from "./useSelect";
 export { useSelect } from "./useSelect";
 
+export type { ColumnDragApi } from "./useColumnDrag";
+export { useColumnDrag } from "./useColumnDrag";
+
 export type { SavedQueriesApi } from "./useSavedQueries";
 export { useSavedQueries } from "./useSavedQueries";
