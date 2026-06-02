@@ -44,7 +44,7 @@ export interface QueryBuilderProps<Row> {
 const cx = (...parts: Array<string | undefined | false>): string =>
   parts.filter((p): p is string => Boolean(p)).join(" ");
 
-function useFieldHasNull(api: QueryTableApi<unknown>, fieldName: string | undefined): boolean | undefined {
+function useFieldHasNull<Row>(api: QueryTableApi<Row>, fieldName: string | undefined): boolean | undefined {
   const [hasNull, setHasNull] = useState<boolean | undefined>(undefined);
 
   useEffect(() => {
@@ -235,7 +235,7 @@ function SelectRow<Row>({
   const [adding, setAdding] = useState(false);
   const dragField = useRef<string | null>(null);
   const [dragSlotIndex, setDragSlotIndex] = useState<number | null>(null);
-  const fieldLabelByName = useMemo(() => new Map(select.fields.map((f) => [f.name, f.label]), [select.fields]);
+  const fieldLabelByName = useMemo(() => new Map(select.fields.map((f) => [f.name, f.label])), [select.fields]);
 
   function reorder(from: string, to: string) {
     if (from === to) return;
@@ -248,11 +248,18 @@ function SelectRow<Row>({
   const dragSource = dragField.current;
   const slotIndex = dragSlotIndex;
 
-  const rendered = useMemo(() => {
-    if (!dragSource) return fieldNames.map((name) => ({ kind: "field" as const, name }));
+  type HeaderItem = { kind: "slot" } | { kind: "field"; name: string };
+  const rendered = useMemo<HeaderItem[]>(() => {
+    const asFieldItems = (names: string[]): HeaderItem[] => names.map((name) => ({ kind: "field", name }));
+    if (!dragSource) return asFieldItems(fieldNames);
 
     const withoutDragged = fieldNames.filter((name) => name !== dragSource);
-    const slot = slotIndex == null ? withoutDragged : [...withoutDragged.slice(0, slotIndex), { kind: "slot" as const }, ...withoutDragged.slice(slotIndex)];
+    const withoutDraggedFieldItems = asFieldItems(withoutDragged);
+    const slotItem: HeaderItem = { kind: "slot" };
+    const slot =
+      slotIndex == null
+        ? withoutDraggedFieldItems
+        : [...withoutDraggedFieldItems.slice(0, slotIndex), slotItem, ...withoutDraggedFieldItems.slice(slotIndex)];
     return slot;
   }, [fieldNames, dragSource, slotIndex]);
 
