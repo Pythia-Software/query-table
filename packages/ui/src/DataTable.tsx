@@ -160,10 +160,16 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
   const slotIndex = dragSlotIndex;
   type HeaderItem = { kind: "slot" } | { kind: "field"; name: string };
   const renderedHeaders = useMemo<HeaderItem[]>(() => {
-    if (!dragSource) return fieldNames.map((name) => ({ kind: "field", name }));
+    const asFieldItems = (names: string[]): HeaderItem[] => names.map((name) => ({ kind: "field", name }));
+    if (!dragSource) return asFieldItems(fieldNames);
     const withoutDragged = fieldNames.filter((name) => name !== dragSource);
-    if (slotIndex == null) return withoutDragged.map((name) => ({ kind: "field", name }));
-    return [...withoutDragged.slice(0, slotIndex), { kind: "slot" }, ...withoutDragged.slice(slotIndex)];
+    const withoutDraggedFieldItems = asFieldItems(withoutDragged);
+    if (slotIndex == null) return withoutDraggedFieldItems;
+    return [
+      ...withoutDraggedFieldItems.slice(0, slotIndex),
+      { kind: "slot" },
+      ...withoutDraggedFieldItems.slice(slotIndex),
+    ];
   }, [dragSource, fieldNames, slotIndex]);
 
   // ---- selection ----
@@ -521,7 +527,7 @@ function MenuItem({
     >
       {children}
     </button>
-  }
+  );
 }
 
 /** Header menu sort helper for set / append / prepend actions. */
