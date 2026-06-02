@@ -44,7 +44,7 @@ export interface QueryBuilderProps<Row> {
 const cx = (...parts: Array<string | undefined | false>): string =>
   parts.filter((p): p is string => Boolean(p)).join(" ");
 
-function useFieldHasNull(api: QueryTableApi<unknown>, fieldName: string | undefined): boolean | undefined {
+function useFieldHasNull<Row>(api: QueryTableApi<Row>, fieldName: string | undefined): boolean | undefined {
   const [hasNull, setHasNull] = useState<boolean | undefined>(undefined);
 
   useEffect(() => {
@@ -248,11 +248,17 @@ function SelectRow<Row>({
   const dragSource = dragField.current;
   const slotIndex = dragSlotIndex;
 
-  const rendered = useMemo(() => {
-    if (!dragSource) return fieldNames.map((name) => ({ kind: "field" as const, name }));
+  type HeaderItem = { kind: "slot" } | { kind: "field"; name: string };
+  const rendered = useMemo<HeaderItem[]>(() => {
+    const asFieldItems = (names: string[]): HeaderItem[] => names.map((name) => ({ kind: "field", name }));
+    if (!dragSource) return asFieldItems(fieldNames);
 
     const withoutDragged = fieldNames.filter((name) => name !== dragSource);
-    const slot = slotIndex == null ? withoutDragged : [...withoutDragged.slice(0, slotIndex), { kind: "slot" as const }, ...withoutDragged.slice(slotIndex)];
+    const withoutDraggedFieldItems = asFieldItems(withoutDragged);
+    const slot =
+      slotIndex == null
+        ? withoutDraggedFieldItems
+        : [...withoutDraggedFieldItems.slice(0, slotIndex), { kind: "slot" }, ...withoutDraggedFieldItems.slice(slotIndex)];
     return slot;
   }, [fieldNames, dragSource, slotIndex]);
 
