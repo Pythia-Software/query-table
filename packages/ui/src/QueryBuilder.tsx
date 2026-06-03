@@ -44,6 +44,47 @@ export interface QueryBuilderProps<Row> {
 const cx = (...parts: Array<string | undefined | false>): string =>
   parts.filter((p): p is string => Boolean(p)).join(" ");
 
+const MAX_AUTO_REFRESH_POLLS = 1000;
+const DEFAULT_AUTO_REFRESH_FREQUENCY_MS = 20_000;
+const DEFAULT_AUTO_REFRESH_TURN_OFF_AFTER_MS = 5 * 60_000;
+
+const AUTO_REFRESH_FREQUENCIES = [
+  { label: "Every 5s", value: 5_000 },
+  { label: "Every 10s", value: 10_000 },
+  { label: "Every 20s", value: DEFAULT_AUTO_REFRESH_FREQUENCY_MS },
+  { label: "Every 30s", value: 30_000 },
+  { label: "Every 1m", value: 60_000 },
+  { label: "Every 2m", value: 2 * 60_000 },
+  { label: "Every 5m", value: 5 * 60_000 },
+  { label: "Every 10m", value: 10 * 60_000 },
+] as const;
+
+const AUTO_REFRESH_TURN_OFF_AFTER = [
+  { label: "After 5m", value: DEFAULT_AUTO_REFRESH_TURN_OFF_AFTER_MS },
+  { label: "After 15m", value: 15 * 60_000 },
+  { label: "After 30m", value: 30 * 60_000 },
+  { label: "After 1h", value: 60 * 60_000 },
+  { label: "After 2h", value: 2 * 60 * 60_000 },
+  { label: "After 4h", value: 4 * 60 * 60_000 },
+  { label: "After 8h", value: 8 * 60 * 60_000 },
+  { label: "After 12h", value: 12 * 60 * 60_000 },
+  { label: "After 24h", value: 24 * 60 * 60_000 },
+] as const;
+
+function autoRefreshPolls(frequencyMs: number, turnOffAfterMs: number): number {
+  if (frequencyMs <= 0 || turnOffAfterMs <= 0) return Infinity;
+  return Math.floor(turnOffAfterMs / frequencyMs);
+}
+
+function formatDuration(ms: number): string {
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = minutes / 60;
+  return Number.isInteger(hours) ? `${hours}h` : `${minutes}m`;
+}
+
 function useFieldHasNull<Row>(api: QueryTableApi<Row>, fieldName: string | undefined): boolean | undefined {
   const [hasNull, setHasNull] = useState<boolean | undefined>(undefined);
 
@@ -117,6 +158,9 @@ function orderBySummaryText<Row>(orderBy: OrderByClause[], byName: Map<string, F
 
 export function QueryBuilder<Row>({ api, fields, total, running, classNames }: QueryBuilderProps<Row>): ReactNode {
   const [showSaved, setShowSaved] = useState(false);
+  const [showAutoRefresh, setShowAutoRefresh] = useState(false);
+  const [autoRefreshFrequencyMs, setAutoRefreshFrequencyMs] = useState(DEFAULT_AUTO_REFRESH_FREQUENCY_MS);
+  const [autoRefreshTurnOffAfterMs, setAutoRefreshTurnOffAfterMs] = useState(DEFAULT_AUTO_REFRESH_TURN_OFF_AFTER_MS);
   const [editingSavedId, setEditingSavedId] = useState<string | null>(null);
   const [editingSavedName, setEditingSavedName] = useState("");
   const [collapsed, setCollapsed] = useState(false);
@@ -139,6 +183,12 @@ export function QueryBuilder<Row>({ api, fields, total, running, classNames }: Q
     () => orderBySummaryText(api.query.orderBy, byName),
     [api.query.orderBy, byName],
   );
+  const autoRefreshStatus = api.autoRefresh.status;
+  const selectedAutoRefreshPolls = autoRefreshPolls(autoRefreshFrequencyMs, autoRefreshTurnOffAfterMs);
+  const canSubmitAutoRefresh = selectedAutoRefreshPolls >= 1 && selectedAutoRefreshPolls <= MAX_AUTO_REFRESH_POLLS;
+  const autoRefreshButtonText = autoRefreshStatus
+    ? `⟳ auto ${formatDuration(autoRefreshStatus.frequencyMs)}`
+    : "⟳ auto";
 
   useEffect(() => {
     if (editingSavedId != null && activeSavedQuery?.id !== editingSavedId) {
@@ -186,6 +236,25 @@ export function QueryBuilder<Row>({ api, fields, total, running, classNames }: Q
   useEffect(() => {
     if (collapsed) setShowSaved(false);
   }, [collapsed]);
+
+  useEffect(() => {
+    if (!showAutoRefresh || !autoRefreshStatus) return;
+    setAutoRefreshFrequencyMs(autoRefreshStatus.frequencyMs);
+    setAutoRefreshTurnOffAfterMs(autoRefreshStatus.turnOffAfterMs);
+  }, [showAutoRefresh, autoRefreshStatus]);
+
+  function submitAutoRefresh() {
+    if (!canSubmitAutoRefresh) return;
+    try {
+      api.autoRefresh.start({
+        frequencyMs: autoRefreshFrequencyMs,
+        turnOffAfterMs: autoRefreshTurnOffAfterMs,
+      });
+      setShowAutoRefresh(false);
+    } catch (error) {
+      saveFailed(error);
+    }
+  }
 
   return (
     <div className={cx("qt-qb", classNames?.root)}>
@@ -262,6 +331,89 @@ export function QueryBuilder<Row>({ api, fields, total, running, classNames }: Q
             <button type="button" className={cx("qt-btn", classNames?.button)} onClick={api.refresh} disabled={running}>
               ↻ refresh
             </button>
+            <span className="qt-auto-refresh">
+              <button
+                type="button"
+                className={cx("qt-btn", Boolean(autoRefreshStatus) && "qt-btn--active", classNames?.button)}
+                onClick={() => setShowAutoRefresh((next) => !next)}
+                aria-expanded={showAutoRefresh}
+                title={autoRefreshStatus ? "View or clear auto-refresh" : "Configure auto-refresh"}
+              >
+                {autoRefreshButtonText}
+              </button>
+              {showAutoRefresh ? (
+                <span className="qt-auto-refresh-popover" role="dialog" aria-label="Auto-refresh settings">
+                  <label className="qt-auto-refresh-field">
+                    <span>Frequency</span>
+                    <select
+                      className="qt-auto-refresh-select"
+                      value={autoRefreshFrequencyMs}
+                      onChange={(e) => setAutoRefreshFrequencyMs(Number(e.target.value))}
+                    >
+                      {AUTO_REFRESH_FREQUENCIES.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="qt-auto-refresh-field">
+                    <span>Turn off after</span>
+                    <select
+                      className="qt-auto-refresh-select"
+                      value={autoRefreshTurnOffAfterMs}
+                      onChange={(e) => setAutoRefreshTurnOffAfterMs(Number(e.target.value))}
+                    >
+                      {AUTO_REFRESH_TURN_OFF_AFTER.map((option) => (
+                        <option
+                          key={option.value}
+                          value={option.value}
+                          disabled={
+                            autoRefreshPolls(autoRefreshFrequencyMs, option.value) < 1 ||
+                            autoRefreshPolls(autoRefreshFrequencyMs, option.value) > MAX_AUTO_REFRESH_POLLS
+                          }
+                        >
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <span className={cx("qt-auto-refresh-status", !canSubmitAutoRefresh && "qt-auto-refresh-status--error")}>
+                    {canSubmitAutoRefresh
+                      ? `${selectedAutoRefreshPolls} polls maximum`
+                      : `Choose between 1 and 1000 polls`}
+                  </span>
+                  {autoRefreshStatus ? (
+                    <span className="qt-auto-refresh-status">
+                      Active: every {formatDuration(autoRefreshStatus.frequencyMs)}, clears after{" "}
+                      {formatDuration(autoRefreshStatus.turnOffAfterMs)}. {autoRefreshStatus.pollCount} polls run.
+                    </span>
+                  ) : null}
+                  <span className="qt-auto-refresh-actions">
+                    <button
+                      type="button"
+                      className={cx("qt-btn", classNames?.button)}
+                      onClick={submitAutoRefresh}
+                      disabled={!canSubmitAutoRefresh}
+                    >
+                      {autoRefreshStatus ? "Update" : "Start"}
+                    </button>
+                    {autoRefreshStatus ? (
+                      <button
+                        type="button"
+                        className={cx("qt-btn", classNames?.button)}
+                        onClick={() => {
+                          api.autoRefresh.stop();
+                          setShowAutoRefresh(false);
+                        }}
+                      >
+                        Clear
+                      </button>
+                    ) : null}
+                  </span>
+                </span>
+              ) : null}
+            </span>
             <button type="button" className={cx("qt-btn", classNames?.button)} onClick={api.undo} disabled={!api.canUndo}>
               ↶ Undo
             </button>
