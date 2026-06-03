@@ -59,6 +59,7 @@ const DEFAULT_SELECTION_WIDTH = 36;
 const AUTOFIT_EXTRA_PX = 16;
 const MENU_WIDTH = 240;
 const MENU_ROW_HEIGHT = 32;
+const COPY_FEEDBACK_MS = 900;
 const SELECTION_COLUMN = "__qt_selection__";
 type HeaderSortPlacement = "set" | "append" | "prepend";
 
@@ -92,14 +93,62 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
   const [draftWidths, setDraftWidths] = useState<Record<string, number>>({});
   const [selectionColumnWidth, setSelectionColumnWidth] = useState(DEFAULT_SELECTION_WIDTH);
   const [tableColumnOrder, setTableColumnOrder] = useState<string[]>([]);
+  const [copiedCellKey, setCopiedCellKey] = useState<string | null>(null);
   const tableWrapRef = useRef<HTMLDivElement>(null);
   const resizeCommitRef = useRef<{ name: string; width: number } | null>(null);
   const resizingFieldRef = useRef<string | null>(null);
+  const copiedCellTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Shared drag state when the host passes `api.columnDrag`; otherwise a local
   // instance keeps the table self-contained. (The hook is always called to obey
   // the rules of hooks; the local one is unused when a shared one is provided.)
   const localColumnDrag = useColumnDrag();
   const columnDrag = props.columnDrag ?? localColumnDrag;
+
+  useEffect(() => {
+    return () => {
+      if (copiedCellTimerRef.current) {
+        clearTimeout(copiedCellTimerRef.current);
+        copiedCellTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  function cellKey(rowIdValue: RowId | null, rowIndex: number, fieldName: string): string {
+    return rowIdValue == null ? `row:${rowIndex}:${fieldName}` : `id:${rowIdValue}:${fieldName}`;
+  }
+
+  function isInteractiveTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) return false;
+    const tag = target.tagName;
+    return tag === "A" || tag === "BUTTON" || tag === "INPUT" || tag === "SELECT";
+  }
+
+  function showCopyFeedback(cellId: string) {
+    if (copiedCellTimerRef.current) {
+      clearTimeout(copiedCellTimerRef.current);
+      copiedCellTimerRef.current = null;
+    }
+    setCopiedCellKey(cellId);
+    copiedCellTimerRef.current = setTimeout(() => {
+      setCopiedCellKey((current) => (current === cellId ? null : current));
+      copiedCellTimerRef.current = null;
+    }, COPY_FEEDBACK_MS);
+  }
+
+  async function copyCellToClipboard(e: React.MouseEvent, f: FieldDef<Row>, rowIdValue: RowId | null, rowIndex: number, value: unknown) {
+    if (isInteractiveTarget(e.target)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setMenu(null);
+    try {
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(valueToString(value));
+      }
+    } catch {
+      /* clipboard denial is non-fatal */
+    }
+    showCopyFeedback(cellKey(rowIdValue, rowIndex, f.name));
+  }
 
   const pageIds = rows.map(rowId).filter((id): id is RowId => id != null);
   const headerState = selection ? selection.pageState(pageIds) : "none";
@@ -279,14 +328,12 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
 
   // ---- cell menu ----
   function openMenu(e: React.MouseEvent, f: FieldDef<Row>, row: Row) {
-    const tag = (e.target as HTMLElement).tagName;
-    if (tag === "A" || tag === "BUTTON" || tag === "INPUT" || tag === "SELECT") return;
+    if (isInteractiveTarget(e.target)) return;
     e.preventDefault();
     setMenu({ kind: "cell", field: f, value: readFieldValue(f, row), x: e.clientX, y: e.clientY });
   }
   function openHeaderMenu(e: React.MouseEvent, f: FieldDef<Row>) {
-    const tag = (e.target as HTMLElement).tagName;
-    if (tag === "A" || tag === "BUTTON" || tag === "INPUT" || tag === "SELECT") return;
+    if (isInteractiveTarget(e.target)) return;
     e.preventDefault();
     setMenu({ kind: "header", field: f, x: e.clientX, y: e.clientY });
   }
@@ -563,6 +610,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                     if (!f) return null;
                     const render = resolveRenderer(f, renderers);
                     const value = readFieldValue(f, row);
+                    const key = cellKey(id, i, f.name);
                     return (
                       <td
                         key={f.name}
@@ -571,8 +619,9 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                         style={f.select?.align ? { textAlign: f.select.align } : undefined}
                         onClick={(e) => openMenu(e, f, row)}
                         onContextMenu={(e) => openMenu(e, f, row)}
+                        onDoubleClick={(e) => copyCellToClipboard(e, f, id, i, value)}
                       >
-                        {render({ value, row, field: f, query })}
+                        {copiedCellKey === key ? <span className="qt-cell-copy-chip">✓ copied</span> : render({ value, row, field: f, query })}
                       </td>
                     );
                   })}
@@ -781,4 +830,10 @@ function cssAttributeValue(value: string): string {
 
 function sameOrder(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
+function valueToString(value: unknown): string {
+  if (value == null) return "";
+  if (Array.isArray(value)) return value.join(", ");
+  return String(value);
 }

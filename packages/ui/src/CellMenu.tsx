@@ -84,13 +84,7 @@ export function CellMenu<Row>({ field, value, x, y, onAddFilter, onClose, classN
     );
   }
 
-  const items: ReactNode[] = [
-    <div key="header" className="qt-cm-header">
-      <span className="qt-cm-field">{field.label}</span>
-      <span className="qt-cm-value">{previewValue(value)}</span>
-    </div>,
-    ...filterItems,
-    <div key="sep" className={cx("qt-cm-sep", classNames?.separator)} />,
+  const copyItem = (
     <MenuItem
       key="copy"
       classNames={classNames}
@@ -104,7 +98,17 @@ export function CellMenu<Row>({ field, value, x, y, onAddFilter, onClose, classN
       }}
     >
       copy value
-    </MenuItem>,
+    </MenuItem>
+  );
+
+  const items: ReactNode[] = [
+    <div key="header" className="qt-cm-header">
+      <span className="qt-cm-field">{field.label}</span>
+      <span className="qt-cm-value">{previewValue(value)}</span>
+    </div>,
+    copyItem,
+    <div key="sep" className={cx("qt-cm-sep", classNames?.separator)} />,
+    ...filterItems,
   ];
 
   const vw = typeof window !== "undefined" ? window.innerWidth : 9999;
