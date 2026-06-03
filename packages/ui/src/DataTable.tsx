@@ -146,6 +146,10 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     if (name === SELECTION_COLUMN) return draftWidths[name] ?? selectionColumnWidth;
     return f ? resolvedWidthFor(name, f) : draftWidths[name];
   }
+  function displayColumnWidthFor(name: string, f?: FieldDef<Row>): number {
+    if (name === SELECTION_COLUMN) return resolvedColumnWidthFor(name) ?? DEFAULT_SELECTION_WIDTH;
+    return f ? resolvedWidthFor(name, f) ?? DEFAULT_WIDTH : DEFAULT_WIDTH;
+  }
   function clampWidth(width: number): number {
     return Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.round(width)));
   }
@@ -332,6 +336,10 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
   }
 
   const totalCols = fields.length + (showSel ? 1 : 0) + (trailing ? 1 : 0);
+  const tableWidth = renderedColumnNames.reduce((sum, name) => {
+    const f = fieldByName.get(name);
+    return sum + displayColumnWidthFor(name, f);
+  }, trailing ? 40 : 0);
   const start = query.offset;
   const end = total != null ? Math.min(start + query.limit, total) : start + rows.length;
   const canPrev = start > 0;
@@ -356,14 +364,14 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
         {loading && (
           <div className={cx("qt-loading-bar", classNames?.loadingBar)} role="progressbar" aria-label="loading" />
         )}
-        <table className={cx("qt-table", classNames?.table)}>
+        <table className={cx("qt-table", classNames?.table)} style={{ minWidth: tableWidth }}>
           <colgroup>
             {renderedColumnNames.map((name) => {
               const f = fieldByName.get(name);
-              const w = resolvedColumnWidthFor(name, f);
-              if (name === SELECTION_COLUMN) return <col key={name} style={{ width: w ?? DEFAULT_SELECTION_WIDTH }} />;
+              const w = displayColumnWidthFor(name, f);
+              if (name === SELECTION_COLUMN) return <col key={name} style={{ width: w }} />;
               if (!f) return null;
-              return <col key={f.name} style={w != null ? { width: w } : undefined} />;
+              return <col key={f.name} style={{ width: w }} />;
             })}
             {trailing && <col style={{ width: 40 }} />}
           </colgroup>
