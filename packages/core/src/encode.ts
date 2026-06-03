@@ -18,7 +18,7 @@
 // (pre-width) — so existing xplo-perf / xlsx-collect bookmarks keep working.
 
 import { EMPTY_QUERY } from "./query";
-import type { QueryState, WhereClause, OrderByClause, SelectColumn } from "./query";
+import type { QueryState, WhereClause, OrderByClause, SelectColumn, AggregationClause } from "./query";
 import type { FieldSchema } from "./schema";
 import { indexFields, isFilterable, isPushdownFilter, isSortable, selectedFields } from "./schema";
 
@@ -56,6 +56,7 @@ interface CompactQuery {
   o?: OrderByClause[] | OrderByClause; // object accepted for legacy decode
   l?: number;
   f?: number;
+  g?: AggregationClause[]; // aggregation metrics (omitted when none)
   c?: string[]; // legacy alias for select column names
 }
 
@@ -68,6 +69,7 @@ export function encodeQuery(q: QueryState): string {
   if (q.orderBy.length) c.o = q.orderBy;
   c.l = q.limit;
   if (q.offset) c.f = q.offset;
+  if (q.aggregations?.length) c.g = q.aggregations;
   if (Object.keys(c).length === 0) return "";
   return toBase64Url(JSON.stringify(c));
 }
@@ -78,16 +80,39 @@ export function decodeQuery(token: string): QueryState {
   if (!token) return { ...EMPTY_QUERY };
   try {
     const c = JSON.parse(fromBase64Url(token)) as CompactQuery;
-    return {
+    const out: QueryState = {
       select: normalizeSelect(c.s ?? c.c),
       where: Array.isArray(c.w) ? c.w : [],
       orderBy: normalizeOrderBy(c.o),
       limit: typeof c.l === "number" ? c.l : EMPTY_QUERY.limit,
       offset: typeof c.f === "number" ? c.f : 0,
     };
+    // Only attach `aggregations` when present, so an all-default token still
+    // decodes structurally equal to EMPTY_QUERY (the key stays absent).
+    if (Array.isArray(c.g) && c.g.length) out.aggregations = normalizeAggregations(c.g);
+    return out;
   } catch {
     return { ...EMPTY_QUERY };
   }
+}
+
+function normalizeAggregations(g: unknown): AggregationClause[] {
+  if (!Array.isArray(g)) return [];
+  return g
+    .map((item, i): AggregationClause | null => {
+      if (!item || typeof item !== "object") return null;
+      const raw = item as Partial<AggregationClause>;
+      if (typeof raw.op !== "string") return null;
+      const out: AggregationClause = {
+        id: typeof raw.id === "string" && raw.id ? raw.id : `a${i}`,
+        op: raw.op,
+        groupBy: Array.isArray(raw.groupBy) ? raw.groupBy.filter((x): x is string => typeof x === "string") : [],
+      };
+      if (typeof raw.field === "string") out.field = raw.field;
+      if (typeof raw.label === "string") out.label = raw.label;
+      return out;
+    })
+    .filter((x): x is AggregationClause => x != null);
 }
 
 function normalizeSelect(s: CompactQuery["s"] | CompactQuery["c"]): SelectColumn[] {
@@ -159,4 +184,64 @@ export function toServerQuery<Row>(q: QueryState, schema: FieldSchema<Row>): Ser
   }
 
   return { select: [...select], where, orderBy, limit: q.limit, offset: q.offset };
+}
+
+// ---- aggregation server subset --------------------------------------------
+
+/** The backend request for the metric panel. Scope is the whole filtered set:
+ *  the SAME pushdown WHERE as the rows query, but NO ORDER BY / LIMIT / OFFSET —
+ *  metrics describe every matching row, not the visible page. Mirrors the Go
+ *  AggSpec list. */
+export interface AggregationRequest {
+  where: WhereClause[];
+  aggregations: AggregationClause[];
+}
+
+/** One group's result. `keys` has one entry per AggregationClause.groupBy field,
+ *  in axis order (`[]` for a grand total); a null key is the NULL/empty bucket. */
+export interface AggregationBucket {
+  keys: (string | null)[];
+  /** The metric: a number for count/sum/avg, or the column's value for min/max
+   *  (which may be a string for text/datetime). null when undefined (e.g. avg of
+   *  an all-null column). */
+  value: number | string | null;
+  /** COUNT(*) of rows in the group — always present, even when `value` isn't a
+   *  count, so the panel can show group sizes / shares. */
+  count: number;
+}
+
+export interface AggregationResultEntry {
+  /** Echoes AggregationClause.id. */
+  id: string;
+  buckets: AggregationBucket[];
+}
+
+export interface AggregationResult {
+  /** One entry per requested aggregation, in request order. */
+  metrics: AggregationResultEntry[];
+}
+
+/** Project a QueryState into the metric request: the pushdown WHERE subset (same
+ *  rule as toServerQuery) plus the aggregations whose measure + group fields are
+ *  all server-capable backend columns. Aggregations referencing a derived /
+ *  unknown field are dropped — the server has no SQL for them. */
+export function toAggregationQuery<Row>(q: QueryState, schema: FieldSchema<Row>): AggregationRequest {
+  const byName = indexFields(schema);
+
+  const where = q.where.filter((cl) => {
+    const f = byName.get(cl.field);
+    return f != null && isPushdownFilter(f);
+  });
+
+  const isBackend = (name: string | undefined): boolean => {
+    if (name == null) return true; // omitted measure (count(*)) is fine
+    const f = byName.get(name);
+    return f != null && f.source.kind === "backend";
+  };
+
+  const aggregations = (q.aggregations ?? []).filter(
+    (a) => isBackend(a.field) && a.groupBy.every((g) => isBackend(g)),
+  );
+
+  return { where, aggregations };
 }

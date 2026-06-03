@@ -60,6 +60,33 @@ export interface SelectColumn {
   width?: number;
 }
 
+/** A single aggregate operation. `count` is the only op that needs no measure
+ *  column (it counts rows); the rest reduce one column's values. The server-side
+ *  matrix (backends/go aggOpAllowed + the TS AGG_OPS_BY_TYPE) decides which ops a
+ *  field's type permits. */
+export type AggOp = "count" | "count_distinct" | "sum" | "avg" | "min" | "max";
+
+/** One optional "metric" pinned above the table: a single aggregate over a single
+ *  measure column, optionally broken down by one or more group columns.
+ *
+ *  Scope is deliberately the *whole filtered set* — the same WHERE as the table,
+ *  but NOT its ORDER BY / LIMIT / OFFSET. It is always evaluated on the server
+ *  (a real GROUP BY), so it reflects every matching row, not just the visible
+ *  page. Lives inside QueryState so it round-trips through `?q=`, saved queries,
+ *  and undo/redo for free — a saved query is a saved dashboard. */
+export interface AggregationClause {
+  /** Stable id; keys the metric panel and survives a `?q=` round-trip. */
+  id: string;
+  op: AggOp;
+  /** Measure column (FieldDef.name). Omit only for `count` (⇒ COUNT(*)). */
+  field?: string;
+  /** Group-by columns, in axis order. `[]` = a single grand-total value.
+   *  One ⇒ a list/bar breakdown; two ⇒ an x/y pivot; three+ ⇒ a flat table. */
+  groupBy: string[];
+  /** Panel header override; defaults to a derived label like "avg total". */
+  label?: string;
+}
+
 export interface QueryState {
   /** Ordered SELECT list + per-column widths. Empty = the schema's default columns. */
   select: SelectColumn[];
@@ -71,6 +98,9 @@ export interface QueryState {
   limit: number;
   /** Page offset (rows). */
   offset: number;
+  /** Optional aggregate metrics shown above the table. Omitted/empty = none.
+   *  Each runs as its own server GROUP BY over the WHERE-filtered set (no paging). */
+  aggregations?: AggregationClause[];
 }
 
 /** A row's stable identity, used for selection and per-row refresh. */
@@ -95,6 +125,7 @@ export function queriesEqual(a: QueryState, b: QueryState): boolean {
   if (!sameArray(a.where, b.where)) return false;
   if (!sameArray(a.orderBy, b.orderBy)) return false;
   if (!sameArray(a.select, b.select)) return false;
+  if (!sameArray(a.aggregations ?? [], b.aggregations ?? [])) return false;
   return true;
 }
 

@@ -13,8 +13,9 @@
 //   - NULLs sort per OrderByClause.nulls (default "last")
 //   - multi-sort is a stable lexicographic fold over orderBy in priority order
 
-import type { QueryState, WhereClause } from "./query";
+import type { AggOp, AggregationClause, QueryState, WhereClause } from "./query";
 import type { FieldSchema, FieldDef } from "./schema";
+import type { AggregationBucket, AggregationResult } from "./encode";
 import { indexFields, readFieldValue } from "./schema";
 import { coerceValue } from "./ops";
 
@@ -63,6 +64,111 @@ export function applyQuery<Row>(rows: Row[], q: QueryState, schema: FieldSchema<
 /** Does one row satisfy one clause? Exposed for the CellMenu preview + tests. */
 export function matchesClause<Row>(row: Row, clause: WhereClause, schema: FieldSchema<Row>): boolean {
   return matchesWith(indexFields(schema), row, clause);
+}
+
+/** Client-side mirror of the backend GROUP BY (the executor for `clientRows`
+ *  mode / the demo). Scope matches the server contract: the WHERE-filtered set
+ *  only — ORDER BY / LIMIT / OFFSET are intentionally ignored, so a metric
+ *  reflects every matching row, not the visible page. Must agree with
+ *  backends/go's aggregate compile on op semantics. */
+export function applyAggregations<Row>(rows: Row[], q: QueryState, schema: FieldSchema<Row>): AggregationResult {
+  const byName = indexFields(schema);
+  const filtered = rows.filter((row) => q.where.every((cl) => matchesWith(byName, row, cl)));
+  const metrics = (q.aggregations ?? []).map((agg) => ({
+    id: agg.id,
+    buckets: computeBuckets(filtered, agg, byName),
+  }));
+  return { metrics };
+}
+
+function computeBuckets<Row>(
+  rows: Row[],
+  agg: AggregationClause,
+  byName: Map<string, FieldDef<Row>>,
+): AggregationBucket[] {
+  const groupFields = agg.groupBy
+    .map((n) => byName.get(n))
+    .filter((f): f is FieldDef<Row> => f != null);
+  const measure = agg.field ? byName.get(agg.field) : undefined;
+
+  const groups = new Map<string, { keys: (string | null)[]; rows: Row[] }>();
+  for (const row of rows) {
+    const keys = groupFields.map((f) => {
+      const v = readFieldValue(f, row);
+      return v == null || v === "" ? null : String(v);
+    });
+    const k = JSON.stringify(keys);
+    let g = groups.get(k);
+    if (!g) {
+      g = { keys, rows: [] };
+      groups.set(k, g);
+    }
+    g.rows.push(row);
+  }
+
+  const buckets = [...groups.values()].map((g) => ({
+    keys: g.keys,
+    count: g.rows.length,
+    value: aggValue(agg.op, measure, g.rows),
+  }));
+  return sortBuckets(buckets);
+}
+
+function aggValue<Row>(op: AggOp, measure: FieldDef<Row> | undefined, rows: Row[]): number | string | null {
+  if (op === "count") {
+    if (!measure) return rows.length; // COUNT(*)
+    let n = 0;
+    for (const r of rows) if (readFieldValue(measure, r) != null) n++; // COUNT(expr) = non-null
+    return n;
+  }
+  if (!measure) return null;
+  const values = rows.map((r) => readFieldValue(measure, r)).filter((v) => v != null);
+
+  switch (op) {
+    case "count_distinct":
+      return new Set(values.map((v) => String(v))).size;
+    case "sum":
+    case "avg": {
+      let sum = 0;
+      let n = 0;
+      for (const v of values) {
+        const num = typeof v === "number" ? v : Number(v);
+        if (Number.isFinite(num)) {
+          sum += num;
+          n++;
+        }
+      }
+      if (op === "avg") return n ? sum / n : null;
+      return n ? sum : null;
+    }
+    case "min":
+    case "max": {
+      let best: unknown;
+      for (const v of values) {
+        if (best === undefined) {
+          best = v;
+          continue;
+        }
+        const cmp = compare(v, best);
+        if (op === "min" ? cmp < 0 : cmp > 0) best = v;
+      }
+      return (best as number | string | undefined) ?? null;
+    }
+    default:
+      return null;
+  }
+}
+
+/** Stable display order: descending by the metric (or group size when the metric
+ *  isn't numeric), then by group key. The 2D pivot ignores this; the 1D bar list
+ *  and the flat N-column table read top-to-bottom from it. */
+function sortBuckets(buckets: AggregationBucket[]): AggregationBucket[] {
+  return [...buckets].sort((a, b) => {
+    const av = typeof a.value === "number" ? a.value : a.count;
+    const bv = typeof b.value === "number" ? b.value : b.count;
+    if (av !== bv) return bv - av;
+    return JSON.stringify(a.keys).localeCompare(JSON.stringify(b.keys));
+  });
 }
 
 function matchesWith<Row>(byName: Map<string, FieldDef<Row>>, row: Row, clause: WhereClause): boolean {

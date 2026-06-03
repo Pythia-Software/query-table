@@ -6,7 +6,7 @@
 //                     backend-backed when the data layer provides one).
 
 import type { QueryState, RowId } from "./query";
-import type { ServerQuery } from "./encode";
+import type { ServerQuery, AggregationRequest, AggregationResult } from "./encode";
 
 // ---- Transport ------------------------------------------------------------
 
@@ -55,6 +55,13 @@ export interface Transport<Row = any> {
    *  server-side (e.g. ILIKE prefix) and cap at `limit` so large domains stay
    *  fast and refine per keystroke. */
   fetchDistinctValues?(q: DistinctValuesQuery, signal?: AbortSignal): Promise<DistinctValuesResult>;
+
+  /** Run the metric panel's GROUP BY queries (one per requested aggregation),
+   *  scoped to the WHERE-filtered set with no paging. Optional: without it, the
+   *  metric panel falls back to applyAggregations over local rows (client mode).
+   *  Implementations compile each AggSpec with backends/go CompileAggregation,
+   *  sharing the same WHERE as fetchRows. */
+  fetchAggregations?(q: AggregationRequest, signal?: AbortSignal): Promise<AggregationResult>;
 
   /** Re-fetch a single row by id, for in-place updates without a full re-query
    *  (xlsx-collect's per-row refresh). Optional. */

@@ -13,6 +13,9 @@ export { DataTable } from "./DataTable";
 export type { QueryBuilderProps } from "./QueryBuilder";
 export { QueryBuilder } from "./QueryBuilder";
 
+export type { MetricsPanelProps } from "./MetricsPanel";
+export { MetricsPanel } from "./MetricsPanel";
+
 export type { FieldPickerProps } from "./FieldPicker";
 export { FieldPicker } from "./FieldPicker";
 
