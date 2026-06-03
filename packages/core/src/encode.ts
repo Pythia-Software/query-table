@@ -66,7 +66,7 @@ export function encodeQuery(q: QueryState): string {
     c.s = q.select.map((col): [string] | [string, number] => (col.width != null ? [col.field, col.width] : [col.field]));
   if (q.where.length) c.w = q.where;
   if (q.orderBy.length) c.o = q.orderBy;
-  if (q.limit !== EMPTY_QUERY.limit) c.l = q.limit;
+  c.l = q.limit;
   if (q.offset) c.f = q.offset;
   if (Object.keys(c).length === 0) return "";
   return toBase64Url(JSON.stringify(c));

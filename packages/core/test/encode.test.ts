@@ -18,9 +18,10 @@ describe("encodeQuery / decodeQuery", () => {
     expect(decodeQuery(encodeQuery(q))).toEqual(q);
   });
 
-  it("encodes an all-default query to the empty string", () => {
-    expect(encodeQuery(EMPTY_QUERY)).toBe("");
-    expect(decodeQuery("")).toEqual(EMPTY_QUERY);
+  it("encodes an all-default query with explicit defaults", () => {
+    const token = encodeQuery(EMPTY_QUERY);
+    expect(token).not.toBe("");
+    expect(decodeQuery(token)).toEqual(EMPTY_QUERY);
   });
 
   it("never throws on garbage input", () => {
