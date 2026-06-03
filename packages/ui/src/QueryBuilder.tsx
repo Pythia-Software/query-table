@@ -958,11 +958,27 @@ function OrderRow<Row>({
     setOrderBy(orderBy.filter((_, k) => k !== i));
   }
   function addTerm(f: FieldDef<Row>) {
-    if (orderBy.some((o) => o.field === (f.sort?.field ?? f.name))) {
+    const field = f.sort?.field ?? f.name;
+    const nextOrderBy: OrderByClause[] = [...orderBy, { field, dir: "desc" }];
+
+    if (orderBy.some((o) => o.field === field)) {
       setAdding(false);
       return;
     }
-    setOrderBy([...orderBy, { field: f.sort?.field ?? f.name, dir: "desc" }]);
+
+    const hasSelectColumn = api.select.visible.some((c) => c.field === field);
+    if (hasSelectColumn) {
+      setOrderBy(nextOrderBy);
+      setAdding(false);
+      return;
+    }
+
+    api.setQuery((q) => ({
+      ...q,
+      offset: 0,
+      orderBy: nextOrderBy,
+      select: q.select.length ? [...q.select, { field }] : [...api.select.visible, { field }],
+    }));
     setAdding(false);
   }
 
