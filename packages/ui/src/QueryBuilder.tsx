@@ -959,7 +959,7 @@ function OrderRow<Row>({
   }
   function addTerm(f: FieldDef<Row>) {
     const field = f.sort?.field ?? f.name;
-    const nextOrderBy = [...orderBy, { field, dir: "desc" }];
+    const nextOrderBy: OrderByClause[] = [...orderBy, { field, dir: "desc" }];
 
     if (orderBy.some((o) => o.field === field)) {
       setAdding(false);
