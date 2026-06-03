@@ -7,7 +7,7 @@
 // autocomplete and xlsx-collect's draggable column chips, grouped picker, and
 // per-clause operator dropdowns. Multi-sort (orderBy is an array) is new to both.
 
-import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
   DistinctValuesResult,
   FieldDef,
@@ -85,6 +85,11 @@ function formatDuration(ms: number): string {
   return Number.isInteger(hours) ? `${hours}h` : `${minutes}m`;
 }
 
+function formatStatusTime(ms: number | null): string {
+  if (ms == null) return "never";
+  return new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
+}
+
 function useFieldHasNull<Row>(api: QueryTableApi<Row>, fieldName: string | undefined): boolean | undefined {
   const [hasNull, setHasNull] = useState<boolean | undefined>(undefined);
 
@@ -157,6 +162,7 @@ function orderBySummaryText<Row>(orderBy: OrderByClause[], byName: Map<string, F
 }
 
 export function QueryBuilder<Row>({ api, fields, total, running, classNames }: QueryBuilderProps<Row>): ReactNode {
+  const UNSAVED_QUERY_EDIT_ID = "__qt-unsaved-query__";
   const [showSaved, setShowSaved] = useState(false);
   const [showAutoRefresh, setShowAutoRefresh] = useState(false);
   const [autoRefreshFrequencyMs, setAutoRefreshFrequencyMs] = useState(DEFAULT_AUTO_REFRESH_FREQUENCY_MS);
@@ -165,6 +171,8 @@ export function QueryBuilder<Row>({ api, fields, total, running, classNames }: Q
   const [editingSavedName, setEditingSavedName] = useState("");
   const [lastSavedId, setLastSavedId] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
+  const [lastFailureAt, setLastFailureAt] = useState<number | null>(null);
   const byName = useMemo(() => new Map(fields.map((f) => [f.name, f])), [fields]);
   const activeSavedQuery = useMemo(
     () => api.saved.items.find((item) => queriesEqual(item.query, api.query)),
@@ -174,8 +182,11 @@ export function QueryBuilder<Row>({ api, fields, total, running, classNames }: Q
     () => api.saved.items.find((item) => item.id === lastSavedId) ?? null,
     [api.saved.items, lastSavedId],
   );
+  const isSavedQuery = activeSavedQuery != null;
+  const isEditingUnsaved = editingSavedId === UNSAVED_QUERY_EDIT_ID;
   const bodyId = useId();
   const isEditingSaved = editingSavedId != null && activeSavedQuery?.id === editingSavedId;
+  const showUpdateButton = Boolean(lastSavedQuery) && !activeSavedQuery;
   const collapsedSummary = useMemo(
     () => buildCollapsedSummary(api.query.where, api.query.orderBy, byName),
     [api.query.where, api.query.orderBy, byName],
@@ -192,78 +203,144 @@ export function QueryBuilder<Row>({ api, fields, total, running, classNames }: Q
   const selectedAutoRefreshPolls = autoRefreshPolls(autoRefreshFrequencyMs, autoRefreshTurnOffAfterMs);
   const canSubmitAutoRefresh = selectedAutoRefreshPolls >= 1 && selectedAutoRefreshPolls <= MAX_AUTO_REFRESH_POLLS;
   const autoRefreshButtonText = autoRefreshStatus
-    ? `⟳ auto ${formatDuration(autoRefreshStatus.frequencyMs)}`
-    : "⟳ auto";
+    ? `⟳ Auto-Update ${formatDuration(autoRefreshStatus.frequencyMs)}`
+    : "⟳ Auto-Update";
+  const rowSummary = `${api.rows.length} of ${total ?? "?"}`;
+  const lastUpdatedText = formatStatusTime(lastUpdatedAt);
+  const failureText = api.error
+    ? `Error: ${api.error.message}`
+    : lastFailureAt
+      ? `Last failure at ${formatStatusTime(lastFailureAt)}`
+      : null;
+  const isBusy = Boolean(running) || api.loading;
+  const lastRowsRef = useRef<Row[] | null>(null);
+  const lastTotalRef = useRef<number | null>(null);
+  const previousLoadingRef = useRef(api.loading);
 
   useEffect(() => {
-    if (editingSavedId != null && activeSavedQuery?.id !== editingSavedId) {
-      cancelRenameActiveSaved();
+    if (activeSavedQuery) {
+      setLastSavedId(activeSavedQuery.id);
+      if (!isEditingSaved) {
+        setEditingSavedName(activeSavedQuery.name);
+        setEditingSavedId(null);
+      }
+      return;
     }
-    if (activeSavedQuery) setLastSavedId(activeSavedQuery.id);
+
+    if (!isEditingUnsaved) {
+      setEditingSavedId(null);
+      setEditingSavedName("");
+    }
     // activeSavedQuery can become null if edits/loads shift to unsaved or another query
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSavedQuery]);
+  }, [activeSavedQuery, isEditingSaved, isEditingUnsaved]);
 
   useEffect(() => {
     if (!lastSavedId || api.saved.items.some((item) => item.id === lastSavedId)) return;
     setLastSavedId(null);
   }, [api.saved.items, lastSavedId]);
 
+  useEffect(() => {
+    const hasData = api.rows.length > 0 || total != null;
+    const rowsChanged = lastRowsRef.current !== api.rows;
+    const totalChanged = lastTotalRef.current !== total;
+    const loadingDone = !api.loading;
+
+    if (loadingDone && api.error) {
+      setLastFailureAt(Date.now());
+      lastRowsRef.current = api.rows;
+      lastTotalRef.current = total;
+      previousLoadingRef.current = api.loading;
+      return;
+    }
+
+    if (
+      loadingDone &&
+      (previousLoadingRef.current || rowsChanged || totalChanged || lastUpdatedAt == null) &&
+      hasData
+    ) {
+      setLastUpdatedAt(Date.now());
+      setLastFailureAt(null);
+      lastRowsRef.current = api.rows;
+      lastTotalRef.current = total;
+    }
+    previousLoadingRef.current = api.loading;
+  }, [api.error, api.loading, api.rows, total, lastUpdatedAt]);
+
   function saveFailed(error: unknown): void {
     const message = error instanceof Error ? error.message : "Failed to save query.";
     if (typeof window !== "undefined") window.alert(message);
   }
 
-  async function saveAs() {
-    const name = typeof window !== "undefined" ? window.prompt("Save query as…") : null;
-    if (!name) return;
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    try {
-      const saved = await api.saved.save(trimmed);
-      setLastSavedId(saved.id);
-    } catch (error) {
-      saveFailed(error);
+  function beginEditSavedName() {
+    if (activeSavedQuery) {
+      setEditingSavedId(activeSavedQuery.id);
+      setEditingSavedName(activeSavedQuery.name);
+      return;
     }
+    if (isEditingUnsaved) return;
+    setEditingSavedId(UNSAVED_QUERY_EDIT_ID);
+    setEditingSavedName((next) => (next ? next : "Custom Query"));
   }
 
-  async function saveLastSaved() {
-    if (!lastSavedQuery || !lastSavedId) return;
-    try {
-      await api.saved.remove(lastSavedId);
-      const saved = await api.saved.save(lastSavedQuery.name);
-      setLastSavedId(saved.id);
-    } catch (error) {
-      saveFailed(error);
-    }
-  }
-
-  function beginRenameActiveSaved() {
-    if (!activeSavedQuery) return;
-    setEditingSavedId(activeSavedQuery.id);
-    setEditingSavedName(activeSavedQuery.name);
-  }
-
-  function cancelRenameActiveSaved() {
+  function cancelNameEdit() {
     setEditingSavedId(null);
     setEditingSavedName("");
   }
 
-  function commitRenameActiveSaved() {
+  async function persistSavedQuery(name: string): Promise<string | null> {
+    const trimmed = name.trim();
+    if (!trimmed) return null;
+    try {
+      const saved = await api.saved.save(trimmed);
+      setLastSavedId(saved.id);
+      return saved.id;
+    } catch (error) {
+      saveFailed(error);
+      return null;
+    }
+  }
+
+  async function commitSavedNameEdit() {
     if (!isEditingSaved || !activeSavedQuery) return;
     const trimmed = editingSavedName.trim();
     if (!trimmed || trimmed === activeSavedQuery.name) {
-      cancelRenameActiveSaved();
+      cancelNameEdit();
       return;
     }
-    void api.saved
-      .save(trimmed)
-      .then((saved) => {
-        setLastSavedId(saved.id);
-        return api.saved.remove(activeSavedQuery.id);
-      })
-      .catch(saveFailed);
-    cancelRenameActiveSaved();
+    const savedId = await persistSavedQuery(trimmed);
+    if (!savedId) return;
+    await api.saved.remove(activeSavedQuery.id);
+    cancelNameEdit();
+  }
+
+  async function commitUnsavedNameEdit() {
+    if (!isEditingUnsaved) return;
+    const savedId = await persistSavedQuery(editingSavedName);
+    if (!savedId) {
+      cancelNameEdit();
+      return;
+    }
+    cancelNameEdit();
+  }
+
+  async function updateLastSavedQuery() {
+    if (!lastSavedQuery) return;
+    const savedId = await persistSavedQuery(lastSavedQuery.name);
+    if (!savedId || savedId === lastSavedQuery.id) return;
+    await api.saved.remove(lastSavedQuery.id);
+    setLastSavedId(savedId);
+  }
+
+  function commitNameEditor() {
+    if (isEditingSaved) {
+      void commitSavedNameEdit();
+      return;
+    }
+    if (isEditingUnsaved) {
+      void commitUnsavedNameEdit();
+      return;
+    }
   }
 
   useEffect(() => {
@@ -291,207 +368,224 @@ export function QueryBuilder<Row>({ api, fields, total, running, classNames }: Q
 
   return (
     <div className={cx("qt-qb", classNames?.root)}>
-      <div className="qt-qb-row qt-qb-actions">
-        {collapsed ? (
-          <>
+      <div className="qt-qb-bar qt-qb-state-bar qt-qb-row">
+        <span className="qt-qb-state-main">
+          <span className="qt-qb-saved">
+            <button
+              type="button"
+              className={cx("qt-qb-saved-star", isSavedQuery ? "qt-qb-saved-star--saved" : "qt-qb-saved-star--unsaved")}
+              title={isSavedQuery ? "Rename saved query" : "Save query"}
+              disabled={isBusy}
+              onClick={beginEditSavedName}
+            >
+              {isSavedQuery ? "★" : "☆"}
+            </button>
+            {isEditingSaved || isEditingUnsaved ? (
+              <span className="qt-qb-saved-input-wrap">
+                <input
+                  type="text"
+                  className="qt-qb-saved-input"
+                  value={editingSavedName}
+                  disabled={isBusy}
+                  autoFocus
+                  onChange={(e) => setEditingSavedName(e.target.value)}
+                  onBlur={commitNameEditor}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      commitNameEditor();
+                    }
+                    if (e.key === "Escape") {
+                      e.preventDefault();
+                      cancelNameEdit();
+                    }
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+                <button
+                  type="button"
+                  className="qt-qb-saved-cancel"
+                  title="Do not save"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    cancelNameEdit();
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  ✕
+                </button>
+              </span>
+            ) : (
+              <button
+                type="button"
+                className={cx("qt-qb-saved-name", !activeSavedQuery && "qt-qb-saved-name--custom")}
+                onClick={beginEditSavedName}
+              >
+                {activeSavedQuery ? activeSavedQuery.name : "Custom Query"}
+              </button>
+            )}
+          </span>
+          {collapsed ? (
             <span className="qt-qb-summary qt-truncate" title={collapsedSummary}>
               <span className="qt-qb-summary-kw">WHERE</span>{" "}
               <strong>{collapsedWhereText}</strong>{" "}
               <span className="qt-qb-summary-kw">ORDER BY</span>{" "}
               <strong>{collapsedOrderText}</strong>
             </span>
-            <button
-              type="button"
-              className={cx("qt-btn", classNames?.button)}
-              onClick={() => setCollapsed((next) => !next)}
-              aria-expanded={!collapsed}
-              aria-controls={bodyId}
-              title={collapsed ? "Expand query builder" : "Collapse query builder"}
-            >
-              {collapsed ? "Show query builder" : "Hide query builder"}
-            </button>
-          </>
-        ) : (
-          <>
-            <span className="qt-qb-left">
-              <span className="qt-qb-count">{api.loading ? "loading…" : `${api.rows.length} of ${total ?? "?"}`}</span>
-              {activeSavedQuery && (
-                <span className="qt-qb-saved">
-                  <span className="qt-qb-saved-star" aria-hidden>
-                    ★
-                  </span>
-                  {isEditingSaved ? (
-                    <input
-                      type="text"
-                      className="qt-qb-saved-input"
-                      value={editingSavedName}
-                      disabled={running}
-                      autoFocus
-                      onChange={(e) => setEditingSavedName(e.target.value)}
-                      onBlur={commitRenameActiveSaved}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          commitRenameActiveSaved();
-                        }
-                        if (e.key === "Escape") {
-                          e.preventDefault();
-                          cancelRenameActiveSaved();
-                        }
-                      }}
-                      onClick={(e) => e.stopPropagation()}
-                    />
-                  ) : (
-                    <strong className="qt-qb-saved-name">
-                      {activeSavedQuery.name}
-                      {api.saved.defaultId === activeSavedQuery.id ? (
-                        <span className="qt-qb-saved-default"> default</span>
-                      ) : null}
-                    </strong>
-                  )}
-                  <button
-                    type="button"
-                    className="qt-qb-saved-edit"
-                    title="Rename saved query"
-                    disabled={running}
-                    onClick={beginRenameActiveSaved}
-                  >
-                    ✎
-                  </button>
-                </span>
-              )}
-            </span>
-            <button type="button" className={cx("qt-btn", classNames?.button)} onClick={api.refresh} disabled={running}>
-              ↻ refresh
-            </button>
-            <span className="qt-auto-refresh">
-              <button
-                type="button"
-                className={cx("qt-btn", Boolean(autoRefreshStatus) && "qt-btn--active", classNames?.button)}
-                onClick={() => setShowAutoRefresh((next) => !next)}
-                aria-expanded={showAutoRefresh}
-                title={autoRefreshStatus ? "View or clear auto-refresh" : "Configure auto-refresh"}
-              >
-                {autoRefreshButtonText}
-              </button>
-              {showAutoRefresh ? (
-                <span className="qt-auto-refresh-popover" role="dialog" aria-label="Auto-refresh settings">
-                  <label className="qt-auto-refresh-field">
-                    <span>Frequency</span>
-                    <select
-                      className="qt-auto-refresh-select"
-                      value={autoRefreshFrequencyMs}
-                      onChange={(e) => setAutoRefreshFrequencyMs(Number(e.target.value))}
-                    >
-                      {AUTO_REFRESH_FREQUENCIES.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="qt-auto-refresh-field">
-                    <span>Turn off after</span>
-                    <select
-                      className="qt-auto-refresh-select"
-                      value={autoRefreshTurnOffAfterMs}
-                      onChange={(e) => setAutoRefreshTurnOffAfterMs(Number(e.target.value))}
-                    >
-                      {AUTO_REFRESH_TURN_OFF_AFTER.map((option) => (
-                        <option
-                          key={option.value}
-                          value={option.value}
-                          disabled={
-                            autoRefreshPolls(autoRefreshFrequencyMs, option.value) < 1 ||
-                            autoRefreshPolls(autoRefreshFrequencyMs, option.value) > MAX_AUTO_REFRESH_POLLS
-                          }
-                        >
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <span className={cx("qt-auto-refresh-status", !canSubmitAutoRefresh && "qt-auto-refresh-status--error")}>
-                    {canSubmitAutoRefresh
-                      ? `${selectedAutoRefreshPolls} polls maximum`
-                      : `Choose between 1 and 1000 polls`}
-                  </span>
-                  {autoRefreshStatus ? (
-                    <span className="qt-auto-refresh-status">
-                      Active: every {formatDuration(autoRefreshStatus.frequencyMs)}, clears after{" "}
-                      {formatDuration(autoRefreshStatus.turnOffAfterMs)}. {autoRefreshStatus.pollCount} polls run.
-                    </span>
-                  ) : null}
-                  <span className="qt-auto-refresh-actions">
-                    <button
-                      type="button"
-                      className={cx("qt-btn", classNames?.button)}
-                      onClick={submitAutoRefresh}
-                      disabled={!canSubmitAutoRefresh}
-                    >
-                      {autoRefreshStatus ? "Update" : "Start"}
-                    </button>
-                    {autoRefreshStatus ? (
-                      <button
-                        type="button"
-                        className={cx("qt-btn", classNames?.button)}
-                        onClick={() => {
-                          api.autoRefresh.stop();
-                          setShowAutoRefresh(false);
-                        }}
-                      >
-                        Clear
-                      </button>
-                    ) : null}
-                  </span>
-                </span>
-              ) : null}
-            </span>
-            <button type="button" className={cx("qt-btn", classNames?.button)} onClick={api.undo} disabled={!api.canUndo}>
-              ↶ Undo
-            </button>
-            <button type="button" className={cx("qt-btn", classNames?.button)} onClick={api.redo} disabled={!api.canRedo}>
-              ↷ Redo
-            </button>
-            <button
-              type="button"
-              className={cx("qt-btn", classNames?.button)}
-              onClick={() => void saveLastSaved()}
-              disabled={running || !lastSavedQuery}
-            >
-              ★ {lastSavedQuery ? `save '${lastSavedQuery.name}'` : "save"}
-            </button>
-            <button type="button" className={cx("qt-btn", classNames?.button)} onClick={() => void saveAs()} disabled={running}>
-              ★ save as...
-            </button>
-            <button type="button" className={cx("qt-btn", classNames?.button)} onClick={() => setShowSaved(true)}>
-              ≡ saved{api.saved.items.length > 0 ? ` (${api.saved.items.length})` : ""}
-            </button>
-            <button type="button" className={cx("qt-btn", classNames?.button)} onClick={api.resetAll} disabled={running}>
-              Reset All
-            </button>
-            <button
-              type="button"
-              className={cx("qt-btn", classNames?.button)}
-              onClick={() => setCollapsed((next) => !next)}
-              aria-expanded={!collapsed}
-              aria-controls={bodyId}
-              title={collapsed ? "Expand query builder" : "Collapse query builder"}
-            >
-              {collapsed ? "Show query builder" : "Hide query builder"}
-            </button>
-          </>
-        )}
+          ) : null}
+        </span>
+        {showUpdateButton ? (
+          <button
+            type="button"
+            className={cx("qt-btn", classNames?.button)}
+            onClick={() => void updateLastSavedQuery()}
+            disabled={isBusy}
+          >
+            {`Update Query '${lastSavedQuery?.name ?? "query"}'`}
+          </button>
+        ) : null}
+        <button type="button" className={cx("qt-btn", classNames?.button)} onClick={() => setShowSaved(true)}>
+          Saved{api.saved.items.length > 0 ? ` (${api.saved.items.length})` : ""}
+        </button>
+        <button
+          type="button"
+          className={cx("qt-btn", classNames?.button)}
+          onClick={() => setCollapsed((next) => !next)}
+          aria-expanded={!collapsed}
+          aria-controls={bodyId}
+          title={collapsed ? "Expand query builder" : "Collapse query builder"}
+        >
+          {collapsed ? "Show query builder" : "Hide query builder"}
+        </button>
       </div>
 
       {!collapsed ? (
-        <div id={bodyId} className="qt-qb-body">
-          <SelectRow api={api} fields={fields} classNames={classNames} disabled={running} />
-          <WhereRow api={api} byName={byName} fields={fields} classNames={classNames} disabled={running} />
-          <OrderRow api={api} fields={fields} classNames={classNames} disabled={running} />
-          <WindowRow api={api} classNames={classNames} disabled={running} />
+        <div className="qt-qb-bar qt-qb-editor-bar">
+          <div id={bodyId} className="qt-qb-body">
+            <SelectRow api={api} fields={fields} classNames={classNames} disabled={isBusy} />
+            <WhereRow api={api} byName={byName} fields={fields} classNames={classNames} disabled={isBusy} />
+            <OrderRow api={api} fields={fields} classNames={classNames} disabled={isBusy} />
+            <WindowRow api={api} classNames={classNames} disabled={isBusy} />
+          </div>
+          <div className="qt-qb-editor-stack">
+            <button type="button" className={cx("qt-btn", classNames?.button)} onClick={api.undo} disabled={!api.canUndo || isBusy}>
+              ↶ Undo
+            </button>
+            <button type="button" className={cx("qt-btn", classNames?.button)} onClick={api.redo} disabled={!api.canRedo || isBusy}>
+              ↷ Redo
+            </button>
+            <button type="button" className={cx("qt-btn", classNames?.button)} onClick={api.resetAll} disabled={isBusy}>
+              Reset All
+            </button>
+          </div>
         </div>
       ) : null}
+
+      <div className="qt-qb-bar qt-qb-run-bar qt-qb-row">
+        <span className="qt-qb-run-metric qt-qb-run-metric--strong">{api.loading ? "loading…" : `${rowSummary} rows`}</span>
+        <span className="qt-qb-run-metric">Last updated {lastUpdatedText}</span>
+        {failureText ? <span className="qt-qb-run-error">{failureText}</span> : null}
+        <span className="qt-qb-run-actions">
+          {autoRefreshStatus ? (
+            <span className="qt-qb-auto-status">
+              {`Every ${formatDuration(autoRefreshStatus.frequencyMs)}; clear after ${formatDuration(
+                autoRefreshStatus.turnOffAfterMs,
+              )} (${autoRefreshStatus.pollCount} polls run)`}
+            </span>
+          ) : null}
+          <span className="qt-auto-refresh">
+            <button
+              type="button"
+              className={cx("qt-btn", Boolean(autoRefreshStatus) && "qt-btn--active", classNames?.button)}
+              onClick={() => setShowAutoRefresh((next) => !next)}
+              aria-expanded={showAutoRefresh}
+              title={autoRefreshStatus ? "View or clear auto-update" : "Configure auto-update"}
+            >
+              {autoRefreshButtonText}
+            </button>
+            {showAutoRefresh ? (
+              <span className="qt-auto-refresh-popover" role="dialog" aria-label="Auto-refresh settings">
+                <label className="qt-auto-refresh-field">
+                  <span>Frequency</span>
+                  <select
+                    className="qt-auto-refresh-select"
+                    value={autoRefreshFrequencyMs}
+                    onChange={(e) => setAutoRefreshFrequencyMs(Number(e.target.value))}
+                  >
+                    {AUTO_REFRESH_FREQUENCIES.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="qt-auto-refresh-field">
+                  <span>Turn off after</span>
+                  <select
+                    className="qt-auto-refresh-select"
+                    value={autoRefreshTurnOffAfterMs}
+                    onChange={(e) => setAutoRefreshTurnOffAfterMs(Number(e.target.value))}
+                  >
+                    {AUTO_REFRESH_TURN_OFF_AFTER.map((option) => (
+                      <option
+                        key={option.value}
+                        value={option.value}
+                        disabled={
+                          autoRefreshPolls(autoRefreshFrequencyMs, option.value) < 1 ||
+                          autoRefreshPolls(autoRefreshFrequencyMs, option.value) > MAX_AUTO_REFRESH_POLLS
+                        }
+                      >
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <span className={cx("qt-auto-refresh-status", !canSubmitAutoRefresh && "qt-auto-refresh-status--error")}>
+                  {canSubmitAutoRefresh
+                    ? `${selectedAutoRefreshPolls} polls maximum`
+                    : `Choose between 1 and 1000 polls`}
+                </span>
+                {autoRefreshStatus ? (
+                  <span className="qt-auto-refresh-status">
+                    Active: every {formatDuration(autoRefreshStatus.frequencyMs)}, clears after{" "}
+                    {formatDuration(autoRefreshStatus.turnOffAfterMs)}. {autoRefreshStatus.pollCount} polls run.
+                  </span>
+                ) : null}
+                <span className="qt-auto-refresh-actions">
+                  <button
+                    type="button"
+                    className={cx("qt-btn", classNames?.button)}
+                    onClick={submitAutoRefresh}
+                    disabled={!canSubmitAutoRefresh}
+                  >
+                    {autoRefreshStatus ? "Update" : "Start"}
+                  </button>
+                  {autoRefreshStatus ? (
+                    <button
+                      type="button"
+                      className={cx("qt-btn", classNames?.button)}
+                      onClick={() => {
+                        api.autoRefresh.stop();
+                        setShowAutoRefresh(false);
+                      }}
+                    >
+                      Clear
+                    </button>
+                  ) : null}
+                </span>
+              </span>
+            ) : null}
+          </span>
+          <button
+            type="button"
+            className={cx("qt-btn", "qt-btn--primary", classNames?.button)}
+            onClick={api.refresh}
+            disabled={isBusy}
+          >
+            Run Now
+          </button>
+        </span>
+      </div>
 
       {!collapsed && showSaved ? (
         <SavedQueriesModal saved={api.saved} onClose={() => setShowSaved(false)} onLoad={setLastSavedId} />
