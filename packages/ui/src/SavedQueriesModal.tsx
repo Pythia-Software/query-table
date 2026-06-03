@@ -7,9 +7,10 @@ import type { SavedQueriesApi } from "@query-table/react";
 export interface SavedQueriesModalProps {
   saved: SavedQueriesApi;
   onClose: () => void;
+  onLoad?: (savedId: string) => void;
 }
 
-export function SavedQueriesModal({ saved, onClose }: SavedQueriesModalProps): ReactNode {
+export function SavedQueriesModal({ saved, onClose, onLoad }: SavedQueriesModalProps): ReactNode {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
@@ -37,6 +38,7 @@ export function SavedQueriesModal({ saved, onClose }: SavedQueriesModalProps): R
                     type="button"
                     className="qt-saved-pick"
                     onClick={() => {
+                      onLoad?.(s.id);
                       saved.load(s.id);
                       onClose();
                     }}

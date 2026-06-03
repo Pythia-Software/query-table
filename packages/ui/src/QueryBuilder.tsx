@@ -163,11 +163,16 @@ export function QueryBuilder<Row>({ api, fields, total, running, classNames }: Q
   const [autoRefreshTurnOffAfterMs, setAutoRefreshTurnOffAfterMs] = useState(DEFAULT_AUTO_REFRESH_TURN_OFF_AFTER_MS);
   const [editingSavedId, setEditingSavedId] = useState<string | null>(null);
   const [editingSavedName, setEditingSavedName] = useState("");
+  const [lastSavedId, setLastSavedId] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const byName = useMemo(() => new Map(fields.map((f) => [f.name, f])), [fields]);
   const activeSavedQuery = useMemo(
     () => api.saved.items.find((item) => queriesEqual(item.query, api.query)),
     [api.query, api.saved.items],
+  );
+  const lastSavedQuery = useMemo(
+    () => api.saved.items.find((item) => item.id === lastSavedId) ?? null,
+    [api.saved.items, lastSavedId],
   );
   const bodyId = useId();
   const isEditingSaved = editingSavedId != null && activeSavedQuery?.id === editingSavedId;
@@ -194,18 +199,43 @@ export function QueryBuilder<Row>({ api, fields, total, running, classNames }: Q
     if (editingSavedId != null && activeSavedQuery?.id !== editingSavedId) {
       cancelRenameActiveSaved();
     }
+    if (activeSavedQuery) setLastSavedId(activeSavedQuery.id);
     // activeSavedQuery can become null if edits/loads shift to unsaved or another query
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSavedQuery]);
+
+  useEffect(() => {
+    if (!lastSavedId || api.saved.items.some((item) => item.id === lastSavedId)) return;
+    setLastSavedId(null);
+  }, [api.saved.items, lastSavedId]);
 
   function saveFailed(error: unknown): void {
     const message = error instanceof Error ? error.message : "Failed to save query.";
     if (typeof window !== "undefined") window.alert(message);
   }
 
-  function save() {
+  async function saveAs() {
     const name = typeof window !== "undefined" ? window.prompt("Save query as…") : null;
-    if (name && name.trim()) void api.saved.save(name.trim()).catch(saveFailed);
+    if (!name) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    try {
+      const saved = await api.saved.save(trimmed);
+      setLastSavedId(saved.id);
+    } catch (error) {
+      saveFailed(error);
+    }
+  }
+
+  async function saveLastSaved() {
+    if (!lastSavedQuery || !lastSavedId) return;
+    try {
+      await api.saved.remove(lastSavedId);
+      const saved = await api.saved.save(lastSavedQuery.name);
+      setLastSavedId(saved.id);
+    } catch (error) {
+      saveFailed(error);
+    }
   }
 
   function beginRenameActiveSaved() {
@@ -228,7 +258,10 @@ export function QueryBuilder<Row>({ api, fields, total, running, classNames }: Q
     }
     void api.saved
       .save(trimmed)
-      .then(() => void api.saved.remove(activeSavedQuery.id))
+      .then((saved) => {
+        setLastSavedId(saved.id);
+        return api.saved.remove(activeSavedQuery.id);
+      })
       .catch(saveFailed);
     cancelRenameActiveSaved();
   }
@@ -420,8 +453,16 @@ export function QueryBuilder<Row>({ api, fields, total, running, classNames }: Q
             <button type="button" className={cx("qt-btn", classNames?.button)} onClick={api.redo} disabled={!api.canRedo}>
               ↷ Redo
             </button>
-            <button type="button" className={cx("qt-btn", classNames?.button)} onClick={save} disabled={running}>
-              ★ save
+            <button
+              type="button"
+              className={cx("qt-btn", classNames?.button)}
+              onClick={() => void saveLastSaved()}
+              disabled={running || !lastSavedQuery}
+            >
+              ★ {lastSavedQuery ? `save '${lastSavedQuery.name}'` : "save"}
+            </button>
+            <button type="button" className={cx("qt-btn", classNames?.button)} onClick={() => void saveAs()} disabled={running}>
+              ★ save as...
             </button>
             <button type="button" className={cx("qt-btn", classNames?.button)} onClick={() => setShowSaved(true)}>
               ≡ saved{api.saved.items.length > 0 ? ` (${api.saved.items.length})` : ""}
@@ -453,7 +494,7 @@ export function QueryBuilder<Row>({ api, fields, total, running, classNames }: Q
       ) : null}
 
       {!collapsed && showSaved ? (
-        <SavedQueriesModal saved={api.saved} onClose={() => setShowSaved(false)} />
+        <SavedQueriesModal saved={api.saved} onClose={() => setShowSaved(false)} onLoad={setLastSavedId} />
       ) : null}
     </div>
   );
