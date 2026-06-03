@@ -1,6 +1,6 @@
 // @query-table/react — headless hooks. No markup; bring your own (or use @query-table/ui).
 
-export type { UseQueryTableOptions, QueryTableApi } from "./useQueryTable";
+export type { AutoRefreshApi, AutoRefreshConfig, AutoRefreshStatus, UseQueryTableOptions, QueryTableApi } from "./useQueryTable";
 export { useQueryTable } from "./useQueryTable";
 
 export type { SelectionApi } from "./useSelection";

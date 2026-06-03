@@ -20,6 +20,7 @@ import {
 } from "@query-table/core";
 
 const AUTOCOMPLETE_LIMIT = 50;
+const MAX_AUTO_REFRESH_POLLS = 1000;
 import type {
   QueryState,
   WhereClause,
@@ -55,6 +56,23 @@ export interface UseQueryTableOptions<Row> {
   now?: () => number;
 }
 
+export interface AutoRefreshConfig {
+  frequencyMs: number;
+  turnOffAfterMs: number;
+}
+
+export interface AutoRefreshStatus extends AutoRefreshConfig {
+  startedAt: number;
+  stopsAt: number;
+  pollCount: number;
+}
+
+export interface AutoRefreshApi {
+  status: AutoRefreshStatus | null;
+  start: (config: AutoRefreshConfig) => void;
+  stop: () => void;
+}
+
 export interface QueryTableApi<Row> {
   // state
   query: QueryState;
@@ -76,6 +94,7 @@ export interface QueryTableApi<Row> {
   loading: boolean;
   error: Error | null;
   refresh: () => void;
+  autoRefresh: AutoRefreshApi;
   refreshRow: (id: RowId) => Promise<void>;
 
   // filters
@@ -196,6 +215,7 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [nonce, setNonce] = useState(0);
+  const [autoRefreshStatus, setAutoRefreshStatus] = useState<AutoRefreshStatus | null>(null);
 
   const setQuery = useCallback<QueryTableApi<Row>["setQuery"]>((next) => {
     setQueryState((prev) => {
@@ -372,6 +392,60 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
   );
 
   const refresh = useCallback(() => setNonce((n) => n + 1), []);
+  const stopAutoRefresh = useCallback(() => setAutoRefreshStatus(null), []);
+  const startAutoRefresh = useCallback(
+    ({ frequencyMs, turnOffAfterMs }: AutoRefreshConfig) => {
+      const pollCount = frequencyMs > 0 && turnOffAfterMs > 0 ? Math.floor(turnOffAfterMs / frequencyMs) : 0;
+      if (pollCount < 1 || pollCount > MAX_AUTO_REFRESH_POLLS) {
+        throw new Error("Auto-refresh must schedule between 1 and 1000 polls.");
+      }
+
+      const startedAt = now();
+      setAutoRefreshStatus({
+        frequencyMs,
+        turnOffAfterMs,
+        startedAt,
+        stopsAt: startedAt + turnOffAfterMs,
+        pollCount: 0,
+      });
+    },
+    [now],
+  );
+
+  useEffect(() => {
+    if (!autoRefreshStatus) return;
+
+    const tick = () => {
+      if (now() >= autoRefreshStatus.stopsAt) {
+        setAutoRefreshStatus(null);
+        return;
+      }
+
+      refresh();
+      setAutoRefreshStatus((current) => {
+        if (!current) return current;
+        return { ...current, pollCount: current.pollCount + 1 };
+      });
+    };
+
+    const interval = setInterval(tick, autoRefreshStatus.frequencyMs);
+    const timeout = setTimeout(() => setAutoRefreshStatus(null), Math.max(0, autoRefreshStatus.stopsAt - now()));
+
+    return () => {
+      clearInterval(interval);
+      clearTimeout(timeout);
+    };
+  }, [autoRefreshStatus, now, refresh]);
+
+  const autoRefresh = useMemo<AutoRefreshApi>(
+    () => ({
+      status: autoRefreshStatus,
+      start: startAutoRefresh,
+      stop: stopAutoRefresh,
+    }),
+    [autoRefreshStatus, startAutoRefresh, stopAutoRefresh],
+  );
+
   const refreshRow = useCallback(
     async (id: RowId) => {
       if (!transport?.fetchRow) return;
@@ -396,6 +470,7 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
     undo,
     redo,
     refresh,
+    autoRefresh,
     refreshRow,
     addFilter,
     updateFilter,
