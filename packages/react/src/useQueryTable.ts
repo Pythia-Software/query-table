@@ -203,6 +203,7 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
   const { schema, transport, clientRows, initialQuery, syncUrl = true, debounceMs = 200 } = opts;
   const storage = useMemo(() => opts.storage ?? localStorageAdapter(), [opts.storage]);
   const now = opts.now ?? Date.now;
+  const nowRef = useRef(now);
   const defaults = useMemo(() => defaultsFor(schema), [schema]);
   const byName = useMemo(() => new Map(schema.fields.map((f) => [f.name, f])), [schema]);
 
@@ -216,6 +217,10 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
   const [error, setError] = useState<Error | null>(null);
   const [nonce, setNonce] = useState(0);
   const [autoRefreshStatus, setAutoRefreshStatus] = useState<AutoRefreshStatus | null>(null);
+
+  useEffect(() => {
+    nowRef.current = now;
+  }, [now]);
 
   const setQuery = useCallback<QueryTableApi<Row>["setQuery"]>((next) => {
     setQueryState((prev) => {
@@ -400,42 +405,50 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
         throw new Error("Auto-refresh must schedule between 1 and 1000 polls.");
       }
 
-      const startedAt = now();
+      const startedAt = nowRef.current();
+      refresh();
       setAutoRefreshStatus({
         frequencyMs,
         turnOffAfterMs,
         startedAt,
         stopsAt: startedAt + turnOffAfterMs,
-        pollCount: 0,
+        pollCount: 1,
       });
     },
-    [now],
+    [refresh],
   );
 
+  const autoRefreshFrequencyMs = autoRefreshStatus?.frequencyMs ?? null;
+  const autoRefreshStopsAt = autoRefreshStatus?.stopsAt ?? null;
+
   useEffect(() => {
-    if (!autoRefreshStatus) return;
+    if (autoRefreshFrequencyMs == null || autoRefreshStopsAt == null) return;
 
     const tick = () => {
-      if (now() >= autoRefreshStatus.stopsAt) {
-        setAutoRefreshStatus(null);
+      if (nowRef.current() >= autoRefreshStopsAt) {
+        setAutoRefreshStatus((current) => (current?.stopsAt === autoRefreshStopsAt ? null : current));
         return;
       }
 
       refresh();
       setAutoRefreshStatus((current) => {
         if (!current) return current;
+        if (current.stopsAt !== autoRefreshStopsAt) return current;
         return { ...current, pollCount: current.pollCount + 1 };
       });
     };
 
-    const interval = setInterval(tick, autoRefreshStatus.frequencyMs);
-    const timeout = setTimeout(() => setAutoRefreshStatus(null), Math.max(0, autoRefreshStatus.stopsAt - now()));
+    const interval = setInterval(tick, autoRefreshFrequencyMs);
+    const timeout = setTimeout(
+      () => setAutoRefreshStatus((current) => (current?.stopsAt === autoRefreshStopsAt ? null : current)),
+      Math.max(0, autoRefreshStopsAt - nowRef.current()),
+    );
 
     return () => {
       clearInterval(interval);
       clearTimeout(timeout);
     };
-  }, [autoRefreshStatus, now, refresh]);
+  }, [autoRefreshFrequencyMs, autoRefreshStopsAt, refresh]);
 
   const autoRefresh = useMemo<AutoRefreshApi>(
     () => ({
