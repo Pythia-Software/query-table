@@ -123,6 +123,94 @@ func TestCompile_select(t *testing.T) {
 	}
 }
 
+func TestCompileAggregation_grandTotalCount(t *testing.T) {
+	s := mustSchema(t)
+	res, err := CompileAggregation(AggSpec{ID: "c", Op: "count"}, s)
+	if err != nil {
+		t.Fatalf("CompileAggregation: %v", err)
+	}
+	want := []string{`COUNT(*) AS "value"`, `COUNT(*) AS "count"`}
+	if !reflect.DeepEqual(res.SelectExprs, want) {
+		t.Errorf("SelectExprs = %#v, want %#v", res.SelectExprs, want)
+	}
+	if res.GroupBySQL != "" {
+		t.Errorf("GroupBySQL = %q, want empty (grand total)", res.GroupBySQL)
+	}
+}
+
+func TestCompileAggregation_avgByTwoGroups(t *testing.T) {
+	s := mustSchema(t)
+	res, err := CompileAggregation(AggSpec{
+		ID:      "m",
+		Op:      "avg",
+		Field:   "total_ms",
+		GroupBy: []string{"overall", "is_starred"},
+	}, s)
+	if err != nil {
+		t.Fatalf("CompileAggregation: %v", err)
+	}
+	want := []string{
+		`vr.overall AS "g0"`,
+		`(w.tags ? 'x') AS "g1"`,
+		`AVG(vr.total_ms) AS "value"`,
+		`COUNT(*) AS "count"`,
+	}
+	if !reflect.DeepEqual(res.SelectExprs, want) {
+		t.Errorf("SelectExprs\n got: %#v\nwant: %#v", res.SelectExprs, want)
+	}
+	if res.GroupBySQL != "vr.overall, (w.tags ? 'x')" {
+		t.Errorf("GroupBySQL = %q", res.GroupBySQL)
+	}
+}
+
+func TestCompileAggregation_opMatrixAndValidation(t *testing.T) {
+	s := mustSchema(t)
+	// SUM on an enum is invalid (numeric-only).
+	if _, err := CompileAggregation(AggSpec{ID: "x", Op: "sum", Field: "overall"}, s); err == nil {
+		t.Error("want error for sum on enum field")
+	}
+	// MIN on a datetime/enum/text is allowed; MIN on overall (enum) is fine.
+	if _, err := CompileAggregation(AggSpec{ID: "x", Op: "min", Field: "overall"}, s); err != nil {
+		t.Errorf("min on enum should be allowed: %v", err)
+	}
+	// count_distinct on a textarray is NOT allowed (only count).
+	if _, err := CompileAggregation(AggSpec{ID: "x", Op: "count_distinct", Field: "function_names"}, s); err == nil {
+		t.Error("want error for count_distinct on textarray")
+	}
+	// Unknown op, measure field, and group field all error.
+	if _, err := CompileAggregation(AggSpec{ID: "x", Op: "median", Field: "total_ms"}, s); err == nil {
+		t.Error("want error for unknown op")
+	}
+	if _, err := CompileAggregation(AggSpec{ID: "x", Op: "avg", Field: "nope"}, s); err == nil {
+		t.Error("want error for unknown measure field")
+	}
+	if _, err := CompileAggregation(AggSpec{ID: "x", Op: "count", GroupBy: []string{"nope"}}, s); err == nil {
+		t.Error("want error for unknown group field")
+	}
+	// avg requires a measure field.
+	if _, err := CompileAggregation(AggSpec{ID: "x", Op: "avg"}, s); err == nil {
+		t.Error("want error for avg with no measure field")
+	}
+}
+
+func TestDecodeWireQuery_aggregations(t *testing.T) {
+	token := b64url(`{"g":[{"id":"a1","op":"avg","field":"total_ms","groupBy":["overall"]},{"id":"a2","op":"count"}]}`)
+	q, err := DecodeWireQuery(token)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(q.Aggregations) != 2 {
+		t.Fatalf("want 2 aggregations, got %#v", q.Aggregations)
+	}
+	if q.Aggregations[0].Op != "avg" || q.Aggregations[0].Field != "total_ms" ||
+		!reflect.DeepEqual(q.Aggregations[0].GroupBy, []string{"overall"}) {
+		t.Errorf("agg[0] = %#v", q.Aggregations[0])
+	}
+	if q.Aggregations[1].Op != "count" || q.Aggregations[1].Field != "" {
+		t.Errorf("agg[1] = %#v", q.Aggregations[1])
+	}
+}
+
 func TestDecodeWireQuery_legacyShapes(t *testing.T) {
 	// legacy: o is a single object, c is a string[]
 	token := b64url(`{"o":{"field":"total_ms","dir":"desc"},"c":["overall","total_ms"],"l":50,"w":[{"field":"overall","op":"=","value":"FAIL"}]}`)

@@ -39,6 +39,12 @@ export interface QueryBuilderProps<Row> {
   /** Disable inputs while a fetch is in flight. */
   running?: boolean;
   classNames?: QueryBuilderClassNames;
+  /** Use this to control collapse state from a parent UI. */
+  collapsed?: boolean;
+  /** Controlled collapse callback (use when `collapsed` is provided). */
+  onCollapsedChange?: (collapsed: boolean) => void;
+  /** Initial collapse state for uncontrolled mode. */
+  defaultCollapsed?: boolean;
 }
 
 const cx = (...parts: Array<string | undefined | false>): string =>
@@ -161,7 +167,16 @@ function orderBySummaryText<Row>(orderBy: OrderByClause[], byName: Map<string, F
   return orderBy.length === 0 ? "(default)" : orderBy.map((term) => orderByAsText(term, byName)).join(", ");
 }
 
-export function QueryBuilder<Row>({ api, fields, total, running, classNames }: QueryBuilderProps<Row>): ReactNode {
+export function QueryBuilder<Row>({
+  api,
+  fields,
+  total,
+  running,
+  classNames,
+  collapsed,
+  onCollapsedChange,
+  defaultCollapsed = false,
+}: QueryBuilderProps<Row>): ReactNode {
   const UNSAVED_QUERY_EDIT_ID = "__qt-unsaved-query__";
   const [showSaved, setShowSaved] = useState(false);
   const [showAutoRefresh, setShowAutoRefresh] = useState(false);
@@ -170,7 +185,16 @@ export function QueryBuilder<Row>({ api, fields, total, running, classNames }: Q
   const [editingSavedId, setEditingSavedId] = useState<string | null>(null);
   const [editingSavedName, setEditingSavedName] = useState("");
   const [lastSavedId, setLastSavedId] = useState<string | null>(null);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsedFallback, setCollapsedFallback] = useState(defaultCollapsed);
+  const collapsedControlled = typeof collapsed !== "undefined";
+  const isCollapsed = collapsedControlled ? collapsed : collapsedFallback;
+  const setCollapsed = (next: boolean) => {
+    if (collapsedControlled) {
+      onCollapsedChange?.(next);
+      return;
+    }
+    setCollapsedFallback(next);
+  };
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   const [lastFailureAt, setLastFailureAt] = useState<number | null>(null);
   const byName = useMemo(() => new Map(fields.map((f) => [f.name, f])), [fields]);
@@ -344,8 +368,8 @@ export function QueryBuilder<Row>({ api, fields, total, running, classNames }: Q
   }
 
   useEffect(() => {
-    if (collapsed) setShowSaved(false);
-  }, [collapsed]);
+    if (isCollapsed) setShowSaved(false);
+  }, [isCollapsed]);
 
   useEffect(() => {
     if (!showAutoRefresh || !autoRefreshStatus) return;
@@ -425,7 +449,7 @@ export function QueryBuilder<Row>({ api, fields, total, running, classNames }: Q
               </button>
             )}
           </span>
-          {collapsed ? (
+          {isCollapsed ? (
             <span className="qt-qb-summary qt-truncate" title={collapsedSummary}>
               <span className="qt-qb-summary-kw">WHERE</span>{" "}
               <strong>{collapsedWhereText}</strong>{" "}
@@ -449,17 +473,23 @@ export function QueryBuilder<Row>({ api, fields, total, running, classNames }: Q
         </button>
         <button
           type="button"
-          className={cx("qt-btn", classNames?.button)}
-          onClick={() => setCollapsed((next) => !next)}
-          aria-expanded={!collapsed}
+          className={cx("qt-btn", "qt-qb-collapse-btn", classNames?.button)}
+          onClick={() => setCollapsed(!isCollapsed)}
+          aria-expanded={!isCollapsed}
           aria-controls={bodyId}
-          title={collapsed ? "Expand query builder" : "Collapse query builder"}
+          title={isCollapsed ? "Expand query builder" : "Collapse query builder"}
         >
-          {collapsed ? "Show query builder" : "Hide query builder"}
+          <span
+            className={cx("qt-qb-collapse-caret", isCollapsed && "qt-qb-collapse-caret--collapsed")}
+            aria-hidden="true"
+          >
+            ▾
+          </span>
+          <span className="qt-sr-only">{isCollapsed ? "Expand query builder" : "Collapse query builder"}</span>
         </button>
       </div>
 
-      {!collapsed ? (
+      {!isCollapsed ? (
         <div className="qt-qb-bar qt-qb-editor-bar">
           <div id={bodyId} className="qt-qb-body">
             <SelectRow api={api} fields={fields} classNames={classNames} disabled={isBusy} />
@@ -587,7 +617,7 @@ export function QueryBuilder<Row>({ api, fields, total, running, classNames }: Q
         </span>
       </div>
 
-      {!collapsed && showSaved ? (
+      {!isCollapsed && showSaved ? (
         <SavedQueriesModal saved={api.saved} onClose={() => setShowSaved(false)} onLoad={setLastSavedId} />
       ) : null}
     </div>
@@ -1273,3 +1303,4 @@ function WindowRow<Row>({
     </div>
   );
 }
+

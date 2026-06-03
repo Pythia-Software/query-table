@@ -104,6 +104,126 @@ func Compile(q WireQuery, schema Schema, startIdx int) (CompileResult, int, erro
 	return res, idx, nil
 }
 
+// AggCompileResult holds the SQL fragments for one metric's GROUP BY query. The
+// caller splices them into its own FROM/JOIN, sharing the rows query's WHERE so
+// the metric covers the same filtered set (scope = whole set, no paging):
+//
+//	SELECT <SelectExprs joined by ", ">
+//	FROM   <caller FROM/JOIN>
+//	[WHERE <Compile(WireQuery{Where: req.Where}, …).WhereSQL>]
+//	[GROUP BY <GroupBySQL>]
+//
+// SelectExprs is, in order: one `expr AS "g0"/"g1"/…` per group field, then the
+// aggregate `AS "value"`, then `COUNT(*) AS "count"`. GroupBySQL lists the same
+// group expressions (empty string ⇒ a single grand-total row, no GROUP BY).
+type AggCompileResult struct {
+	SelectExprs []string
+	GroupBySQL  string
+}
+
+// CompileAggregation validates one AggSpec against the schema allowlist and emits
+// its SELECT + GROUP BY fragments. Like Compile, the only request-influenced
+// tokens that reach SQL are the validated op and the schema-defined field
+// expressions — never request input. No bound args are produced (aggregations
+// carry no values; the shared WHERE is compiled separately via Compile).
+//
+// Errors on: unknown op, unknown measure/group field, a missing measure for an
+// op that needs one, or an op not allowed for the measure field's kind.
+func CompileAggregation(spec AggSpec, schema Schema) (AggCompileResult, error) {
+	var res AggCompileResult
+	if !aggOpKnown(spec.Op) {
+		return res, fmt.Errorf("unknown aggregate op %q", spec.Op)
+	}
+
+	groupExprs := make([]string, 0, len(spec.GroupBy))
+	for i, g := range spec.GroupBy {
+		gs, ok := schema.Fields[g]
+		if !ok {
+			return res, fmt.Errorf("unknown group field %q", g)
+		}
+		res.SelectExprs = append(res.SelectExprs, fmt.Sprintf("%s AS %s", gs.Expr, safeIdent(fmt.Sprintf("g%d", i))))
+		groupExprs = append(groupExprs, gs.Expr)
+	}
+
+	valueExpr, err := aggValueExpr(spec, schema)
+	if err != nil {
+		return res, err
+	}
+	res.SelectExprs = append(res.SelectExprs, valueExpr+` AS "value"`, `COUNT(*) AS "count"`)
+
+	if len(groupExprs) > 0 {
+		res.GroupBySQL = strings.Join(groupExprs, ", ")
+	}
+	return res, nil
+}
+
+// aggValueExpr builds the aggregate SELECT expression. `count` with no field is
+// COUNT(*) (counts rows); with a field it counts non-null values.
+func aggValueExpr(spec AggSpec, schema Schema) (string, error) {
+	if spec.Op == "count" && spec.Field == "" {
+		return "COUNT(*)", nil
+	}
+	if spec.Field == "" {
+		return "", fmt.Errorf("aggregate op %q requires a measure field", spec.Op)
+	}
+	fs, ok := schema.Fields[spec.Field]
+	if !ok {
+		return "", fmt.Errorf("unknown measure field %q", spec.Field)
+	}
+	if !aggOpAllowed(fs.Kind, spec.Op) {
+		return "", fmt.Errorf("aggregate op %q not allowed on %s field", spec.Op, kindName(fs.Kind))
+	}
+	switch spec.Op {
+	case "count":
+		return "COUNT(" + fs.Expr + ")", nil
+	case "count_distinct":
+		return "COUNT(DISTINCT " + fs.Expr + ")", nil
+	case "sum":
+		return "SUM(" + fs.Expr + ")", nil
+	case "avg":
+		return "AVG(" + fs.Expr + ")", nil
+	case "min":
+		return "MIN(" + fs.Expr + ")", nil
+	case "max":
+		return "MAX(" + fs.Expr + ")", nil
+	default:
+		return "", fmt.Errorf("unknown aggregate op %q", spec.Op)
+	}
+}
+
+func aggOpKnown(op string) bool {
+	switch op {
+	case "count", "count_distinct", "sum", "avg", "min", "max":
+		return true
+	}
+	return false
+}
+
+// aggOpAllowed mirrors @query-table/core AGG_OPS_BY_TYPE — the server-side
+// enforcement of which aggregate ops a field's kind permits. Keep in lockstep.
+func aggOpAllowed(kind FieldKind, op string) bool {
+	switch kind {
+	case FieldNumber:
+		switch op {
+		case "count", "count_distinct", "sum", "avg", "min", "max":
+			return true
+		}
+	case FieldDatetime, FieldEnum, FieldText:
+		switch op {
+		case "count", "count_distinct", "min", "max":
+			return true
+		}
+	case FieldBool:
+		switch op {
+		case "count", "count_distinct":
+			return true
+		}
+	case FieldTextArray:
+		return op == "count"
+	}
+	return false
+}
+
 func orderTerm(expr, dir, nulls string) (string, error) {
 	d := "ASC"
 	if strings.EqualFold(dir, "desc") {

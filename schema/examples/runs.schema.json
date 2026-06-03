@@ -28,6 +28,7 @@
       "type": "text",
       "group": "core",
       "select": { "default": true },
+      "aggregate": { "groupable": false },
       "bindings": { "postgres": { "expr": "w.corpus_case_name" } }
     },
     {

@@ -38,6 +38,9 @@
     "filterOp": {
       "enum": ["=", "!=", ">", ">=", "<", "<=", "contains", "starts_with", "ends_with", "includes", "is_null", "is_not_null"]
     },
+    "aggOp": {
+      "enum": ["count", "count_distinct", "sum", "avg", "min", "max"]
+    },
     "orderByClause": {
       "type": "object",
       "required": ["field", "dir"],
@@ -105,6 +108,16 @@
             "default": { "type": "boolean", "description": "Shown when the query's select is empty." },
             "width": { "type": "number", "minimum": 1 },
             "align": { "enum": ["left", "right", "center"] }
+          }
+        },
+        "aggregate": {
+          "type": "object",
+          "description": "Capability config for the aggregation/metrics add-on. Backend fields only.",
+          "additionalProperties": false,
+          "properties": {
+            "measure": { "type": "boolean", "description": "Can be a metric's measure (sum/avg/min/max/count_distinct)? Default: backend ⇒ true." },
+            "groupable": { "type": "boolean", "description": "Can be a GROUP BY key? Default: enum/text/bool ⇒ true." },
+            "ops": { "type": "array", "items": { "$ref": "#/$defs/aggOp" }, "description": "Override the default aggregate-op set for the field's type." }
           }
         },
         "group": { "type": "string", "description": "Field-picker grouping bucket." },

@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { loadSchema, type RowId } from "@query-table/core";
 import { useQueryTable } from "@query-table/react";
 import {
   DataTable,
+  MetricsPanel,
   QueryBuilder,
   SelectionToolbar,
   defaultRenderers,
@@ -12,6 +14,7 @@ import "@query-table/ui/theme.css";
 
 import runsDoc from "../../schema/examples/runs.schema.json";
 import { RUNS, type Run } from "./data";
+import { CollapsibleSection } from "./CollapsibleSection";
 
 const schema = loadSchema<Run>(runsDoc);
 
@@ -34,11 +37,17 @@ const renderers: RenderRegistry<Run> = {
 };
 
 export function App() {
+  const [metricsCollapsed, setMetricsCollapsed] = useState(false);
+  const [tableCollapsed, setTableCollapsed] = useState(false);
+
   const api = useQueryTable<Run>({
     schema,
     clientRows: RUNS,
     syncUrl: true,
   });
+  const metricCount = api.aggregations.clauses.length;
+  const metricLabel = `${metricCount} metric${metricCount === 1 ? "" : "s"}`;
+  const tableSummary = `${api.rows.length} row${api.rows.length === 1 ? "" : "s"}${api.total != null ? ` (of ${api.total} total)` : ""}`;
 
   return (
     <div style={{ maxWidth: 1100, margin: "24px auto", fontFamily: "system-ui, sans-serif" }}>
@@ -50,24 +59,41 @@ export function App() {
 
       <QueryBuilder api={api} fields={schema.fields} total={api.total} running={api.loading} />
 
-      <SelectionToolbar
-        selection={api.selection}
-        actions={(ids: RowId[]) => <button>Re-run {ids.length}</button>}
-      />
+      <CollapsibleSection
+        title="Metrics"
+        collapsed={metricsCollapsed}
+        onToggle={setMetricsCollapsed}
+        collapsedSummary={metricLabel}
+        className="qt-qt-section--metrics"
+      >
+        <MetricsPanel aggregations={api.aggregations} fields={schema.fields} renderers={renderers} />
+      </CollapsibleSection>
 
-      <DataTable
-        fields={api.visibleFields}
-        rows={api.rows}
-        query={api.query}
-        onQueryChange={api.setQuery}
-        total={api.total}
-        renderers={renderers}
-        rowId={(r: Run) => r.id}
-        selection={api.selection}
-        columnDrag={api.columnDrag}
-        loading={api.loading}
-        emptyMessage="No runs match this query."
-      />
+      <CollapsibleSection
+        title="Table"
+        collapsed={tableCollapsed}
+        onToggle={setTableCollapsed}
+        collapsedSummary={tableSummary}
+        className="qt-qt-section--table"
+      >
+        <SelectionToolbar
+          selection={api.selection}
+          actions={(ids: RowId[]) => <button>Re-run {ids.length}</button>}
+        />
+        <DataTable
+          fields={api.visibleFields}
+          rows={api.rows}
+          query={api.query}
+          onQueryChange={api.setQuery}
+          total={api.total}
+          renderers={renderers}
+          rowId={(r: Run) => r.id}
+          selection={api.selection}
+          columnDrag={api.columnDrag}
+          loading={api.loading}
+          emptyMessage="No runs match this query."
+        />
+      </CollapsibleSection>
     </div>
   );
 }

@@ -6,6 +6,8 @@ export type {
   WhereClause,
   OrderByClause,
   SelectColumn,
+  AggOp,
+  AggregationClause,
   QueryState,
   RowId,
 } from "./query";
@@ -22,6 +24,7 @@ export type {
   FilterConfig,
   SortConfig,
   SelectConfig,
+  AggregateConfig,
   FieldDef,
   FieldSchema,
 } from "./schema";
@@ -38,12 +41,27 @@ export {
 } from "./schema";
 
 export { OPS_BY_TYPE, NULLARY_OPS, opsForField, opAllowedForType, coerceValue } from "./ops";
+export {
+  AGG_OPS_BY_TYPE,
+  AGG_OPS_NEEDING_FIELD,
+  aggOpNeedsField,
+  aggOpsForField,
+  aggOpAllowedForType,
+  isMeasurable,
+  isGroupable,
+} from "./agg";
 
-export type { ServerQuery } from "./encode";
-export { encodeQuery, decodeQuery, toServerQuery } from "./encode";
+export type {
+  ServerQuery,
+  AggregationRequest,
+  AggregationBucket,
+  AggregationResultEntry,
+  AggregationResult,
+} from "./encode";
+export { encodeQuery, decodeQuery, toServerQuery, toAggregationQuery } from "./encode";
 
 export type { ApplyResult } from "./apply";
-export { applyQuery, matchesClause } from "./apply";
+export { applyQuery, matchesClause, applyAggregations } from "./apply";
 
 export type {
   FetchRowsResult,

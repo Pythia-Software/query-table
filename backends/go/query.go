@@ -31,17 +31,29 @@ type OrderBy struct {
 	Nulls string `json:"nulls,omitempty"` // "first" | "last" | "" (default last)
 }
 
+// AggSpec mirrors @query-table/core AggregationClause: one aggregate op over one
+// measure column (Field; empty ⇒ COUNT(*)), broken down by zero or more group
+// columns. Compiled by CompileAggregation; the metric panel runs one per spec
+// over the WHERE-filtered set (no paging).
+type AggSpec struct {
+	ID      string   `json:"id"`
+	Op      string   `json:"op"`
+	Field   string   `json:"field,omitempty"`
+	GroupBy []string `json:"groupBy,omitempty"`
+}
+
 // WireQuery is the server-bound subset of QueryState (the TS ServerQuery / the
 // {s,w,o,...} `?q=` payload). View-only state (column widths) never arrives.
 //
 // OrderBy unmarshals from BOTH the new array form and the legacy single-object
 // form, so old xplo-perf / xlsx-collect links keep compiling.
 type WireQuery struct {
-	Select  []string      `json:"select,omitempty"`
-	Where   []WhereClause `json:"w,omitempty"`
-	OrderBy OrderBys      `json:"o,omitempty"`
-	Limit   int           `json:"l,omitempty"`
-	Offset  int           `json:"f,omitempty"`
+	Select       []string      `json:"select,omitempty"`
+	Where        []WhereClause `json:"w,omitempty"`
+	OrderBy      OrderBys      `json:"o,omitempty"`
+	Limit        int           `json:"l,omitempty"`
+	Offset       int           `json:"f,omitempty"`
+	Aggregations []AggSpec     `json:"g,omitempty"`
 }
 
 // OrderBys is a slice of OrderBy that also accepts a single object on decode
@@ -81,6 +93,7 @@ type wirePayload struct {
 	Order  OrderBys        `json:"o,omitempty"`
 	Limit  int             `json:"l,omitempty"`
 	Offset int             `json:"f,omitempty"`
+	Aggs   []AggSpec       `json:"g,omitempty"`
 }
 
 // DecodeWireQuery decodes the base64url-encoded JSON `?q=` token produced by
@@ -109,6 +122,7 @@ func DecodeWireQuery(token string) (WireQuery, error) {
 	q.OrderBy = p.Order
 	q.Limit = p.Limit
 	q.Offset = p.Offset
+	q.Aggregations = p.Aggs
 	q.Select = decodeSelect(p.Select, p.Legacy)
 	return q, nil
 }

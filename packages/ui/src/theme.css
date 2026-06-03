@@ -26,6 +26,19 @@
   --qt-radius: 6px;
 }
 
+/* ---- utilities ---- */
+.qt-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ---- shared bits ---- */
 .qt-muted { color: var(--qt-muted); }
 .qt-truncate { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -233,7 +246,7 @@
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
 }
-.qt-qb-state-bar { gap: 6px; }
+.qt-qb-state-bar { position: relative; padding-left: 4px; gap: 6px; }
 .qt-qb-state-main { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-right: auto; min-width: 0; }
 .qt-qb-editor-bar {
   display: flex;
@@ -259,6 +272,31 @@
 .qt-qb-auto-status { color: var(--qt-muted); font-size: 11px; }
 .qt-qb-run-actions { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
 .qt-qb-run-error { color: var(--qt-fail-fg); font-size: 11px; }
+.qt-qb-collapse-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  left: -20px;
+  width: 20px;
+  height: 26px;
+  min-width: 20px;
+  padding: 0;
+  justify-content: center;
+  border-right: 0;
+  border-radius: var(--qt-radius) 0 0 var(--qt-radius);
+}
+.qt-qb-collapse-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  transition: transform 0.12s ease;
+  transform: rotate(0deg);
+  font-size: 13px;
+}
+.qt-qb-collapse-caret--collapsed {
+  transform: rotate(-90deg);
+}
 .qt-qb-kw {
   color: var(--qt-muted);
   text-transform: uppercase;
@@ -462,3 +500,163 @@
 .qt-pill--pass { color: var(--qt-pass-fg); background: var(--qt-pass-bg); }
 .qt-pill--fail { color: var(--qt-fail-fg); background: var(--qt-fail-bg); }
 .qt-pill--warn { color: var(--qt-warn-fg); background: var(--qt-warn-bg); }
+
+/* ---- aggregate metric chips (in the query builder) ---- */
+/* Full-width dotted separator so the metrics add-on reads as distinct from the
+   select/where/order/limit rows above it. */
+.qt-qb-row--metrics { border-top: 1px dotted var(--qt-border); padding-top: 9px; margin-top: 3px; }
+.qt-chip--agg { gap: 4px; height: auto; min-height: 24px; padding: 1px 6px; flex-wrap: wrap; }
+.qt-chip-agg-by { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+/* group-by chips are styled to read like the select inputs beside them: white,
+   subtle border, the selects' 4px radius. */
+.qt-chip-agg-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: #fff;
+  border: 1px solid var(--qt-border-subtle);
+  border-radius: 4px;
+  padding: 0 2px 0 6px;
+  height: 20px;
+  font-size: 11px;
+}
+.qt-chip-agg-group-label { white-space: nowrap; }
+.qt-chip-agg-group .qt-chip-x { font-size: 9px; padding: 0 1px; }
+.qt-chip-agg-add { padding: 0 7px; }
+
+/* ---- metrics panel (above the table) ---- */
+/* Light-grey tray so the white cards pop. Cards are flex-1 + align-stretch, so a
+   row of them shares width and matches height; up to 4 per line, then wrap. */
+.qt-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 12px;
+  margin: 0;
+  padding: 12px;
+  background: var(--qt-header-bg);
+  border: 1px solid var(--qt-border);
+  border-radius: 0;
+}
+.qt-metrics-error { flex: 1 0 100%; color: var(--qt-fail-fg); font-size: 12px; }
+.qt-metric {
+  flex: 1 1 calc(25% - 9px);
+  min-width: 170px;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--qt-border);
+  border-radius: var(--qt-radius);
+  background: #fff;
+  padding: 10px 12px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  box-sizing: border-box;
+}
+/* pivots / flat tables get two columns of width so the grid has room to breathe. */
+.qt-metric--gb2,
+.qt-metric--gb3 { flex-basis: calc(50% - 6px); }
+.qt-metric-head { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.qt-metric-title { font-weight: 700; font-size: 12px; }
+.qt-metric-by { color: var(--qt-muted); font-size: 11px; }
+.qt-metric-loading,
+.qt-metric-empty { color: var(--qt-muted); font-size: 12px; font-style: italic; }
+
+/* big number (0 group-by) — centered in whatever height the row stretches to */
+.qt-metric-big { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 2px; }
+.qt-metric-big-value { font-size: 24px; font-weight: 700; line-height: 1.1; color: var(--qt-text); font-variant-numeric: tabular-nums; }
+.qt-metric-big-sub { color: var(--qt-muted); font-size: 11px; }
+
+/* ranked bars (1 group-by) */
+.qt-metric-bars { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 4px; min-width: 0; }
+.qt-metric-bar-row { display: grid; grid-template-columns: minmax(54px, 38%) 1fr auto; align-items: center; gap: 8px; }
+.qt-metric-bar-label { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qt-metric-bar-track { height: 8px; background: var(--qt-border-subtle); border-radius: 999px; overflow: hidden; }
+.qt-metric-bar-fill { display: block; height: 100%; background: var(--qt-accent); border-radius: 999px; min-width: 2px; }
+.qt-metric-bar-value { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--qt-text); }
+
+/* pivot + flat table (2 / 3+ group-by) */
+.qt-metric-pivot-wrap { overflow-x: auto; }
+.qt-metric-pivot,
+.qt-metric-flat { border-collapse: collapse; font-size: 12px; }
+.qt-metric-pivot th,
+.qt-metric-pivot td,
+.qt-metric-flat th,
+.qt-metric-flat td {
+  border: 1px solid var(--qt-border-subtle);
+  padding: 3px 8px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.qt-metric-pivot thead th,
+.qt-metric-flat thead th { background: var(--qt-header-bg); font-weight: 600; }
+.qt-metric-pivot-row,
+.qt-metric-flat td:first-child,
+.qt-metric-flat th:first-child { text-align: left; }
+.qt-metric-pivot-corner { text-align: left; color: var(--qt-muted); font-weight: 500; }
+.qt-metric-pivot-axes { font-size: 11px; }
+.qt-metric-flat-value { font-weight: 600; }
+
+/* ---- compact collapsible sections for dashboard + table ---- */
+.qt-qt-section {
+  position: relative;
+  margin: 0;
+}
+.qt-qt-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  min-height: 26px;
+  padding: 5px 6px 5px 4px;
+  border: 1px solid var(--qt-border);
+  border-bottom: 0;
+  border-radius: 0;
+  box-sizing: border-box;
+}
+.qt-qt-section-title {
+  font-size: 12px;
+  color: var(--qt-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 700;
+}
+.qt-qt-section-summary {
+  font-size: 12px;
+  color: var(--qt-muted);
+}
+.qt-qt-section-toggle {
+  position: absolute;
+  left: -20px;
+  top: 0;
+  width: 20px;
+  height: 26px;
+  min-width: 20px;
+  padding: 0;
+  border-right: 0;
+  border-radius: var(--qt-radius) 0 0 var(--qt-radius);
+  justify-content: center;
+  box-sizing: border-box;
+}
+.qt-qt-section-toggle-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  transition: transform 0.12s ease;
+  transform: rotate(0deg);
+  font-size: 13px;
+}
+.qt-qt-section-toggle-caret--collapsed {
+  transform: rotate(-90deg);
+}
+
+.qt-qt-section--metrics.qt-qt-section--expanded > .qt-metrics {
+  border-bottom: 0;
+}
+
+.qt-qt-section--table.qt-qt-section--collapsed .qt-qt-section-head {
+  border: 1px solid var(--qt-border);
+  border-radius: 0 0 var(--qt-radius) 0;
+}
