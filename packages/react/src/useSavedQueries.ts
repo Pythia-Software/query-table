@@ -15,7 +15,7 @@ export interface SavedQueriesApi {
   /** Saved query id used as the default view when no query is specified. */
   defaultId: string | null;
   /** Persist the current query under a name. Rejects on duplicate names. */
-  save: (name: string) => Promise<void>;
+  save: (name: string) => Promise<SavedQuery>;
   /** Load a saved query into the live controller (and thus the URL). */
   load: (id: string) => void;
   /** Mark a saved query as the default view. No-op when storage lacks support. */
@@ -57,8 +57,9 @@ export function useSavedQueries(
 
   const save = useCallback(
     async (name: string) => {
-      await storage.saveNamed(key, name, currentQuery, now());
+      const saved = await storage.saveNamed(key, name, currentQuery, now());
       await refresh();
+      return saved;
     },
     [storage, key, currentQuery, now, refresh],
   );
