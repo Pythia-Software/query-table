@@ -17,7 +17,7 @@
 //      `select`). The only code-bearing members are the derived `accessor` and
 //      the `render` function — kept apart from the config so the two don't mix.
 
-import type { FilterOp, OrderByClause, SelectColumn } from "./query";
+import type { AggOp, FilterOp, OrderByClause, SelectColumn } from "./query";
 
 export type FieldType =
   | "text"
@@ -106,6 +106,16 @@ export interface SelectConfig {
   align?: Align;
 }
 
+export interface AggregateConfig {
+  /** Can this field be a metric's MEASURE (sum/avg/min/max/count_distinct)?
+   *  Default: backend ⇒ true, derived ⇒ false. */
+  measure?: boolean;
+  /** Can this field be a GROUP BY key? Default: enum/text/bool ⇒ true. */
+  groupable?: boolean;
+  /** Override the default aggregate-op set for the field's type. */
+  ops?: AggOp[];
+}
+
 // ---- the field ------------------------------------------------------------
 
 export interface FieldDef<Row = any, V = unknown> {
@@ -121,6 +131,7 @@ export interface FieldDef<Row = any, V = unknown> {
   filter?: FilterConfig;
   sort?: SortConfig;
   select?: SelectConfig;
+  aggregate?: AggregateConfig;
 
   // discovery (picker UX, declarative)
   group?: string; // grouping bucket
@@ -260,6 +271,7 @@ function projectField<Row>(raw: any, i: number): FieldDef<Row> {
     filter: raw.filter,
     sort: raw.sort,
     select: raw.select,
+    aggregate: raw.aggregate,
     group: raw.group,
     aliases: raw.aliases,
     render: raw.render, // string key from JSON; consumer may override with a fn

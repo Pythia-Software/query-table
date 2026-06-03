@@ -94,6 +94,7 @@ interface QueryState {
   orderBy: OrderByClause[];  // multi-sort, priority = array order
   limit:   number;
   offset:  number;
+  aggregations?: AggregationClause[]; // optional dashboard metrics (see below); omitted = none
 }
 ```
 
@@ -131,6 +132,61 @@ reaches SQL text; values are always bound parameters. Every type allows
 See `schema/query-table.schema.json` for the authoritative document format and
 `schema/examples/runs.schema.json` for a worked schema (ported from xplo-perf,
 validated against the meta-schema and loadable by both the TS and Go loaders).
+
+---
+
+## Aggregation metrics (the dashboard add-on)
+
+Optional **metrics** pin above the table: each is a single aggregate
+(`count`/`count_distinct`/`sum`/`avg`/`min`/`max`) over one measure column,
+broken down by zero or more group columns. They turn the query builder into a
+lightweight dashboard — and because they live inside `QueryState`, a saved query
+*is* a saved dashboard (URL, saved queries, and undo/redo all come for free).
+
+```ts
+interface AggregationClause {
+  id: string;          // stable; survives a ?q= round-trip
+  op: AggOp;           // count | count_distinct | sum | avg | min | max
+  field?: string;      // measure column; omit only for count ⇒ COUNT(*)
+  groupBy: string[];   // 0 ⇒ one number · 1 ⇒ bars · 2 ⇒ x/y pivot · 3+ ⇒ flat table
+  label?: string;
+}
+```
+
+**Scope is the whole filtered set.** A metric runs as a real server `GROUP BY`
+over the *same `WHERE`* as the table, but **without** its `ORDER BY` / `LIMIT` /
+`OFFSET` — so it reflects every matching row, not the visible page. It is never a
+client-side reduction of the rows already on screen: the measure or group column
+is often not even among the visible/selected columns, so it genuinely needs the
+database.
+
+Each metric is its own request, kept off the rows pipeline:
+
+- **Transport** gains `fetchAggregations?(req: AggregationRequest)`. `core`
+  projects the query with `toAggregationQuery` (pushdown `WHERE` subset + the
+  server-capable specs). `clientRows` mode falls back to `applyAggregations`, the
+  client mirror, so the demo works with no backend.
+- **`backends/go`** adds `CompileAggregation(spec, schema)`, a sibling of
+  `Compile` that emits the `SELECT`/`GROUP BY` fragments and reuses `Compile`'s
+  `WhereSQL`. The op×type matrix (`AGG_OPS_BY_TYPE` ⇄ Go `aggOpAllowed`) and the
+  field-expression allowlist are enforced on both ends, exactly like filters.
+
+```
+SELECT <group exprs…>, AVG(vr.total_ms) AS "value", COUNT(*) AS "count"
+FROM <caller FROM/JOIN>
+WHERE <shared WhereSQL>          -- same filter as the rows query
+GROUP BY <group exprs…>          -- no ORDER BY / LIMIT / OFFSET
+```
+
+The **`MetricsPanel`** component renders the results (big number · ranked bars ·
+pivot · flat table) and the **QueryBuilder** grows a `metrics` row to build them.
+Per-field `aggregate: { measure?, groupable?, ops? }` config tunes what the
+pickers offer (defaults are type-driven: numbers are measurable, enum/text/bool
+are groupable).
+
+> Caveat: a non-pushdown (`pushdown:false`) `WHERE` clause isn't sent to the
+> server, so a DB-backed metric is computed over a superset of those rows. Such
+> filters are rare; surface them in the UI if your dataset uses them.
 
 ---
 

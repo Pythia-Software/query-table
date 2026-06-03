@@ -25,6 +25,9 @@ import type {
   QueryState,
   WhereClause,
   OrderByClause,
+  AggOp,
+  AggregationClause,
+  AggregationResult,
   RowId,
   FieldDef,
   FieldSchema,
@@ -32,6 +35,7 @@ import type {
   StorageAdapter,
   DistinctValuesResult,
 } from "@query-table/core";
+import { useAggregations } from "./useAggregations";
 import { useSelection, type SelectionApi } from "./useSelection";
 import { useSelect, type SelectApi } from "./useSelect";
 import { useColumnDrag, type ColumnDragApi } from "./useColumnDrag";
@@ -73,6 +77,34 @@ export interface AutoRefreshApi {
   stop: () => void;
 }
 
+/** A patch for one metric. `field`/`label` accept an explicit `undefined` to
+ *  CLEAR them (e.g. switching to an op whose measure no longer applies); an
+ *  absent key leaves the existing value untouched. */
+export interface AggregationPatch {
+  op?: AggOp;
+  field?: string | undefined;
+  groupBy?: string[];
+  label?: string | undefined;
+}
+
+export interface AggregationsApi {
+  /** The metric specs currently in the query. */
+  clauses: AggregationClause[];
+  /** Server (or client-mirror) results, one entry per clause; null when none. */
+  results: AggregationResult | null;
+  loading: boolean;
+  error: Error | null;
+  /** Append a metric. Defaults to "count all rows"; pass a partial to override.
+   *  Returns the generated id. */
+  add: (partial?: Partial<Omit<AggregationClause, "id">>) => string;
+  /** Patch a metric by id. */
+  update: (id: string, patch: AggregationPatch) => void;
+  /** Remove a metric by id. */
+  remove: (id: string) => void;
+  /** Remove all metrics. */
+  clear: () => void;
+}
+
 export interface QueryTableApi<Row> {
   // state
   query: QueryState;
@@ -96,6 +128,9 @@ export interface QueryTableApi<Row> {
   refresh: () => void;
   autoRefresh: AutoRefreshApi;
   refreshRow: (id: RowId) => Promise<void>;
+
+  // aggregation metrics (the dashboard panel above the table)
+  aggregations: AggregationsApi;
 
   // filters
   addFilter: (clause: WhereClause) => void;
@@ -138,13 +173,31 @@ function defaultsFor<Row>(schema: FieldSchema<Row>): QueryState {
 }
 
 function cloneQueryState(q: QueryState): QueryState {
-  return {
+  const clone: QueryState = {
     select: q.select.map((column) => ({ ...column })),
     where: q.where.map((clause) => ({ ...clause })),
     orderBy: q.orderBy.map((term) => ({ ...term })),
     limit: q.limit,
     offset: q.offset,
   };
+  if (q.aggregations) clone.aggregations = q.aggregations.map((a) => ({ ...a, groupBy: [...a.groupBy] }));
+  return clone;
+}
+
+/** Apply a patch to a metric, building a fresh clause so optional `field`/`label`
+ *  can be dropped (passing them as `undefined` clears; omitting the key keeps the
+ *  current value) without ever materializing an `undefined`-valued property. */
+function mergeAggregation(a: AggregationClause, patch: AggregationPatch): AggregationClause {
+  const next: AggregationClause = {
+    id: a.id,
+    op: patch.op ?? a.op,
+    groupBy: patch.groupBy ?? a.groupBy,
+  };
+  const field = "field" in patch ? patch.field : a.field;
+  if (field) next.field = field;
+  const label = "label" in patch ? patch.label : a.label;
+  if (label) next.label = label;
+  return next;
 }
 
 function isNullLike(value: unknown): boolean {
@@ -208,6 +261,7 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
   const byName = useMemo(() => new Map(schema.fields.map((f) => [f.name, f])), [schema]);
 
   const initRef = useRef(resolveInitial(opts));
+  const aggIdRef = useRef(0);
   const [query, setQueryState] = useState<QueryState>(initRef.current.q);
   const undoStack = useRef<QueryState[]>([cloneQueryState(initRef.current.q)]);
   const redoStack = useRef<QueryState[]>([]);
@@ -326,6 +380,7 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
     storage,
     now,
   );
+  const aggState = useAggregations(query, schema, transport, clientRows, debounceMs, nonce);
 
   const canUndo = undoStack.current.length > 0;
   const canRedo = redoStack.current.length > 0;
@@ -363,6 +418,33 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
   );
   const clearFilters = useCallback(() => setQuery((q) => ({ ...q, offset: 0, where: [] })), [setQuery]);
   const resetAll = useCallback(() => setQuery(() => cloneQueryState(defaults)), [setQuery, defaults]);
+
+  // ---- aggregation metric mutators (don't touch paging — scope is the whole set) ----
+  const addAggregation = useCallback<AggregationsApi["add"]>(
+    (partial) => {
+      const id = `a${nowRef.current()}-${aggIdRef.current++}`;
+      const clause: AggregationClause = { id, op: "count", groupBy: [], ...partial };
+      setQuery((q) => ({ ...q, aggregations: [...(q.aggregations ?? []), clause] }));
+      return id;
+    },
+    [setQuery],
+  );
+  const updateAggregation = useCallback<AggregationsApi["update"]>(
+    (id, patch) =>
+      setQuery((q) => ({
+        ...q,
+        aggregations: (q.aggregations ?? []).map((a) => (a.id === id ? mergeAggregation(a, patch) : a)),
+      })),
+    [setQuery],
+  );
+  const removeAggregation = useCallback<AggregationsApi["remove"]>(
+    (id) => setQuery((q) => ({ ...q, aggregations: (q.aggregations ?? []).filter((a) => a.id !== id) })),
+    [setQuery],
+  );
+  const clearAggregations = useCallback<AggregationsApi["clear"]>(
+    () => setQuery((q) => ({ ...q, aggregations: [] })),
+    [setQuery],
+  );
 
   const setSort = useCallback((orderBy: OrderByClause[]) => setQuery((q) => ({ ...q, offset: 0, orderBy })), [setQuery]);
   const toggleSort = useCallback(
@@ -470,6 +552,29 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
 
   const visibleFields = useMemo(() => selectedFields(schema, query), [schema, query]);
 
+  const aggregations = useMemo<AggregationsApi>(
+    () => ({
+      clauses: query.aggregations ?? [],
+      results: aggState.results,
+      loading: aggState.loading,
+      error: aggState.error,
+      add: addAggregation,
+      update: updateAggregation,
+      remove: removeAggregation,
+      clear: clearAggregations,
+    }),
+    [
+      query.aggregations,
+      aggState.results,
+      aggState.loading,
+      aggState.error,
+      addAggregation,
+      updateAggregation,
+      removeAggregation,
+      clearAggregations,
+    ],
+  );
+
   return {
     query,
     defaults,
@@ -485,6 +590,7 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
     refresh,
     autoRefresh,
     refreshRow,
+    aggregations,
     addFilter,
     updateFilter,
     removeFilter,
