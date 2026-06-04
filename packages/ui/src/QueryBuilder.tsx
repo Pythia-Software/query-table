@@ -353,10 +353,18 @@ export function QueryBuilder<Row>({
 
   async function updateLastSavedQuery() {
     if (!lastSavedQuery) return;
-    const savedId = await persistSavedQuery(lastSavedQuery.name);
-    if (!savedId || savedId === lastSavedQuery.id) return;
-    await api.saved.remove(lastSavedQuery.id);
-    setLastSavedId(savedId);
+    const wasDefault = api.saved.defaultId === lastSavedQuery.id;
+    const trimmedName = lastSavedQuery.name.trim();
+    if (!trimmedName) return;
+
+    try {
+      await api.saved.remove(lastSavedQuery.id);
+      const saved = await api.saved.save(trimmedName);
+      if (wasDefault) await api.saved.setDefault(saved.id);
+      setLastSavedId(saved.id);
+    } catch (error) {
+      saveFailed(error);
+    }
   }
 
   function commitNameEditor() {
