@@ -99,6 +99,9 @@ export interface AggregationsApi {
   add: (partial?: Partial<Omit<AggregationClause, "id">>) => string;
   /** Patch a metric by id. */
   update: (id: string, patch: AggregationPatch) => void;
+  /** Reorder: move the metric `id` to `toIndex` (an index in the list with the
+   *  metric removed, so a drag preview's slot maps straight to the result). */
+  move: (id: string, toIndex: number) => void;
   /** Remove a metric by id. */
   remove: (id: string) => void;
   /** Remove all metrics. */
@@ -437,6 +440,19 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
       })),
     [setQuery],
   );
+  const moveAggregation = useCallback<AggregationsApi["move"]>(
+    (id, toIndex) =>
+      setQuery((q) => {
+        const current = q.aggregations ?? [];
+        const from = current.findIndex((a) => a.id === id);
+        if (from === -1) return q;
+        const next = [...current];
+        const [item] = next.splice(from, 1);
+        next.splice(Math.max(0, Math.min(toIndex, next.length)), 0, item!);
+        return { ...q, aggregations: next };
+      }),
+    [setQuery],
+  );
   const removeAggregation = useCallback<AggregationsApi["remove"]>(
     (id) => setQuery((q) => ({ ...q, aggregations: (q.aggregations ?? []).filter((a) => a.id !== id) })),
     [setQuery],
@@ -560,6 +576,7 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
       error: aggState.error,
       add: addAggregation,
       update: updateAggregation,
+      move: moveAggregation,
       remove: removeAggregation,
       clear: clearAggregations,
     }),
@@ -570,6 +587,7 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
       aggState.error,
       addAggregation,
       updateAggregation,
+      moveAggregation,
       removeAggregation,
       clearAggregations,
     ],
