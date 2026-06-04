@@ -9,6 +9,8 @@
 
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
+  AggOp,
+  AggregationClause,
   DistinctValuesResult,
   FieldDef,
   FilterOp,
@@ -17,7 +19,11 @@ import type {
 } from "@query-table/core";
 import {
   NULLARY_OPS,
+  aggOpNeedsField,
+  aggOpsForField,
   filterValues as filterValuesFor,
+  isGroupable,
+  isMeasurable,
   queriesEqual,
   isFilterable,
   isSelectable,
@@ -543,6 +549,7 @@ export function QueryBuilder<Row>({
             <WhereRow api={api} byName={byName} fields={fields} classNames={classNames} disabled={isBusy} />
             <OrderRow api={api} fields={fields} classNames={classNames} disabled={isBusy} />
             <WindowRow api={api} classNames={classNames} disabled={isBusy} />
+            <MetricsRow api={api} fields={fields} classNames={classNames} disabled={isBusy} />
           </div>
           <div className="qt-qb-editor-stack">
             <button type="button" className={cx("qt-btn", classNames?.button)} onClick={api.undo} disabled={!api.canUndo || isBusy}>
@@ -1353,5 +1360,253 @@ function WindowRow<Row>({
         </button>
       )}
     </div>
+  );
+}
+
+// ---- METRICS (aggregations: op · measure · group-by, reorderable) ---------
+
+const AGG_OPS: AggOp[] = ["count", "count_distinct", "sum", "avg", "min", "max"];
+const AGG_OP_LABELS: Record<AggOp, string> = {
+  count: "count",
+  count_distinct: "count distinct",
+  sum: "sum",
+  avg: "avg",
+  min: "min",
+  max: "max",
+};
+
+function MetricsRow<Row>({
+  api,
+  fields,
+  classNames,
+  disabled,
+}: {
+  api: QueryTableApi<Row>;
+  fields: FieldDef<Row>[];
+  classNames: QueryBuilderClassNames | undefined;
+  disabled: boolean | undefined;
+}) {
+  const { aggregations } = api;
+  const clauses = aggregations.clauses;
+  const measurable = useMemo(() => fields.filter(isMeasurable), [fields]);
+  const groupable = useMemo(() => fields.filter(isGroupable), [fields]);
+
+  // Local live-reorder drag state (metrics are their own list, like the order-by
+  // terms). Chips are identified by their stable clause id so React MOVES the
+  // dragged chip instead of remounting it (a remount aborts the native drag).
+  const [drag, setDrag] = useState<{ source: string; overIndex: number } | null>(null);
+
+  const ids = clauses.map((c) => c.id);
+  const byId = useMemo(() => new Map(clauses.map((c) => [c.id, c])), [clauses]);
+
+  function previewIds(): string[] {
+    if (!drag) return ids;
+    const without = ids.filter((i) => i !== drag.source);
+    if (without.length === ids.length) return ids;
+    const at = Math.max(0, Math.min(drag.overIndex, without.length));
+    return [...without.slice(0, at), drag.source, ...without.slice(at)];
+  }
+  function handleOver(e: React.DragEvent, id: string) {
+    if (!drag) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (drag.source === id) return;
+    const without = ids.filter((i) => i !== drag.source);
+    let next = without.indexOf(id);
+    if (next >= 0) {
+      // Drop after the hovered chip when past its midpoint, so a metric can be
+      // moved into the last slot (no clientX ⇒ insert before, like the spec).
+      const rect = e.currentTarget.getBoundingClientRect();
+      if (e.clientX > rect.left + rect.width / 2) next += 1;
+      setDrag((d) => (d && d.overIndex !== next ? { source: d.source, overIndex: next } : d));
+    }
+  }
+  function commitDrop() {
+    if (drag) aggregations.move(drag.source, drag.overIndex);
+    setDrag(null);
+  }
+
+  const rendered = previewIds();
+
+  return (
+    <div className="qt-qb-row qt-qb-row--metrics">
+      <span className="qt-qb-kw">metrics</span>
+      {clauses.length === 0 && <span className="qt-qb-hint">none</span>}
+      {rendered.map((id) => {
+        const clause = byId.get(id)!;
+        return (
+          <MetricChip
+            // Stable key (clause id) so React MOVES the dragged chip, not remounts it.
+            key={id}
+            clause={clause}
+            measurable={measurable}
+            groupable={groupable}
+            classNames={classNames}
+            disabled={disabled}
+            isDragSource={drag?.source === id}
+            onDragStart={() => setDrag({ source: id, overIndex: ids.indexOf(id) })}
+            onDragOver={(e) => handleOver(e, id)}
+            onDrop={commitDrop}
+            onDragEnd={() => setDrag(null)}
+            onChangeOp={(op) => changeMetricOp(aggregations, clause, measurable, op)}
+            onChangeField={(field) => aggregations.update(id, { field })}
+            onAddGroup={(field) => aggregations.update(id, { groupBy: [...clause.groupBy, field] })}
+            onRemoveGroup={(field) =>
+              aggregations.update(id, { groupBy: clause.groupBy.filter((g) => g !== field) })
+            }
+            onRemove={() => aggregations.remove(id)}
+          />
+        );
+      })}
+      <button type="button" className="qt-add" onClick={() => aggregations.add()} disabled={disabled}>
+        + add metric
+      </button>
+      {clauses.length > 0 && (
+        <button type="button" className="qt-link-btn" onClick={aggregations.clear} disabled={disabled} title="Remove all metrics">
+          reset
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Change a metric's op, dropping the measure if it's no longer valid for the
+ *  new op (e.g. switching avg→count on a text field, or to an op the field type
+ *  can't aggregate). `count` keeps any chosen measure. */
+function changeMetricOp<Row>(
+  aggregations: QueryTableApi<Row>["aggregations"],
+  clause: AggregationClause,
+  measurable: FieldDef<Row>[],
+  op: AggOp,
+): void {
+  const field = clause.field;
+  const stillValid =
+    field != null && measurable.some((f) => f.name === field && aggOpsForField(f).includes(op));
+  if (field != null && !stillValid) aggregations.update(clause.id, { op, field: undefined });
+  else aggregations.update(clause.id, { op });
+}
+
+function MetricChip<Row>({
+  clause,
+  measurable,
+  groupable,
+  classNames,
+  disabled,
+  isDragSource,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+  onChangeOp,
+  onChangeField,
+  onAddGroup,
+  onRemoveGroup,
+  onRemove,
+}: {
+  clause: AggregationClause;
+  measurable: FieldDef<Row>[];
+  groupable: FieldDef<Row>[];
+  classNames: QueryBuilderClassNames | undefined;
+  disabled: boolean | undefined;
+  isDragSource: boolean;
+  onDragStart: () => void;
+  onDragOver: (e: React.DragEvent) => void;
+  onDrop: () => void;
+  onDragEnd: () => void;
+  onChangeOp: (op: AggOp) => void;
+  onChangeField: (field: string | undefined) => void;
+  onAddGroup: (field: string) => void;
+  onRemoveGroup: (field: string) => void;
+  onRemove: () => void;
+}) {
+  const [addingGroup, setAddingGroup] = useState(false);
+  const byName = useMemo(() => new Map(groupable.map((f) => [f.name, f])), [groupable]);
+
+  // Measures valid for the current op (a measurable field whose effective ops
+  // include this op). `count` may stand alone, so it gets an "(all rows)" choice.
+  const needsField = aggOpNeedsField(clause.op);
+  const measureOptions = measurable.filter((f) => aggOpsForField(f).includes(clause.op));
+
+  return (
+    <span
+      className={cx("qt-chip", "qt-chip--agg", isDragSource && "qt-chip--dragging", classNames?.chip)}
+      draggable={!disabled}
+      onDragStart={(e) => {
+        onDragStart();
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", clause.id);
+      }}
+      onDragOver={onDragOver}
+      onDrop={(e) => {
+        e.preventDefault();
+        onDrop();
+      }}
+      onDragEnd={onDragEnd}
+      title="drag to reorder metrics"
+    >
+      <span aria-hidden className="qt-chip-grip">
+        ⋮⋮
+      </span>
+      <select
+        className={cx("qt-chip-op", classNames?.select)}
+        value={clause.op}
+        disabled={disabled}
+        onChange={(e) => onChangeOp(e.target.value as AggOp)}
+      >
+        {AGG_OPS.map((op) => (
+          <option key={op} value={op}>
+            {AGG_OP_LABELS[op]}
+          </option>
+        ))}
+      </select>
+      <select
+        className={cx("qt-chip-val", classNames?.select)}
+        value={clause.field ?? ""}
+        disabled={disabled}
+        onChange={(e) => onChangeField(e.target.value || undefined)}
+      >
+        {!needsField && <option value="">(all rows)</option>}
+        {needsField && clause.field == null && <option value="">measure…</option>}
+        {measureOptions.map((f) => (
+          <option key={f.name} value={f.name}>
+            {f.label}
+          </option>
+        ))}
+      </select>
+      <span className="qt-chip-agg-by">
+        {clause.groupBy.map((g) => (
+          <span className="qt-chip-agg-group" key={g}>
+            <span className="qt-chip-agg-group-label">{byName.get(g)?.label ?? g}</span>
+            <button type="button" className="qt-chip-x" onClick={() => onRemoveGroup(g)} disabled={disabled}>
+              ✕
+            </button>
+          </span>
+        ))}
+        {addingGroup ? (
+          <FieldPicker
+            fields={groupable}
+            excluded={clause.groupBy}
+            onPick={(f) => {
+              onAddGroup(f.name);
+              setAddingGroup(false);
+            }}
+            onClose={() => setAddingGroup(false)}
+          />
+        ) : (
+          <button
+            type="button"
+            className="qt-add qt-chip-agg-add"
+            onClick={() => setAddingGroup(true)}
+            disabled={disabled}
+            title="Group by a field"
+          >
+            {clause.groupBy.length === 0 ? "+ by" : "+"}
+          </button>
+        )}
+      </span>
+      <button type="button" className="qt-chip-x" onClick={onRemove} disabled={disabled} title="Remove metric">
+        ✕
+      </button>
+    </span>
   );
 }
