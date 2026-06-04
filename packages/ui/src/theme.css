@@ -90,7 +90,7 @@
   overscroll-behavior: contain;
   overscroll-behavior-x: contain;
   -webkit-overflow-scrolling: touch;
-  touch-action: pan-x;
+  touch-action: pan-x pan-y;
 }
 .qt-table-wrap--loading .qt-row { opacity: 0.55; transition: opacity 120ms ease-in; }
 .qt-table {
