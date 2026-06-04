@@ -349,6 +349,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     const dy = e.deltaY;
     const absDx = Math.abs(dx);
     const absDy = Math.abs(dy);
+    const prefersHorizontal = absDx > absDy * 1.25;
 
     if (dx === 0 && !e.shiftKey) return;
 
@@ -359,7 +360,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
       return;
     }
 
-    if (absDx >= absDy || e.shiftKey) {
+    if (e.shiftKey || prefersHorizontal) {
       e.preventDefault();
       e.stopPropagation();
       wrap.scrollLeft += dx;
