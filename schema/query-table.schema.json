@@ -121,6 +121,7 @@
           }
         },
         "group": { "type": "string", "description": "Field-picker grouping bucket." },
+        "alias": { "type": "string", "description": "Single alternative search term (legacy alias support)." },
         "aliases": { "type": "array", "items": { "type": "string" }, "description": "Extra search terms for the picker." },
         "render": { "type": "string", "description": "Render-registry key resolved on the frontend (code, not data — only the key is stored)." },
         "bindings": {

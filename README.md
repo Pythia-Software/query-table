@@ -112,7 +112,7 @@ interface FieldDef<Row = any, V = unknown> {
   filter?: { enabled?; pushdown?; ops?: FilterOp[]; values?: FilterValues };  // pushdown = predicate pushdown
   sort?:   { enabled?; field?: string };                                       // field = server sort key if ≠ name
   select?: { enabled?; default?; width?; align? };                             // enabled:false = filter-only
-  group?: string; aliases?: string[];                                          // picker UX
+  group?: string; alias?: string; aliases?: string[];                          // picker UX
   render?: string | CellRenderer<Row, V>;                                      // registry key or inline fn
 }
 

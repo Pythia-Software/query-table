@@ -20,7 +20,7 @@
 import { EMPTY_QUERY } from "./query";
 import type { QueryState, WhereClause, OrderByClause, SelectColumn, AggregationClause } from "./query";
 import type { FieldSchema } from "./schema";
-import { indexFields, isFilterable, isPushdownFilter, isSortable, selectedFields } from "./schema";
+import { indexFields, isFilterable, isPushdownFilter, isSortable, resolveFieldName, selectedFields } from "./schema";
 
 // ---- base64url (browser + node) -------------------------------------------
 
@@ -154,17 +154,20 @@ export interface ServerQuery {
  *  client-only sorts, and remapping sort fields through `sort.field`. */
 export function toServerQuery<Row>(q: QueryState, schema: FieldSchema<Row>): ServerQuery {
   const byName = indexFields(schema);
+  const resolveField = (name: string) => resolveFieldName(schema, name) ?? name;
 
   const where = q.where.filter((cl) => {
-    const f = byName.get(cl.field);
+    const field = resolveField(cl.field);
+    const f = byName.get(field);
     return f != null && isPushdownFilter(f);
   });
 
   const orderBy: OrderByClause[] = [];
   for (const term of q.orderBy) {
-    const f = byName.get(term.field);
+    const field = resolveField(term.field);
+    const f = byName.get(field);
     if (!f || !isSortable(f) || f.source.kind !== "backend") continue;
-    orderBy.push({ ...term, field: f.sort?.field ?? term.field });
+    orderBy.push({ ...term, field: f.sort?.field ?? f.name });
   }
 
   // SELECT = the BACKEND columns the response rows must carry: visible backend
@@ -179,8 +182,9 @@ export function toServerQuery<Row>(q: QueryState, schema: FieldSchema<Row>): Ser
   );
   select.add(schema.idField);
   for (const cl of q.where) {
-    const f = byName.get(cl.field);
-    if (f && isFilterable(f) && !isPushdownFilter(f) && f.source.kind === "backend") select.add(cl.field);
+    const field = resolveField(cl.field);
+    const f = byName.get(field);
+    if (f && isFilterable(f) && !isPushdownFilter(f) && f.source.kind === "backend") select.add(field);
   }
 
   return { select: [...select], where, orderBy, limit: q.limit, offset: q.offset };
@@ -227,15 +231,17 @@ export interface AggregationResult {
  *  unknown field are dropped — the server has no SQL for them. */
 export function toAggregationQuery<Row>(q: QueryState, schema: FieldSchema<Row>): AggregationRequest {
   const byName = indexFields(schema);
+  const resolveField = (name: string) => resolveFieldName(schema, name) ?? name;
 
   const where = q.where.filter((cl) => {
-    const f = byName.get(cl.field);
+    const f = byName.get(resolveField(cl.field));
     return f != null && isPushdownFilter(f);
   });
 
   const isBackend = (name: string | undefined): boolean => {
     if (name == null) return true; // omitted measure (count(*)) is fine
-    const f = byName.get(name);
+    const field = resolveField(name);
+    const f = byName.get(field);
     return f != null && f.source.kind === "backend";
   };
 

@@ -135,6 +135,7 @@ export interface FieldDef<Row = any, V = unknown> {
 
   // discovery (picker UX, declarative)
   group?: string; // grouping bucket
+  alias?: string; // single alternative search term
   aliases?: string[]; // extra search terms
 
   // presentation (the only code-bearing field): registry key or inline fn
@@ -188,7 +189,6 @@ export function selectedFields<Row>(
   schema: FieldSchema<Row>,
   q: { select: SelectColumn[] },
 ): FieldDef<Row>[] {
-  const byName = indexFields(schema);
   const order =
     q.select.length > 0
       ? q.select.map((c) => c.field)
@@ -199,12 +199,66 @@ export function selectedFields<Row>(
   const out: FieldDef<Row>[] = [];
   for (const name of order) {
     if (seen.has(name)) continue;
-    const f = byName.get(name);
+    const f = resolveField(schema, name);
     if (!f || !isSelectable(f)) continue;
     seen.add(name);
+    seen.add(f.name);
     out.push(f);
   }
   return out;
+}
+
+/** Resolve a field token to a concrete field by canonical name, case-insensitive
+ *  name match, or alias match. */
+export function resolveField<Row>(schema: FieldSchema<Row>, field: string): FieldDef<Row> | undefined {
+  const token = field.trim();
+  if (!token) return undefined;
+
+  const byName = indexFields(schema);
+  const byExactName = byName.get(token);
+  if (byExactName) return byExactName;
+
+  const needle = token.toLowerCase();
+  for (const f of schema.fields) {
+    if (f.name.toLowerCase() === needle) return f;
+    if (aliasMatches(f, needle)) return f;
+  }
+  return undefined;
+}
+
+/** Return the canonical name for a query token, or undefined when unresolved. */
+export function resolveFieldName<Row>(schema: FieldSchema<Row>, field: string): string | undefined {
+  return resolveField(schema, field)?.name;
+}
+
+/** All configured aliases for a field (deduped, preserving display shape). */
+export function aliasTermsFor<Row>(field: FieldDef<Row>): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  const add = (raw: unknown) => {
+    if (typeof raw !== "string") return;
+    const value = raw.trim();
+    if (!value) return;
+    const key = value.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(value);
+  };
+
+  add(field.alias);
+  if (field.aliases) {
+    for (const alias of field.aliases) add(alias);
+  }
+
+  return out;
+}
+
+function aliasMatches(field: FieldDef, needle: string): boolean {
+  for (const alias of aliasTermsFor(field)) {
+    if (alias.toLowerCase() === needle) return true;
+  }
+  return false;
 }
 
 /** Read a field's value from a row: derived `accessor` if present, else the
@@ -273,7 +327,28 @@ function projectField<Row>(raw: any, i: number): FieldDef<Row> {
     select: raw.select,
     aggregate: raw.aggregate,
     group: raw.group,
-    aliases: raw.aliases,
+    alias: raw.alias,
+    aliases: normalizeAliases(raw.aliases, raw.alias),
     render: raw.render, // string key from JSON; consumer may override with a fn
   };
+}
+
+function normalizeAliases(rawAliases: unknown, rawAlias: unknown): string[] | undefined {
+  const aliases: string[] = [];
+  const seen = new Set<string>();
+  const add = (raw: unknown) => {
+    if (typeof raw !== "string") return;
+    const value = raw.trim();
+    if (!value) return;
+    const key = value.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    aliases.push(value);
+  };
+
+  add(rawAlias);
+  if (Array.isArray(rawAliases)) {
+    for (const item of rawAliases) add(item);
+  }
+  return aliases.length ? aliases : undefined;
 }
