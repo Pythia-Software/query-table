@@ -372,6 +372,10 @@
   padding: 8px;
   box-sizing: border-box;
 }
+.qt-auto-refresh-popover--align-right {
+  left: auto;
+  right: 0;
+}
 .qt-auto-refresh-field { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--qt-muted); font-size: 12px; }
 .qt-auto-refresh-select {
   width: 132px;
