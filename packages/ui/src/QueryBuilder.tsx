@@ -240,6 +240,9 @@ export function QueryBuilder<Row>({
   const lastRowsRef = useRef<Row[] | null>(null);
   const lastTotalRef = useRef<number | null>(null);
   const previousLoadingRef = useRef(api.loading);
+  const autoRefreshRef = useRef<HTMLSpanElement>(null);
+  const autoRefreshPopoverRef = useRef<HTMLSpanElement>(null);
+  const [autoRefreshPopoverAlignRight, setAutoRefreshPopoverAlignRight] = useState(false);
 
   useEffect(() => {
     if (activeSavedQuery) {
@@ -376,6 +379,42 @@ export function QueryBuilder<Row>({
     setAutoRefreshFrequencyMs(autoRefreshStatus.frequencyMs);
     setAutoRefreshTurnOffAfterMs(autoRefreshStatus.turnOffAfterMs);
   }, [showAutoRefresh, autoRefreshStatus]);
+
+  useEffect(() => {
+    if (!showAutoRefresh) return;
+
+    function onDocumentClick(event: MouseEvent) {
+      const wrapper = autoRefreshRef.current;
+      const target = event.target as Node | null;
+      if (!wrapper || !target) return;
+      if (!wrapper.contains(target)) setShowAutoRefresh(false);
+    }
+
+    function onDocumentKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setShowAutoRefresh(false);
+    }
+
+    function calculateAutoRefreshPosition() {
+      const popover = autoRefreshPopoverRef.current;
+      const wrapper = autoRefreshRef.current;
+      if (!popover || !wrapper) return;
+      const wrapperRect = wrapper.getBoundingClientRect();
+      const popWidth = popover.offsetWidth;
+      const viewportRightInset = 8;
+      setAutoRefreshPopoverAlignRight(wrapperRect.right + popWidth > window.innerWidth - viewportRightInset);
+    }
+
+    calculateAutoRefreshPosition();
+    const t = setTimeout(() => window.addEventListener("click", onDocumentClick), 0);
+    window.addEventListener("keydown", onDocumentKeyDown);
+    window.addEventListener("resize", calculateAutoRefreshPosition);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener("click", onDocumentClick);
+      window.removeEventListener("keydown", onDocumentKeyDown);
+      window.removeEventListener("resize", calculateAutoRefreshPosition);
+    };
+  }, [showAutoRefresh]);
 
   function submitAutoRefresh() {
     if (!canSubmitAutoRefresh) return;
@@ -523,7 +562,7 @@ export function QueryBuilder<Row>({
               )} (${autoRefreshStatus.pollCount} polls run)`}
             </span>
           ) : null}
-          <span className="qt-auto-refresh">
+            <span className="qt-auto-refresh" ref={autoRefreshRef}>
             <button
               type="button"
               className={cx("qt-btn", Boolean(autoRefreshStatus) && "qt-btn--active", classNames?.button)}
@@ -534,7 +573,12 @@ export function QueryBuilder<Row>({
               {autoRefreshButtonText}
             </button>
             {showAutoRefresh ? (
-              <span className="qt-auto-refresh-popover" role="dialog" aria-label="Auto-refresh settings">
+              <span
+                ref={autoRefreshPopoverRef}
+                className={cx("qt-auto-refresh-popover", autoRefreshPopoverAlignRight && "qt-auto-refresh-popover--align-right")}
+                role="dialog"
+                aria-label="Auto-refresh settings"
+              >
                 <label className="qt-auto-refresh-field">
                   <span>Frequency</span>
                   <select
@@ -1303,4 +1347,3 @@ function WindowRow<Row>({
     </div>
   );
 }
-
