@@ -40,7 +40,7 @@ export function FieldPicker<Row>({
         return (
           f.label.toLowerCase().includes(needle) ||
           f.name.toLowerCase().includes(needle) ||
-          (f.aliases?.some((a) => a.toLowerCase().includes(needle)) ?? false)
+          (fieldAliases(f).some((a) => a.toLowerCase().includes(needle)))
         );
       }),
     [fields, excludedSet, needle],
@@ -130,9 +130,18 @@ function isEnabled(f: FieldDef, stats: FieldPickerProps<any>["stats"], gate: boo
 }
 
 function aliasMatch(f: FieldDef, needle: string): string | undefined {
-  if (!needle || !f.aliases) return undefined;
+  if (!needle) return undefined;
   if (f.label.toLowerCase().includes(needle) || f.name.toLowerCase().includes(needle)) return undefined;
-  return f.aliases.find((a) => a.toLowerCase().includes(needle));
+  return fieldAliases(f).find((a) => a.toLowerCase().includes(needle));
+}
+
+function fieldAliases<Row>(f: FieldDef<Row>): string[] {
+  const aliases = new Set<string>();
+  if (f.alias) aliases.add(f.alias);
+  if (f.aliases) {
+    for (const alias of f.aliases) aliases.add(alias);
+  }
+  return [...aliases];
 }
 
 function groupByGroup<Row>(fs: FieldDef<Row>[]): Array<[string, FieldDef<Row>[]]> {

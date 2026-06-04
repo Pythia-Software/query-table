@@ -16,7 +16,7 @@
 import type { AggOp, AggregationClause, QueryState, WhereClause } from "./query";
 import type { FieldSchema, FieldDef } from "./schema";
 import type { AggregationBucket, AggregationResult } from "./encode";
-import { indexFields, readFieldValue } from "./schema";
+import { indexFields, readFieldValue, resolveFieldName } from "./schema";
 import { coerceValue } from "./ops";
 
 export interface ApplyResult<Row> {
@@ -31,12 +31,15 @@ export interface ApplyResult<Row> {
  *  ignored (the backend already enforced its own allowlist). */
 export function applyQuery<Row>(rows: Row[], q: QueryState, schema: FieldSchema<Row>): ApplyResult<Row> {
   const byName = indexFields(schema);
+  const resolveField = (name: string) => resolveFieldName(schema, name) ?? name;
+  const whereClauses = q.where.map((clause) => ({ ...clause, field: resolveField(clause.field) }));
+  const orderBy = q.orderBy.map((term) => ({ ...term, field: resolveField(term.field) }));
 
-  let out = rows.filter((row) => q.where.every((cl) => matchesWith(byName, row, cl)));
+  let out = rows.filter((row) => whereClauses.every((cl) => matchesWith(byName, row, cl)));
   const total = out.length;
 
-  if (q.orderBy.length) {
-    const terms = q.orderBy
+  if (orderBy.length) {
+    const terms = orderBy
       .map((t) => ({ field: byName.get(t.field), dir: t.dir, nullsLast: (t.nulls ?? "last") === "last" }))
       .filter((t): t is { field: FieldDef<Row>; dir: "asc" | "desc"; nullsLast: boolean } => t.field != null);
     out = [...out].sort((a, b) => {
@@ -73,10 +76,12 @@ export function matchesClause<Row>(row: Row, clause: WhereClause, schema: FieldS
  *  backends/go's aggregate compile on op semantics. */
 export function applyAggregations<Row>(rows: Row[], q: QueryState, schema: FieldSchema<Row>): AggregationResult {
   const byName = indexFields(schema);
-  const filtered = rows.filter((row) => q.where.every((cl) => matchesWith(byName, row, cl)));
+  const resolveField = (name: string) => resolveFieldName(schema, name) ?? name;
+  const whereClauses = q.where.map((clause) => ({ ...clause, field: resolveField(clause.field) }));
+  const filtered = rows.filter((row) => whereClauses.every((cl) => matchesWith(byName, row, cl)));
   const metrics = (q.aggregations ?? []).map((agg) => ({
     id: agg.id,
-    buckets: computeBuckets(filtered, agg, byName),
+    buckets: computeBuckets(filtered, agg, byName, resolveField),
   }));
   return { metrics };
 }
@@ -85,11 +90,12 @@ function computeBuckets<Row>(
   rows: Row[],
   agg: AggregationClause,
   byName: Map<string, FieldDef<Row>>,
+  resolveField: (field: string) => string,
 ): AggregationBucket[] {
   const groupFields = agg.groupBy
-    .map((n) => byName.get(n))
+    .map((n) => byName.get(resolveField(n)))
     .filter((f): f is FieldDef<Row> => f != null);
-  const measure = agg.field ? byName.get(agg.field) : undefined;
+  const measure = agg.field ? byName.get(resolveField(agg.field)) : undefined;
 
   const groups = new Map<string, { keys: (string | null)[]; rows: Row[] }>();
   for (const row of rows) {

@@ -81,6 +81,7 @@
       "label": "★",
       "type": "bool",
       "group": "tagging",
+      "alias": "star",
       "render": "tag_marker",
       "select": { "width": 40 },
       "sort": { "field": "is_starred" },
