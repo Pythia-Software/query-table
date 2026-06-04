@@ -92,14 +92,17 @@ function computeBuckets<Row>(
   byName: Map<string, FieldDef<Row>>,
   resolveField: (field: string) => string,
 ): AggregationBucket[] {
-  const groupFields = agg.groupBy
-    .map((n) => byName.get(resolveField(n)))
-    .filter((f): f is FieldDef<Row> => f != null);
+  // One slot per groupBy entry, preserving position. An unresolved field stays
+  // in the array as `undefined` so every bucket's `keys` has exactly one element
+  // per requested group field — the panel renders keys positionally against
+  // `clause.groupBy`, so dropping an entry here would shift every later column.
+  const groupFields = agg.groupBy.map((n) => byName.get(resolveField(n)));
   const measure = agg.field ? byName.get(resolveField(agg.field)) : undefined;
 
   const groups = new Map<string, { keys: (string | null)[]; rows: Row[] }>();
   for (const row of rows) {
     const keys = groupFields.map((f) => {
+      if (!f) return null; // unresolved group field → NULL bucket, never a missing column
       const v = readFieldValue(f, row);
       return v == null || v === "" ? null : String(v);
     });

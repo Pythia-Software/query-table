@@ -69,6 +69,16 @@ describe("applyAggregations", () => {
     expect(buckets.some((b) => b.keys[0] === "macos" && b.keys[1] === null)).toBe(true);
   });
 
+  it("keeps a positional null slot for an unresolved group field (no column shift)", () => {
+    // An unknown/unresolvable group field must NOT shrink `keys` — every bucket
+    // keeps one slot per groupBy entry so the panel renders it positionally
+    // against clause.groupBy. Dropping it slides the value into the wrong column.
+    const agg: AggregationClause = { id: "g3", op: "count", groupBy: ["platform", "nope", "overall"] };
+    const buckets = bucketsById({ ...base, aggregations: [agg] }, "g3");
+    expect(buckets.every((b) => b.keys.length === 3)).toBe(true);
+    expect(buckets.every((b) => b.keys[1] === null)).toBe(true); // unresolved axis is always NULL
+  });
+
   it("min/max return the column's value (typed), count_distinct counts uniques", () => {
     const mx = bucketsById({ ...base, aggregations: [{ id: "m", op: "max", field: "total_ms", groupBy: [] }] }, "m");
     expect(mx[0]?.value).toBe(999);
