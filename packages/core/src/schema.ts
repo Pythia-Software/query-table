@@ -333,7 +333,7 @@ function projectField<Row>(raw: any, i: number): FieldDef<Row> {
   };
 }
 
-function normalizeAliases(rawAliases: unknown, rawAlias: unknown): string[] | undefined {
+function normalizeAliases(rawAliases: unknown, rawAlias: unknown): string[] {
   const aliases: string[] = [];
   const seen = new Set<string>();
   const add = (raw: unknown) => {
@@ -350,5 +350,5 @@ function normalizeAliases(rawAliases: unknown, rawAlias: unknown): string[] | un
   if (Array.isArray(rawAliases)) {
     for (const item of rawAliases) add(item);
   }
-  return aliases.length ? aliases : undefined;
+  return aliases;
 }
