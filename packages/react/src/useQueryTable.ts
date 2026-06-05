@@ -58,6 +58,13 @@ export interface UseQueryTableOptions<Row> {
   debounceMs?: number;
   /** Injected clock for deterministic saved-query timestamps. Default Date.now. */
   now?: () => number;
+  /** Side-effect to run on every refresh — both manual `api.refresh()` and each
+   *  auto-refresh tick. Fires *in addition to* the internal `setNonce` re-query,
+   *  so manual and auto stay identical. Use it in client mode (no transport) to
+   *  bridge a UI refresh to your own server fetch without monkey-patching the
+   *  returned `api`. Always read through a ref, so supplying it never tears down
+   *  and recreates the auto-refresh interval. */
+  onRefresh?: () => void;
 }
 
 export interface AutoRefreshConfig {
@@ -260,6 +267,7 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
   const storage = useMemo(() => opts.storage ?? localStorageAdapter(), [opts.storage]);
   const now = opts.now ?? Date.now;
   const nowRef = useRef(now);
+  const onRefreshRef = useRef(opts.onRefresh);
   const defaults = useMemo(() => defaultsFor(schema), [schema]);
   const byName = useMemo(() => new Map(schema.fields.map((f) => [f.name, f])), [schema]);
 
@@ -278,6 +286,10 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
   useEffect(() => {
     nowRef.current = now;
   }, [now]);
+
+  useEffect(() => {
+    onRefreshRef.current = opts.onRefresh;
+  }, [opts.onRefresh]);
 
   const setQuery = useCallback<QueryTableApi<Row>["setQuery"]>((next) => {
     setQueryState((prev) => {
@@ -494,7 +506,15 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
     [transport, byName, clientRows],
   );
 
-  const refresh = useCallback(() => setNonce((n) => n + 1), []);
+  // Single refresh seam: re-runs the internal query (setNonce) and fires the
+  // consumer's onRefresh, if any. Both the manual `api.refresh()` and every
+  // auto-refresh tick go through here, so they stay observably identical. Read
+  // onRefresh through a ref to keep this callback (and the interval that depends
+  // on it) stable across renders.
+  const refresh = useCallback(() => {
+    setNonce((n) => n + 1);
+    onRefreshRef.current?.();
+  }, []);
   const stopAutoRefresh = useCallback(() => setAutoRefreshStatus(null), []);
   const startAutoRefresh = useCallback(
     ({ frequencyMs, turnOffAfterMs }: AutoRefreshConfig) => {
