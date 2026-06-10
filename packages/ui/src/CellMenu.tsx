@@ -1,7 +1,7 @@
 // CellMenu — right-click (or left-click) a cell → quick-filter popover + copy.
 // Offers only the operators valid for that field's type (opsForField), prefilled
-// with the clicked cell's value, plus "copy value". Anchors at the click point
-// and clamps to the viewport. Present in both source projects; unified here.
+// with the clicked cell's value, plus "copy value". Anchors just off the click
+// point and clamps to the viewport. Present in both source projects; unified here.
 
 import { useEffect, useState, type ReactNode } from "react";
 import type { FieldDef, FilterOp, WhereClause } from "@query-table/core";
@@ -24,6 +24,7 @@ const cx = (...parts: Array<string | undefined>): string => parts.filter(Boolean
 /** Approximate sizing so the popover can clamp itself into the viewport. */
 const MENU_WIDTH = 240;
 const ROW_HEIGHT = 32;
+const POINTER_OFFSET = 4;
 
 export function CellMenu<Row>({ field, value, x, y, onAddFilter, onClose, classNames }: CellMenuProps<Row>): ReactNode {
   // Dismiss on Escape or an outside click. The opening click is deferred a tick
@@ -113,8 +114,8 @@ export function CellMenu<Row>({ field, value, x, y, onAddFilter, onClose, classN
 
   const vw = typeof window !== "undefined" ? window.innerWidth : 9999;
   const vh = typeof window !== "undefined" ? window.innerHeight : 9999;
-  const left = Math.max(8, Math.min(x, vw - MENU_WIDTH - 8));
-  const top = Math.max(8, Math.min(y, vh - ROW_HEIGHT * items.length - 8));
+  const left = Math.max(8, Math.min(x + POINTER_OFFSET, vw - MENU_WIDTH - 8));
+  const top = Math.max(8, Math.min(y + POINTER_OFFSET, vh - ROW_HEIGHT * items.length - 8));
 
   return (
     <div
