@@ -1,0 +1,35 @@
+name: Feature request
+description: Propose a focused enhancement
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem should the project solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed API or behavior
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: package
+    attributes:
+      label: Likely scope
+      options:
+        - core
+        - React hooks
+        - UI components
+        - Go backend
+        - schema codegen
+        - documentation or tooling
+    validations:
+      required: true

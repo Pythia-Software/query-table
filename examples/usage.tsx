@@ -2,8 +2,8 @@
 // This is the "does it compose?" test: it typechecks against the real packages
 // (see examples/tsconfig.json). Not shipped; not part of any package build.
 
-import { loadSchema, localStorageAdapter, type Transport, type QueryState, type RowId } from "@query-table/core";
-import { useQueryTable } from "@query-table/react";
+import { loadSchema, localStorageAdapter, type Transport, type QueryState, type RowId } from "@pythia-software/query-table-core";
+import { useQueryTable } from "@pythia-software/query-table-react";
 import {
   DataTable,
   QueryBuilder,
@@ -11,40 +11,48 @@ import {
   defaultRenderers,
   type RenderRegistry,
   type CellContext,
-} from "@query-table/ui";
-import "@query-table/ui/theme.css";
+} from "@pythia-software/query-table-ui";
+import "@pythia-software/query-table-ui/theme.css";
 
 import runsDoc from "../schema/examples/runs.schema.json";
 
 // 1. The dataset's row type (would be generated alongside the schema).
 interface Run {
   id: number;
-  workbook_case_name: string | null;
+  job_name: string | null;
   platform: string;
   overall: "PASS" | "FAIL" | "DIFFERENCES" | null;
   total_ms: number | null;
   is_starred: boolean;
-  failed_steps: string[] | null;
+  error_codes: string[] | null;
 }
 
 // 2. Load the schema (the JSON doc shared with the Go backend).
 const schema = loadSchema<Run>(runsDoc);
 
 // 3. A Transport — the only backend-specific glue. Talks the ServerQuery wire
-//    format the Go `Compile` understands; here, the project's existing API.
+//    format the Go `Compile` understands.
 const transport: Transport<Run> = {
   async fetchRows(query, signal) {
-    const res = await fetch("/api/v1/runs", { method: "POST", body: JSON.stringify(query), signal: signal ?? null });
-    return res.json(); // { rows, total }
+    const res = await fetch("/api/runs/query", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(query),
+      signal: signal ?? null,
+    });
+    if (!res.ok) throw new Error(`Query failed with HTTP ${res.status}`);
+    return res.json() as Promise<{ rows: Run[]; total: number }>;
   },
   // Powers filter-value autocomplete: the backend matches `search` (ILIKE) and
   // returns the top matches + whether it truncated (so the UI says "keep typing").
   // If available, include `hasNull` to let the UI suppress null-only operators /
   // order controls when a column is guaranteed non-null.
   async fetchDistinctValues(q, signal) {
-    const res = await fetch(`/api/v1/runs/distinct?f=${q.field}&q=${encodeURIComponent(q.search)}`, {
+    const params = new URLSearchParams({ field: q.field, search: q.search });
+    const res = await fetch(`/api/runs/distinct-values?${params}`, {
       signal: signal ?? null,
     });
+    if (!res.ok) throw new Error(`Distinct-values request failed with HTTP ${res.status}`);
     return res.json(); // { values, hasMore, hasNull? }
   },
 };
@@ -54,9 +62,9 @@ const transport: Transport<Run> = {
 const renderers: RenderRegistry<Run> = {
   ...defaultRenderers,
   overall_pill: ({ value }: CellContext<Run>) => <span className={`qt-pill--${String(value).toLowerCase()}`}>{String(value)}</span>,
-  tag_marker: ({ value }: CellContext<Run>) => <button title="rerun-after-deploy">{value ? "★" : "☆"}</button>,
+  tag_marker: ({ value }: CellContext<Run>) => <span title="priority">{value ? "★" : "☆"}</span>,
   link_run: ({ value }: CellContext<Run>) => <a href={`/runs/${value}`}>{String(value).slice(0, 8)}</a>,
-  step_tags: ({ value }: CellContext<Run>) => (
+  code_tags: ({ value }: CellContext<Run>) => (
     <>
       {((value as string[] | null) ?? []).map((s) => (
         <span key={s} className="qt-pill--fail">
@@ -65,10 +73,10 @@ const renderers: RenderRegistry<Run> = {
       ))}
     </>
   ),
-  artifact_link: ({ row }: CellContext<Run>) => <button onClick={() => openArtifact(row.id, "deviations")}>view</button>,
+  detail_link: ({ row }: CellContext<Run>) => <button onClick={() => openDetails(row.id)}>view</button>,
 };
 
-declare function openArtifact(id: number, kind: string): void;
+declare function openDetails(id: number): void;
 declare function bulkRerun(ids: RowId[]): void;
 
 // 5. The component. ~15 lines of glue; everything else is the schema.
@@ -76,6 +84,8 @@ export function RunsTable({ initialQuery }: { initialQuery?: QueryState }) {
   const api = useQueryTable<Run>({
     schema,
     transport,
+    // Opt in only for non-sensitive filters: this is cleartext JSON.
+    // Prefer a server adapter with access controls for sensitive datasets.
     storage: localStorageAdapter(),
     // initialQuery is typically decodeQuery(searchParams.q) for SSR first paint.
     ...(initialQuery ? { initialQuery } : {}),

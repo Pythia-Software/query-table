@@ -1,6 +1,6 @@
 /* theme.css — Mode A styling: structural classes + a CSS custom-property
  * contract. Every visual knob is a variable, so a consumer themes the whole
- * table by overriding variables (xplo-perf's GitHub-ish palette is the default).
+ * table by overriding variables (a neutral palette is the default).
  * Mode B users (Tailwind) skip this file and pass `classNames` slots instead.
  *
  * Every `qt-*` class the components emit is declared here so the drop-in mode
@@ -201,7 +201,7 @@
 }
 .qt-resize-handle:focus-visible { box-shadow: inset 0 0 0 2px var(--qt-accent); }
 
-/* indeterminate / sliding loading bar (ported from xplo-perf globals.css) */
+/* indeterminate / sliding loading bar */
 .qt-loading-bar {
   position: absolute;
   top: 0;

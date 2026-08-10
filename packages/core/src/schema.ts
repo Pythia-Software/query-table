@@ -30,9 +30,9 @@ export type FieldType =
 export type Align = "left" | "right" | "center";
 
 /** A cell renderer is resolved by name against a `RenderRegistry` (in
- *  @query-table/ui) or supplied inline. The type lives in core so FieldDef can
+ *  @pythia-software/query-table-ui) or supplied inline. The type lives in core so FieldDef can
  *  reference it, but core never imports React — `unknown` stands in for the node
- *  and @query-table/ui narrows it to `React.ReactNode`. */
+ *  and @pythia-software/query-table-ui narrows it to `React.ReactNode`. */
 export type CellRenderer<Row = any, V = unknown> = (ctx: {
   value: V;
   row: Row;
@@ -144,7 +144,7 @@ export interface FieldDef<Row = any, V = unknown> {
 
 /** The frontend's loaded schema for one dataset. */
 export interface FieldSchema<Row = any> {
-  /** Dataset id, also the localStorage namespace for saved queries. */
+  /** Dataset id, also the StorageAdapter namespace for saved queries. */
   name: string;
   /** Field that yields a row's stable id for selection / per-row refresh. */
   idField: string;

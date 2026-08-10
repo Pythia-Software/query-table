@@ -2,11 +2,10 @@ package querytable
 
 // compile.go — WireQuery → parameterized SQL fragments.
 //
-// This is the single chokepoint where a query becomes SQL. It generalizes
-// explo's perfstore.Compile with: multi-sort (ORDER BY a, b, … + tiebreaker),
-// synthetic expressions via FieldSpec, computed SELECT columns, and the extra
-// xlsx-collect operators (starts_with / ends_with / includes / textarray
-// nullity). Callers splice the fragments into their own FROM/JOIN tree.
+// This is the single chokepoint where a query becomes SQL. It supports
+// multi-sort (ORDER BY a, b, … + tiebreaker), synthetic expressions via
+// FieldSpec, computed SELECT columns, and text/array operators. Callers splice
+// the fragments into their own FROM/JOIN tree.
 
 import (
 	"fmt"
@@ -39,6 +38,9 @@ type CompileResult struct {
 func Compile(q WireQuery, schema Schema, startIdx int) (CompileResult, int, error) {
 	var res CompileResult
 	idx := startIdx
+	if err := q.Validate(); err != nil {
+		return res, idx, fmt.Errorf("invalid query: %w", err)
+	}
 
 	// WHERE
 	clauses := make([]string, 0, len(q.Where))
@@ -199,7 +201,7 @@ func aggOpKnown(op string) bool {
 	return false
 }
 
-// aggOpAllowed mirrors @query-table/core AGG_OPS_BY_TYPE — the server-side
+// aggOpAllowed mirrors @pythia-software/query-table-core AGG_OPS_BY_TYPE — the server-side
 // enforcement of which aggregate ops a field's kind permits. Keep in lockstep.
 func aggOpAllowed(kind FieldKind, op string) bool {
 	switch kind {
@@ -293,7 +295,7 @@ func compileWhere(spec FieldSpec, op, value string, idx int) (string, []any, int
 	}
 }
 
-// opAllowed mirrors @query-table/core OPS_BY_TYPE — the server-side enforcement
+// opAllowed mirrors @pythia-software/query-table-core OPS_BY_TYPE — the server-side enforcement
 // of the operator matrix. Nullity is valid on every kind (incl. bool).
 func opAllowed(kind FieldKind, op string) bool {
 	switch op {

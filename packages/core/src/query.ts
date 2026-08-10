@@ -6,12 +6,8 @@
 //     SELECT <select>  WHERE <where>  ORDER BY <orderBy>  LIMIT <limit> OFFSET <offset>
 //
 // Both "what data" (where/orderBy/limit/offset) and "how viewed" (select +
-// per-column width) are serialized together so one URL reproduces the same table
-// for any user on any device (decision #5).
-//
-// This shape is the union of the two sibling tables it replaces, with three
-// deliberate upgrades over both: multi-sort (`orderBy` is an array), per-column
-// width travels in `select`, and the full op set of both projects is merged.
+// per-column width) can be serialized together when a consumer explicitly opts
+// into URL synchronization.
 
 /** All filter operators across both source projects, unioned. Every value can
  *  be NULL, so `is_null`/`is_not_null` are valid for every field type. */
@@ -116,6 +112,137 @@ export const EMPTY_QUERY: QueryState = {
   limit: 100,
   offset: 0,
 };
+
+/** Resource limits applied whenever query state crosses a trust boundary (URL,
+ * storage, an imperative setQuery call, or a server projection). They keep a
+ * malformed bookmark from becoming an unexpectedly expensive request. */
+export const MAX_QUERY_LIMIT = 1_000;
+export const MAX_QUERY_OFFSET = 1_000_000;
+export const MAX_SELECT_COLUMNS = 200;
+export const MAX_WHERE_CLAUSES = 100;
+export const MAX_ORDER_BY_TERMS = 20;
+export const MAX_AGGREGATIONS = 20;
+export const MAX_GROUP_BY_FIELDS = 20;
+export const MAX_QUERY_TOKEN_LENGTH = 2 * 1024 * 1024;
+
+const MAX_FIELD_NAME_LENGTH = 256;
+const MAX_FILTER_VALUE_LENGTH = 10_000;
+const MAX_LABEL_LENGTH = 1_000;
+const MIN_COLUMN_WIDTH = 24;
+const MAX_COLUMN_WIDTH = 2_000;
+
+const FILTER_OPS: ReadonlySet<string> = new Set([
+  "=",
+  "!=",
+  ">",
+  ">=",
+  "<",
+  "<=",
+  "contains",
+  "starts_with",
+  "ends_with",
+  "includes",
+  "is_null",
+  "is_not_null",
+]);
+
+const AGG_OPS: ReadonlySet<string> = new Set(["count", "count_distinct", "sum", "avg", "min", "max"]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function boundedString(value: unknown, maxLength: number): string | null {
+  return typeof value === "string" && value.length > 0 && value.length <= maxLength ? value : null;
+}
+
+function boundedInteger(value: unknown, fallback: number, min: number, max: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(value)));
+}
+
+/** Convert unknown input into a bounded, structurally valid QueryState.
+ * Invalid members are dropped; invalid scalar paging values use the supplied
+ * fallback. This function is intentionally schema-agnostic—field allowlisting
+ * still happens in toServerQuery and in the backend compiler. */
+export function normalizeQueryState(input: unknown, fallback: QueryState = EMPTY_QUERY): QueryState {
+  const raw = isRecord(input) ? input : {};
+
+  const select: SelectColumn[] = [];
+  if (Array.isArray(raw.select)) {
+    for (const item of raw.select.slice(0, MAX_SELECT_COLUMNS)) {
+      if (!isRecord(item)) continue;
+      const field = boundedString(item.field, MAX_FIELD_NAME_LENGTH);
+      if (!field) continue;
+      const column: SelectColumn = { field };
+      if (typeof item.width === "number" && Number.isFinite(item.width)) {
+        column.width = boundedInteger(item.width, MIN_COLUMN_WIDTH, MIN_COLUMN_WIDTH, MAX_COLUMN_WIDTH);
+      }
+      select.push(column);
+    }
+  } else {
+    select.push(...fallback.select.map((column) => ({ ...column })));
+  }
+
+  const where: WhereClause[] = [];
+  if (Array.isArray(raw.where)) {
+    for (const item of raw.where.slice(0, MAX_WHERE_CLAUSES)) {
+      if (!isRecord(item)) continue;
+      const field = boundedString(item.field, MAX_FIELD_NAME_LENGTH);
+      const value = typeof item.value === "string" && item.value.length <= MAX_FILTER_VALUE_LENGTH ? item.value : null;
+      if (!field || typeof item.op !== "string" || !FILTER_OPS.has(item.op) || value == null) continue;
+      where.push({ field, op: item.op as FilterOp, value });
+    }
+  } else {
+    where.push(...fallback.where.map((clause) => ({ ...clause })));
+  }
+
+  const orderBy: OrderByClause[] = [];
+  if (Array.isArray(raw.orderBy)) {
+    for (const item of raw.orderBy.slice(0, MAX_ORDER_BY_TERMS)) {
+      if (!isRecord(item)) continue;
+      const field = boundedString(item.field, MAX_FIELD_NAME_LENGTH);
+      if (!field || (item.dir !== "asc" && item.dir !== "desc")) continue;
+      const term: OrderByClause = { field, dir: item.dir };
+      if (item.nulls === "first" || item.nulls === "last") term.nulls = item.nulls;
+      orderBy.push(term);
+    }
+  } else {
+    orderBy.push(...fallback.orderBy.map((term) => ({ ...term })));
+  }
+
+  const out: QueryState = {
+    select,
+    where,
+    orderBy,
+    limit: boundedInteger(raw.limit, fallback.limit, 1, MAX_QUERY_LIMIT),
+    offset: boundedInteger(raw.offset, fallback.offset, 0, MAX_QUERY_OFFSET),
+  };
+
+  if (Array.isArray(raw.aggregations)) {
+    const aggregations: AggregationClause[] = [];
+    for (const item of raw.aggregations.slice(0, MAX_AGGREGATIONS)) {
+      if (!isRecord(item)) continue;
+      const id = boundedString(item.id, MAX_FIELD_NAME_LENGTH);
+      if (!id || typeof item.op !== "string" || !AGG_OPS.has(item.op) || !Array.isArray(item.groupBy)) continue;
+      const groupBy = item.groupBy
+        .slice(0, MAX_GROUP_BY_FIELDS)
+        .map((field) => boundedString(field, MAX_FIELD_NAME_LENGTH))
+        .filter((field): field is string => field != null);
+      const aggregation: AggregationClause = { id, op: item.op as AggOp, groupBy };
+      const field = boundedString(item.field, MAX_FIELD_NAME_LENGTH);
+      const label = boundedString(item.label, MAX_LABEL_LENGTH);
+      if (field) aggregation.field = field;
+      if (label) aggregation.label = label;
+      aggregations.push(aggregation);
+    }
+    if (aggregations.length > 0) out.aggregations = aggregations;
+  } else if (fallback.aggregations?.length) {
+    out.aggregations = fallback.aggregations.map((aggregation) => ({ ...aggregation, groupBy: [...aggregation.groupBy] }));
+  }
+
+  return out;
+}
 
 /** Structural equality on two queries — used to decide whether a `?q=` write or a
  *  refetch is actually needed (avoids history spam / redundant fetches). */

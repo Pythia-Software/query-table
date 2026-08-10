@@ -18,12 +18,12 @@ describe("applyQuery — filtering", () => {
   });
 
   it("textarray includes (case-insensitive)", () => {
-    const r = applyQuery(rows, base({ where: [{ field: "failed_steps", op: "includes", value: "EVAL" }] }), runsSchema);
+    const r = applyQuery(rows, base({ where: [{ field: "error_codes", op: "includes", value: "EVAL" }] }), runsSchema);
     expect(r.rows.map((x) => x.id)).toEqual([2, 3]);
   });
 
   it("is_null treats empty array and null alike", () => {
-    const r = applyQuery(rows, base({ where: [{ field: "failed_steps", op: "is_null", value: "" }] }), runsSchema);
+    const r = applyQuery(rows, base({ where: [{ field: "error_codes", op: "is_null", value: "" }] }), runsSchema);
     expect(r.rows.map((x) => x.id)).toEqual([1, 4]); // null + []
   });
 

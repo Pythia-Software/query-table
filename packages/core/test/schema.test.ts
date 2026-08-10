@@ -18,13 +18,13 @@ describe("per-source capability defaults", () => {
   it("backend fields filter/sort by default; derived do not", () => {
     expect(isFilterable(f("overall"))).toBe(true);
     expect(isSortable(f("overall"))).toBe(true);
-    expect(isFilterable(f("deviations"))).toBe(false); // derived
-    expect(isSortable(f("deviations"))).toBe(false);
+    expect(isFilterable(f("details"))).toBe(false); // derived
+    expect(isSortable(f("details"))).toBe(false);
   });
 
   it("pushdown:false keeps the field filterable but client-side", () => {
-    expect(isFilterable(f("failed_steps"))).toBe(true);
-    expect(isPushdownFilter(f("failed_steps"))).toBe(false);
+    expect(isFilterable(f("error_codes"))).toBe(true);
+    expect(isPushdownFilter(f("error_codes"))).toBe(false);
   });
 
   it("selectable defaults true", () => {
@@ -68,13 +68,13 @@ describe("loadSchema", () => {
       idField: "id",
       fields: [
         { name: "id", label: "ID", type: "number", bindings: { postgres: { expr: "w.id" } } },
-        { name: "deviations", label: "D", type: "text", source: "derived", render: "artifact_link" },
+        { name: "details", label: "D", type: "text", source: "derived", render: "detail_link" },
       ],
     };
     const s = loadSchema(doc);
     expect(s.fields[0]!.source.kind).toBe("backend"); // inferred from bindings
     expect(s.fields[1]!.source.kind).toBe("derived");
-    expect(s.fields[1]!.render).toBe("artifact_link");
+    expect(s.fields[1]!.render).toBe("detail_link");
   });
 
   it("throws a readable error on a malformed doc", () => {

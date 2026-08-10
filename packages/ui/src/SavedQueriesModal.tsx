@@ -2,7 +2,7 @@
 // api.saved; loading one pushes its QueryState into the controller (and the URL).
 
 import { useEffect, type ReactNode } from "react";
-import type { SavedQueriesApi } from "@query-table/react";
+import type { SavedQueriesApi } from "@pythia-software/query-table-react";
 
 export interface SavedQueriesModalProps {
   saved: SavedQueriesApi;

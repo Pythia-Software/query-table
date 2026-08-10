@@ -1,0 +1,31 @@
+name: Usage question
+description: Ask for help integrating or using query-table
+title: "[Question]: "
+labels: [question]
+body:
+  - type: input
+    id: package
+    attributes:
+      label: Package and version
+      placeholder: "@pythia-software/query-table-react 0.1.0 or backends/go"
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: What are you trying to do?
+      description: Include the relevant schema, query, or component setup.
+    validations:
+      required: true
+  - type: textarea
+    id: attempted
+    attributes:
+      label: What have you tried?
+      description: Link the documentation you consulted and include any error output.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: "Node, React, browser, Go, and database versions as applicable"

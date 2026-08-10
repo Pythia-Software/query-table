@@ -3,9 +3,8 @@
 // (enum/static <select>, value autocomplete via Transport.fetchDistinctValues).
 // Hosts the Save / saved-queries entry point.
 //
-// A union of both projects' builders: xplo-perf's chip layout + datalist
-// autocomplete and xlsx-collect's draggable column chips, grouped picker, and
-// per-clause operator dropdowns. Multi-sort (orderBy is an array) is new to both.
+// Combines a chip layout, autocomplete, draggable column chips, a grouped
+// picker, per-clause operators, and multi-sort.
 
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
@@ -16,7 +15,7 @@ import type {
   FilterOp,
   OrderByClause,
   WhereClause,
-} from "@query-table/core";
+} from "@pythia-software/query-table-core";
 import {
   NULLARY_OPS,
   aggOpNeedsField,
@@ -29,8 +28,8 @@ import {
   isSelectable,
   isSortable,
   opsForField,
-} from "@query-table/core";
-import type { QueryTableApi } from "@query-table/react";
+} from "@pythia-software/query-table-core";
+import type { QueryTableApi } from "@pythia-software/query-table-react";
 import type { QueryBuilderClassNames } from "./classNames";
 import { FieldPicker } from "./FieldPicker";
 import { SavedQueriesModal } from "./SavedQueriesModal";

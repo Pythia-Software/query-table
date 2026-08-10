@@ -21,13 +21,13 @@ func TestExampleSchemaLoads(t *testing.T) {
 	if s.Name != "runs" || s.IDField != "id" {
 		t.Errorf("name/id = %q/%q", s.Name, s.IDField)
 	}
-	// `deviations` is a derived field (no postgres binding) → absent from backend schema.
-	if _, ok := s.Fields["deviations"]; ok {
-		t.Error("derived field deviations should not be in the backend schema")
+	// `details` is a derived field (no postgres binding) → absent from backend schema.
+	if _, ok := s.Fields["details"]; ok {
+		t.Error("derived field details should not be in the backend schema")
 	}
-	// `failed_steps` has filter.pushdown:false → not server-filterable.
-	if s.Fields["failed_steps"].ServerFilter {
-		t.Error("failed_steps should be client-only (pushdown:false)")
+	// `error_codes` has filter.pushdown:false → not server-filterable.
+	if s.Fields["error_codes"].ServerFilter {
+		t.Error("error_codes should be client-only (pushdown:false)")
 	}
 	// `is_starred` is synthetic and sorts via its own expr.
 	star, ok := s.Fields["is_starred"]

@@ -2,6 +2,7 @@ package querytable
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -12,15 +13,15 @@ const schemaJSON = `{
   "idField": "id",
   "tiebreakSort": [{"field": "id", "dir": "desc"}],
   "fields": [
-    {"name": "id", "label": "ID", "type": "number", "bindings": {"postgres": {"expr": "vr.id"}}},
-    {"name": "overall", "label": "Overall", "type": "enum", "bindings": {"postgres": {"expr": "vr.overall"}}},
-    {"name": "total_ms", "label": "Total", "type": "number", "bindings": {"postgres": {"expr": "vr.total_ms"}}},
+    {"name": "id", "label": "ID", "type": "number", "bindings": {"postgres": {"expr": "r.id"}}},
+    {"name": "overall", "label": "Overall", "type": "enum", "bindings": {"postgres": {"expr": "r.overall"}}},
+    {"name": "total_ms", "label": "Total", "type": "number", "bindings": {"postgres": {"expr": "r.total_ms"}}},
     {"name": "is_starred", "label": "Star", "type": "bool", "sort": {"field": "is_starred"},
       "bindings": {"postgres": {"expr": "(w.tags ? 'x')", "synthetic": true}}},
     {"name": "function_names", "label": "Fns", "type": "textarray", "bindings": {"postgres": {"expr": "w.fn_names"}}},
-    {"name": "failed_steps", "label": "Failed", "type": "textarray", "filter": {"pushdown": false},
-      "bindings": {"postgres": {"expr": "vr.failed_steps"}}},
-    {"name": "deviations", "label": "D", "type": "text", "source": "derived"}
+    {"name": "error_codes", "label": "Errors", "type": "textarray", "filter": {"pushdown": false},
+      "bindings": {"postgres": {"expr": "r.error_codes"}}},
+    {"name": "details", "label": "D", "type": "text", "source": "derived"}
   ]
 }`
 
@@ -35,14 +36,14 @@ func mustSchema(t *testing.T) Schema {
 
 func TestLoadSchema_skipsDerived(t *testing.T) {
 	s := mustSchema(t)
-	if _, ok := s.Fields["deviations"]; ok {
+	if _, ok := s.Fields["details"]; ok {
 		t.Error("derived field should be absent from the backend schema")
 	}
 	if len(s.Fields) != 6 {
 		t.Errorf("want 6 backend fields, got %d", len(s.Fields))
 	}
-	if s.Fields["failed_steps"].ServerFilter {
-		t.Error("failed_steps has pushdown:false → ServerFilter should be false")
+	if s.Fields["error_codes"].ServerFilter {
+		t.Error("error_codes has pushdown:false → ServerFilter should be false")
 	}
 }
 
@@ -57,7 +58,7 @@ func TestCompile_where(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Compile: %v", err)
 	}
-	want := "(vr.overall = $1) AND (vr.total_ms > $2) AND " +
+	want := "(r.overall = $1) AND (r.total_ms > $2) AND " +
 		"(EXISTS (SELECT 1 FROM unnest(w.fn_names) AS _e WHERE LOWER(_e) = LOWER($3)))"
 	if res.WhereSQL != want {
 		t.Errorf("WhereSQL\n got: %s\nwant: %s", res.WhereSQL, want)
@@ -73,7 +74,7 @@ func TestCompile_where(t *testing.T) {
 
 func TestCompile_rejectsClientOnlyFilter(t *testing.T) {
 	s := mustSchema(t)
-	_, _, err := Compile(WireQuery{Where: []WhereClause{{Field: "failed_steps", Op: "includes", Value: "x"}}}, s, 1)
+	_, _, err := Compile(WireQuery{Where: []WhereClause{{Field: "error_codes", Op: "includes", Value: "x"}}}, s, 1)
 	if err == nil || !strings.Contains(err.Error(), "not server-filterable") {
 		t.Errorf("want not-server-filterable error, got %v", err)
 	}
@@ -102,7 +103,7 @@ func TestCompile_multiSortWithTiebreak(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Compile: %v", err)
 	}
-	want := "vr.total_ms DESC NULLS LAST, (w.tags ? 'x') ASC NULLS FIRST, vr.id DESC NULLS LAST"
+	want := "r.total_ms DESC NULLS LAST, (w.tags ? 'x') ASC NULLS FIRST, r.id DESC NULLS LAST"
 	if res.OrderSQL != want {
 		t.Errorf("OrderSQL\n got: %s\nwant: %s", res.OrderSQL, want)
 	}
@@ -114,7 +115,7 @@ func TestCompile_select(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Compile: %v", err)
 	}
-	want := []string{`vr.overall AS "overall"`, `(w.tags ? 'x') AS "is_starred"`}
+	want := []string{`r.overall AS "overall"`, `(w.tags ? 'x') AS "is_starred"`}
 	if !reflect.DeepEqual(res.SelectExprs, want) {
 		t.Errorf("SelectExprs = %#v, want %#v", res.SelectExprs, want)
 	}
@@ -150,15 +151,15 @@ func TestCompileAggregation_avgByTwoGroups(t *testing.T) {
 		t.Fatalf("CompileAggregation: %v", err)
 	}
 	want := []string{
-		`vr.overall AS "g0"`,
+		`r.overall AS "g0"`,
 		`(w.tags ? 'x') AS "g1"`,
-		`AVG(vr.total_ms) AS "value"`,
+		`AVG(r.total_ms) AS "value"`,
 		`COUNT(*) AS "count"`,
 	}
 	if !reflect.DeepEqual(res.SelectExprs, want) {
 		t.Errorf("SelectExprs\n got: %#v\nwant: %#v", res.SelectExprs, want)
 	}
-	if res.GroupBySQL != "vr.overall, (w.tags ? 'x')" {
+	if res.GroupBySQL != "r.overall, (w.tags ? 'x')" {
 		t.Errorf("GroupBySQL = %q", res.GroupBySQL)
 	}
 }
@@ -243,16 +244,65 @@ func TestDecodeWireQuery_tupleSelect(t *testing.T) {
 	}
 }
 
+func TestWireQueryJSON_acceptsServerQueryNamesAndValidates(t *testing.T) {
+	var q WireQuery
+	err := json.Unmarshal([]byte(`{
+		"select":["overall"],
+		"where":[{"field":"overall","op":"=","value":"FAIL"}],
+		"orderBy":[{"field":"total_ms","dir":"desc"}],
+		"limit":50,
+		"offset":10,
+		"aggregations":[{"id":"count","op":"count"}]
+	}`), &q)
+	if err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if q.Limit != 50 || q.Offset != 10 || len(q.Where) != 1 || len(q.OrderBy) != 1 || len(q.Aggregations) != 1 {
+		t.Fatalf("unexpected query: %#v", q)
+	}
+
+	if err := json.Unmarshal([]byte(`{"limit":1001}`), &q); err == nil {
+		t.Fatal("want resource-limit error from JSON decoder")
+	}
+}
+
+func TestDecodeWireQuery_rejectsResourceLimitViolations(t *testing.T) {
+	for name, payload := range map[string]string{
+		"limit":  `{"l":1001}`,
+		"offset": `{"f":1000001}`,
+		"value":  `{"w":[{"field":"overall","op":"=","value":"` + strings.Repeat("x", maxFilterValueBytes+1) + `"}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := DecodeWireQuery(b64url(payload)); err == nil {
+				t.Fatal("want resource-limit error")
+			}
+		})
+	}
+	if _, err := DecodeWireQuery(strings.Repeat("x", maxQueryTokenBytes+1)); err == nil {
+		t.Fatal("want oversized token error")
+	}
+}
+
+func TestCompile_rejectsResourceLimitViolations(t *testing.T) {
+	s := mustSchema(t)
+	if _, _, err := Compile(WireQuery{Limit: MaxQueryLimit + 1}, s, 1); err == nil {
+		t.Fatal("want oversized limit error")
+	}
+	if _, _, err := Compile(WireQuery{Offset: -1}, s, 1); err == nil {
+		t.Fatal("want negative offset error")
+	}
+}
+
 func TestCompileDistinct(t *testing.T) {
 	s := mustSchema(t)
 	dc, next, err := CompileDistinct("overall", "FA", s, 1)
 	if err != nil {
 		t.Fatalf("CompileDistinct: %v", err)
 	}
-	if dc.Expr != "vr.overall" {
+	if dc.Expr != "r.overall" {
 		t.Errorf("expr = %q", dc.Expr)
 	}
-	if dc.SearchSQL != "POSITION(LOWER($1) IN LOWER(vr.overall::text)) > 0" {
+	if dc.SearchSQL != "POSITION(LOWER($1) IN LOWER(r.overall::text)) > 0" {
 		t.Errorf("searchSQL = %q", dc.SearchSQL)
 	}
 	if next != 2 || !reflect.DeepEqual(dc.Args, []any{"FA"}) {
@@ -266,7 +316,7 @@ func TestCompileDistinctHasNull(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CompileDistinctHasNull: %v", err)
 	}
-	if nh.IsNullExpr != "vr.overall IS NULL" {
+	if nh.IsNullExpr != "r.overall IS NULL" {
 		t.Errorf("expr = %q", nh.IsNullExpr)
 	}
 
@@ -276,7 +326,7 @@ func TestCompileDistinctHasNull(t *testing.T) {
 	}
 }
 
-// b64url mimics @query-table/core encodeQuery's charset (base64url, no padding).
+// b64url mimics @pythia-software/query-table-core encodeQuery's charset (base64url, no padding).
 func b64url(json string) string {
 	s := base64.StdEncoding.EncodeToString([]byte(json))
 	s = strings.TrimRight(s, "=")

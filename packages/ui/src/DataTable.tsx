@@ -3,14 +3,14 @@
 // Presentation only: it draws headers (sort affordances), the checkbox column,
 // cells (via the render registry), the right-click CellMenu, column resize
 // handles, and the loading bar. All state
-// lives in the @query-table/react hook; DataTable receives the resolved view
-// and emits intents through onQueryChange. It deliberately mirrors the props
-// shape of xplo-perf's DataTable so porting is mechanical.
+// lives in the @pythia-software/query-table-react hook; DataTable receives the resolved view
+// and emits intents through onQueryChange. Its props mirror a conventional
+// schema-driven table so adoption is mechanical.
 
 import { useEffect, useMemo, useRef, useState, type ReactNode, type SetStateAction } from "react";
-import type { OrderByClause, QueryState, FieldDef, RowId, SelectColumn, WhereClause } from "@query-table/core";
-import { isSortable, readFieldValue } from "@query-table/core";
-import { useColumnDrag, type SelectionApi, type ColumnDragApi } from "@query-table/react";
+import type { OrderByClause, QueryState, FieldDef, RowId, SelectColumn, WhereClause } from "@pythia-software/query-table-core";
+import { isSortable, readFieldValue } from "@pythia-software/query-table-core";
+import { useColumnDrag, type SelectionApi, type ColumnDragApi } from "@pythia-software/query-table-react";
 import { resolveRenderer, type RenderRegistry } from "./renderers";
 import type { TableClassNames } from "./classNames";
 import { CellMenu } from "./CellMenu";

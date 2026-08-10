@@ -13,11 +13,10 @@
 //      computed/synthetic columns the view needs — requested ∪ always-needed,
 //      design decision #2). Per-column widths never leave the client.
 //
-// Back-compat: decodeQuery accepts the legacy compact shapes from both source
-// projects — `o` as a single object (pre-multi-sort) and `c`/`s` as a string[]
-// (pre-width) — so existing xplo-perf / xlsx-collect bookmarks keep working.
+// Back-compat: decodeQuery accepts legacy compact shapes: `o` as a single
+// object (pre-multi-sort) and `c`/`s` as a string[] (pre-width).
 
-import { EMPTY_QUERY } from "./query";
+import { EMPTY_QUERY, MAX_QUERY_TOKEN_LENGTH, normalizeQueryState } from "./query";
 import type { QueryState, WhereClause, OrderByClause, SelectColumn, AggregationClause } from "./query";
 import type { FieldSchema } from "./schema";
 import { indexFields, isFilterable, isPushdownFilter, isSortable, resolveFieldName, selectedFields } from "./schema";
@@ -62,6 +61,7 @@ interface CompactQuery {
 
 /** QueryState → base64url token (omitting defaults). All-default query → "". */
 export function encodeQuery(q: QueryState): string {
+  q = normalizeQueryState(q);
   const c: CompactQuery = {};
   if (q.select.length)
     c.s = q.select.map((col): [string] | [string, number] => (col.width != null ? [col.field, col.width] : [col.field]));
@@ -78,41 +78,21 @@ export function encodeQuery(q: QueryState): string {
  *  normalize to a valid QueryState (never throws). */
 export function decodeQuery(token: string): QueryState {
   if (!token) return { ...EMPTY_QUERY };
+  if (token.length > MAX_QUERY_TOKEN_LENGTH) return { ...EMPTY_QUERY };
   try {
     const c = JSON.parse(fromBase64Url(token)) as CompactQuery;
-    const out: QueryState = {
+    const out = normalizeQueryState({
       select: normalizeSelect(c.s ?? c.c),
       where: Array.isArray(c.w) ? c.w : [],
       orderBy: normalizeOrderBy(c.o),
-      limit: typeof c.l === "number" ? c.l : EMPTY_QUERY.limit,
-      offset: typeof c.f === "number" ? c.f : 0,
-    };
-    // Only attach `aggregations` when present, so an all-default token still
-    // decodes structurally equal to EMPTY_QUERY (the key stays absent).
-    if (Array.isArray(c.g) && c.g.length) out.aggregations = normalizeAggregations(c.g);
+      limit: c.l,
+      offset: c.f,
+      aggregations: c.g,
+    });
     return out;
   } catch {
     return { ...EMPTY_QUERY };
   }
-}
-
-function normalizeAggregations(g: unknown): AggregationClause[] {
-  if (!Array.isArray(g)) return [];
-  return g
-    .map((item, i): AggregationClause | null => {
-      if (!item || typeof item !== "object") return null;
-      const raw = item as Partial<AggregationClause>;
-      if (typeof raw.op !== "string") return null;
-      const out: AggregationClause = {
-        id: typeof raw.id === "string" && raw.id ? raw.id : `a${i}`,
-        op: raw.op,
-        groupBy: Array.isArray(raw.groupBy) ? raw.groupBy.filter((x): x is string => typeof x === "string") : [],
-      };
-      if (typeof raw.field === "string") out.field = raw.field;
-      if (typeof raw.label === "string") out.label = raw.label;
-      return out;
-    })
-    .filter((x): x is AggregationClause => x != null);
 }
 
 function normalizeSelect(s: CompactQuery["s"] | CompactQuery["c"]): SelectColumn[] {
@@ -153,6 +133,7 @@ export interface ServerQuery {
 /** Project a QueryState into the server request, dropping client-only filters,
  *  client-only sorts, and remapping sort fields through `sort.field`. */
 export function toServerQuery<Row>(q: QueryState, schema: FieldSchema<Row>): ServerQuery {
+  q = normalizeQueryState(q);
   const byName = indexFields(schema);
   const resolveField = (name: string) => resolveFieldName(schema, name) ?? name;
 
@@ -230,6 +211,7 @@ export interface AggregationResult {
  *  all server-capable backend columns. Aggregations referencing a derived /
  *  unknown field are dropped — the server has no SQL for them. */
 export function toAggregationQuery<Row>(q: QueryState, schema: FieldSchema<Row>): AggregationRequest {
+  q = normalizeQueryState(q);
   const byName = indexFields(schema);
   const resolveField = (name: string) => resolveFieldName(schema, name) ?? name;
 

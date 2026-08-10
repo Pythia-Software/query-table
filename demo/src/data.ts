@@ -3,19 +3,19 @@
 
 export interface Run {
   id: number;
-  workbook_case_name: string | null;
+  job_name: string | null;
   platform: "windows" | "macos" | "linux";
   overall: "PASS" | "FAIL" | "DIFFERENCES" | null;
   total_ms: number | null;
-  engine_key: string;
+  worker: string;
   enqueued_at: string | null;
   is_starred: boolean;
-  failed_steps: string[] | null;
+  error_codes: string[] | null;
 }
 
 const PLATFORMS = ["windows", "macos", "linux"] as const;
 const OVERALLS = ["PASS", "FAIL", "DIFFERENCES", null] as const;
-const CASES = [
+const JOBS = [
   "checkout-flow",
   "login-oauth",
   "invoice-export",
@@ -43,13 +43,13 @@ export const RUNS: Run[] = Array.from({ length: 40 }, (_, i) => {
   const hr = String(Math.floor(r() * 24)).padStart(2, "0");
   return {
     id: 1000 + i,
-    workbook_case_name: CASES[Math.floor(r() * CASES.length)]!,
+    job_name: JOBS[Math.floor(r() * JOBS.length)]!,
     platform: PLATFORMS[Math.floor(r() * PLATFORMS.length)]!,
     overall,
     total_ms: r() < 0.1 ? null : Math.floor(r() * 120000),
-    engine_key: `engine-${1 + Math.floor(r() * 4)}`,
+    worker: `worker-${1 + Math.floor(r() * 4)}`,
     enqueued_at: `2026-05-${day}T${hr}:00:00Z`,
     is_starred: r() < 0.25,
-    failed_steps: overall === "FAIL" ? ["compile", "snapshot"].slice(0, 1 + Math.floor(r() * 2)) : null,
+    error_codes: overall === "FAIL" ? ["timeout", "validation"].slice(0, 1 + Math.floor(r() * 2)) : null,
   };
 });

@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import type { FieldSchema, StorageAdapter, Transport } from "@query-table/core";
+import type { FieldSchema, StorageAdapter, Transport } from "@pythia-software/query-table-core";
 import { useQueryTable, type QueryTableApi, type UseQueryTableOptions } from "../src/useQueryTable";
 
 // React's act() requires this flag in a non-test-runner host like ours.

@@ -1,26 +1,48 @@
 {
   "name": "query-table-monorepo",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "Schema-driven data table — core, react, and ui packages.",
   "license": "MIT",
+  "author": "Pythia Software",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Pythia-Software/query-table.git"
+  },
+  "homepage": "https://github.com/Pythia-Software/query-table#readme",
+  "bugs": {
+    "url": "https://github.com/Pythia-Software/query-table/issues"
+  },
+  "engines": {
+    "node": ">=22.14.0"
+  },
+  "packageManager": "npm@11.6.1",
   "workspaces": [
     "packages/*",
     "tools/*",
     "demo"
   ],
   "scripts": {
-    "build:core": "tsc -p packages/core",
-    "build": "npm run build:core && tsc -p packages/react && tsc -p packages/ui",
+    "build": "npm run build:packages",
+    "build:packages": "npm run build --workspace @pythia-software/query-table-core && npm run build --workspace @pythia-software/query-table-react && npm run build --workspace @pythia-software/query-table-ui && npm run build --workspace @pythia-software/query-table-codegen",
+    "build:demo": "npm run build --workspace @pythia-software/query-table-demo",
     "lint": "npm run typecheck",
-    "typecheck": "npm run build:core && tsc --noEmit -p packages/core/tsconfig.test.json && tsc --noEmit -p packages/react/tsconfig.test.json && tsc --noEmit -p packages/ui",
+    "typecheck": "npm run build:packages && tsc --noEmit -p packages/core/tsconfig.test.json && tsc --noEmit -p packages/react/tsconfig.test.json && tsc --noEmit -p packages/ui/tsconfig.test.json && tsc --noEmit -p tools/schema-codegen/tsconfig.test.json && tsc --noEmit -p examples/tsconfig.json && tsc --noEmit -p demo/tsconfig.json",
     "test": "vitest run",
-    "demo": "npm run dev --workspace @query-table/demo",
+    "test:go": "cd backends/go && go test ./...",
+    "vet:go": "cd backends/go && go vet ./...",
+    "version:check": "node scripts/verify-release-version.mjs",
+    "audit": "npm audit",
+    "package:lint": "publint packages/core && publint packages/react && publint packages/ui && publint tools/schema-codegen && attw packages/core --pack --profile esm-only && attw packages/react --pack --profile esm-only && attw packages/ui --pack --profile esm-only --exclude-entrypoints ./theme.css && attw tools/schema-codegen --pack --profile esm-only",
+    "package:check": "npm run build:packages && npm run package:lint && node scripts/verify-packages.mjs",
+    "check": "npm run typecheck && npm test && npm run test:go && npm run vet:go",
+    "release:check": "npm run version:check && npm run check && npm run build:demo && npm run package:check && npm run audit",
+    "demo": "npm run dev --workspace @pythia-software/query-table-demo",
     "test:dnd": "node demo/dnd-test.mjs",
     "prepare": "husky"
   },
   "devDependencies": {
-    "@playwright/test": "^1.60.0",
+    "@arethetypeswrong/cli": "^0.18.5",
     "@types/node": "^20.11.30",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.7",
@@ -29,7 +51,14 @@
     "jsdom": "^29.1.1",
     "playwright": "^1.60.0",
     "react": "^18.3.1",
+    "publint": "^0.3.23",
+    "tsup": "^8.5.1",
     "typescript": "^5.6.3",
-    "vitest": "^2.1.8"
+    "vitest": "^3.2.6"
+  },
+  "overrides": {
+    "tsup": {
+      "esbuild": "0.27.2"
+    }
   }
 }

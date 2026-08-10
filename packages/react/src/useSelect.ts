@@ -5,8 +5,8 @@
 // avoid flooding history during a drag (useQueryTable does this).
 
 import { useCallback, useMemo } from "react";
-import type { QueryState, SelectColumn, FieldDef, FieldSchema } from "@query-table/core";
-import { selectedFields } from "@query-table/core";
+import type { QueryState, SelectColumn, FieldDef, FieldSchema } from "@pythia-software/query-table-core";
+import { selectedFields } from "@pythia-software/query-table-core";
 
 export interface SelectApi<Row> {
   /** Ordered visible columns (resolved: schema defaults when query.select is empty). */

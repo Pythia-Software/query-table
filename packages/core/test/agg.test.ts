@@ -111,11 +111,11 @@ describe("aggregation encode round-trip + projection", () => {
       ...base,
       where: [
         { field: "overall", op: "=", value: "FAIL" }, // pushdown
-        { field: "failed_steps", op: "includes", value: "eval" }, // pushdown:false → dropped
+        { field: "error_codes", op: "includes", value: "eval" }, // pushdown:false → dropped
       ],
       aggregations: [
         { id: "ok", op: "avg", field: "total_ms", groupBy: ["platform"] },
-        { id: "bad", op: "count", groupBy: ["deviations"] }, // derived group field → dropped
+        { id: "bad", op: "count", groupBy: ["details"] }, // derived group field → dropped
       ],
     };
     const req = toAggregationQuery(q, runsSchema);
@@ -130,7 +130,7 @@ describe("aggregate capability helpers", () => {
     expect(isMeasurable(byName.get("total_ms")!)).toBe(true);
     expect(isGroupable(byName.get("platform")!)).toBe(true); // enum
     expect(isGroupable(byName.get("total_ms")!)).toBe(false); // number, no bucketing
-    expect(isMeasurable(byName.get("deviations")!)).toBe(false); // derived
+    expect(isMeasurable(byName.get("details")!)).toBe(false); // derived
     expect(aggOpsForField(byName.get("total_ms")!)).toContain("sum");
     expect(aggOpsForField(byName.get("overall")!)).not.toContain("sum"); // enum
   });
