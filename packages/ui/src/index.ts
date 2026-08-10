@@ -1,9 +1,9 @@
-// @query-table/ui — the opinionated, themeable components.
-// Bring your own theme: import "@query-table/ui/theme.css" (Mode A) or pass
+// @pythia-software/query-table-ui — the opinionated, themeable components.
+// Bring your own theme: import "@pythia-software/query-table-ui/theme.css" (Mode A) or pass
 // `classNames` slots (Mode B).
 
 export type { CellContext, CellRenderer, RenderRegistry } from "./renderers";
-export { defaultRenderers, resolveRenderer } from "./renderers";
+export { defaultRenderers, resolveRenderer, safeLinkHref } from "./renderers";
 
 export type { TableClassNames, QueryBuilderClassNames, MenuClassNames } from "./classNames";
 

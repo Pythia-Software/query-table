@@ -1,0 +1,62 @@
+name: Release npm packages
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish
+    if: github.repository == 'Pythia-Software/query-table'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out full history
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Require the tagged commit to be on main
+        run: git merge-base --is-ancestor "${GITHUB_SHA}" origin/main
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Use an OIDC-capable npm version
+        run: npm install --global npm@11.6.1
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: backends/go/go.mod
+          cache: false
+      - name: Install exact dependencies
+        run: npm ci --ignore-scripts
+      - name: Match package versions to the tag
+        run: npm run version:check -- "${GITHUB_REF_NAME}"
+      - name: Run the release gate
+        run: npm run release:check
+      - name: Publish packages in dependency order
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: |
+          version="${RELEASE_VERSION#v}"
+          publish_workspace() {
+            package_name="$1"
+            if npm view "${package_name}@${version}" version >/dev/null 2>&1; then
+              echo "${package_name}@${version} is already published; skipping."
+            else
+              npm publish --workspace "${package_name}" --access public
+            fi
+          }
+          publish_workspace "@pythia-software/query-table-core"
+          publish_workspace "@pythia-software/query-table-react"
+          publish_workspace "@pythia-software/query-table-ui"
+          publish_workspace "@pythia-software/query-table-codegen"

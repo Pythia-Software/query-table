@@ -1,12 +1,12 @@
-// useSelection — row selection with both projects' behaviors merged.
+// useSelection — row selection for paged and re-sortable datasets.
 //
-//   - xplo-perf: shift-click range select, anchored by ROW ID (not index) so a
+//   - Shift-click range select, anchored by ROW ID (not index) so a
 //     range survives re-sort / re-filter / paging. Index anchors break the moment
 //     the data reorders; id anchors don't.
-//   - xlsx-collect: indeterminate header checkbox + select-all-on-page.
+//   - Indeterminate header checkbox + select-all-on-page.
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import type { RowId } from "@query-table/core";
+import type { RowId } from "@pythia-software/query-table-core";
 
 export interface SelectionApi {
   selected: Set<RowId>;

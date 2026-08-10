@@ -1,9 +1,9 @@
 // Package querytable compiles a frontend QueryState into parameterized SQL,
 // validated against a server-defined field schema. It is the Go projection of
-// @query-table/core: the wire types here mirror the TS shapes exactly so a
+// @pythia-software/query-table-core: the wire types here mirror the TS shapes exactly so a
 // base64url ?q= token (or a JSON request body) round-trips without translation.
 //
-// Safety model (carried over from explo's perfstore/querydsl.go): the column
+// Safety model: the column
 // expression for each field comes from the schema, never from request input. An
 // unknown field is a compile error before any SQL is built. Values reach SQL
 // only as bound placeholders ($N). The validated operator and the schema-defined
@@ -17,21 +17,37 @@ import (
 	"strings"
 )
 
-// WhereClause mirrors @query-table/core WhereClause.
+// Resource limits mirror @pythia-software/query-table-core. Compile and DecodeWireQuery both
+// enforce them so callers are protected whether a query came from a URL token
+// or was decoded from a JSON request body elsewhere.
+const (
+	MaxQueryLimit       = 1_000
+	MaxQueryOffset      = 1_000_000
+	MaxSelectColumns    = 200
+	MaxWhereClauses     = 100
+	MaxOrderByTerms     = 20
+	MaxAggregations     = 20
+	MaxGroupByFields    = 20
+	maxFieldNameLength  = 256
+	maxFilterValueBytes = 10_000
+	maxQueryTokenBytes  = 2 * 1024 * 1024
+)
+
+// WhereClause mirrors @pythia-software/query-table-core WhereClause.
 type WhereClause struct {
 	Field string `json:"field"`
 	Op    string `json:"op"`
 	Value string `json:"value"`
 }
 
-// OrderBy mirrors @query-table/core OrderByClause.
+// OrderBy mirrors @pythia-software/query-table-core OrderByClause.
 type OrderBy struct {
 	Field string `json:"field"`
 	Dir   string `json:"dir"`             // "asc" | "desc"
 	Nulls string `json:"nulls,omitempty"` // "first" | "last" | "" (default last)
 }
 
-// AggSpec mirrors @query-table/core AggregationClause: one aggregate op over one
+// AggSpec mirrors @pythia-software/query-table-core AggregationClause: one aggregate op over one
 // measure column (Field; empty ⇒ COUNT(*)), broken down by zero or more group
 // columns. Compiled by CompileAggregation; the metric panel runs one per spec
 // over the WHERE-filtered set (no paging).
@@ -46,7 +62,7 @@ type AggSpec struct {
 // {s,w,o,...} `?q=` payload). View-only state (column widths) never arrives.
 //
 // OrderBy unmarshals from BOTH the new array form and the legacy single-object
-// form, so old xplo-perf / xlsx-collect links keep compiling.
+// form, so legacy links keep compiling.
 type WireQuery struct {
 	Select       []string      `json:"select,omitempty"`
 	Where        []WhereClause `json:"w,omitempty"`
@@ -54,6 +70,108 @@ type WireQuery struct {
 	Limit        int           `json:"l,omitempty"`
 	Offset       int           `json:"f,omitempty"`
 	Aggregations []AggSpec     `json:"g,omitempty"`
+}
+
+// UnmarshalJSON accepts both the readable ServerQuery property names emitted
+// by @pythia-software/query-table-core and the compact names used inside a URL token. It
+// validates resource limits before returning, so a normal json.Decoder is a
+// safe API boundary even when the caller does not use DecodeWireQuery.
+func (q *WireQuery) UnmarshalJSON(data []byte) error {
+	var payload struct {
+		Select              []string      `json:"select"`
+		Where               []WhereClause `json:"where"`
+		CompactWhere        []WhereClause `json:"w"`
+		OrderBy             OrderBys      `json:"orderBy"`
+		CompactOrderBy      OrderBys      `json:"o"`
+		Limit               *int          `json:"limit"`
+		CompactLimit        *int          `json:"l"`
+		Offset              *int          `json:"offset"`
+		CompactOffset       *int          `json:"f"`
+		Aggregations        []AggSpec     `json:"aggregations"`
+		CompactAggregations []AggSpec     `json:"g"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return err
+	}
+
+	q.Select = payload.Select
+	q.Where = payload.Where
+	if q.Where == nil {
+		q.Where = payload.CompactWhere
+	}
+	q.OrderBy = payload.OrderBy
+	if q.OrderBy == nil {
+		q.OrderBy = payload.CompactOrderBy
+	}
+	q.Limit = 0
+	if payload.Limit != nil {
+		q.Limit = *payload.Limit
+	} else if payload.CompactLimit != nil {
+		q.Limit = *payload.CompactLimit
+	}
+	q.Offset = 0
+	if payload.Offset != nil {
+		q.Offset = *payload.Offset
+	} else if payload.CompactOffset != nil {
+		q.Offset = *payload.CompactOffset
+	}
+	q.Aggregations = payload.Aggregations
+	if q.Aggregations == nil {
+		q.Aggregations = payload.CompactAggregations
+	}
+
+	return q.Validate()
+}
+
+// Validate rejects malformed or unexpectedly expensive query shapes. A zero
+// Limit is allowed so an omitted value can be replaced by the caller's default;
+// an explicitly negative or oversized value is never allowed.
+func (q WireQuery) Validate() error {
+	if q.Limit < 0 || q.Limit > MaxQueryLimit {
+		return fmt.Errorf("limit must be between 0 and %d", MaxQueryLimit)
+	}
+	if q.Offset < 0 || q.Offset > MaxQueryOffset {
+		return fmt.Errorf("offset must be between 0 and %d", MaxQueryOffset)
+	}
+	if len(q.Select) > MaxSelectColumns {
+		return fmt.Errorf("select has %d fields; maximum is %d", len(q.Select), MaxSelectColumns)
+	}
+	if len(q.Where) > MaxWhereClauses {
+		return fmt.Errorf("where has %d clauses; maximum is %d", len(q.Where), MaxWhereClauses)
+	}
+	if len(q.OrderBy) > MaxOrderByTerms {
+		return fmt.Errorf("orderBy has %d terms; maximum is %d", len(q.OrderBy), MaxOrderByTerms)
+	}
+	if len(q.Aggregations) > MaxAggregations {
+		return fmt.Errorf("aggregations has %d items; maximum is %d", len(q.Aggregations), MaxAggregations)
+	}
+	for _, field := range q.Select {
+		if field == "" || len(field) > maxFieldNameLength {
+			return fmt.Errorf("invalid select field name")
+		}
+	}
+	for _, clause := range q.Where {
+		if clause.Field == "" || len(clause.Field) > maxFieldNameLength {
+			return fmt.Errorf("invalid filter field name")
+		}
+		if len(clause.Value) > maxFilterValueBytes {
+			return fmt.Errorf("filter value for %q exceeds %d bytes", clause.Field, maxFilterValueBytes)
+		}
+	}
+	for _, term := range q.OrderBy {
+		if term.Field == "" || len(term.Field) > maxFieldNameLength {
+			return fmt.Errorf("invalid sort field name")
+		}
+	}
+	for _, aggregation := range q.Aggregations {
+		if aggregation.ID == "" || len(aggregation.ID) > maxFieldNameLength {
+			return fmt.Errorf("invalid aggregation id")
+		}
+		if len(aggregation.GroupBy) > MaxGroupByFields {
+			return fmt.Errorf("aggregation %q has %d group fields; maximum is %d", aggregation.ID, len(aggregation.GroupBy), MaxGroupByFields)
+		}
+	}
+	return nil
 }
 
 // OrderBys is a slice of OrderBy that also accepts a single object on decode
@@ -97,13 +215,16 @@ type wirePayload struct {
 }
 
 // DecodeWireQuery decodes the base64url-encoded JSON `?q=` token produced by
-// @query-table/core encodeQuery. The select tuples carry widths the server
+// @pythia-software/query-table-core encodeQuery. The select tuples carry widths the server
 // ignores; only the field names are extracted. Mirrors the charset/padding
 // fix-ups so a bookmark round-trips bit-for-bit.
 func DecodeWireQuery(token string) (WireQuery, error) {
 	var q WireQuery
 	if token == "" {
 		return q, nil
+	}
+	if len(token) > maxQueryTokenBytes {
+		return q, fmt.Errorf("query token exceeds %d bytes", maxQueryTokenBytes)
 	}
 	s := strings.ReplaceAll(token, "-", "+")
 	s = strings.ReplaceAll(s, "_", "/")
@@ -124,6 +245,9 @@ func DecodeWireQuery(token string) (WireQuery, error) {
 	q.Offset = p.Offset
 	q.Aggregations = p.Aggs
 	q.Select = decodeSelect(p.Select, p.Legacy)
+	if err := q.Validate(); err != nil {
+		return WireQuery{}, fmt.Errorf("query: %w", err)
+	}
 	return q, nil
 }
 

@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { loadSchema, type RowId } from "@query-table/core";
-import { useQueryTable } from "@query-table/react";
+import { loadSchema, type RowId } from "@pythia-software/query-table-core";
+import { useQueryTable } from "@pythia-software/query-table-react";
 import {
   DataTable,
   MetricsPanel,
@@ -9,8 +9,8 @@ import {
   defaultRenderers,
   type RenderRegistry,
   type CellContext,
-} from "@query-table/ui";
-import "@query-table/ui/theme.css";
+} from "@pythia-software/query-table-ui";
+import "@pythia-software/query-table-ui/theme.css";
 
 import runsDoc from "../../schema/examples/runs.schema.json";
 import { RUNS, type Run } from "./data";
@@ -22,9 +22,9 @@ const renderers: RenderRegistry<Run> = {
   ...defaultRenderers,
   overall_pill: ({ value }: CellContext<Run>) =>
     value ? <span className={`qt-pill--${String(value).toLowerCase()}`}>{String(value)}</span> : <span>—</span>,
-  tag_marker: ({ value }: CellContext<Run>) => <button title="rerun-after-deploy">{value ? "★" : "☆"}</button>,
+  tag_marker: ({ value }: CellContext<Run>) => <span title="priority">{value ? "★" : "☆"}</span>,
   link_run: ({ value }: CellContext<Run>) => <a href={`#run-${value}`}>{String(value)}</a>,
-  step_tags: ({ value }: CellContext<Run>) => (
+  code_tags: ({ value }: CellContext<Run>) => (
     <>
       {((value as string[] | null) ?? []).map((s) => (
         <span key={s} className="qt-pill--fail">
@@ -33,7 +33,7 @@ const renderers: RenderRegistry<Run> = {
       ))}
     </>
   ),
-  artifact_link: () => <button>view</button>,
+  detail_link: () => <button>view</button>,
 };
 
 export function App() {

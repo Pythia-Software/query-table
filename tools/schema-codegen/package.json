@@ -1,15 +1,39 @@
 {
-  "name": "@query-table/schema-codegen",
-  "version": "0.0.0",
+  "name": "@pythia-software/query-table-codegen",
+  "version": "0.1.0",
   "description": "Generate the TS catalog + Go schema from a query-table JSON schema document.",
+  "keywords": ["codegen", "data-table", "json-schema", "typescript", "golang"],
   "license": "MIT",
-  "private": true,
+  "author": "Pythia Software",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Pythia-Software/query-table.git",
+    "directory": "tools/schema-codegen"
+  },
+  "homepage": "https://github.com/Pythia-Software/query-table/tree/main/tools/schema-codegen#readme",
+  "bugs": { "url": "https://github.com/Pythia-Software/query-table/issues" },
+  "engines": { "node": ">=22" },
   "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
   "bin": { "query-table-codegen": "./dist/cli.js" },
+  "files": ["dist", "README.md", "LICENSE"],
+  "publishConfig": { "access": "public" },
   "scripts": {
-    "build": "tsc -b"
+    "build": "tsup src/index.ts src/cli.ts --format esm --dts --sourcemap --clean --target node22 --external @pythia-software/query-table-core",
+    "prepack": "npm run build",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@query-table/core": "0.0.0"
+    "@pythia-software/query-table-core": "0.1.0"
   }
 }

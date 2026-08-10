@@ -19,7 +19,7 @@ describe("schema/examples/runs.schema.json", () => {
   it("resolves the declared default columns", () => {
     const s = loadSchema(doc);
     expect(selectedFields(s, { select: [] }).map((f) => f.name)).toEqual([
-      "workbook_case_name",
+      "job_name",
       "platform",
       "overall",
       "total_ms",
@@ -31,7 +31,7 @@ describe("schema/examples/runs.schema.json", () => {
     const s = loadSchema(doc);
     const by = (n: string) => s.fields.find((f) => f.name === n)!;
     expect(by("is_starred").source).toEqual({ kind: "backend", synthetic: true });
-    expect(by("deviations").source).toEqual({ kind: "derived" });
+    expect(by("details").source).toEqual({ kind: "derived" });
     expect(by("enqueued_at").source).toEqual({ kind: "backend", path: "enqueued_at.Time" });
   });
 });

@@ -4,8 +4,8 @@
 // point and clamps to the viewport. Present in both source projects; unified here.
 
 import { useEffect, useState, type ReactNode } from "react";
-import type { FieldDef, FilterOp, WhereClause } from "@query-table/core";
-import { NULLARY_OPS, opsForField } from "@query-table/core";
+import type { FieldDef, FilterOp, WhereClause } from "@pythia-software/query-table-core";
+import { NULLARY_OPS, opsForField } from "@pythia-software/query-table-core";
 import type { MenuClassNames } from "./classNames";
 
 export interface CellMenuProps<Row> {

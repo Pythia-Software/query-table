@@ -1,0 +1,11 @@
+* text=auto eol=lf
+
+*.css text diff
+*.go text diff
+*.js text diff
+*.json text diff
+*.md text diff
+*.mjs text diff
+*.ts text diff
+*.tsx text diff
+*.yml text diff

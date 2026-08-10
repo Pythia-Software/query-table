@@ -1,40 +1,71 @@
 # query-table
 
+[![CI](https://github.com/Pythia-Software/query-table/actions/workflows/ci.yml/badge.svg)](https://github.com/Pythia-Software/query-table/actions/workflows/ci.yml)
+[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 An opinionated, schema-driven data table for backend-filtered datasets.
 
-`query-table` gives you a "gold standard" table UI — filtering, multi-sort, row
-selection, saved queries, shareable URL state — that stays customizable through
-a declarative **field schema** and a small set of adapters. One schema drives
-both the frontend (column rendering, which operators are offered, what's
-sortable) and the backend (the exact SQL it's allowed to emit). Define it once;
-both ends consume it.
-
-It is the convergence of two sibling tables that drifted apart:
-`explo`'s `xplo-perf` DataTable and `xlsx-collect`'s WorkbookTable. This package
-is the union of their power-user features, extracted so it can be reused.
+`query-table` gives you a full-featured table UI — filtering, multi-sort, row
+selection, saved queries, and optional shareable URL state — that stays
+customizable through a declarative **field schema** and a small set of adapters.
+One schema drives both the frontend (column rendering, which operators are
+offered, what's sortable) and the backend (the exact SQL it's allowed to emit).
+Define it once; both ends consume it.
 
 > Naming: the package family is **`query-table`**. Use `query_table` where
 > dashes are illegal (Go identifiers), and `querytable` where neither is allowed.
 
 ---
 
-## Design decisions (locked)
+## Install
 
-1. **Standalone repo**, published as packages. Three adopting PRs land in parallel:
-   this repo (the package), `explo` (xplo-perf adopts it), `xlsx-collect` (adopts it).
+Choose the highest-level package you need:
+
+```bash
+# Framework-agnostic query and schema primitives
+npm install @pythia-software/query-table-core
+
+# Headless React state and orchestration
+npm install @pythia-software/query-table-core @pythia-software/query-table-react react
+
+# Complete React UI
+npm install @pythia-software/query-table-core @pythia-software/query-table-react @pythia-software/query-table-ui react
+```
+
+For the Go SQL compiler:
+
+```bash
+go get github.com/Pythia-Software/query-table/backends/go
+```
+
+For schema generation:
+
+```bash
+npm install --save-dev @pythia-software/query-table-codegen
+```
+
+All npm packages are ESM-only and include bundled JavaScript, declarations,
+source maps, package documentation, and the MIT license. Node.js 22 or newer is
+supported by the published packages.
+
+---
+
+## Design decisions
+
+1. **Standalone packages.** Consumers can use the framework-agnostic core,
+   headless React hooks, or the complete UI package.
 2. **Schema source of truth = JSON Schema.** Field schemas are JSON documents
    validated against `schema/query-table.schema.json`. SQL/backend details live
    in a per-backend `bindings` block, so non-Go/non-SQL backends can bind the
    same schema later. Codegen projects a document into a TS catalog and a Go schema.
 3. **Multi-sort** via header menu on column headings (set/append/prepend, asc/desc), plus
    an ordered, reorderable sort list in the QueryBuilder. State is `orderBy: SortClause[]`.
-4. **Saved queries** default to `localStorage`, with an optional backend store when
-   the data layer implements `StorageAdapter`. **The current view always lives in
-   the URL** (`?q=` base64url), so reload / back-forward / bookmarks all work, and a
-   saved query is just a serialized `QueryState` you load into the URL.
-5. **View state lives in the query.** Visible columns, their order, *and their
-   widths* are part of `QueryState`. One URL reproduces the same table on any
-   device for any user.
+4. **Private by default.** Saved queries use non-durable memory and URL sync is
+   disabled unless a consumer explicitly supplies `localStorageAdapter()` or
+   sets `syncUrl: true`. Query tokens are base64url-encoded, not encrypted, and
+   may contain raw filter values.
+5. **View state lives in the query.** Visible columns, their order, and their
+   widths are part of `QueryState`, so explicitly shared URLs reproduce a view.
 6. **Package name** `query-table` / `query_table` / `querytable` as above.
 
 ---
@@ -49,34 +80,34 @@ is the union of their power-user features, extracted so it can be reused.
                        codegen     │     codegen
               ┌────────────────────┴────────────────────┐
               ▼                                          ▼
-   @query-table/core  (TS FieldDef[])        backends/go  (Go Schema / FieldSpec)
+   @pythia-software/query-table-core  (TS FieldDef[])        backends/go  (Go Schema / FieldSpec)
         QueryState · encode/decode · applyQuery · adapters
               │                                          │
               ▼                                          ▼
-   @query-table/react  (headless hooks)        Compile(WireQuery, Schema)
+   @pythia-software/query-table-react  (headless hooks)        Compile(WireQuery, Schema)
         useQueryTable · useSelection ·            → parameterized SQL
-        useColumns · useSavedQueries              (allowlist = injection boundary)
+        useSelect · useSavedQueries               (allowlist = injection boundary)
               │
               ▼
-   @query-table/ui  (the gold-standard components, themeable)
+   @pythia-software/query-table-ui  (the gold-standard components, themeable)
         DataTable · QueryBuilder · FieldPicker · CellMenu · SelectionToolbar
 ```
 
-Take only what you need: drop-in `@query-table/ui`, or `@query-table/react` with
-your own markup, or just `@query-table/core` for the wire types in another stack.
+Take only what you need: drop-in `@pythia-software/query-table-ui`, or `@pythia-software/query-table-react` with
+your own markup, or just `@pythia-software/query-table-core` for the wire types in another stack.
 
 ### Packages
 
 | Package | What it is | Depends on |
 |---|---|---|
-| `@query-table/core` | Pure TS. `QueryState`, `FieldDef`, encode/decode, client-side `applyQuery`, adapter interfaces. No React, no DOM. | — |
-| `@query-table/react` | Headless hooks that own query state, URL/storage sync, fetch orchestration, selection, columns. No markup. | core, react (peer) |
-| `@query-table/ui` | The opinionated components. Themeable via CSS variables **or** a `classNames` slot map (Tailwind-friendly). | core, react, react (peer) |
+| `@pythia-software/query-table-core` | Pure TS. `QueryState`, `FieldDef`, encode/decode, client-side `applyQuery`, adapter interfaces. No React, no DOM. | — |
+| `@pythia-software/query-table-react` | Headless hooks that own query state, URL/storage sync, fetch orchestration, selection, columns. No markup. | core, react (peer) |
+| `@pythia-software/query-table-ui` | The opinionated components. Themeable via CSS variables **or** a `classNames` slot map (Tailwind-friendly). | core, React hooks, React (peer) |
 | `backends/go` | `querytable` Go module: compiles a `WireQuery` to parameterized SQL against a schema allowlist. | — |
-| `tools/schema-codegen` | Emits the TS catalog + Go schema from a JSON schema document. | core |
+| `@pythia-software/query-table-codegen` | CLI and JS API that emit the TS catalog + Go schema from a JSON schema document. | core |
 | `demo` | Runnable Vite playground over an in-memory dataset, for seeing UI changes live and manual testing. | core, react, ui |
 
-React is a **peer dependency `>=18`** (xlsx-collect is on 19, explo on 18).
+React is a **peer dependency `>=18 <20`**.
 
 Run the playground with `npm run demo` (serves http://localhost:5179). See
 [`demo/README.md`](demo/README.md), including the headless drag-and-drop
@@ -87,7 +118,7 @@ regression check (`node demo/dnd-test.mjs`).
 ## The contracts at a glance
 
 ```ts
-// what data + how to view it — reads like the SQL it compiles to, all shareable via URL
+// what data + how to view it — reads like the SQL it compiles to
 interface QueryState {
   select:  SelectColumn[];   // ordered visible columns + per-column width; [] = schema defaults
   where:   WhereClause[];    // AND-combined filters
@@ -130,8 +161,8 @@ reaches SQL text; values are always bound parameters. Every type allows
 `is_null`/`is_not_null` (bool included) — any column can be NULL.
 
 See `schema/query-table.schema.json` for the authoritative document format and
-`schema/examples/runs.schema.json` for a worked schema (ported from xplo-perf,
-validated against the meta-schema and loadable by both the TS and Go loaders).
+`schema/examples/runs.schema.json` for a worked schema validated against the
+meta-schema and loadable by both the TypeScript and Go loaders.
 
 ---
 
@@ -141,7 +172,7 @@ Optional **metrics** pin above the table: each is a single aggregate
 (`count`/`count_distinct`/`sum`/`avg`/`min`/`max`) over one measure column,
 broken down by zero or more group columns. They turn the query builder into a
 lightweight dashboard — and because they live inside `QueryState`, a saved query
-*is* a saved dashboard (URL, saved queries, and undo/redo all come for free).
+*is* a saved dashboard. URL sharing is available when explicitly enabled.
 
 ```ts
 interface AggregationClause {
@@ -172,7 +203,7 @@ Each metric is its own request, kept off the rows pipeline:
   field-expression allowlist are enforced on both ends, exactly like filters.
 
 ```
-SELECT <group exprs…>, AVG(vr.total_ms) AS "value", COUNT(*) AS "count"
+SELECT <group exprs…>, AVG(r.total_ms) AS "value", COUNT(*) AS "count"
 FROM <caller FROM/JOIN>
 WHERE <shared WhereSQL>          -- same filter as the rows query
 GROUP BY <group exprs…>          -- no ORDER BY / LIMIT / OFFSET
@@ -194,13 +225,22 @@ are groupable).
 
 | Package | State | Verified by |
 |---|---|---|
-| `@query-table/core` | **implemented** | 32 unit tests (`vitest`) + `tsc --noEmit`, all green |
-| `backends/go` | **implemented** | `go test` + `go vet`, all green; loads the example doc |
-| `@query-table/react` | **implemented** | `tsc --noEmit`, clean |
-| `@query-table/ui` | **implemented** | `tsc --noEmit`; runtime UX verified during app adoption |
-| `tools/schema-codegen` | contract only | the runtime loaders (`loadSchema` / `LoadSchema`) already make the JSON schema work end-to-end without it; codegen is the compile-time optimization |
+| `@pythia-software/query-table-core` | **implemented** | unit tests (`vitest`) + `tsc --noEmit` |
+| `backends/go` | **implemented** | `go test` + `go vet`; loads the example doc |
+| `@pythia-software/query-table-react` | **implemented** | unit tests + `tsc --noEmit` |
+| `@pythia-software/query-table-ui` | **implemented** | unit tests + `tsc --noEmit` |
+| `@pythia-software/query-table-codegen` | **implemented** | unit tests, CLI tarball test, and generated TS/Go output checks |
 
-Known follow-ups: the build emits bundler-style ESM (extensionless relative
-imports) — fine for the Next.js consumers, but a `tsup`/NodeNext pass is wanted
-before publishing for raw-Node ESM. Then: the three adoption PRs (explo,
-xlsx-collect) and the codegen generator.
+Package tarballs are checked with Publint, Are the Types Wrong, a clean consumer
+install, native Node ESM imports, TypeScript NodeNext resolution, CSS export
+resolution, and an installed codegen CLI invocation.
+
+---
+
+## Contributing and security
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development and release checks,
+[RELEASING.md](RELEASING.md) for the maintainer release procedure,
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community expectations, and
+[SECURITY.md](SECURITY.md) for private vulnerability reporting. User-visible
+changes are recorded in [CHANGELOG.md](CHANGELOG.md).

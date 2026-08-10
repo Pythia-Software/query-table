@@ -1,11 +1,12 @@
 # query-table demo — local playground
 
-A runnable Vite + React app that mounts the real `@query-table/ui` components
+A runnable Vite + React app that mounts the real `@pythia-software/query-table-ui` components
 over an in-memory dataset (no backend). Use it to see changes to the packages
 working live, and to manually test interactions like drag-to-reorder.
 
-The `@query-table/*` packages export raw TS source, so Vite compiles them
-straight from `packages/*/src` — edit a package and the demo hot-reloads.
+The published packages export compiled ESM from `dist/`. The demo's Vite config
+aliases the local `packages/*/src` entry points so edits still hot-reload during
+development.
 
 ## Run it
 

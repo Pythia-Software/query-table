@@ -1,13 +1,11 @@
 // useSavedQueries — named query snapshots over a StorageAdapter.
 //
 // "Last query" auto-restore and named saves both flow through the injected
-// StorageAdapter (localStorage by default, backend-backed if the data layer
-// provides one — decision #4). Loading a saved query pushes its QueryState into
-// the controller, which re-encodes the URL — so a saved query is equally a
-// shareable link.
+// StorageAdapter (in-memory by default, explicitly durable when the caller
+// provides one). Loading a saved query pushes its QueryState into the controller.
 
 import { useCallback, useEffect, useState } from "react";
-import type { QueryState, SavedQuery, StorageAdapter } from "@query-table/core";
+import type { QueryState, SavedQuery, StorageAdapter } from "@pythia-software/query-table-core";
 
 export interface SavedQueriesApi {
   items: SavedQuery[];
@@ -16,7 +14,7 @@ export interface SavedQueriesApi {
   defaultId: string | null;
   /** Persist the current query under a name. Rejects on duplicate names. */
   save: (name: string) => Promise<SavedQuery>;
-  /** Load a saved query into the live controller (and thus the URL). */
+  /** Load a saved query into the live controller. */
   load: (id: string) => void;
   /** Mark a saved query as the default view. No-op when storage lacks support. */
   setDefault: (id: string) => Promise<void>;

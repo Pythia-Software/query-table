@@ -1,4 +1,4 @@
-// @query-table/core — pure TS contracts shared by every consumer.
+// @pythia-software/query-table-core — pure TS contracts shared by every consumer.
 // No React, no DOM. Safe to import on a server, in a worker, or another stack.
 
 export type {
@@ -11,7 +11,19 @@ export type {
   QueryState,
   RowId,
 } from "./query";
-export { EMPTY_QUERY, queriesEqual } from "./query";
+export {
+  EMPTY_QUERY,
+  MAX_QUERY_LIMIT,
+  MAX_QUERY_OFFSET,
+  MAX_SELECT_COLUMNS,
+  MAX_WHERE_CLAUSES,
+  MAX_ORDER_BY_TERMS,
+  MAX_AGGREGATIONS,
+  MAX_GROUP_BY_FIELDS,
+  MAX_QUERY_TOKEN_LENGTH,
+  normalizeQueryState,
+  queriesEqual,
+} from "./query";
 
 export type {
   FieldType,
@@ -72,4 +84,4 @@ export type {
   SavedQuery,
   StorageAdapter,
 } from "./adapters";
-export { localStorageAdapter } from "./adapters";
+export { localStorageAdapter, memoryStorageAdapter } from "./adapters";

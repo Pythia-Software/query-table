@@ -1,10 +1,10 @@
 // classNames.ts — the styling escape hatch.
 //
-// Two ways to skin the components (decision: support both projects' looks):
-//   - Mode A (drop-in): import "@query-table/ui/theme.css" and override CSS
-//     variables. xplo-perf's plain-CSS palette becomes the default theme.
+// Two ways to skin the components:
+//   - Mode A (drop-in): import "@pythia-software/query-table-ui/theme.css" and override CSS
+//     variables. The bundled plain-CSS palette becomes the default theme.
 //   - Mode B (Tailwind/bespoke): pass a `classNames` slot map and skip the
-//     stylesheet. xlsx-collect passes its Tailwind utility strings here.
+//     stylesheet. Consumers can pass Tailwind utility strings here.
 //
 // Components apply BOTH their structural class (`qt-*`, for Mode A) and any
 // matching slot string (for Mode B), so the two modes compose.

@@ -3,7 +3,7 @@
 // The headless brain of the table: it holds the QueryState, keeps it in sync
 // with the URL (`?q=`) and the StorageAdapter, orchestrates fetches through the
 // Transport (debounced + abortable), and exposes intent-level mutators so a UI
-// never hand-edits QueryState. @query-table/ui is a thin layer over this; you
+// never hand-edits QueryState. @pythia-software/query-table-ui is a thin layer over this; you
 // can also build an entirely custom table on it.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -12,12 +12,13 @@ import {
   applyQuery,
   decodeQuery,
   encodeQuery,
-  localStorageAdapter,
+  memoryStorageAdapter,
+  normalizeQueryState,
   readFieldValue,
   selectedFields,
   toServerQuery,
   queriesEqual,
-} from "@query-table/core";
+} from "@pythia-software/query-table-core";
 
 const AUTOCOMPLETE_LIMIT = 50;
 const MAX_AUTO_REFRESH_POLLS = 1000;
@@ -34,7 +35,7 @@ import type {
   Transport,
   StorageAdapter,
   DistinctValuesResult,
-} from "@query-table/core";
+} from "@pythia-software/query-table-core";
 import { useAggregations } from "./useAggregations";
 import { useSelection, type SelectionApi } from "./useSelection";
 import { useSelect, type SelectApi } from "./useSelect";
@@ -47,12 +48,16 @@ export interface UseQueryTableOptions<Row> {
   transport?: Transport<Row>;
   /** All rows, for client-side mode (applyQuery runs locally over these). */
   clientRows?: Row[];
-  /** Saved/last-query persistence. Defaults to localStorageAdapter(). */
+  /** Saved/last-query persistence. Defaults to a non-durable in-memory adapter.
+   * Pass localStorageAdapter() explicitly only when filter values are safe to
+   * retain as cleartext JSON on the device. */
   storage?: StorageAdapter;
-  /** Seed query — typically the server-decoded `?q=` for SSR/first paint. When
-   *  omitted the hook resolves: URL → storage.loadLast → schema defaults. */
+  /** Seed query, normalized and resource-bounded before use. When omitted the
+   * hook resolves: opted-in URL → storage.loadLast → schema defaults. */
   initialQuery?: QueryState;
-  /** Mirror QueryState to `?q=` via history.replaceState. Default true. */
+  /** Mirror QueryState to `?q=` via history.replaceState. Default false because
+   * base64url is encoding, not encryption: filters will appear in browser
+   * history, referrers, logs, analytics, and screenshots when enabled. */
   syncUrl?: boolean;
   /** Debounce (ms) between a query change and the fetch it triggers. Default 200. */
   debounceMs?: number;
@@ -173,13 +178,13 @@ export interface QueryTableApi<Row> {
 }
 
 function defaultsFor<Row>(schema: FieldSchema<Row>): QueryState {
-  return {
+  return normalizeQueryState({
     select: schema.defaultSelect ?? [],
     where: [],
     orderBy: schema.defaultSort ?? [],
     limit: schema.defaultLimit ?? EMPTY_QUERY.limit,
     offset: 0,
-  };
+  });
 }
 
 function cloneQueryState(q: QueryState): QueryState {
@@ -254,17 +259,18 @@ function distinctValuesFromRows<Row>(field: FieldDef<Row>, rows: Row[], search: 
 }
 
 function resolveInitial<Row>(opts: UseQueryTableOptions<Row>): { q: QueryState; fromUrl: boolean } {
-  if (opts.initialQuery) return { q: opts.initialQuery, fromUrl: false };
-  if (typeof window !== "undefined") {
+  const defaults = defaultsFor(opts.schema);
+  if (opts.initialQuery) return { q: normalizeQueryState(opts.initialQuery, defaults), fromUrl: false };
+  if (opts.syncUrl === true && typeof window !== "undefined") {
     const token = new URLSearchParams(window.location.search).get("q");
-    if (token) return { q: decodeQuery(token), fromUrl: true };
+    if (token) return { q: normalizeQueryState(decodeQuery(token), defaults), fromUrl: true };
   }
-  return { q: defaultsFor(opts.schema), fromUrl: false };
+  return { q: defaults, fromUrl: false };
 }
 
 export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableApi<Row> {
-  const { schema, transport, clientRows, initialQuery, syncUrl = true, debounceMs = 200 } = opts;
-  const storage = useMemo(() => opts.storage ?? localStorageAdapter(), [opts.storage]);
+  const { schema, transport, clientRows, initialQuery, syncUrl = false, debounceMs = 200 } = opts;
+  const storage = useMemo(() => opts.storage ?? memoryStorageAdapter(), [opts.storage]);
   const now = opts.now ?? Date.now;
   const nowRef = useRef(now);
   const onRefreshRef = useRef(opts.onRefresh);
@@ -293,13 +299,14 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
 
   const setQuery = useCallback<QueryTableApi<Row>["setQuery"]>((next) => {
     setQueryState((prev) => {
-      const nextQuery = typeof next === "function" ? (next as (p: QueryState) => QueryState)(prev) : next;
+      const candidate = typeof next === "function" ? (next as (p: QueryState) => QueryState)(prev) : next;
+      const nextQuery = normalizeQueryState(candidate, defaults);
       if (queriesEqual(prev, nextQuery)) return prev;
       undoStack.current.push(cloneQueryState(prev));
       redoStack.current = [];
       return cloneQueryState(nextQuery);
     });
-  }, []);
+  }, [defaults]);
 
   // Restore the default saved query (preferred) or last query on mount when
   // nothing explicit seeded the view.
@@ -310,9 +317,10 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
       const defaultSaved = await storage.loadDefaultSaved?.(schema.name);
       const restored = defaultSaved?.query ?? (await storage.loadLast(schema.name));
       if (!cancelled && restored) {
-        undoStack.current = [cloneQueryState(restored)];
+        const normalized = normalizeQueryState(restored, defaults);
+        undoStack.current = [cloneQueryState(normalized)];
         redoStack.current = [];
-        setQueryState(restored);
+        setQueryState(normalized);
       }
     })();
     return () => {
@@ -481,8 +489,8 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
     [setQuery],
   );
 
-  const setLimit = useCallback((limit: number) => patch({ limit: Math.max(1, Math.round(limit)), offset: 0 }), [patch]);
-  const setOffset = useCallback((offset: number) => patch({ offset: Math.max(0, Math.round(offset)) }), [patch]);
+  const setLimit = useCallback((limit: number) => patch({ limit, offset: 0 }), [patch]);
+  const setOffset = useCallback((offset: number) => patch({ offset }), [patch]);
   const nextPage = useCallback(() => setQuery((q) => ({ ...q, offset: q.offset + q.limit })), [setQuery]);
   const prevPage = useCallback(() => setQuery((q) => ({ ...q, offset: Math.max(0, q.offset - q.limit) })), [setQuery]);
 

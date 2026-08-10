@@ -1,28 +1,43 @@
 {
-  "name": "@query-table/ui",
-  "version": "0.0.0",
+  "name": "@pythia-software/query-table-ui",
+  "version": "0.1.0",
   "description": "Schema-driven data table — opinionated, themeable React components.",
+  "keywords": ["data-table", "query-builder", "react", "components", "typescript"],
   "license": "MIT",
+  "author": "Pythia Software",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Pythia-Software/query-table.git",
+    "directory": "packages/ui"
+  },
+  "homepage": "https://github.com/Pythia-Software/query-table#readme",
+  "bugs": { "url": "https://github.com/Pythia-Software/query-table/issues" },
+  "engines": { "node": ">=22" },
   "type": "module",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "sideEffects": ["**/*.css"],
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "default": "./src/index.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     },
-    "./theme.css": "./src/theme.css"
+    "./theme.css": "./dist/theme.css"
   },
-  "files": ["src", "dist"],
+  "files": ["dist", "README.md", "LICENSE"],
+  "publishConfig": { "access": "public" },
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsup src/index.ts src/theme.css --format esm --dts --sourcemap --clean --target es2020 --external react --external @pythia-software/query-table-core --external @pythia-software/query-table-react",
+    "prepack": "npm run build",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@query-table/core": "0.0.0",
-    "@query-table/react": "0.0.0"
+    "@pythia-software/query-table-core": "0.1.0",
+    "@pythia-software/query-table-react": "0.1.0"
   },
   "peerDependencies": {
-    "react": ">=18"
+    "react": ">=18 <20"
   }
 }

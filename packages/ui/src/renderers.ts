@@ -1,15 +1,14 @@
 // renderers.ts — the cell render registry.
 //
 // This is how the table stays "gold standard but customizable" (the core ask).
-// The package ships ONLY truly-generic renderers. Domain-specific cells
-// (xplo-perf's `overall_pill`/`artifact_link`/`fix_prompt`, xlsx-collect's
-// `source_cell`/`risk_badge`) are registered by the consuming app — they must
-// NOT live in a generic package. A FieldDef.render is either a key resolved
+// The package ships ONLY truly-generic renderers. Domain-specific cells are
+// registered by the consuming app — they must NOT live in a generic package.
+// A FieldDef.render is either a key resolved
 // against `{ ...defaultRenderers, ...consumerRenderers }` or an inline function.
 
 import type { ReactNode } from "react";
 import { createElement } from "react";
-import type { FieldDef, QueryState } from "@query-table/core";
+import type { FieldDef, QueryState } from "@pythia-software/query-table-core";
 
 export interface CellContext<Row = any, V = unknown> {
   value: V;
@@ -30,6 +29,23 @@ const muted = (text: string): ReactNode => createElement("span", { className: "q
 
 function isEmpty(v: unknown): boolean {
   return v == null || v === "" || (Array.isArray(v) && v.length === 0);
+}
+
+const SAFE_LINK_PROTOCOLS: ReadonlySet<string> = new Set(["http:", "https:", "mailto:", "tel:"]);
+
+/** Resolve a user-controlled link against a harmless HTTPS base and allow only
+ * navigation protocols. This catches obfuscated forms such as `java\nscript:`
+ * that simple prefix checks miss while preserving relative and fragment URLs. */
+export function safeLinkHref(value: unknown): string | null {
+  if (isEmpty(value)) return null;
+  const href = String(value).trim();
+  if (!href) return null;
+  try {
+    const parsed = new URL(href, "https://query-table.invalid/");
+    return SAFE_LINK_PROTOCOLS.has(parsed.protocol) ? href : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Generic, domain-free renderers shipped with the package. Keys are stable and
@@ -101,14 +117,16 @@ export const defaultRenderers: RenderRegistry = {
     );
   },
 
-  // value as an <a href={value}>
+  // value as an <a href={value}> when its URL scheme is safe
   link({ value }) {
     if (isEmpty(value)) return muted(EMPTY);
-    const href = String(value);
+    const label = String(value);
+    const href = safeLinkHref(value);
+    if (!href) return createElement("span", { className: "qt-muted", title: "Unsafe link blocked" }, label);
     return createElement(
       "a",
       { className: "qt-link", href, target: "_blank", rel: "noopener noreferrer", title: href },
-      href,
+      label,
     );
   },
 };

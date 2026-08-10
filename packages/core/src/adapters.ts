@@ -2,9 +2,10 @@
 // here so the package core stays generic.
 //
 //   - Transport     : how rows + filter-value suggestions are fetched.
-//   - StorageAdapter: where saved/last queries live (localStorage default;
-//                     backend-backed when the data layer provides one).
+//   - StorageAdapter: where saved/last queries live (in-memory by default in
+//                     the React hook; explicitly durable when callers opt in).
 
+import { normalizeQueryState } from "./query";
 import type { QueryState, RowId } from "./query";
 import type { ServerQuery, AggregationRequest, AggregationResult } from "./encode";
 
@@ -38,7 +39,7 @@ export interface DistinctValuesResult {
   hasNull?: boolean;
 }
 
-/** Per-field metadata for the field picker (xlsx-collect's distinct/min/max). */
+/** Per-field metadata for the field picker. */
 export interface FieldStats {
   distinct?: number;
   min?: string | number;
@@ -64,7 +65,7 @@ export interface Transport<Row = any> {
   fetchAggregations?(q: AggregationRequest, signal?: AbortSignal): Promise<AggregationResult>;
 
   /** Re-fetch a single row by id, for in-place updates without a full re-query
-   *  (xlsx-collect's per-row refresh). Optional. */
+   *  after a mutation. Optional. */
   fetchRow?(id: RowId, signal?: AbortSignal): Promise<Row | null>;
 
   /** Stats for the field picker. Optional. */
@@ -84,7 +85,7 @@ export interface SavedQuery {
 /** Persistence for the "last" query (auto-restored) and named saved queries. All
  *  methods are namespaced by `key` (the schema/dataset name) so multiple tables
  *  on one origin don't collide. Async to allow backend implementations; the
- *  default localStorage adapter resolves synchronously. */
+ *  browser adapters can still resolve synchronously. */
 export interface StorageAdapter {
   loadLast(key: string): Promise<QueryState | null>;
   saveLast(key: string, query: QueryState): Promise<void>;
@@ -104,9 +105,95 @@ export interface StorageAdapter {
 const LAST_PREFIX = "query-table:last:";
 const SAVED_PREFIX = "query-table:saved:";
 const DEFAULT_PREFIX = "query-table:default:";
+const MAX_SAVED_QUERIES = 100;
+const MAX_SAVED_NAME_LENGTH = 200;
 
-/** Default StorageAdapter over window.localStorage. Returns a no-op adapter when
- *  localStorage is unavailable (SSR / sandboxed). */
+function normalizeSavedQuery(value: unknown): SavedQuery | null {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  if (
+    typeof raw.id !== "string" ||
+    !raw.id ||
+    raw.id.length > 256 ||
+    typeof raw.name !== "string" ||
+    !raw.name ||
+    raw.name.length > MAX_SAVED_NAME_LENGTH ||
+    typeof raw.savedAt !== "number" ||
+    !Number.isFinite(raw.savedAt) ||
+    raw.query == null ||
+    typeof raw.query !== "object"
+  ) {
+    return null;
+  }
+  return { id: raw.id, name: raw.name, savedAt: raw.savedAt, query: normalizeQueryState(raw.query) };
+}
+
+function normalizeSavedQueries(value: unknown): SavedQuery[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .slice(0, MAX_SAVED_QUERIES)
+    .map(normalizeSavedQuery)
+    .filter((item): item is SavedQuery => item != null);
+}
+
+/** In-memory persistence used by default by the React package. It supports the
+ * full saved-query UI for the lifetime of a mounted table without writing
+ * filter values to durable browser storage. */
+export function memoryStorageAdapter(): StorageAdapter {
+  const last = new Map<string, QueryState>();
+  const saved = new Map<string, SavedQuery[]>();
+  const defaults = new Map<string, string>();
+
+  return {
+    async loadLast(key) {
+      const query = last.get(key);
+      return query ? normalizeQueryState(query) : null;
+    },
+    async saveLast(key, query) {
+      last.set(key, normalizeQueryState(query));
+    },
+    async listSaved(key) {
+      return (saved.get(key) ?? []).map((item) => ({ ...item, query: normalizeQueryState(item.query) }));
+    },
+    async loadDefaultSaved(key) {
+      const id = defaults.get(key);
+      return id ? (saved.get(key) ?? []).find((item) => item.id === id) ?? null : null;
+    },
+    async setDefaultSaved(key, id) {
+      if (id == null) {
+        defaults.delete(key);
+        return;
+      }
+      if (!(saved.get(key) ?? []).some((item) => item.id === id)) throw new Error(`Saved query "${id}" does not exist.`);
+      defaults.set(key, id);
+    },
+    async saveNamed(key, name, query, savedAt) {
+      const normalizedName = name.trim();
+      if (!normalizedName || normalizedName.length > MAX_SAVED_NAME_LENGTH) {
+        throw new Error(`Saved query name must be between 1 and ${MAX_SAVED_NAME_LENGTH} characters.`);
+      }
+      const items = saved.get(key) ?? [];
+      if (items.length >= MAX_SAVED_QUERIES) throw new Error(`At most ${MAX_SAVED_QUERIES} saved queries are allowed.`);
+      if (items.some((item) => item.name === normalizedName)) throw new Error(`Saved query "${normalizedName}" already exists.`);
+      const item: SavedQuery = {
+        id: `${savedAt}-${Math.round((savedAt * 9301 + 49297) % 233280)}`,
+        name: normalizedName,
+        savedAt,
+        query: normalizeQueryState(query),
+      };
+      saved.set(key, [...items, item]);
+      return item;
+    },
+    async deleteSaved(key, id) {
+      saved.set(key, (saved.get(key) ?? []).filter((item) => item.id !== id));
+      if (defaults.get(key) === id) defaults.delete(key);
+    },
+  };
+}
+
+/** Opt-in StorageAdapter over window.localStorage. Query state includes raw
+ * filter values and is stored as cleartext JSON; do not use it for sensitive
+ * datasets. Falls back to no persistence when storage is unavailable. */
 export function localStorageAdapter(): StorageAdapter {
   const ls: Storage | null = (() => {
     try {
@@ -120,8 +207,7 @@ export function localStorageAdapter(): StorageAdapter {
     if (!ls) return [];
     try {
       const raw = ls.getItem(SAVED_PREFIX + key);
-      const arr = raw ? (JSON.parse(raw) as SavedQuery[]) : [];
-      return Array.isArray(arr) ? arr : [];
+      return normalizeSavedQueries(raw ? JSON.parse(raw) : []);
     } catch {
       return [];
     }
@@ -144,13 +230,13 @@ export function localStorageAdapter(): StorageAdapter {
       if (!ls) return null;
       try {
         const raw = ls.getItem(LAST_PREFIX + key);
-        return raw ? (JSON.parse(raw) as QueryState) : null;
+        return raw ? normalizeQueryState(JSON.parse(raw)) : null;
       } catch {
         return null;
       }
     },
     async saveLast(key, query) {
-      if (ls) ls.setItem(LAST_PREFIX + key, JSON.stringify(query));
+      if (ls) ls.setItem(LAST_PREFIX + key, JSON.stringify(normalizeQueryState(query)));
     },
     async listSaved(key) {
       return readSaved(key).sort((a, b) => b.savedAt - a.savedAt);
@@ -169,11 +255,21 @@ export function localStorageAdapter(): StorageAdapter {
       writeDefaultId(key, id);
     },
     async saveNamed(key, name, query, savedAt) {
-      const items = readSaved(key);
-      if (items.some((q) => q.name === name)) {
-        throw new Error(`Saved query "${name}" already exists.`);
+      const normalizedName = name.trim();
+      if (!normalizedName || normalizedName.length > MAX_SAVED_NAME_LENGTH) {
+        throw new Error(`Saved query name must be between 1 and ${MAX_SAVED_NAME_LENGTH} characters.`);
       }
-      const item: SavedQuery = { id: `${savedAt}-${Math.round((savedAt * 9301 + 49297) % 233280)}`, name, savedAt, query };
+      const items = readSaved(key);
+      if (items.length >= MAX_SAVED_QUERIES) throw new Error(`At most ${MAX_SAVED_QUERIES} saved queries are allowed.`);
+      if (items.some((q) => q.name === normalizedName)) {
+        throw new Error(`Saved query "${normalizedName}" already exists.`);
+      }
+      const item: SavedQuery = {
+        id: `${savedAt}-${Math.round((savedAt * 9301 + 49297) % 233280)}`,
+        name: normalizedName,
+        savedAt,
+        query: normalizeQueryState(query),
+      };
       items.push(item);
       writeSaved(key, items);
       return item;

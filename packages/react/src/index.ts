@@ -1,4 +1,4 @@
-// @query-table/react — headless hooks. No markup; bring your own (or use @query-table/ui).
+// @pythia-software/query-table-react — headless hooks. No markup; bring your own (or use @pythia-software/query-table-ui).
 
 export type { AutoRefreshApi, AutoRefreshConfig, AutoRefreshStatus, AggregationsApi, AggregationPatch, UseQueryTableOptions, QueryTableApi } from "./useQueryTable";
 export { useQueryTable } from "./useQueryTable";

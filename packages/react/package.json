@@ -1,26 +1,41 @@
 {
-  "name": "@query-table/react",
-  "version": "0.0.0",
+  "name": "@pythia-software/query-table-react",
+  "version": "0.1.0",
   "description": "Schema-driven data table — headless React hooks.",
+  "keywords": ["data-table", "query-builder", "react", "hooks", "typescript"],
   "license": "MIT",
+  "author": "Pythia Software",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Pythia-Software/query-table.git",
+    "directory": "packages/react"
+  },
+  "homepage": "https://github.com/Pythia-Software/query-table#readme",
+  "bugs": { "url": "https://github.com/Pythia-Software/query-table/issues" },
+  "engines": { "node": ">=22" },
   "type": "module",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "default": "./src/index.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     }
   },
-  "files": ["src", "dist"],
+  "files": ["dist", "README.md", "LICENSE"],
+  "publishConfig": { "access": "public" },
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsup src/index.ts --format esm --dts --sourcemap --clean --target es2020 --external react --external @pythia-software/query-table-core",
+    "prepack": "npm run build",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@query-table/core": "0.0.0"
+    "@pythia-software/query-table-core": "0.1.0"
   },
   "peerDependencies": {
-    "react": ">=18"
+    "react": ">=18 <20"
   }
 }

@@ -7,8 +7,8 @@
 // does not re-issue them. Debounced + abortable, mirroring the rows fetch.
 
 import { useEffect, useMemo, useState } from "react";
-import { applyAggregations, toAggregationQuery } from "@query-table/core";
-import type { AggregationResult, FieldSchema, QueryState, Transport } from "@query-table/core";
+import { applyAggregations, toAggregationQuery } from "@pythia-software/query-table-core";
+import type { AggregationResult, FieldSchema, QueryState, Transport } from "@pythia-software/query-table-core";
 
 export interface AggregationsApiState {
   results: AggregationResult | null;

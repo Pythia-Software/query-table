@@ -1,10 +1,10 @@
-// FieldPicker — grouped, searchable field chooser (xlsx-collect's richer one).
+// FieldPicker — grouped, searchable field chooser.
 // Searches label + name + aliases, groups by FieldDef.group, and surfaces
 // per-field stats (distinct count, min/max) when the Transport provides them.
 // Used to add columns and to add filters.
 
 import { useMemo, useState, type ReactNode } from "react";
-import type { FieldDef, FieldStats } from "@query-table/core";
+import type { FieldDef, FieldStats } from "@pythia-software/query-table-core";
 
 export interface FieldPickerProps<Row> {
   fields: FieldDef<Row>[];
