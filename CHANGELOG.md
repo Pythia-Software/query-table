@@ -6,6 +6,8 @@ contain intentional API changes described in their release notes.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-08-10
+
 ### Added
 
 - Publishable ESM builds and declarations for the core, React, UI, and schema
@@ -27,4 +29,5 @@ contain intentional API changes described in their release notes.
 - Updated the JavaScript toolchain to remove known dependency advisories.
 - Added Git-history secret scanning and Go/npm vulnerability checks to CI.
 
-[Unreleased]: https://github.com/Pythia-Software/query-table/compare/main...HEAD
+[Unreleased]: https://github.com/Pythia-Software/query-table/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/Pythia-Software/query-table/releases/tag/v0.1.0
