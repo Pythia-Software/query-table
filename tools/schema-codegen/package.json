@@ -25,7 +25,7 @@
       "default": "./dist/index.js"
     }
   },
-  "bin": { "query-table-codegen": "./dist/cli.js" },
+  "bin": { "query-table-codegen": "dist/cli.js" },
   "files": ["dist", "README.md", "LICENSE"],
   "publishConfig": { "access": "public" },
   "scripts": {
