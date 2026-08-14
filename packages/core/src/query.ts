@@ -113,10 +113,11 @@ export const EMPTY_QUERY: QueryState = {
   offset: 0,
 };
 
-/** Resource limits applied whenever query state crosses a trust boundary (URL,
- * storage, an imperative setQuery call, or a server projection). They keep a
- * malformed bookmark from becoming an unexpectedly expensive request. */
-export const MAX_QUERY_LIMIT = 1_000;
+/** Structural limits applied whenever query state crosses a trust boundary
+ * (URL, storage, an imperative setQuery call, or a server projection). Row
+ * limits may use the full safe-integer range; consumers and their backends own
+ * any smaller operational cap appropriate for their dataset. */
+export const MAX_QUERY_LIMIT = Number.MAX_SAFE_INTEGER;
 export const MAX_QUERY_OFFSET = 1_000_000;
 export const MAX_SELECT_COLUMNS = 200;
 export const MAX_WHERE_CLAUSES = 100;
