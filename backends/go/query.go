@@ -17,11 +17,14 @@ import (
 	"strings"
 )
 
-// Resource limits mirror @pythia-software/query-table-core. Compile and DecodeWireQuery both
-// enforce them so callers are protected whether a query came from a URL token
-// or was decoded from a JSON request body elsewhere.
+// Structural limits mirror @pythia-software/query-table-core. Compile and
+// DecodeWireQuery both enforce them so callers are protected whether a query
+// came from a URL token or was decoded from a JSON request body elsewhere.
 const (
-	MaxQueryLimit       = 1_000
+	// MaxQueryLimit is the largest row limit representable by this platform.
+	// The package does not impose a smaller application-level row cap; consumers
+	// and their databases own any operational limit appropriate for the dataset.
+	MaxQueryLimit       = int(^uint(0) >> 1)
 	MaxQueryOffset      = 1_000_000
 	MaxSelectColumns    = 200
 	MaxWhereClauses     = 100
@@ -123,9 +126,9 @@ func (q *WireQuery) UnmarshalJSON(data []byte) error {
 	return q.Validate()
 }
 
-// Validate rejects malformed or unexpectedly expensive query shapes. A zero
-// Limit is allowed so an omitted value can be replaced by the caller's default;
-// an explicitly negative or oversized value is never allowed.
+// Validate rejects malformed query shapes. A zero Limit is allowed so an
+// omitted value can be replaced by the caller's default; a negative value is
+// never allowed. Values too large for the platform fail during JSON decoding.
 func (q WireQuery) Validate() error {
 	if q.Limit < 0 || q.Limit > MaxQueryLimit {
 		return fmt.Errorf("limit must be between 0 and %d", MaxQueryLimit)

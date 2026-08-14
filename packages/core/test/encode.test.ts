@@ -83,6 +83,10 @@ describe("encodeQuery / decodeQuery", () => {
 });
 
 describe("normalizeQueryState", () => {
+  it("does not impose an application-level 1,000-row limit", () => {
+    expect(normalizeQueryState({ ...EMPTY_QUERY, limit: 10_000 }).limit).toBe(10_000);
+  });
+
   it("normalizes arbitrary runtime input into a bounded QueryState", () => {
     const where = Array.from({ length: MAX_WHERE_CLAUSES + 20 }, (_, i) => ({
       field: `field_${i}`,

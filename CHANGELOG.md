@@ -6,6 +6,11 @@ contain intentional API changes described in their release notes.
 
 ## [Unreleased]
 
+### Changed
+
+- Removed the package-level 1,000-row query limit. Consumers and their backends
+  can apply smaller operational caps when appropriate.
+
 ## [0.1.0] - 2026-08-10
 
 ### Added

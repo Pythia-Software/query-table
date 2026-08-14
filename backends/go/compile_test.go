@@ -261,14 +261,16 @@ func TestWireQueryJSON_acceptsServerQueryNamesAndValidates(t *testing.T) {
 		t.Fatalf("unexpected query: %#v", q)
 	}
 
-	if err := json.Unmarshal([]byte(`{"limit":1001}`), &q); err == nil {
-		t.Fatal("want resource-limit error from JSON decoder")
+	if err := json.Unmarshal([]byte(`{"limit":10000}`), &q); err != nil {
+		t.Fatalf("unmarshal limit above 1000: %v", err)
+	}
+	if q.Limit != 10_000 {
+		t.Fatalf("limit = %d, want 10000", q.Limit)
 	}
 }
 
 func TestDecodeWireQuery_rejectsResourceLimitViolations(t *testing.T) {
 	for name, payload := range map[string]string{
-		"limit":  `{"l":1001}`,
 		"offset": `{"f":1000001}`,
 		"value":  `{"w":[{"field":"overall","op":"=","value":"` + strings.Repeat("x", maxFilterValueBytes+1) + `"}]}`,
 	} {
@@ -283,11 +285,18 @@ func TestDecodeWireQuery_rejectsResourceLimitViolations(t *testing.T) {
 	}
 }
 
+func TestDecodeWireQuery_acceptsLimitAbove1000(t *testing.T) {
+	q, err := DecodeWireQuery(b64url(`{"l":10000}`))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if q.Limit != 10_000 {
+		t.Fatalf("limit = %d, want 10000", q.Limit)
+	}
+}
+
 func TestCompile_rejectsResourceLimitViolations(t *testing.T) {
 	s := mustSchema(t)
-	if _, _, err := Compile(WireQuery{Limit: MaxQueryLimit + 1}, s, 1); err == nil {
-		t.Fatal("want oversized limit error")
-	}
 	if _, _, err := Compile(WireQuery{Offset: -1}, s, 1); err == nil {
 		t.Fatal("want negative offset error")
 	}
