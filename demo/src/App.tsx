@@ -15,6 +15,7 @@ import "@pythia-software/query-table-ui/theme.css";
 import runsDoc from "../../schema/examples/runs.schema.json";
 import { RUNS, type Run } from "./data";
 import { CollapsibleSection } from "./CollapsibleSection";
+import "./demo.css";
 
 const schema = loadSchema<Run>(runsDoc);
 
@@ -50,11 +51,19 @@ export function App() {
   const tableSummary = `${api.rows.length} row${api.rows.length === 1 ? "" : "s"}${api.total != null ? ` (of ${api.total} total)` : ""}`;
 
   return (
-    <div style={{ maxWidth: 1100, margin: "24px auto", fontFamily: "system-ui, sans-serif" }}>
-      <h1 style={{ fontSize: 20 }}>query-table — local demo</h1>
-      <p style={{ color: "#666", fontSize: 13 }}>
-        Client-side mode over {RUNS.length} mock rows. Drag the <code>select</code> chips and the table
-        headers to reorder columns; drag the <code>order by</code> chips to re-prioritize sort.
+    <main className="qt-demo">
+      <header className="qt-demo-header">
+        <p className="qt-demo-eyebrow">Interactive playground</p>
+        <h1>query-table</h1>
+      </header>
+      <p className="qt-demo-intro">
+        <span className="qt-demo-desktop-copy">
+          Client-side mode over {RUNS.length} mock rows. Drag the <code>select</code> chips and the table
+          headers to reorder columns; drag the <code>order by</code> chips to re-prioritize sort.
+        </span>
+        <span className="qt-demo-mobile-copy">
+          Explore {RUNS.length} mock rows. Build a query above, tap any cell for actions, and swipe the table to see every column.
+        </span>
       </p>
 
       <QueryBuilder api={api} fields={schema.fields} total={api.total} running={api.loading} />
@@ -94,6 +103,6 @@ export function App() {
           emptyMessage="No runs match this query."
         />
       </CollapsibleSection>
-    </div>
+    </main>
   );
 }

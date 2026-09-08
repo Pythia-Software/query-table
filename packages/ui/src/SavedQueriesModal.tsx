@@ -21,7 +21,13 @@ export function SavedQueriesModal({ saved, onClose, onLoad }: SavedQueriesModalP
 
   return (
     <div className="qt-modal-backdrop" onClick={onClose}>
-      <div className="qt-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Saved queries">
+      <div
+        className="qt-modal"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Saved queries"
+      >
         <h3 className="qt-modal-title">Saved queries</h3>
         {saved.loading ? (
           <p className="qt-muted">Loading…</p>

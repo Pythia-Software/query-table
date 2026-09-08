@@ -92,6 +92,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
   const [selectionColumnWidth, setSelectionColumnWidth] = useState(DEFAULT_SELECTION_WIDTH);
   const [tableColumnOrder, setTableColumnOrder] = useState<string[]>([]);
   const [copiedCellKey, setCopiedCellKey] = useState<string | null>(null);
+  const [showHorizontalCue, setShowHorizontalCue] = useState(false);
   const tableWrapRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
   const resizeGuideRef = useRef<HTMLDivElement>(null);
@@ -443,6 +444,27 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     const f = fieldByName.get(name);
     return sum + displayColumnWidthFor(name, f);
   }, trailing ? 40 : 0);
+  // A horizontal data grid is more useful than a card stack on small screens,
+  // but overflow should be discoverable. Keep a lightweight cue visible only
+  // while there is more content to the right.
+  useEffect(() => {
+    const wrap = tableWrapRef.current;
+    if (!wrap) return;
+
+    const updateCue = () => {
+      const hasMoreToRight = wrap.scrollWidth - wrap.clientWidth - wrap.scrollLeft > 2;
+      setShowHorizontalCue(hasMoreToRight);
+    };
+
+    updateCue();
+    window.addEventListener("resize", updateCue);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateCue);
+    observer?.observe(wrap);
+    return () => {
+      window.removeEventListener("resize", updateCue);
+      observer?.disconnect();
+    };
+  }, [renderedColumnNames, tableWidth]);
   const start = query.offset;
   const end = total != null ? Math.min(start + query.limit, total) : start + rows.length;
   const canPrev = start > 0;
@@ -454,6 +476,11 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
 
   return (
     <>
+      {showHorizontalCue ? (
+        <div className="qt-table-scroll-cue" aria-hidden="true">
+          Swipe to see more <span>→</span>
+        </div>
+      ) : null}
       <div
         ref={tableWrapRef}
         className={cx(
@@ -462,6 +489,14 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
           classNames?.wrap,
         )}
         onWheel={onTableWheel}
+        onScroll={() => {
+          const wrap = tableWrapRef.current;
+          if (!wrap) return;
+          setShowHorizontalCue(wrap.scrollWidth - wrap.clientWidth - wrap.scrollLeft > 2);
+        }}
+        role="region"
+        aria-label="Scrollable data table"
+        tabIndex={0}
       >
         {loading && (
           <div className={cx("qt-loading-bar", classNames?.loadingBar)} role="progressbar" aria-label="loading" />
