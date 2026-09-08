@@ -102,15 +102,28 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
   } = props;
 
   const [menu, setMenu] = useState<MenuState<Row> | null>(null);
-  const [resizingField, setResizingField] = useState<string | null>(null);
-  const [draftWidths, setDraftWidths] = useState<Record<string, number>>({});
   const [selectionColumnWidth, setSelectionColumnWidth] = useState(DEFAULT_SELECTION_WIDTH);
   const [tableColumnOrder, setTableColumnOrder] = useState<string[]>([]);
   const [copiedCellKey, setCopiedCellKey] = useState<string | null>(null);
   const [headerHeight, setHeaderHeight] = useState(0);
+  const [showHorizontalCue, setShowHorizontalCue] = useState(false);
   const tableWrapRef = useRef<HTMLDivElement>(null);
   const tableHeadRef = useRef<HTMLTableSectionElement>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
+  const resizeGuideRef = useRef<HTMLDivElement>(null);
+  // A real <col> width change invalidates layout for every row. During a drag,
+  // move only the compositor-friendly guide and apply the column width once on
+  // release; refs also keep pointermove out of React's render pipeline.
   const resizeCommitRef = useRef<{ name: string; width: number } | null>(null);
+  const resizePreviewRef = useRef<{
+    name: string;
+    width: number;
+    previousWidth: number;
+    startTableWidth: number;
+    guideX: number;
+  } | null>(null);
+  const resizeFrameRef = useRef<number | null>(null);
+  const cancelResizeRef = useRef<(() => void) | null>(null);
   const resizingFieldRef = useRef<string | null>(null);
   const copiedCellTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Shared drag state when the host passes `api.columnDrag`; otherwise a local
@@ -151,6 +164,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
         clearTimeout(copiedCellTimerRef.current);
         copiedCellTimerRef.current = null;
       }
+      cancelResizeRef.current?.();
     };
   }, []);
 
@@ -250,11 +264,11 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     return col?.width ?? f.select?.width;
   }
   function resolvedWidthFor(name: string, f: FieldDef<Row>): number | undefined {
-    return draftWidths[name] ?? widthFor(name, f);
+    return widthFor(name, f);
   }
   function resolvedColumnWidthFor(name: string, f?: FieldDef<Row>): number | undefined {
-    if (name === SELECTION_COLUMN) return draftWidths[name] ?? selectionColumnWidth;
-    return f ? resolvedWidthFor(name, f) : draftWidths[name];
+    if (name === SELECTION_COLUMN) return selectionColumnWidth;
+    return f ? resolvedWidthFor(name, f) : undefined;
   }
   function displayColumnWidthFor(name: string, f?: FieldDef<Row>): number {
     if (name === SELECTION_COLUMN) return resolvedColumnWidthFor(name) ?? DEFAULT_SELECTION_WIDTH;
@@ -278,16 +292,20 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     const px = clampWidth(width);
     onQueryChange((prev) => ({ ...prev, select: writeWidth(prev.select, fields, name, px) }));
   }
-  function setDraftWidth(name: string, width: number) {
-    setDraftWidths((prev) => (prev[name] === width ? prev : { ...prev, [name]: width }));
+  function applyResizeGuide() {
+    const preview = resizePreviewRef.current;
+    const guide = resizeGuideRef.current;
+    if (!preview || !guide) return;
+    guide.style.transform = `translateX(${preview.guideX}px)`;
   }
-  function clearDraftWidth(name: string) {
-    setDraftWidths((prev) => {
-      if (!(name in prev)) return prev;
-      const next = { ...prev };
-      delete next[name];
-      return next;
-    });
+  function applyCommittedResize() {
+    const preview = resizePreviewRef.current;
+    const table = tableRef.current;
+    if (!preview || !table) return;
+    const selector = `col[data-qt-column="${cssAttributeValue(preview.name)}"]`;
+    const col = table.querySelector<HTMLTableColElement>(selector);
+    if (col) col.style.width = `${preview.width}px`;
+    table.style.minWidth = `${preview.startTableWidth + preview.width - preview.previousWidth}px`;
   }
   function startResize(name: string, startWidth: number | undefined, e: React.PointerEvent<HTMLSpanElement>) {
     e.preventDefault();
@@ -296,30 +314,72 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     const startW = startWidth ?? e.currentTarget.parentElement?.getBoundingClientRect().width ?? DEFAULT_WIDTH;
     const previousCursor = document.body.style.cursor;
     const previousUserSelect = document.body.style.userSelect;
+    const initialWidth = clampColumnWidth(name, startW);
+    const wrap = tableWrapRef.current;
+    const wrapRect = wrap?.getBoundingClientRect();
+    const header = e.currentTarget.parentElement as HTMLTableCellElement | null;
     resizeCommitRef.current = null;
+    resizePreviewRef.current = {
+      name,
+      width: initialWidth,
+      previousWidth: displayColumnWidthFor(name, fieldByName.get(name)),
+      startTableWidth: tableWidth,
+      guideX: startX - (wrapRect?.left ?? 0) + (wrap?.scrollLeft ?? 0),
+    };
     resizingFieldRef.current = name;
-    setResizingField(name);
-    setDraftWidth(name, clampColumnWidth(name, startW));
+    tableWrapRef.current?.classList.add("qt-table-wrap--resizing");
+    header?.classList.add("qt-th--resizing");
+    if (header) header.draggable = false;
+    if (resizeGuideRef.current) {
+      resizeGuideRef.current.style.display = "block";
+      resizeGuideRef.current.style.top = `${wrap?.scrollTop ?? 0}px`;
+      resizeGuideRef.current.style.height = `${wrap?.clientHeight ?? 0}px`;
+    }
+    applyResizeGuide();
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
-    const finish = () => {
+    const cleanup = (commitWidth: boolean) => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", finish);
       window.removeEventListener("pointercancel", finish);
+      if (resizeFrameRef.current != null) {
+        cancelAnimationFrame(resizeFrameRef.current);
+        resizeFrameRef.current = null;
+        applyResizeGuide();
+      }
       document.body.style.cursor = previousCursor;
       document.body.style.userSelect = previousUserSelect;
-      const commit = resizeCommitRef.current;
+      tableWrapRef.current?.classList.remove("qt-table-wrap--resizing");
+      tableRef.current
+        ?.querySelector<HTMLElement>(`th[data-qt-field="${cssAttributeValue(name)}"]`)
+        ?.classList.remove("qt-th--resizing");
+      if (header) header.draggable = true;
+      const commit = commitWidth ? resizeCommitRef.current : null;
+      if (commit) applyCommittedResize();
+      if (resizeGuideRef.current) resizeGuideRef.current.style.display = "none";
       resizeCommitRef.current = null;
+      resizePreviewRef.current = null;
       resizingFieldRef.current = null;
-      setResizingField(null);
-      clearDraftWidth(name);
+      cancelResizeRef.current = null;
       if (commit) commitColumnWidth(commit.name, commit.width);
     };
+    const finish = () => cleanup(true);
     const onMove = (ev: PointerEvent) => {
       const next = clampColumnWidth(name, startW + (ev.clientX - startX));
       resizeCommitRef.current = { name, width: next };
-      setDraftWidth(name, next);
+      const preview = resizePreviewRef.current;
+      if (preview) {
+        preview.width = next;
+        preview.guideX = startX + (next - startW) - (wrapRect?.left ?? 0) + (wrap?.scrollLeft ?? 0);
+      }
+      if (resizeFrameRef.current == null) {
+        resizeFrameRef.current = requestAnimationFrame(() => {
+          resizeFrameRef.current = null;
+          applyResizeGuide();
+        });
+      }
     };
+    cancelResizeRef.current = () => cleanup(false);
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", finish);
     window.addEventListener("pointercancel", finish);
@@ -449,6 +509,27 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     const f = fieldByName.get(name);
     return sum + displayColumnWidthFor(name, f);
   }, trailing ? 40 : 0);
+  // A horizontal data grid is more useful than a card stack on small screens,
+  // but overflow should be discoverable. Keep a lightweight cue visible only
+  // while there is more content to the right.
+  useEffect(() => {
+    const wrap = tableWrapRef.current;
+    if (!wrap) return;
+
+    const updateCue = () => {
+      const hasMoreToRight = wrap.scrollWidth - wrap.clientWidth - wrap.scrollLeft > 2;
+      setShowHorizontalCue(hasMoreToRight);
+    };
+
+    updateCue();
+    window.addEventListener("resize", updateCue);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateCue);
+    observer?.observe(wrap);
+    return () => {
+      window.removeEventListener("resize", updateCue);
+      observer?.disconnect();
+    };
+  }, [renderedColumnNames, tableWidth]);
   const start = query.offset;
   const end = total != null ? Math.min(start + query.limit, total) : start + rows.length;
   const canPrev = start > 0;
@@ -467,28 +548,45 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
 
   return (
     <>
+      {showHorizontalCue ? (
+        <div className="qt-table-scroll-cue" aria-hidden="true">
+          Swipe to see more <span>→</span>
+        </div>
+      ) : null}
       <div
         ref={tableWrapRef}
         className={cx(
           "qt-table-wrap",
           loading && "qt-table-wrap--loading",
-          !!resizingField && "qt-table-wrap--resizing",
           classNames?.wrap,
         )}
         onWheel={onTableWheel}
         style={{ maxHeight, overflowY: "auto" }}
+        onScroll={() => {
+          const wrap = tableWrapRef.current;
+          if (!wrap) return;
+          setShowHorizontalCue(wrap.scrollWidth - wrap.clientWidth - wrap.scrollLeft > 2);
+        }}
+        role="region"
+        aria-label="Scrollable data table"
+        tabIndex={0}
       >
         {loading && (
           <div className={cx("qt-loading-bar", classNames?.loadingBar)} role="progressbar" aria-label="loading" />
         )}
-        <table className={cx("qt-table", classNames?.table)} style={{ minWidth: tableWidth }}>
+        <div
+          ref={resizeGuideRef}
+          className={cx("qt-resize-guide", classNames?.resizeGuide)}
+          aria-hidden="true"
+        />
+        <table ref={tableRef} className={cx("qt-table", classNames?.table)} style={{ minWidth: tableWidth }}>
           <colgroup>
             {renderedColumnNames.map((name) => {
               const f = fieldByName.get(name);
               const w = displayColumnWidthFor(name, f);
-              if (name === SELECTION_COLUMN) return <col key={name} style={{ width: w }} />;
+              if (name === SELECTION_COLUMN) return <col key={name} data-qt-column={name} style={{ width: w }} />;
               if (!f) return null;
-              return <col key={f.name} style={{ width: w }} />;
+              return <col key={f.name} data-qt-column={f.name} style={{ width: w }} />;
             })}
             {trailing && <col style={{ width: 40 }} />}
           </colgroup>
@@ -504,11 +602,10 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                         "qt-th",
                         "qt-checkbox-cell",
                         dragSource === name && "qt-th--dragging",
-                        resizingField === name && "qt-th--resizing",
                         classNames?.th,
                         classNames?.checkboxCell,
                       )}
-                      draggable={resizingField == null}
+                      draggable
                       onDragStart={(e) => {
                         if (resizingFieldRef.current) {
                           e.preventDefault();
@@ -569,11 +666,10 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                       "qt-th",
                       sortable && "qt-th--sortable",
                       dragSource === f.name && "qt-th--dragging",
-                      resizingField === f.name && "qt-th--resizing",
                       classNames?.th,
                     )}
                     style={f.select?.align ? { textAlign: f.select.align } : undefined}
-                    draggable={resizingField == null}
+                    draggable
                     onDragStart={(e) => {
                       if (resizingFieldRef.current) {
                         e.preventDefault();

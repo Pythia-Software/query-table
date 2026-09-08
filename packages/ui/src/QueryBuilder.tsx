@@ -20,6 +20,7 @@ import {
   NULLARY_OPS,
   aggOpNeedsField,
   aggOpsForField,
+  encodeQuery,
   filterValues as filterValuesFor,
   isGroupable,
   isMeasurable,
@@ -58,6 +59,7 @@ const cx = (...parts: Array<string | undefined | false>): string =>
 const MAX_AUTO_REFRESH_POLLS = 1000;
 const DEFAULT_AUTO_REFRESH_FREQUENCY_MS = 20_000;
 const DEFAULT_AUTO_REFRESH_TURN_OFF_AFTER_MS = 5 * 60_000;
+const SHARE_FEEDBACK_MS = 2_000;
 
 const AUTO_REFRESH_FREQUENCIES = [
   { label: "Every 5s", value: 5_000 },
@@ -184,6 +186,7 @@ export function QueryBuilder<Row>({
 }: QueryBuilderProps<Row>): ReactNode {
   const UNSAVED_QUERY_EDIT_ID = "__qt-unsaved-query__";
   const [showSaved, setShowSaved] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
   const [showAutoRefresh, setShowAutoRefresh] = useState(false);
   const [autoRefreshFrequencyMs, setAutoRefreshFrequencyMs] = useState(DEFAULT_AUTO_REFRESH_FREQUENCY_MS);
   const [autoRefreshTurnOffAfterMs, setAutoRefreshTurnOffAfterMs] = useState(DEFAULT_AUTO_REFRESH_TURN_OFF_AFTER_MS);
@@ -248,6 +251,22 @@ export function QueryBuilder<Row>({
   const autoRefreshRef = useRef<HTMLSpanElement>(null);
   const autoRefreshPopoverRef = useRef<HTMLSpanElement>(null);
   const [autoRefreshPopoverAlignRight, setAutoRefreshPopoverAlignRight] = useState(false);
+  const shareFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (shareFeedbackTimerRef.current) clearTimeout(shareFeedbackTimerRef.current);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    setShareCopied(false);
+    if (shareFeedbackTimerRef.current) {
+      clearTimeout(shareFeedbackTimerRef.current);
+      shareFeedbackTimerRef.current = null;
+    }
+  }, [api.query]);
 
   useEffect(() => {
     if (activeSavedQuery) {
@@ -442,6 +461,28 @@ export function QueryBuilder<Row>({
     }
   }
 
+  async function shareQuery() {
+    if (typeof window === "undefined") return;
+
+    const url = new URL(window.location.href);
+    // Always derive the token from the live query. In particular, a saved
+    // default must be shared by value because the recipient will not have the
+    // sender's StorageAdapter contents.
+    url.searchParams.set("q", encodeQuery(api.query));
+
+    try {
+      await navigator.clipboard.writeText(url.toString());
+      setShareCopied(true);
+      if (shareFeedbackTimerRef.current) clearTimeout(shareFeedbackTimerRef.current);
+      shareFeedbackTimerRef.current = setTimeout(() => {
+        setShareCopied(false);
+        shareFeedbackTimerRef.current = null;
+      }, SHARE_FEEDBACK_MS);
+    } catch {
+      window.prompt("Copy this query URL", url.toString());
+    }
+  }
+
   return (
     <div className={cx("qt-qb", classNames?.root)}>
       <div className="qt-qb-bar qt-qb-state-bar qt-qb-row">
@@ -520,6 +561,15 @@ export function QueryBuilder<Row>({
             {`Update Query '${lastSavedQuery?.name ?? "query"}'`}
           </button>
         ) : null}
+        <button
+          type="button"
+          className={cx("qt-btn", classNames?.button)}
+          onClick={() => void shareQuery()}
+          title="Copy a URL for this query"
+          aria-live="polite"
+        >
+          {shareCopied ? "Copied!" : "Share"}
+        </button>
         <button type="button" className={cx("qt-btn", classNames?.button)} onClick={() => setShowSaved(true)}>
           Saved{api.saved.items.length > 0 ? ` (${api.saved.items.length})` : ""}
         </button>
@@ -682,6 +732,46 @@ export function QueryBuilder<Row>({
   );
 }
 
+function MoveButtons({
+  label,
+  position,
+  count,
+  disabled,
+  onMove,
+}: {
+  label: string;
+  position: number;
+  count: number;
+  disabled: boolean | undefined;
+  onMove: (position: number) => void;
+}): ReactNode {
+  if (count < 2) return null;
+  return (
+    <span className="qt-chip-move-buttons">
+      <button
+        type="button"
+        className="qt-chip-move"
+        disabled={disabled || position === 0}
+        onClick={() => onMove(position - 1)}
+        aria-label={`Move ${label} earlier`}
+        title="Move earlier"
+      >
+        ←
+      </button>
+      <button
+        type="button"
+        className="qt-chip-move"
+        disabled={disabled || position === count - 1}
+        onClick={() => onMove(position + 1)}
+        aria-label={`Move ${label} later`}
+        title="Move later"
+      >
+        →
+      </button>
+    </span>
+  );
+}
+
 // ---- SELECT ---------------------------------------------------------------
 
 function SelectRow<Row>({
@@ -718,7 +808,7 @@ function SelectRow<Row>({
   return (
     <div className="qt-qb-row">
       <span className="qt-qb-kw">select</span>
-      {rendered.map((name) => {
+      {rendered.map((name, position) => {
         const label = fieldLabelByName.get(name) ?? name;
         return (
         <span
@@ -769,6 +859,13 @@ function SelectRow<Row>({
             ⋮⋮
           </span>
           <span className="qt-chip-field">{label}</span>
+          <MoveButtons
+            label={label}
+            position={position}
+            count={rendered.length}
+            disabled={disabled}
+            onMove={(nextPosition) => select.move(name, nextPosition)}
+          />
           <button type="button" className="qt-chip-x" onClick={() => select.hide(name)} disabled={disabled}>
             ✕
           </button>
@@ -1080,6 +1177,9 @@ function OrderTermChip<Row>({
   disabled,
   updateTerm,
   removeTerm,
+  position,
+  count,
+  moveTerm,
   classNames,
   label,
 }: {
@@ -1099,6 +1199,9 @@ function OrderTermChip<Row>({
   disabled: boolean | undefined;
   updateTerm: (i: number, patch: Partial<OrderByClause>) => void;
   removeTerm: (i: number) => void;
+  position: number;
+  count: number;
+  moveTerm: (toIndex: number) => void;
   classNames: QueryBuilderClassNames | undefined;
   label: string;
 }) {
@@ -1146,6 +1249,13 @@ function OrderTermChip<Row>({
           nulls {term.nulls ?? "last"}
         </button>
       )}
+      <MoveButtons
+        label={label}
+        position={position}
+        count={count}
+        disabled={disabled}
+        onMove={moveTerm}
+      />
       <button type="button" className="qt-chip-x" onClick={() => removeTerm(dataIndex)} disabled={disabled}>
         ✕
       </button>
@@ -1272,6 +1382,16 @@ function OrderRow<Row>({
             disabled={disabled}
             updateTerm={updateTerm}
             removeTerm={removeTerm}
+            position={pos}
+            count={rendered.length}
+            moveTerm={(toIndex) => {
+              const next = [...orderBy];
+              const fromIndex = next.findIndex((candidate) => candidate.field === f);
+              if (fromIndex === -1) return;
+              const [moved] = next.splice(fromIndex, 1);
+              next.splice(toIndex, 0, moved!);
+              setOrderBy(next);
+            }}
             classNames={classNames}
             label={byName.get(f)?.label ?? f}
           />
@@ -1322,28 +1442,32 @@ function WindowRow<Row>({
 
   return (
     <div className="qt-qb-row qt-qb-pagination">
-      <span className="qt-qb-kw">limit</span>
-      <input
-        className={cx("qt-qb-num", classNames?.input)}
-        type="number"
-        min={1}
-        value={limitDraft}
-        disabled={disabled}
-        onChange={(e) => setLimitDraft(e.target.value)}
-        onBlur={commitLimit}
-        onKeyDown={(e) => e.key === "Enter" && commitLimit()}
-      />
-      <span className="qt-qb-kw">offset</span>
-      <input
-        className={cx("qt-qb-num", classNames?.input)}
-        type="number"
-        min={0}
-        value={offsetDraft}
-        disabled={disabled}
-        onChange={(e) => setOffsetDraft(e.target.value)}
-        onBlur={commitOffset}
-        onKeyDown={(e) => e.key === "Enter" && commitOffset()}
-      />
+      <label className="qt-qb-window-field">
+        <span className="qt-qb-kw">limit</span>
+        <input
+          className={cx("qt-qb-num", classNames?.input)}
+          type="number"
+          min={1}
+          value={limitDraft}
+          disabled={disabled}
+          onChange={(e) => setLimitDraft(e.target.value)}
+          onBlur={commitLimit}
+          onKeyDown={(e) => e.key === "Enter" && commitLimit()}
+        />
+      </label>
+      <label className="qt-qb-window-field">
+        <span className="qt-qb-kw">offset</span>
+        <input
+          className={cx("qt-qb-num", classNames?.input)}
+          type="number"
+          min={0}
+          value={offsetDraft}
+          disabled={disabled}
+          onChange={(e) => setOffsetDraft(e.target.value)}
+          onBlur={commitOffset}
+          onKeyDown={(e) => e.key === "Enter" && commitOffset()}
+        />
+      </label>
       {!hasWindowDefault && (
         <button
           type="button"
@@ -1431,7 +1555,7 @@ function MetricsRow<Row>({
     <div className="qt-qb-row qt-qb-row--metrics">
       <span className="qt-qb-kw">metrics</span>
       {clauses.length === 0 && <span className="qt-qb-hint">none</span>}
-      {rendered.map((id) => {
+      {rendered.map((id, position) => {
         const clause = byId.get(id)!;
         return (
           <MetricChip
@@ -1454,6 +1578,9 @@ function MetricsRow<Row>({
               aggregations.update(id, { groupBy: clause.groupBy.filter((g) => g !== field) })
             }
             onRemove={() => aggregations.remove(id)}
+            position={position}
+            count={rendered.length}
+            onMove={(toIndex) => aggregations.move(id, toIndex)}
           />
         );
       })}
@@ -1501,6 +1628,9 @@ function MetricChip<Row>({
   onAddGroup,
   onRemoveGroup,
   onRemove,
+  position,
+  count,
+  onMove,
 }: {
   clause: AggregationClause;
   measurable: FieldDef<Row>[];
@@ -1517,6 +1647,9 @@ function MetricChip<Row>({
   onAddGroup: (field: string) => void;
   onRemoveGroup: (field: string) => void;
   onRemove: () => void;
+  position: number;
+  count: number;
+  onMove: (toIndex: number) => void;
 }) {
   const [addingGroup, setAddingGroup] = useState(false);
   const byName = useMemo(() => new Map(groupable.map((f) => [f.name, f])), [groupable]);
@@ -1603,6 +1736,13 @@ function MetricChip<Row>({
           </button>
         )}
       </span>
+      <MoveButtons
+        label={clause.label ?? `${AGG_OP_LABELS[clause.op]} metric`}
+        position={position}
+        count={count}
+        disabled={disabled}
+        onMove={onMove}
+      />
       <button type="button" className="qt-chip-x" onClick={onRemove} disabled={disabled} title="Remove metric">
         ✕
       </button>

@@ -1,0 +1,96 @@
+:root {
+  color-scheme: light;
+  background: #f7f9fc;
+  font-family:
+    Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  margin: 0;
+  color: var(--qt-text);
+}
+
+button,
+input,
+select {
+  font-family: inherit;
+}
+
+.qt-demo {
+  width: min(1100px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 32px 0 64px;
+}
+
+.qt-demo-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.qt-demo-header h1 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.2;
+  letter-spacing: -0.025em;
+}
+
+.qt-demo-eyebrow {
+  order: 2;
+  margin: 0;
+  color: var(--qt-accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.qt-demo-intro {
+  max-width: 850px;
+  margin: 0 0 14px;
+  color: var(--qt-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.qt-demo-mobile-copy { display: none; }
+
+@media (max-width: 640px) {
+  .qt-demo {
+    width: auto;
+    margin: 0;
+    padding:
+      max(20px, env(safe-area-inset-top))
+      max(12px, env(safe-area-inset-right))
+      max(40px, env(safe-area-inset-bottom))
+      max(12px, env(safe-area-inset-left));
+  }
+
+  .qt-demo-header {
+    display: block;
+    margin-bottom: 8px;
+  }
+
+  .qt-demo-header h1 {
+    font-size: 24px;
+  }
+
+  .qt-demo-eyebrow {
+    margin-bottom: 4px;
+  }
+
+  .qt-demo-intro {
+    margin-bottom: 18px;
+    font-size: 14px;
+  }
+
+  .qt-demo-intro code {
+    font-size: 12px;
+  }
+
+  .qt-demo-desktop-copy { display: none; }
+  .qt-demo-mobile-copy { display: inline; }
+}
