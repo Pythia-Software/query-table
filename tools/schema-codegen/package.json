@@ -1,6 +1,6 @@
 {
   "name": "@pythia-software/query-table-codegen",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Generate the TS catalog + Go schema from a query-table JSON schema document.",
   "keywords": ["codegen", "data-table", "json-schema", "typescript", "golang"],
   "license": "MIT",
@@ -34,6 +34,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@pythia-software/query-table-core": "0.1.0"
+    "@pythia-software/query-table-core": "0.2.0"
   }
 }

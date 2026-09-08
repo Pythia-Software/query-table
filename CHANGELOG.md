@@ -6,6 +6,8 @@ contain intentional API changes described in their release notes.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-08
+
 ### Added
 
 - Added a QueryBuilder Share button that copies the current query as a URL,
@@ -13,6 +15,9 @@ contain intentional API changes described in their release notes.
 
 ### Changed
 
+- Added responsive and touch-friendly UI behavior, including horizontally
+  scrollable tables, touch-sized controls, button-based query-chip reordering,
+  sticky row selection, single-column metric cards, and bottom-sheet overlays.
 - `DataTable` now virtualizes its body rows inside a 600px maximum-height
   viewport, keeping large client-side result sets responsive. Consumers can
   tune the viewport, row-height estimate, and overscan with component props.
@@ -20,6 +25,11 @@ contain intentional API changes described in their release notes.
   can apply smaller operational caps when appropriate.
 - Improved large-table column resizing by using a frame-coalesced resize guide
   and avoiding row recomputation or transport refetches for width-only changes.
+
+### Security
+
+- Updated transitive development tooling dependencies to address known
+  `browserslist` and `fast-uri` advisories.
 
 ## [0.1.0] - 2026-08-10
 
@@ -44,5 +54,6 @@ contain intentional API changes described in their release notes.
 - Updated the JavaScript toolchain to remove known dependency advisories.
 - Added Git-history secret scanning and Go/npm vulnerability checks to CI.
 
-[Unreleased]: https://github.com/Pythia-Software/query-table/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Pythia-Software/query-table/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Pythia-Software/query-table/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Pythia-Software/query-table/releases/tag/v0.1.0
