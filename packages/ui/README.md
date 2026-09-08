@@ -44,5 +44,10 @@ The bundled `link` renderer allows only HTTP(S), email, telephone, relative,
 and fragment URLs. Applications remain responsible for validating URLs emitted
 by custom renderers.
 
+The query builder's **Share** button copies a URL containing the complete
+current query, including a saved default query. Configure `useQueryTable` with
+`syncUrl: true` so recipients load shared query URLs. Query tokens are encoded,
+not encrypted, and may contain raw filter values.
+
 See the [repository README](https://github.com/Pythia-Software/query-table#readme)
 for customization and backend integration details.

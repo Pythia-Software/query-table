@@ -6,6 +6,11 @@ contain intentional API changes described in their release notes.
 
 ## [Unreleased]
 
+### Added
+
+- Added a QueryBuilder Share button that copies the current query as a URL,
+  including when the current query is a saved default.
+
 ### Changed
 
 - Removed the package-level 1,000-row query limit. Consumers and their backends
