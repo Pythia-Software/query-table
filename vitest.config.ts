@@ -8,6 +8,7 @@ export default defineConfig({
     alias: {
       // Test against source (not built dist) for fast iteration.
       "@pythia-software/query-table-core": new URL("./packages/core/src/index.ts", import.meta.url).pathname,
+      "@pythia-software/query-table-react": new URL("./packages/react/src/index.ts", import.meta.url).pathname,
     },
   },
 });

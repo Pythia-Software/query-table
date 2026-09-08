@@ -16,6 +16,7 @@ export interface TableClassNames {
   headerRow?: string;
   th?: string;
   resizeHandle?: string;
+  resizeGuide?: string;
   tbody?: string;
   row?: string;
   rowSelected?: string;

@@ -139,6 +139,19 @@
 .qt-sort-indicator { color: var(--qt-accent); }
 .qt-sort-priority { font-size: 9px; margin-left: 1px; }
 .qt-table-wrap--resizing { cursor: col-resize; }
+.qt-resize-guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 3;
+  display: none;
+  width: 1px;
+  pointer-events: none;
+  background: var(--qt-accent);
+  opacity: 0.8;
+  will-change: transform;
+}
 .qt-cell {
   padding: 8px 12px;
   border-bottom: 1px solid var(--qt-border-subtle);

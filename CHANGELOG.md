@@ -6,10 +6,17 @@ contain intentional API changes described in their release notes.
 
 ## [Unreleased]
 
+### Added
+
+- Added a QueryBuilder Share button that copies the current query as a URL,
+  including when the current query is a saved default.
+
 ### Changed
 
 - Removed the package-level 1,000-row query limit. Consumers and their backends
   can apply smaller operational caps when appropriate.
+- Improved large-table column resizing by using a frame-coalesced resize guide
+  and avoiding row recomputation or transport refetches for width-only changes.
 
 ## [0.1.0] - 2026-08-10
 
