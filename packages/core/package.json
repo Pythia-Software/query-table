@@ -1,6 +1,6 @@
 {
   "name": "@pythia-software/query-table-core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Schema-driven data table — framework-agnostic core types and logic.",
   "keywords": ["data-table", "query-builder", "schema", "typescript"],
   "license": "MIT",

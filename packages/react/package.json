@@ -1,6 +1,6 @@
 {
   "name": "@pythia-software/query-table-react",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Schema-driven data table — headless React hooks.",
   "keywords": ["data-table", "query-builder", "react", "hooks", "typescript"],
   "license": "MIT",
@@ -33,7 +33,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@pythia-software/query-table-core": "0.1.0"
+    "@pythia-software/query-table-core": "0.2.0"
   },
   "peerDependencies": {
     "react": ">=18 <20"

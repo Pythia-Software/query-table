@@ -1,6 +1,6 @@
 {
   "name": "@pythia-software/query-table-demo",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Runnable local playground for manually testing query-table (drag-and-drop, sort, filter, select).",
   "type": "module",
@@ -10,9 +10,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@pythia-software/query-table-core": "0.1.0",
-    "@pythia-software/query-table-react": "0.1.0",
-    "@pythia-software/query-table-ui": "0.1.0",
+    "@pythia-software/query-table-core": "0.2.0",
+    "@pythia-software/query-table-react": "0.2.0",
+    "@pythia-software/query-table-ui": "0.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
