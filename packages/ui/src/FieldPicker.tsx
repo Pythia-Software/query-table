@@ -87,8 +87,8 @@ export function FieldPicker<Row>({
                     disabled={!enabled}
                     className={enabled ? "qt-picker-item" : "qt-picker-item qt-picker-item--disabled"}
                     title={enabled ? f.name : "not useful as a filter (≤1 distinct value)"}
-                    // mousedown (not click) fires before the input's blur.
-                    onMouseDown={(e) => {
+                    // Pointer down fires before blur for mouse, pen, and touch.
+                    onPointerDown={(e) => {
                       if (!enabled) return;
                       e.preventDefault();
                       onPick(f);

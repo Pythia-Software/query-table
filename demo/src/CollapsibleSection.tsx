@@ -40,12 +40,10 @@ export function CollapsibleSection({
         </span>
         <span className="qt-sr-only">{collapsed ? `Expand ${title}` : `Collapse ${title}`}</span>
       </button>
-      {collapsed ? (
-        <div className="qt-qt-section-head">
-          <span className="qt-qt-section-title">{title}</span>
-          {hasSummary ? <span className="qt-qt-section-summary">{collapsedSummary}</span> : null}
-        </div>
-      ) : null}
+      <div className="qt-qt-section-head">
+        <span className="qt-qt-section-title">{title}</span>
+        {collapsed && hasSummary ? <span className="qt-qt-section-summary">{collapsedSummary}</span> : null}
+      </div>
       {!collapsed ? <div id={bodyId}>{children}</div> : null}
     </section>
   );
