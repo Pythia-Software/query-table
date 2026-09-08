@@ -29,7 +29,7 @@ npm install @pythia-software/query-table-core
 npm install @pythia-software/query-table-core @pythia-software/query-table-react react
 
 # Complete React UI
-npm install @pythia-software/query-table-core @pythia-software/query-table-react @pythia-software/query-table-ui react
+npm install @pythia-software/query-table-core @pythia-software/query-table-react @pythia-software/query-table-ui react react-dom
 ```
 
 For the Go SQL compiler:
@@ -102,12 +102,13 @@ your own markup, or just `@pythia-software/query-table-core` for the wire types 
 |---|---|---|
 | `@pythia-software/query-table-core` | Pure TS. `QueryState`, `FieldDef`, encode/decode, client-side `applyQuery`, adapter interfaces. No React, no DOM. | — |
 | `@pythia-software/query-table-react` | Headless hooks that own query state, URL/storage sync, fetch orchestration, selection, columns. No markup. | core, react (peer) |
-| `@pythia-software/query-table-ui` | The opinionated components. Themeable via CSS variables **or** a `classNames` slot map (Tailwind-friendly). | core, React hooks, React (peer) |
+| `@pythia-software/query-table-ui` | The opinionated components. Themeable via CSS variables **or** a `classNames` slot map (Tailwind-friendly). | core, React hooks, React + React DOM (peers) |
 | `backends/go` | `querytable` Go module: compiles a `WireQuery` to parameterized SQL against a schema allowlist. | — |
 | `@pythia-software/query-table-codegen` | CLI and JS API that emit the TS catalog + Go schema from a JSON schema document. | core |
 | `demo` | Runnable Vite playground over an in-memory dataset, for seeing UI changes live and manual testing. | core, react, ui |
 
-React is a **peer dependency `>=18 <20`**.
+React is a **peer dependency `>=18 <20`**. The UI package also peers on React
+DOM in the same version range.
 
 Run the playground with `npm run demo` (serves http://localhost:5179). See
 [`demo/README.md`](demo/README.md), including the headless drag-and-drop

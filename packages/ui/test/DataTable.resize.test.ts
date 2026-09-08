@@ -57,20 +57,26 @@ describe("DataTable column resizing", () => {
         rowId: (row) => row.id,
       }));
     });
-    expect(renderCell).toHaveBeenCalledTimes(rows.length);
+    const initiallyRenderedCells = renderCell.mock.calls.length;
+    expect(initiallyRenderedCells).toBeGreaterThan(0);
+    expect(initiallyRenderedCells).toBeLessThan(rows.length);
 
     const handle = container.querySelector<HTMLElement>(".qt-resize-handle");
+    const tableWrap = container.querySelector<HTMLElement>(".qt-table-wrap");
     expect(handle).not.toBeNull();
+    expect(tableWrap).not.toBeNull();
+    tableWrap!.scrollTop = 300;
     act(() => handle!.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 100 })));
+    expect(container.querySelector<HTMLElement>(".qt-resize-guide")?.style.top).toBe("300px");
     for (const clientX of [110, 120, 130, 140, 150]) {
       act(() => window.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX })));
     }
 
-    expect(renderCell).toHaveBeenCalledTimes(rows.length);
+    expect(renderCell).toHaveBeenCalledTimes(initiallyRenderedCells);
     expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
 
     act(() => window.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, clientX: 150 })));
-    expect(renderCell).toHaveBeenCalledTimes(rows.length);
+    expect(renderCell).toHaveBeenCalledTimes(initiallyRenderedCells);
     expect(onQueryChange).toHaveBeenCalledTimes(1);
     const update = onQueryChange.mock.calls[0]![0] as (previous: QueryState) => QueryState;
     expect(update(query).select[0]?.width).toBe(170);

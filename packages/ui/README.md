@@ -7,7 +7,7 @@ and selection toolbar.
 ## Install
 
 ```bash
-npm install @pythia-software/query-table-core @pythia-software/query-table-react @pythia-software/query-table-ui react
+npm install @pythia-software/query-table-core @pythia-software/query-table-react @pythia-software/query-table-ui react react-dom
 ```
 
 ## Use
@@ -39,6 +39,12 @@ export function OrdersTable({ table, schema }) {
   );
 }
 ```
+
+`DataTable` virtualizes body rows and uses a 600px maximum-height scroll
+viewport by default. Set `maxHeight` to match the surrounding layout;
+`estimateRowHeight` (37px by default) and `overscan` (8 rows) are available for
+unusually sized or expensive custom row renderers. Visible rows are measured,
+so the estimate does not require every row to have a fixed height.
 
 The bundled `link` renderer allows only HTTP(S), email, telephone, relative,
 and fragment URLs. Applications remain responsible for validating URLs emitted
