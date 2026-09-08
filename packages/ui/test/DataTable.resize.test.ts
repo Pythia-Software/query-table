@@ -34,7 +34,7 @@ const query: QueryState = {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("DataTable column resizing", () => {
-  it("previews pointer moves without rerendering every cell", () => {
+  it("previews pointer moves without rerendering cells and clamps the guide", () => {
     let animationFrameId = 0;
     vi.stubGlobal("requestAnimationFrame", vi.fn(() => ++animationFrameId));
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
@@ -75,6 +75,22 @@ describe("DataTable column resizing", () => {
     const update = onQueryChange.mock.calls[0]![0] as (previous: QueryState) => QueryState;
     expect(update(query).select[0]?.width).toBe(170);
     expect(container.querySelector<HTMLTableColElement>('col[data-qt-column="name"]')?.style.width).toBe("170px");
+
+    onQueryChange.mockClear();
+    act(() => handle!.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 100 })));
+    act(() => window.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 1_000 })));
+    act(() => window.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, clientX: 1_000 })));
+    const maxUpdate = onQueryChange.mock.calls[0]![0] as (previous: QueryState) => QueryState;
+    expect(maxUpdate(query).select[0]?.width).toBe(800);
+    expect(container.querySelector<HTMLElement>(".qt-resize-guide")?.style.transform).toBe("translateX(780px)");
+
+    onQueryChange.mockClear();
+    act(() => handle!.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 100 })));
+    act(() => window.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: -1_000 })));
+    act(() => window.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, clientX: -1_000 })));
+    const minUpdate = onQueryChange.mock.calls[0]![0] as (previous: QueryState) => QueryState;
+    expect(minUpdate(query).select[0]?.width).toBe(1);
+    expect(container.querySelector<HTMLElement>(".qt-resize-guide")?.style.transform).toBe("translateX(-19px)");
 
     act(() => root.unmount());
     container.remove();

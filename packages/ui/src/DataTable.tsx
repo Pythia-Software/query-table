@@ -304,7 +304,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
       const preview = resizePreviewRef.current;
       if (preview) {
         preview.width = next;
-        preview.guideX = ev.clientX - (wrapRect?.left ?? 0) + (wrap?.scrollLeft ?? 0);
+        preview.guideX = startX + (next - startW) - (wrapRect?.left ?? 0) + (wrap?.scrollLeft ?? 0);
       }
       if (resizeFrameRef.current == null) {
         resizeFrameRef.current = requestAnimationFrame(() => {
