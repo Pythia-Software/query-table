@@ -85,8 +85,7 @@
 .qt-table-wrap {
   position: relative;
   display: block;
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: auto;
   overscroll-behavior-x: contain;
   -webkit-overflow-scrolling: touch;
   touch-action: pan-x pan-y;
@@ -99,6 +98,16 @@
   border-radius: var(--qt-radius);
   font-size: var(--qt-font-size);
   table-layout: fixed;
+}
+.qt-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+.qt-table tfoot {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
 }
 .qt-th {
   background: var(--qt-header-bg);
@@ -166,6 +175,7 @@
 .qt-checkbox-cell:hover { background: transparent; }
 .qt-row--selected { background: var(--qt-row-selected-bg); }
 .qt-row--selected .qt-cell:hover { background: var(--qt-row-selected-bg); }
+.qt-virtual-spacer { pointer-events: none; }
 .qt-empty { text-align: center; color: var(--qt-muted); padding: 24px 12px; }
 .qt-table-summary-cell { background: var(--qt-header-bg); border-bottom: 0; }
 .qt-table-summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 24px; }
@@ -203,14 +213,15 @@
 
 /* indeterminate / sliding loading bar */
 .qt-loading-bar {
-  position: absolute;
+  position: sticky;
   top: 0;
   left: 0;
   right: 0;
   height: 2px;
+  margin-bottom: -2px;
   overflow: hidden;
   background: var(--qt-border-subtle);
-  z-index: 1;
+  z-index: 4;
   pointer-events: none;
 }
 .qt-loading-bar::before {

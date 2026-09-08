@@ -8,6 +8,9 @@ contain intentional API changes described in their release notes.
 
 ### Changed
 
+- `DataTable` now virtualizes its body rows inside a 600px maximum-height
+  viewport, keeping large client-side result sets responsive. Consumers can
+  tune the viewport, row-height estimate, and overscan with component props.
 - Removed the package-level 1,000-row query limit. Consumers and their backends
   can apply smaller operational caps when appropriate.
 

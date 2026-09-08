@@ -7,7 +7,8 @@
 // and emits intents through onQueryChange. Its props mirror a conventional
 // schema-driven table so adoption is mechanical.
 
-import { useEffect, useMemo, useRef, useState, type ReactNode, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type SetStateAction } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import type { OrderByClause, QueryState, FieldDef, RowId, SelectColumn, WhereClause } from "@pythia-software/query-table-core";
 import { isSortable, readFieldValue } from "@pythia-software/query-table-core";
 import { useColumnDrag, type SelectionApi, type ColumnDragApi } from "@pythia-software/query-table-react";
@@ -44,6 +45,12 @@ export interface DataTableProps<Row> {
 
   loading?: boolean;
   emptyMessage?: string;
+  /** Maximum height of the scroll viewport. Defaults to 600px. */
+  maxHeight?: number | string;
+  /** Estimated row height in pixels; measured rows replace the estimate. Defaults to 37. */
+  estimateRowHeight?: number;
+  /** Extra rows rendered above and below the visible range. Defaults to 8. */
+  overscan?: number;
   /** Tailwind / bespoke styling slots (Mode B). */
   classNames?: TableClassNames;
 }
@@ -60,6 +67,9 @@ const AUTOFIT_EXTRA_PX = 16;
 const MENU_WIDTH = 240;
 const MENU_ROW_HEIGHT = 32;
 const COPY_FEEDBACK_MS = 900;
+const DEFAULT_MAX_HEIGHT = 600;
+const DEFAULT_ROW_HEIGHT = 37;
+const DEFAULT_OVERSCAN = 8;
 const SELECTION_COLUMN = "__qt_selection__";
 type HeaderSortPlacement = "set" | "append" | "prepend";
 
@@ -85,6 +95,9 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     total = null,
     loading,
     emptyMessage,
+    maxHeight = DEFAULT_MAX_HEIGHT,
+    estimateRowHeight = DEFAULT_ROW_HEIGHT,
+    overscan = DEFAULT_OVERSCAN,
     classNames,
   } = props;
 
@@ -94,7 +107,9 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
   const [selectionColumnWidth, setSelectionColumnWidth] = useState(DEFAULT_SELECTION_WIDTH);
   const [tableColumnOrder, setTableColumnOrder] = useState<string[]>([]);
   const [copiedCellKey, setCopiedCellKey] = useState<string | null>(null);
+  const [headerHeight, setHeaderHeight] = useState(0);
   const tableWrapRef = useRef<HTMLDivElement>(null);
+  const tableHeadRef = useRef<HTMLTableSectionElement>(null);
   const resizeCommitRef = useRef<{ name: string; width: number } | null>(null);
   const resizingFieldRef = useRef<string | null>(null);
   const copiedCellTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -103,6 +118,32 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
   // the rules of hooks; the local one is unused when a shared one is provided.)
   const localColumnDrag = useColumnDrag();
   const columnDrag = props.columnDrag ?? localColumnDrag;
+  const rowIds = useMemo(() => rows.map(rowId), [rowId, rows]);
+  const virtualRowKeys = useMemo(
+    () => rowIds.map((id, index) => (id == null ? `index:${index}` : `${typeof id}:${String(id)}`)),
+    [rowIds],
+  );
+  const getVirtualRowKey = useCallback((index: number) => virtualRowKeys[index] ?? `index:${index}`, [virtualRowKeys]);
+  const normalizedEstimate = Number.isFinite(estimateRowHeight)
+    ? Math.max(1, estimateRowHeight)
+    : DEFAULT_ROW_HEIGHT;
+  const normalizedOverscan = Number.isFinite(overscan)
+    ? Math.max(0, Math.floor(overscan))
+    : DEFAULT_OVERSCAN;
+  const estimateVirtualRow = useCallback(() => normalizedEstimate, [normalizedEstimate]);
+  const initialViewportHeight = typeof maxHeight === "number" && maxHeight > 0 ? maxHeight : DEFAULT_MAX_HEIGHT;
+  const initialRect = useMemo(() => ({ width: 0, height: initialViewportHeight }), [initialViewportHeight]);
+  const rowVirtualizer = useVirtualizer<HTMLDivElement, HTMLTableRowElement>({
+    count: rows.length,
+    getScrollElement: () => tableWrapRef.current,
+    estimateSize: estimateVirtualRow,
+    getItemKey: getVirtualRowKey,
+    overscan: normalizedOverscan,
+    // The header participates in normal table layout even while it is sticky.
+    // Offset row measurements so the virtual range matches the body's origin.
+    scrollMargin: headerHeight,
+    initialRect,
+  });
 
   useEffect(() => {
     return () => {
@@ -111,6 +152,26 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
         copiedCellTimerRef.current = null;
       }
     };
+  }, []);
+
+  useEffect(() => {
+    const header = tableHeadRef.current;
+    if (!header) return;
+
+    const measureHeader = () => {
+      const next = header.getBoundingClientRect().height;
+      setHeaderHeight((current) => (current === next ? current : next));
+    };
+    measureHeader();
+
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", measureHeader);
+      return () => window.removeEventListener("resize", measureHeader);
+    }
+
+    const observer = new ResizeObserver(measureHeader);
+    observer.observe(header);
+    return () => observer.disconnect();
   }, []);
 
   function cellKey(rowIdValue: RowId | null, rowIndex: number, fieldName: string): string {
@@ -150,7 +211,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     showCopyFeedback(cellKey(rowIdValue, rowIndex, f.name));
   }
 
-  const pageIds = rows.map(rowId).filter((id): id is RowId => id != null);
+  const pageIds = rowIds.filter((id): id is RowId => id != null);
   const headerState = selection ? selection.pageState(pageIds) : "none";
   const showSel = selection != null;
 
@@ -396,6 +457,13 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
   const nextPage = () => onQueryChange((prev) => ({ ...prev, offset: prev.offset + prev.limit }));
   const summaryText =
     total == null || total === 0 ? `${rows.length} rows` : `${start + 1}–${end} of ${total}`;
+  const virtualRows = rowVirtualizer.getVirtualItems();
+  const firstVirtualRow = virtualRows[0];
+  const lastVirtualRow = virtualRows[virtualRows.length - 1];
+  const paddingTop = firstVirtualRow ? Math.max(0, firstVirtualRow.start - headerHeight) : 0;
+  const paddingBottom = lastVirtualRow
+    ? Math.max(0, rowVirtualizer.getTotalSize() - (lastVirtualRow.end - headerHeight))
+    : 0;
 
   return (
     <>
@@ -408,6 +476,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
           classNames?.wrap,
         )}
         onWheel={onTableWheel}
+        style={{ maxHeight, overflowY: "auto" }}
       >
         {loading && (
           <div className={cx("qt-loading-bar", classNames?.loadingBar)} role="progressbar" aria-label="loading" />
@@ -423,7 +492,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
             })}
             {trailing && <col style={{ width: 40 }} />}
           </colgroup>
-          <thead className={classNames?.thead}>
+          <thead ref={tableHeadRef} className={classNames?.thead}>
             <tr className={classNames?.headerRow}>
               {renderedColumnNames.map((name) => {
                 if (name === SELECTION_COLUMN) {
@@ -570,12 +639,21 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                 </td>
               </tr>
             )}
-            {rows.map((row, i) => {
-              const id = rowId(row);
+            {paddingTop > 0 && (
+              <tr className="qt-virtual-spacer" aria-hidden="true">
+                <td colSpan={totalCols} style={{ height: paddingTop, padding: 0, border: 0 }} />
+              </tr>
+            )}
+            {virtualRows.map((virtualRow) => {
+              const i = virtualRow.index;
+              const row = rows[i]!;
+              const id = rowIds[i] ?? null;
               const selected = id != null && selection ? selection.isSelected(id) : false;
               return (
                 <tr
-                  key={id != null ? String(id) : i}
+                  key={virtualRow.key}
+                  data-index={i}
+                  ref={rowVirtualizer.measureElement}
                   className={cx("qt-row", selected && "qt-row--selected", classNames?.row, selected && classNames?.rowSelected)}
                 >
                   {renderedColumnNames.map((name) => {
@@ -630,6 +708,11 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                 </tr>
               );
             })}
+            {paddingBottom > 0 && (
+              <tr className="qt-virtual-spacer" aria-hidden="true">
+                <td colSpan={totalCols} style={{ height: paddingBottom, padding: 0, border: 0 }} />
+              </tr>
+            )}
           </tbody>
           <tfoot>
             <tr className={cx("qt-table-summary-row", classNames?.summaryRow)}>

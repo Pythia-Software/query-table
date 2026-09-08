@@ -59,7 +59,7 @@ try {
     join(consumerDirectory, "package.json"),
     JSON.stringify({ name: "query-table-package-consumer", private: true, type: "module" }, null, 2),
   );
-  run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", ...archives, "react@18.3.1"], {
+  run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", ...archives, "react@18.3.1", "react-dom@18.3.1"], {
     cwd: consumerDirectory,
   });
 
