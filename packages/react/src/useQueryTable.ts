@@ -332,6 +332,16 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
 
   // Fetch (debounced + abortable). Transport mode, or client-side applyQuery.
   const queryKey = useMemo(() => encodeQuery(query), [query]);
+  const serverRowQuery = useMemo(() => toServerQuery(query, schema), [queryKey, schema]);
+  // Keep presentation-only query changes out of the expensive row pipeline.
+  // Widths do not leave the client at all, and SELECT does not affect client-side
+  // filtering/sorting/paging. The full queryKey still drives URL + persistence.
+  const rowQueryKey = useMemo(
+    () => transport
+      ? `server:${JSON.stringify(serverRowQuery)}`
+      : `client:${JSON.stringify([query.where, query.orderBy, query.limit, query.offset])}`,
+    [transport, serverRowQuery, query.where, query.orderBy, query.limit, query.offset],
+  );
   useEffect(() => {
     const ac = new AbortController();
     let cancelled = false;
@@ -340,7 +350,7 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
       setError(null);
       try {
         if (transport) {
-          const res = await transport.fetchRows(toServerQuery(query, schema), ac.signal);
+          const res = await transport.fetchRows(serverRowQuery, ac.signal);
           if (!cancelled) {
             setRows(res.rows);
             setTotal(res.total);
@@ -364,9 +374,10 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
       clearTimeout(t);
       ac.abort();
     };
-    // queryKey captures query value; clientRows/nonce force refetch.
+    // rowQueryKey captures only row-affecting query state; clientRows/nonce
+    // force refetch. Presentation changes still sync/persist via queryKey below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queryKey, transport, clientRows, schema, debounceMs, nonce]);
+  }, [rowQueryKey, transport, clientRows, schema, debounceMs, nonce]);
 
   // URL sync.
   useEffect(() => {
