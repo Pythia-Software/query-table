@@ -28,6 +28,20 @@ describe("encodeQuery / decodeQuery", () => {
     expect(decodeQuery(encodeQuery(q))).toEqual(q);
   });
 
+  it("round-trips negated predicates and OR groups (CNF)", () => {
+    const q: QueryState = {
+      ...EMPTY_QUERY,
+      where: [
+        { field: "case_name", op: "contains", value: "x", negated: true },
+        { any: [
+          { field: "overall", op: "=", value: "PASS" },
+          { field: "overall", op: "=", value: "FAIL" },
+        ] },
+      ],
+    };
+    expect(decodeQuery(encodeQuery(q))).toEqual(q);
+  });
+
   it("encodes an all-default query with explicit defaults", () => {
     const token = encodeQuery(EMPTY_QUERY);
     expect(token).not.toBe("");

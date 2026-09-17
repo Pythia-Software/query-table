@@ -482,13 +482,87 @@
 .qt-chip-move-buttons { display: none; }
 .qt-autocomplete-hint { color: var(--qt-muted); font-size: 10px; font-style: italic; }
 
+/* WHERE terms: draggable filter chips, OR groups, negation, and drop hints. */
+.qt-where-term-wrap { display: inline-flex; align-items: center; gap: 4px; }
+.qt-where-and { color: var(--qt-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; padding: 0 1px; }
+.qt-chip--where { position: relative; height: auto; min-height: 24px; flex-wrap: wrap; }
+.qt-chip--where .qt-chip-grip { cursor: grab; }
+/* An OR group reads like brackets: grey top/bottom borders, WHITE left/right so
+   the rounded ends disappear. Taller than a normal chip, with the OR'd members
+   boxed in their own light-grey border, leaving space to the bracket. */
+.qt-chip--or {
+  border-top-color: var(--qt-border);
+  border-bottom-color: var(--qt-border);
+  border-left-color: #fff;
+  border-right-color: #fff;
+  background: #fff;
+  align-items: center;
+  min-height: 42px;
+  padding: 7px 4px;
+}
+.qt-or-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  border: 1px solid var(--qt-border);
+  border-radius: var(--qt-radius);
+  padding: 3px 6px;
+}
+.qt-or-member { display: inline-flex; align-items: center; gap: 4px; }
+.qt-chip-or { color: var(--qt-muted); font-weight: 700; font-size: 11px; }
+.qt-pred { display: inline-flex; align-items: center; gap: 4px; }
+
+/* Operator picker: a trigger button + a keep/exclude popover (same two-column
+   layout as the CellMenu, with the active choice highlighted). */
+.qt-op-picker { position: relative; display: inline-flex; }
+.qt-op-trigger { display: inline-flex; align-items: center; gap: 2px; }
+.qt-op-caret { font-size: 8px; color: var(--qt-muted); }
+.qt-op-pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 210;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px 4px;
+  min-width: 190px;
+  padding: 4px;
+  background: #fff;
+  color: var(--qt-text);
+  border: 1px solid var(--qt-border);
+  border-radius: var(--qt-radius);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+.qt-op-cell {
+  display: block;
+  text-align: left;
+  white-space: nowrap;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--qt-text);
+  cursor: pointer;
+}
+.qt-op-cell:hover { background: var(--qt-header-bg); }
+.qt-op-cell--neg { color: var(--qt-fail-fg); }
+.qt-op-cell--neg:hover { background: var(--qt-fail-bg); }
+.qt-op-cell--on { border-color: var(--qt-accent); background: var(--qt-accent-bg); font-weight: 600; }
+.qt-op-cell--neg.qt-op-cell--on { border-color: var(--qt-fail-fg); background: var(--qt-fail-bg); }
+.qt-chip--drop-before { box-shadow: -3px 0 0 var(--qt-accent); }
+.qt-chip--drop-after { box-shadow: 3px 0 0 var(--qt-accent); }
+.qt-chip--drop-merge { outline: 2px dashed var(--qt-accent); outline-offset: 1px; background: var(--qt-accent-bg); }
+
 /* ---- field picker ---- */
 .qt-picker { position: relative; display: inline-block; }
-.qt-picker-input { font: inherit; font-size: 12px; border: 1px solid var(--qt-accent); border-radius: 4px; padding: 2px 6px; width: 160px; }
-.qt-picker-list { position: absolute; z-index: 20; margin-top: 2px; width: 280px; max-height: 280px; overflow-y: auto; background: #fff; border: 1px solid var(--qt-border); border-radius: var(--qt-radius); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12); }
+.qt-picker-input { font: inherit; font-size: 12px; color: var(--qt-text); border: 1px solid var(--qt-accent); border-radius: 4px; padding: 2px 6px; width: 160px; }
+.qt-picker-list { position: absolute; z-index: 20; margin-top: 2px; width: 280px; max-height: 280px; overflow-y: auto; background: #fff; color: var(--qt-text); border: 1px solid var(--qt-border); border-radius: var(--qt-radius); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12); }
 .qt-picker-empty { padding: 6px 8px; color: var(--qt-muted); font-size: 12px; }
 .qt-picker-group-label { padding: 3px 8px; background: var(--qt-header-bg); color: var(--qt-muted); text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }
-.qt-picker-item { display: block; width: 100%; text-align: left; border: 0; background: transparent; cursor: pointer; padding: 5px 8px; font-size: 12px; }
+.qt-picker-item { display: block; width: 100%; text-align: left; border: 0; background: transparent; color: var(--qt-text); cursor: pointer; padding: 5px 8px; font-size: 12px; }
 .qt-picker-item:hover { background: var(--qt-cell-hover); }
 .qt-picker-item--disabled { opacity: 0.4; cursor: not-allowed; }
 .qt-picker-row { display: flex; justify-content: space-between; gap: 8px; }
@@ -517,6 +591,16 @@
 .qt-cm-item:disabled { cursor: default; opacity: 0.45; color: var(--qt-muted); }
 .qt-cm-item:disabled:hover { background: transparent; }
 .qt-cm-item code { background: var(--qt-border-subtle); padding: 1px 4px; border-radius: 3px; font-size: 11px; }
+/* Two-column quick-filter grid: positive on the left, its negation opposite. */
+.qt-cm-filter-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px 4px; padding: 0 2px 2px; }
+.qt-cm-col-head { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--qt-muted); padding: 2px 8px 0; }
+.qt-cm-col-head--neg { color: var(--qt-fail-fg); }
+.qt-cm-filter { display: flex; align-items: center; gap: 4px; padding: 5px 8px; font-size: 12px; white-space: nowrap; overflow: hidden; }
+.qt-cm-filter .qt-cm-op { font-weight: 600; }
+.qt-cm-filter code { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; }
+.qt-cm-filter--neg { color: var(--qt-fail-fg); }
+.qt-cm-filter--neg:hover { background: var(--qt-fail-bg); }
+.qt-cm-filter-empty { display: block; }
 
 /* ---- selection toolbar ---- */
 .qt-selection-toolbar { display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: var(--qt-accent-bg); border: 1px solid var(--qt-accent); border-radius: var(--qt-radius); }
@@ -1285,6 +1369,8 @@
 .qt-preview-table th { text-align: left; position: sticky; top: 0; background: var(--qt-bg, #f8fafc); }
 .qt-preview-table th, .qt-preview-table td { padding: 9px 12px; border-bottom: 1px solid var(--qt-border, #e2e8f0); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .qt-preview-table td:nth-last-child(-n+2), .qt-preview-table th:nth-last-child(-n+2) { text-align: right; font-variant-numeric: tabular-nums; }
+.qt-preview-sort { appearance: none; border: 0; padding: 0; color: inherit; background: transparent; font: inherit; font-weight: inherit; cursor: pointer; }
+.qt-preview-sort:hover, .qt-preview-sort:focus-visible { color: var(--qt-accent, #285cc4); }
 .qt-formula-error { color: var(--qt-error, #b42318); }
 .qt-editor-notice { color: #16703a; }
 .qt-preview-pages { display: flex; gap: 12px; align-items: center; justify-content: flex-end; margin-top: 12px; font-size: 12px; }
@@ -1299,3 +1385,49 @@
 .qt-regex-inspector dl > div { display: flex; gap: 14px; margin: 4px 0; }
 .qt-regex-inspector dd { margin: 0; overflow-wrap: anywhere; }
 .qt-select-editor .qt-formula-hint { color: var(--qt-muted, #64748b); margin: 6px 0 12px; font-size: 11px; }
+
+/* Keep the column-selection workbench readable when the host follows the
+   system dark appearance. These variables are deliberately local so existing
+   consumer themes and the other modal retain their current appearance. */
+@media (prefers-color-scheme: dark) {
+  .qt-select-editor-backdrop { background: rgba(0, 0, 0, 0.6); }
+
+  .qt-select-editor {
+    color-scheme: dark;
+    --qt-bg: #0d1117;
+    --qt-bg-muted: #161b22;
+    --qt-fg: #f0f6fc;
+    --qt-text: #f0f6fc;
+    --qt-muted: #8b949e;
+    --qt-border: #30363d;
+    --qt-border-subtle: #21262d;
+    --qt-header-bg: #161b22;
+    --qt-accent: #58a6ff;
+    --qt-accent-bg: rgba(56, 139, 253, 0.2);
+    --qt-cell-hover: rgba(88, 166, 255, 0.12);
+    --qt-error: #ff7b72;
+    background: var(--qt-bg);
+  }
+
+  .qt-select-editor .qt-btn:not(.qt-primary),
+  .qt-select-editor .qt-input,
+  .qt-select-editor textarea,
+  .qt-select-editor .qt-preview-controls input,
+  .qt-select-editor .qt-preview-controls select,
+  .qt-select-editor .cm-editor {
+    color: var(--qt-text);
+    background: var(--qt-bg-muted);
+    border-color: var(--qt-border);
+  }
+
+  .qt-select-editor .qt-btn:not(.qt-primary):hover:not(:disabled) {
+    background: var(--qt-accent-bg);
+  }
+
+  .qt-select-editor .qt-type-badge {
+    color: #c9d1d9;
+    background: #1f6feb;
+  }
+
+  .qt-select-editor .qt-editor-notice { color: #3fb950; }
+}

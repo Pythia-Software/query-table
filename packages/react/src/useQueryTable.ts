@@ -21,6 +21,10 @@ import {
   selectedFields,
   toServerQuery,
   queriesEqual,
+  isOrGroup,
+  predicatesOf,
+  negateClause,
+  opsForField,
 } from "@pythia-software/query-table-core";
 
 const AUTOCOMPLETE_LIMIT = 50;
@@ -28,6 +32,7 @@ const MAX_AUTO_REFRESH_POLLS = 1000;
 import type {
   QueryState,
   WhereClause,
+  WhereTerm,
   OrderByClause,
   AggOp,
   AggregationClause,
@@ -154,11 +159,29 @@ export interface QueryTableApi<Row> {
   // aggregation metrics (the dashboard panel above the table)
   aggregations: AggregationsApi;
 
-  // filters
+  // filters — WHERE is CNF: `query.where` is an array of terms (a literal or an
+  // OR group), ANDed together. The top-level intents address a whole term by
+  // index; the predicate-level intents address one literal within a term.
+  /** Append a predicate as its own AND term. */
   addFilter: (clause: WhereClause) => void;
+  /** Replace the whole term at `index` with a single predicate. */
   updateFilter: (index: number, clause: WhereClause) => void;
+  /** Remove the whole term at `index`. */
   removeFilter: (index: number) => void;
   clearFilters: () => void;
+  /** Replace one predicate inside a term (predIndex 0 for a literal term). */
+  updatePredicate: (termIndex: number, predIndex: number, clause: WhereClause) => void;
+  /** Remove one predicate; a group of one flattens to a literal, an emptied term drops. */
+  removePredicate: (termIndex: number, predIndex: number) => void;
+  /** Logically invert one predicate (flips the op, else toggles its NOT flag). */
+  negatePredicate: (termIndex: number, predIndex: number) => void;
+  /** Move the term at `fromIndex` to `toIndex` (an index in the list with the
+   *  dragged term removed, so a drag preview's slot maps straight to the result). */
+  reorderFilters: (fromIndex: number, toIndex: number) => void;
+  /** OR-merge the term at `sourceIndex` into the term at `targetIndex`: the
+   *  target becomes (or stays) an OR group holding both terms' predicates, and
+   *  the source term is removed. This is the drag-onto-another-filter gesture. */
+  mergeFilters: (sourceIndex: number, targetIndex: number) => void;
   /** Reset the complete query state back to schema defaults. */
   resetAll: () => void;
   /** Keystroke-driven filter-value autocomplete (Transport.fetchDistinctValues). */
@@ -195,10 +218,14 @@ function defaultsFor<Row>(schema: FieldSchema<Row>): QueryState {
   });
 }
 
+function cloneWhereTerm(term: WhereTerm): WhereTerm {
+  return isOrGroup(term) ? { any: term.any.map((c) => ({ ...c })) } : { ...term };
+}
+
 function cloneQueryState(q: QueryState): QueryState {
   const clone: QueryState = {
     select: q.select.map((column) => ({ ...column })),
-    where: q.where.map((clause) => ({ ...clause })),
+    where: q.where.map(cloneWhereTerm),
     orderBy: q.orderBy.map((term) => (term.extract ? { ...term, extract: { ...term.extract } } : { ...term })),
     limit: q.limit,
     offset: q.offset,
@@ -458,7 +485,7 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
   const addFilter = useCallback((clause: WhereClause) => setQuery((q) => ({ ...q, offset: 0, where: [...q.where, clause] })), [setQuery]);
   const updateFilter = useCallback(
     (index: number, clause: WhereClause) =>
-      setQuery((q) => ({ ...q, offset: 0, where: q.where.map((c, i) => (i === index ? clause : c)) })),
+      setQuery((q) => ({ ...q, offset: 0, where: q.where.map((t, i) => (i === index ? clause : t)) })),
     [setQuery],
   );
   const removeFilter = useCallback(
@@ -466,6 +493,89 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
     [setQuery],
   );
   const clearFilters = useCallback(() => setQuery((q) => ({ ...q, offset: 0, where: [] })), [setQuery]);
+
+  const updatePredicate = useCallback<QueryTableApi<Row>["updatePredicate"]>(
+    (termIndex, predIndex, clause) =>
+      setQuery((q) => ({
+        ...q,
+        offset: 0,
+        where: q.where.map((term, i) => {
+          if (i !== termIndex) return term;
+          if (isOrGroup(term)) return { any: term.any.map((c, j) => (j === predIndex ? clause : c)) };
+          return clause;
+        }),
+      })),
+    [setQuery],
+  );
+  const removePredicate = useCallback<QueryTableApi<Row>["removePredicate"]>(
+    (termIndex, predIndex) =>
+      setQuery((q) => {
+        const where: WhereTerm[] = [];
+        q.where.forEach((term, i) => {
+          if (i !== termIndex) {
+            where.push(term);
+            return;
+          }
+          if (isOrGroup(term)) {
+            const members = term.any.filter((_, j) => j !== predIndex);
+            if (members.length === 1) where.push(members[0]!);
+            else if (members.length > 1) where.push({ any: members });
+            return; // 0 members → drop the term
+          }
+          // literal term → removing its predicate drops the whole term
+        });
+        return { ...q, offset: 0, where };
+      }),
+    [setQuery],
+  );
+  const negateOne = useCallback(
+    (clause: WhereClause): WhereClause => {
+      const field = byName.get(clause.field);
+      return negateClause(clause, field ? opsForField(field) : undefined);
+    },
+    [byName],
+  );
+  const negatePredicate = useCallback<QueryTableApi<Row>["negatePredicate"]>(
+    (termIndex, predIndex) =>
+      setQuery((q) => ({
+        ...q,
+        offset: 0,
+        where: q.where.map((term, i) => {
+          if (i !== termIndex) return term;
+          if (isOrGroup(term)) return { any: term.any.map((c, j) => (j === predIndex ? negateOne(c) : c)) };
+          return negateOne(term);
+        }),
+      })),
+    [setQuery, negateOne],
+  );
+  const reorderFilters = useCallback<QueryTableApi<Row>["reorderFilters"]>(
+    (fromIndex, toIndex) =>
+      setQuery((q) => {
+        if (fromIndex < 0 || fromIndex >= q.where.length) return q;
+        const where = [...q.where];
+        const [moved] = where.splice(fromIndex, 1);
+        where.splice(Math.max(0, Math.min(toIndex, where.length)), 0, moved!);
+        return { ...q, offset: 0, where };
+      }),
+    [setQuery],
+  );
+  const mergeFilters = useCallback<QueryTableApi<Row>["mergeFilters"]>(
+    (sourceIndex, targetIndex) =>
+      setQuery((q) => {
+        if (sourceIndex === targetIndex) return q;
+        const source = q.where[sourceIndex];
+        const target = q.where[targetIndex];
+        if (!source || !target) return q;
+        const merged: WhereTerm = { any: [...predicatesOf(target), ...predicatesOf(source)] };
+        const where: WhereTerm[] = [];
+        q.where.forEach((term, i) => {
+          if (i === sourceIndex) return; // remove the dragged term
+          where.push(i === targetIndex ? merged : term);
+        });
+        return { ...q, offset: 0, where };
+      }),
+    [setQuery],
+  );
   const resetAll = useCallback(() => setQuery(() => cloneQueryState(defaults)), [setQuery, defaults]);
 
   // ---- aggregation metric mutators (don't touch paging — scope is the whole set) ----
@@ -667,6 +777,11 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
     updateFilter,
     removeFilter,
     clearFilters,
+    updatePredicate,
+    removePredicate,
+    negatePredicate,
+    reorderFilters,
+    mergeFilters,
     resetAll,
     filterValues,
     toggleSort,

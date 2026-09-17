@@ -7,15 +7,17 @@
 // picker, per-clause operators, and multi-sort.
 
 import { SelectColumnEditor } from "./SelectColumnEditor";
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
   AggOp,
   AggregationClause,
   DistinctValuesResult,
   FieldDef,
   FilterOp,
+  OpChoice,
   OrderByClause,
   WhereClause,
+  WhereTerm,
 } from "@pythia-software/query-table-core";
 import {
   NULLARY_OPS,
@@ -25,6 +27,9 @@ import {
   filterValues as filterValuesFor,
   isGroupable,
   isMeasurable,
+  isOrGroup,
+  opPairsForField,
+  predicatesOf,
   queriesEqual,
   isFilterable,
   isSelectable,
@@ -130,12 +135,30 @@ function useFieldHasNull<Row>(api: QueryTableApi<Row>, fieldName: string | undef
   return hasNull;
 }
 
-function whereClauseAsText<Row>(clause: WhereClause, byName: Map<string, FieldDef<Row>>): string {
+/** Operators dropped from the WHERE op dropdowns: their negation is expressed by
+ *  the canonical positive op plus the NOT toggle instead (design: "just support
+ *  NOT"). Legacy queries carrying these ops still decode/compile fine, and a
+ *  clause already on one keeps showing it (see PredicateEditor). */
+const CONVERGED_NEGATIVE_OPS: ReadonlySet<FilterOp> = new Set<FilterOp>(["!=", "is_not_null", "not_matches_regex"]);
+
+/** The op options offered for a field in the WHERE builder — its positive ops,
+ *  with the converged negatives removed (NOT toggle covers those). */
+function positiveOpsForField<Row>(field: FieldDef<Row>): FilterOp[] {
+  return opsForField(field).filter((op) => !CONVERGED_NEGATIVE_OPS.has(op));
+}
+
+function predicateAsText<Row>(clause: WhereClause, byName: Map<string, FieldDef<Row>>): string {
   const field = byName.get(clause.field)?.label ?? clause.field;
   const op = clause.op.replace(/_/g, " ");
-  if (NULLARY_OPS.has(clause.op)) return `${field} ${op}`;
+  const not = clause.negated ? "not " : "";
+  if (NULLARY_OPS.has(clause.op)) return `${field} ${not}${op}`;
   const value = clause.value === "" ? "''" : clause.value;
-  return `${field} ${op} ${value}`;
+  return `${field} ${not}${op} ${value}`;
+}
+
+function whereTermAsText<Row>(term: WhereTerm, byName: Map<string, FieldDef<Row>>): string {
+  if (isOrGroup(term)) return `(${term.any.map((c) => predicateAsText(c, byName)).join(" or ")})`;
+  return predicateAsText(term, byName);
 }
 
 function orderByAsText<Row>(term: OrderByClause, byName: Map<string, FieldDef<Row>>): string {
@@ -159,17 +182,17 @@ function chipFieldWidthForSelect(text: string, fallback = 3, max = 30): number {
 }
 
 function buildCollapsedSummary<Row>(
-  where: WhereClause[],
+  where: WhereTerm[],
   orderBy: OrderByClause[],
   byName: Map<string, FieldDef<Row>>,
 ): string {
-  const whereText = where.length === 0 ? "all rows" : where.map((c) => whereClauseAsText(c, byName)).join(" and ");
+  const whereText = whereClauseSummaryText(where, byName);
   const orderText = orderBy.length === 0 ? "(default)" : orderBy.map((term) => orderByAsText(term, byName)).join(", ");
   return `WHERE ${whereText} ORDER BY ${orderText}`;
 }
 
-function whereClauseSummaryText<Row>(where: WhereClause[], byName: Map<string, FieldDef<Row>>): string {
-  return where.length === 0 ? "all rows" : where.map((c) => whereClauseAsText(c, byName)).join(" and ");
+function whereClauseSummaryText<Row>(where: WhereTerm[], byName: Map<string, FieldDef<Row>>): string {
+  return where.length === 0 ? "all rows" : where.map((t) => whereTermAsText(t, byName)).join(" and ");
 }
 
 function orderBySummaryText<Row>(orderBy: OrderByClause[], byName: Map<string, FieldDef<Row>>): string {
@@ -907,6 +930,27 @@ function SelectRow<Row>({
 
 // ---- WHERE ----------------------------------------------------------------
 
+/** Where a drop lands relative to the hovered term chip: reorder before/after
+ *  it, or drop onto its center to OR the two together. */
+type DropMode = "before" | "after" | "merge";
+
+interface WhereDrag {
+  /** Index of the term being dragged. */
+  from: number;
+  /** Current hovered term + intent, or null when over dead space. */
+  over: { index: number; mode: DropMode } | null;
+}
+
+/** Classify a drag position within a chip: outer thirds reorder, the center
+ *  merges into an OR group. */
+function dropModeFor(e: React.DragEvent): DropMode {
+  const rect = e.currentTarget.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  if (x < rect.width * 0.3) return "before";
+  if (x > rect.width * 0.7) return "after";
+  return "merge";
+}
+
 function WhereRow<Row>({
   api,
   byName,
@@ -921,42 +965,70 @@ function WhereRow<Row>({
   disabled: boolean | undefined;
 }) {
   const [adding, setAdding] = useState(false);
+  // Local drag state (WHERE terms are their own list, unlike the columns shared
+  // via api.columnDrag). Order is committed only on drop, so the DOM order stays
+  // put during the drag and index keys never remount the dragged node.
+  const [drag, setDrag] = useState<WhereDrag | null>(null);
+  const where = api.query.where;
+  // Only make the top-level conjunction explicit ("AND" between terms) once an
+  // OR group is present — otherwise a plain AND-list reads fine unadorned.
+  const hasOr = where.some(isOrGroup);
 
   function addClause(f: FieldDef<Row>) {
-    const op = opsForField(f)[0] ?? "=";
+    const op = positiveOpsForField(f)[0] ?? opsForField(f)[0] ?? "=";
     api.addFilter({ field: f.name, op, value: "" });
     setAdding(false);
   }
 
-  const groupedWhere = useMemo(() => {
-    const groups = new Map<string, { field: string; clauses: { clause: WhereClause; index: number }[] }>();
-    const order: string[] = [];
+  function handleOver(e: React.DragEvent, index: number) {
+    if (!drag) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    const mode = dropModeFor(e);
+    setDrag((d) => (d && (d.over?.index !== index || d.over?.mode !== mode) ? { from: d.from, over: { index, mode } } : d));
+  }
 
-    api.query.where.forEach((c, i) => {
-      if (!groups.has(c.field)) order.push(c.field);
-      const group = groups.get(c.field) ?? { field: c.field, clauses: [] };
-      group.clauses.push({ clause: c, index: i });
-      groups.set(c.field, group);
-    });
-
-    return order.map((fieldName) => groups.get(fieldName)!);
-  }, [api.query.where]);
+  function handleDrop() {
+    if (!drag || !drag.over) {
+      setDrag(null);
+      return;
+    }
+    const { from } = drag;
+    const { index: target, mode } = drag.over;
+    if (mode === "merge") {
+      if (target !== from) api.mergeFilters(from, target);
+    } else {
+      // Translate "before/after term `target`" into an index in the list with the
+      // dragged term already removed (what reorderFilters expects).
+      const tPrime = target < from ? target : target - 1;
+      const insertAt = mode === "after" ? tPrime + 1 : tPrime;
+      if (insertAt !== from) api.reorderFilters(from, insertAt);
+    }
+    setDrag(null);
+  }
 
   return (
     <div className="qt-qb-row">
       <span className="qt-qb-kw">where</span>
-      {api.query.where.length === 0 && !adding && <span className="qt-qb-hint">all rows</span>}
-      {groupedWhere.map((g) => (
-        <ClauseChip
-          key={g.field}
-          api={api}
-          field={byName.get(g.field)}
-          clauses={g.clauses}
-          classNames={classNames}
-          disabled={disabled}
-          onChange={(index, next) => api.updateFilter(index, next)}
-          onRemove={(index) => api.removeFilter(index)}
-        />
+      {where.length === 0 && !adding && <span className="qt-qb-hint">all rows</span>}
+      {where.map((term, index) => (
+        <span className="qt-where-term-wrap" key={index}>
+          {index > 0 && hasOr && <span className="qt-where-and">AND</span>}
+          <TermChip
+            api={api}
+            term={term}
+            index={index}
+            byName={byName}
+            classNames={classNames}
+            disabled={disabled}
+            isDragSource={drag?.from === index}
+            dropHint={drag?.over?.index === index ? drag.over.mode : null}
+            onDragStart={() => setDrag({ from: index, over: null })}
+            onDragOver={(e) => handleOver(e, index)}
+            onDrop={handleDrop}
+            onDragEnd={() => setDrag(null)}
+          />
+        </span>
       ))}
       {adding ? (
         <FieldPicker
@@ -970,7 +1042,7 @@ function WhereRow<Row>({
           + add filter
         </button>
       )}
-      {api.query.where.length > 0 && (
+      {where.length > 0 && (
         <button type="button" className="qt-link-btn" onClick={api.clearFilters} disabled={disabled} title="Reset filters">
           reset
         </button>
@@ -979,10 +1051,224 @@ function WhereRow<Row>({
   );
 }
 
-function ClauseChip<Row>({
+/** One top-level WHERE term: a single predicate, or a bordered OR group holding
+ *  several. Draggable by its grip; a drop onto another chip's center ORs them,
+ *  onto its edges reorders. */
+function TermChip<Row>({
+  api,
+  term,
+  index,
+  byName,
+  classNames,
+  disabled,
+  isDragSource,
+  dropHint,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+}: {
+  api: QueryTableApi<Row>;
+  term: WhereTerm;
+  index: number;
+  byName: Map<string, FieldDef<Row>>;
+  classNames: QueryBuilderClassNames | undefined;
+  disabled: boolean | undefined;
+  isDragSource: boolean;
+  dropHint: DropMode | null;
+  onDragStart: () => void;
+  onDragOver: (e: React.DragEvent) => void;
+  onDrop: () => void;
+  onDragEnd: () => void;
+}) {
+  const group = isOrGroup(term);
+  const predicates = predicatesOf(term);
+
+  const grip = (
+    <span
+      className="qt-chip-grip"
+      aria-hidden
+      draggable={!disabled}
+      onDragStart={(e) => {
+        onDragStart();
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", String(index));
+      }}
+      onDragEnd={onDragEnd}
+      title="drag to reorder, or drop onto another filter to make an OR"
+    >
+      ⋮⋮
+    </span>
+  );
+
+  return (
+    <span
+      className={cx(
+        "qt-chip",
+        "qt-chip--where",
+        group && "qt-chip--or",
+        isDragSource && "qt-chip--dragging",
+        dropHint ? `qt-chip--drop-${dropHint}` : undefined,
+        classNames?.chip,
+      )}
+      onDragOver={onDragOver}
+      onDrop={(e) => {
+        e.preventDefault();
+        onDrop();
+      }}
+    >
+      {grip}
+      {group ? (
+        <span className="qt-or-group">
+          {predicates.map((clause, predIndex) => (
+            <span className="qt-or-member" key={predIndex}>
+              {predIndex > 0 && <span className="qt-chip-and qt-chip-or">OR</span>}
+              <PredicateEditor
+                api={api}
+                field={byName.get(clause.field)}
+                clause={clause}
+                classNames={classNames}
+                disabled={disabled}
+                onChange={(next) => api.updatePredicate(index, predIndex, next)}
+                onRemove={() => api.removePredicate(index, predIndex)}
+              />
+            </span>
+          ))}
+        </span>
+      ) : (
+        <PredicateEditor
+          api={api}
+          field={byName.get(term.field)}
+          clause={term}
+          classNames={classNames}
+          disabled={disabled}
+          onChange={(next) => api.updatePredicate(index, 0, next)}
+          onRemove={() => api.removeFilter(index)}
+        />
+      )}
+    </span>
+  );
+}
+
+/** Human-readable operator labels for the WHERE chips + op picker. */
+const OP_LABEL: Record<FilterOp, string> = {
+  "=": "=",
+  "!=": "≠",
+  ">": ">",
+  ">=": "≥",
+  "<": "<",
+  "<=": "≤",
+  contains: "contains",
+  starts_with: "starts with",
+  ends_with: "ends with",
+  matches_regex: "matches",
+  not_matches_regex: "not matches",
+  includes: "includes",
+  is_null: "is null",
+  is_not_null: "is not null",
+};
+
+function choiceLabel(op: FilterOp, negated: boolean): string {
+  return negated ? `not ${OP_LABEL[op]}` : OP_LABEL[op];
+}
+
+/** The operator control: a button showing the current condition that opens a
+ *  keep/exclude popover — the same two-column layout as the CellMenu, with the
+ *  active choice highlighted. Picking sets the predicate's op + negation. */
+function OpPicker<Row>({
+  field,
+  clause,
+  disabled,
+  classNames,
+  onPick,
+}: {
+  field: FieldDef<Row> | undefined;
+  clause: WhereClause;
+  disabled: boolean | undefined;
+  classNames: QueryBuilderClassNames | undefined;
+  onPick: (choice: OpChoice) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    // Defer the document listener a tick so the opening click doesn't close it.
+    const t = setTimeout(() => window.addEventListener("click", onDocClick), 0);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener("click", onDocClick);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const pairs = useMemo(() => (field ? opPairsForField(field) : []), [field]);
+  const isActive = (choice: OpChoice) =>
+    choice.op === clause.op && Boolean(choice.negated) === Boolean(clause.negated);
+
+  return (
+    <span className="qt-op-picker" ref={wrapRef}>
+      <button
+        type="button"
+        className={cx("qt-chip-op-btn", "qt-op-trigger", classNames?.select)}
+        disabled={disabled}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        {choiceLabel(clause.op, Boolean(clause.negated))}
+        <span className="qt-op-caret" aria-hidden>
+          ▾
+        </span>
+      </button>
+      {open && pairs.length > 0 && (
+        <span className="qt-op-pop" role="dialog" aria-label="Choose condition">
+          <span className="qt-cm-col-head">keep</span>
+          <span className="qt-cm-col-head qt-cm-col-head--neg">exclude</span>
+          {pairs.map((pair, i) => (
+            <Fragment key={i}>
+              <button
+                type="button"
+                className={cx("qt-op-cell", isActive(pair.keep) && "qt-op-cell--on")}
+                onClick={() => {
+                  onPick(pair.keep);
+                  setOpen(false);
+                }}
+              >
+                {choiceLabel(pair.keep.op, pair.keep.negated)}
+              </button>
+              <button
+                type="button"
+                className={cx("qt-op-cell", "qt-op-cell--neg", isActive(pair.exclude) && "qt-op-cell--on")}
+                onClick={() => {
+                  onPick(pair.exclude);
+                  setOpen(false);
+                }}
+              >
+                {choiceLabel(pair.exclude.op, pair.exclude.negated)}
+              </button>
+            </Fragment>
+          ))}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** The editor for one predicate: field label, the operator picker (a keep/
+ *  exclude popover that also carries negation), a type-aware value input, and
+ *  remove. Shared by standalone and grouped terms. */
+function PredicateEditor<Row>({
   api,
   field,
-  clauses,
+  clause,
   classNames,
   disabled,
   onChange,
@@ -990,69 +1276,40 @@ function ClauseChip<Row>({
 }: {
   api: QueryTableApi<Row>;
   field: FieldDef<Row> | undefined;
-  clauses: Array<{ clause: WhereClause; index: number }>;
+  clause: WhereClause;
   classNames: QueryBuilderClassNames | undefined;
   disabled: boolean | undefined;
-  onChange: (index: number, c: WhereClause) => void;
-  onRemove: (index: number) => void;
+  onChange: (next: WhereClause) => void;
+  onRemove: () => void;
 }) {
-  const labelField = field?.label;
-  const fieldName = clauses[0]?.clause.field;
-  const fieldHasNull = useFieldHasNull(api, field?.name);
+  const needsValue = !NULLARY_OPS.has(clause.op);
+  const isRegex = clause.op === "matches_regex" || clause.op === "not_matches_regex";
+
+  function pickOp(choice: OpChoice) {
+    // Keep the captured value; a nullary op just hides its input.
+    const next: WhereClause = { field: clause.field, op: choice.op, value: clause.value };
+    if (choice.negated) next.negated = true;
+    onChange(next);
+  }
 
   return (
-    <span className={cx("qt-chip", "qt-chip--where", classNames?.chip)}>
-      <span className="qt-chip-field">{labelField ?? fieldName}</span>
-      <span className="qt-chip-where-list">
-        {clauses.map((entry, idx) => {
-          const clause = entry.clause;
-          const baseOps: FilterOp[] = field ? opsForField(field) : [clause.op];
-          const filteredBaseOps = fieldHasNull === false ? baseOps.filter((op) => !NULLARY_OPS.has(op)) : baseOps;
-          const clauseOps: FilterOp[] = filteredBaseOps.includes(clause.op)
-            ? filteredBaseOps
-            : [...filteredBaseOps, clause.op];
-          const needsValue = !NULLARY_OPS.has(clause.op);
-          return (
-            <span className="qt-chip-where-clause" key={entry.index}>
-              {idx > 0 && <span className="qt-chip-and">and</span>}
-              <select
-                className={cx("qt-chip-op", classNames?.select)}
-                value={clause.op}
-                disabled={disabled}
-                style={{ width: `${chipFieldWidthForSelect(clause.op, 3)}ch` }}
-                onChange={(e) => onChange(entry.index, { ...clause, op: e.target.value as FilterOp })}
-              >
-                {clauseOps.map((op) => (
-                  <option key={op} value={op}>
-                    {op}
-                  </option>
-                ))}
-              </select>
-              {needsValue && (
-                <ValueInput
-                  api={api}
-                  field={field}
-                  value={clause.value}
-                  forceFreeform={clause.op === "matches_regex" || clause.op === "not_matches_regex"}
-                  placeholder={
-                    clause.op === "matches_regex" || clause.op === "not_matches_regex" ? "regex" : "value"
-                  }
-                  classNames={classNames}
-                  onChange={(v) => onChange(entry.index, { ...clause, value: v })}
-                />
-              )}
-              <button
-                type="button"
-                className="qt-chip-x"
-                onClick={() => onRemove(entry.index)}
-                disabled={disabled}
-              >
-                ✕
-              </button>
-            </span>
-          );
-        })}
-      </span>
+    <span className="qt-pred">
+      <span className="qt-chip-field">{field?.label ?? clause.field}</span>
+      <OpPicker field={field} clause={clause} disabled={disabled} classNames={classNames} onPick={pickOp} />
+      {needsValue && (
+        <ValueInput
+          api={api}
+          field={field}
+          value={clause.value}
+          forceFreeform={isRegex}
+          placeholder={isRegex ? "regex" : "value"}
+          classNames={classNames}
+          onChange={(v) => onChange({ ...clause, value: v })}
+        />
+      )}
+      <button type="button" className="qt-chip-x" onClick={onRemove} disabled={disabled}>
+        ✕
+      </button>
     </span>
   );
 }

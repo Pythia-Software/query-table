@@ -42,7 +42,7 @@ func TestExampleSchemaLoads(t *testing.T) {
 	// And it actually compiles a representative query.
 	q := WireQuery{
 		Select:  []string{"overall", "is_starred"},
-		Where:   []WhereClause{{Field: "overall", Op: "=", Value: "FAIL"}},
+		Where:   []WhereTerm{{Field: "overall", Op: "=", Value: "FAIL"}},
 		OrderBy: OrderBys{{Field: "total_ms", Dir: "desc"}},
 	}
 	if _, _, err := Compile(q, s, 1); err != nil {

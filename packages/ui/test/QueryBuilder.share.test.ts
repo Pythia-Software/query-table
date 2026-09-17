@@ -152,9 +152,10 @@ describe("QueryBuilder sharing", () => {
       await Promise.resolve();
     });
 
-    const filterOp = container!.querySelector<HTMLSelectElement>(".qt-chip-op");
+    // The operator is now a keep/exclude picker button labelled with the op.
+    const filterOp = container!.querySelector<HTMLButtonElement>(".qt-chip--where .qt-op-trigger");
     const filterInput = container!.querySelector<HTMLInputElement>('.qt-chip--where input[placeholder="regex"]');
-    expect(filterOp?.value).toBe("matches_regex");
+    expect(filterOp?.textContent?.replace(/[▾\s]/g, "")).toBe("matches");
     expect(filterInput?.value).toBe("^item-");
     expect(filterInput?.hasAttribute("list")).toBe(false);
 

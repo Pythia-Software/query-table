@@ -17,6 +17,11 @@ import {
   type SelectColumn,
   type RegexInspection,
 } from "@pythia-software/query-table-core";
+import {
+  orderPreviewGroups,
+  type PreviewSort,
+  type PreviewSortKey,
+} from "./previewOrdering";
 const FormulaEditor = lazy(() => import("./FormulaEditor"));
 const fieldExpression = (name: string) => `[${name.replace(/\]/g, "]]")}]`;
 const display = (v: unknown) =>
@@ -59,6 +64,7 @@ export function SelectColumnEditor<Row>({
     [page, setPage] = useState(0),
     [retry, setRetry] = useState(0),
     [functionSearch, setFunctionSearch] = useState("");
+  const [previewSort, setPreviewSort] = useState<PreviewSort | null>(null);
   const drag = useRef<string | null>(null);
   const [inspection, setInspection] = useState<RegexInspection | null>(null);
   const catalogue = api.computed.catalogue.filter(isSelectable);
@@ -211,16 +217,68 @@ export function SelectColumnEditor<Row>({
       setSaving(false);
     }
   }
-  const groups = (preview?.groups ?? []).filter((g) =>
-    filter === "errors"
-      ? !!g.result.error
-      : filter === "nulls"
-        ? !g.result.error && g.result.value === null
-        : true,
+  const groups = useMemo(
+    () =>
+      orderPreviewGroups(
+        (preview?.groups ?? []).filter((g) =>
+          filter === "errors"
+            ? !!g.result.error
+            : filter === "nulls"
+              ? !g.result.error && g.result.value === null
+              : true,
+        ),
+        previewSort,
+      ),
+    [preview, filter, previewSort],
   );
   const shown = groups.slice(page * 50, (page + 1) * 50);
+  const samePreviewSortKey = (a: PreviewSortKey, b: PreviewSortKey) => {
+    if (a.kind !== b.kind) return false;
+    if (a.kind === "input" && b.kind === "input")
+      return a.index === b.index;
+    return true;
+  };
+  const selectPreviewSort = (key: PreviewSortKey, direction: "asc" | "desc") => {
+    setPreviewSort((current) => {
+      const sameKey = !!current && samePreviewSortKey(current.key, key);
+      return sameKey
+        ? { key, direction: current.direction === "asc" ? "desc" : "asc" }
+        : { key, direction };
+    });
+    setPage(0);
+  };
+  const previewSortDirection = (key: PreviewSortKey) =>
+    previewSort && samePreviewSortKey(previewSort.key, key)
+      ? previewSort.direction
+      : undefined;
+  const previewAriaSort = (key: PreviewSortKey) => {
+    const direction = previewSortDirection(key);
+    return direction === "asc"
+      ? "ascending"
+      : direction === "desc"
+        ? "descending"
+        : "none";
+  };
+  const previewSortHeader = (
+    label: string,
+    key: PreviewSortKey,
+    direction: "asc" | "desc" = "asc",
+  ) => {
+    const currentDirection = previewSortDirection(key);
+    return (
+      <button
+        type="button"
+        className="qt-preview-sort"
+        onClick={() => selectPreviewSort(key, direction)}
+        title={`Sort by ${label}`}
+      >
+        {label}
+        {currentDirection && (currentDirection === "asc" ? " ↑" : " ↓")}
+      </button>
+    );
+  };
   return (
-    <div className="qt-modal-backdrop">
+    <div className="qt-modal-backdrop qt-select-editor-backdrop">
       <div
         className="qt-select-editor"
         role="dialog"
@@ -596,16 +654,33 @@ export function SelectColumnEditor<Row>({
                     <thead>
                       <tr>
                         {editing &&
-                          preview.dependencies.map((name) => (
-                            <th key={name}>
-                              {api.computed.catalogue.find(
-                                (f) => f.name === name,
-                              )?.label ?? name}
+                          preview.dependencies.map((name, index) => (
+                            <th
+                              key={name}
+                              aria-sort={previewAriaSort({
+                                kind: "input",
+                                index,
+                              })}
+                            >
+                              {previewSortHeader(
+                                api.computed.catalogue.find(
+                                  (f) => f.name === name,
+                                )?.label ?? name,
+                                { kind: "input", index },
+                              )}
                             </th>
                           ))}
-                        <th>{editing ? "Result" : "Value"}</th>
-                        <th>Count</th>
-                        <th>%</th>
+                        <th aria-sort={previewAriaSort({ kind: "result" })}>
+                          {previewSortHeader(editing ? "Result" : "Value", {
+                            kind: "result",
+                          })}
+                        </th>
+                        <th aria-sort={previewAriaSort({ kind: "count" })}>
+                          {previewSortHeader("Count", { kind: "count" }, "desc")}
+                        </th>
+                        <th aria-sort={previewAriaSort({ kind: "percentage" })}>
+                          {previewSortHeader("%", { kind: "percentage" }, "desc")}
+                        </th>
                       </tr>
                     </thead>
                     <tbody>

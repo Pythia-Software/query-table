@@ -4,6 +4,8 @@
 export type {
   FilterOp,
   WhereClause,
+  OrGroup,
+  WhereTerm,
   OrderByClause,
   SelectColumn,
   AggOp,
@@ -23,6 +25,8 @@ export {
   MAX_QUERY_TOKEN_LENGTH,
   normalizeQueryState,
   queriesEqual,
+  isOrGroup,
+  predicatesOf,
 } from "./query";
 
 export type {
@@ -52,7 +56,8 @@ export {
   loadSchema,
 } from "./schema";
 
-export { OPS_BY_TYPE, NULLARY_OPS, opsForField, opAllowedForType, coerceValue } from "./ops";
+export { OPS_BY_TYPE, NULLARY_OPS, opsForField, opAllowedForType, coerceValue, negateClause, isNegativePredicate, opPairsForField } from "./ops";
+export type { OpChoice, OpPair } from "./ops";
 export {
   AGG_OPS_BY_TYPE,
   AGG_OPS_NEEDING_FIELD,

@@ -37,11 +37,46 @@ const (
 	maxQueryTokenBytes  = 2 * 1024 * 1024
 )
 
-// WhereClause mirrors @pythia-software/query-table-core WhereClause.
+// WhereClause mirrors @pythia-software/query-table-core WhereClause. Negated wraps
+// the predicate in a null-exclusive NOT; it is set only for ops without a
+// complementary operator (contains/starts_with/ends_with/includes), matching the
+// frontend's negateClause.
 type WhereClause struct {
-	Field string `json:"field"`
-	Op    string `json:"op"`
-	Value string `json:"value"`
+	Field   string `json:"field"`
+	Op      string `json:"op"`
+	Value   string `json:"value"`
+	Negated bool   `json:"negated,omitempty"`
+}
+
+// WhereTerm is one conjunct of the WHERE (mirrors the TS WhereTerm =
+// WhereClause | OrGroup). It is either a single predicate (Field/Op/Value set,
+// Any nil) or an OR group (Any set). The two shapes are disjoint on the wire — a
+// literal carries "field", a group carries "any" — so the default JSON
+// (un)marshaling distinguishes them with no custom code. WHERE is the AND of
+// these terms, i.e. conjunctive normal form.
+type WhereTerm struct {
+	Field   string        `json:"field,omitempty"`
+	Op      string        `json:"op,omitempty"`
+	Value   string        `json:"value,omitempty"`
+	Negated bool          `json:"negated,omitempty"`
+	Any     []WhereClause `json:"any,omitempty"`
+}
+
+// IsGroup reports whether the term is an OR group rather than a single predicate.
+func (t WhereTerm) IsGroup() bool { return t.Any != nil }
+
+// Literal returns the predicate a non-group term represents.
+func (t WhereTerm) Literal() WhereClause {
+	return WhereClause{Field: t.Field, Op: t.Op, Value: t.Value, Negated: t.Negated}
+}
+
+// Predicates returns the literals the term contributes: itself for a single
+// predicate, or its members for a group.
+func (t WhereTerm) Predicates() []WhereClause {
+	if t.IsGroup() {
+		return t.Any
+	}
+	return []WhereClause{t.Literal()}
 }
 
 // OrderBy mirrors @pythia-software/query-table-core OrderByClause.
@@ -76,12 +111,12 @@ type AggSpec struct {
 // OrderBy unmarshals from BOTH the new array form and the legacy single-object
 // form, so legacy links keep compiling.
 type WireQuery struct {
-	Select       []string      `json:"select,omitempty"`
-	Where        []WhereClause `json:"w,omitempty"`
-	OrderBy      OrderBys      `json:"o,omitempty"`
-	Limit        int           `json:"l,omitempty"`
-	Offset       int           `json:"f,omitempty"`
-	Aggregations []AggSpec     `json:"g,omitempty"`
+	Select       []string    `json:"select,omitempty"`
+	Where        []WhereTerm `json:"w,omitempty"`
+	OrderBy      OrderBys    `json:"o,omitempty"`
+	Limit        int         `json:"l,omitempty"`
+	Offset       int         `json:"f,omitempty"`
+	Aggregations []AggSpec   `json:"g,omitempty"`
 }
 
 // UnmarshalJSON accepts both the readable ServerQuery property names emitted
@@ -91,8 +126,8 @@ type WireQuery struct {
 func (q *WireQuery) UnmarshalJSON(data []byte) error {
 	var payload struct {
 		Select              []string      `json:"select"`
-		Where               []WhereClause `json:"where"`
-		CompactWhere        []WhereClause `json:"w"`
+		Where               []WhereTerm   `json:"where"`
+		CompactWhere        []WhereTerm   `json:"w"`
 		OrderBy             OrderBys      `json:"orderBy"`
 		CompactOrderBy      OrderBys      `json:"o"`
 		Limit               *int          `json:"limit"`
@@ -149,7 +184,7 @@ func (q WireQuery) Validate() error {
 		return fmt.Errorf("select has %d fields; maximum is %d", len(q.Select), MaxSelectColumns)
 	}
 	if len(q.Where) > MaxWhereClauses {
-		return fmt.Errorf("where has %d clauses; maximum is %d", len(q.Where), MaxWhereClauses)
+		return fmt.Errorf("where has %d terms; maximum is %d", len(q.Where), MaxWhereClauses)
 	}
 	if len(q.OrderBy) > MaxOrderByTerms {
 		return fmt.Errorf("orderBy has %d terms; maximum is %d", len(q.OrderBy), MaxOrderByTerms)
@@ -162,13 +197,20 @@ func (q WireQuery) Validate() error {
 			return fmt.Errorf("invalid select field name")
 		}
 	}
-	for _, clause := range q.Where {
-		if clause.Field == "" || len(clause.Field) > maxFieldNameLength {
-			return fmt.Errorf("invalid filter field name")
+	whereLiterals := 0
+	for _, term := range q.Where {
+		for _, clause := range term.Predicates() {
+			if clause.Field == "" || len(clause.Field) > maxFieldNameLength {
+				return fmt.Errorf("invalid filter field name")
+			}
+			if len(clause.Value) > maxFilterValueBytes {
+				return fmt.Errorf("filter value for %q exceeds %d bytes", clause.Field, maxFilterValueBytes)
+			}
+			whereLiterals++
 		}
-		if len(clause.Value) > maxFilterValueBytes {
-			return fmt.Errorf("filter value for %q exceeds %d bytes", clause.Field, maxFilterValueBytes)
-		}
+	}
+	if whereLiterals > MaxWhereClauses {
+		return fmt.Errorf("where has %d clauses; maximum is %d", whereLiterals, MaxWhereClauses)
 	}
 	for _, term := range q.OrderBy {
 		if term.Field == "" || len(term.Field) > maxFieldNameLength {
@@ -222,7 +264,7 @@ func (o *OrderBys) UnmarshalJSON(b []byte) error {
 type wirePayload struct {
 	Select json.RawMessage `json:"s,omitempty"` // [field] | [field,width] tuples, or legacy string[]
 	Legacy json.RawMessage `json:"c,omitempty"` // legacy string[]
-	Where  []WhereClause   `json:"w,omitempty"`
+	Where  []WhereTerm     `json:"w,omitempty"`
 	Order  OrderBys        `json:"o,omitempty"`
 	Limit  int             `json:"l,omitempty"`
 	Offset int             `json:"f,omitempty"`
