@@ -17,6 +17,10 @@ export interface SelectionApi {
   toggle: (id: RowId, shiftKey?: boolean) => void;
   /** Select / clear every row currently on the page. */
   setPage: (ids: RowId[], selected: boolean) => void;
+  /** Atomically replace the complete selection with arbitrary stable row ids. */
+  replace: (ids: Iterable<RowId>) => void;
+  /** Atomically retain only selected ids that are also present in `ids`. */
+  retain: (ids: Iterable<RowId>) => void;
   /** Header checkbox tri-state for the current page. */
   pageState: (pageIds: RowId[]) => "none" | "some" | "all";
   clear: () => void;
@@ -69,6 +73,22 @@ export function useSelection(displayedIds: RowId[]): SelectionApi {
     });
   }, []);
 
+  const replace = useCallback((ids: Iterable<RowId>) => {
+    const next = new Set(ids);
+    anchor.current = null;
+    setSelected(next);
+  }, []);
+
+  const retain = useCallback((ids: Iterable<RowId>) => {
+    const allowed = new Set(ids);
+    anchor.current = null;
+    setSelected((prev) => {
+      const next = new Set<RowId>();
+      for (const id of prev) if (allowed.has(id)) next.add(id);
+      return next;
+    });
+  }, []);
+
   const pageState = useCallback(
     (pageIds: RowId[]): "none" | "some" | "all" => {
       if (pageIds.length === 0) return "none";
@@ -90,10 +110,12 @@ export function useSelection(displayedIds: RowId[]): SelectionApi {
       isSelected: (id) => selected.has(id),
       toggle,
       setPage,
+      replace,
+      retain,
       pageState,
       clear,
       count: selected.size,
     }),
-    [selected, toggle, setPage, pageState, clear],
+    [selected, toggle, setPage, replace, retain, pageState, clear],
   );
 }

@@ -109,4 +109,20 @@ describe("useQueryTable row pipeline", () => {
     expect(fetchRows).toHaveBeenCalledTimes(2);
     unmount();
   });
+
+  it("keeps replacement stable when a filter changes in the same interaction", () => {
+    const { result, unmount } = renderQueryTable({ clientRows });
+    advance(20);
+    act(() => result.current.selection.setPage([1, 2], true));
+
+    act(() => {
+      result.current.addFilter({ field: "status", op: "=", value: "ready" });
+      result.current.selection.replace([1]);
+    });
+    advance(20);
+
+    expect(result.current.rows.map((row) => row.id)).toEqual([1]);
+    expect([...result.current.selection.selected]).toEqual([1]);
+    unmount();
+  });
 });

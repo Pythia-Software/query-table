@@ -11,9 +11,9 @@ import type { SelectionApi } from "@pythia-software/query-table-react";
 
 export interface SelectionToolbarProps {
   selection: SelectionApi;
-  /** Consumer-rendered action buttons. Receives the selected ids so the consumer
-   *  can gate/enable actions (e.g. mixed-state rules). */
-  actions: (selectedIds: RowId[]) => ReactNode;
+  /** Consumer-rendered action buttons. Receives the selected ids and the public
+   *  selection API. Existing callbacks that accept only ids remain supported. */
+  actions: (selectedIds: RowId[], selection: SelectionApi) => ReactNode;
   /** Hidden when nothing is selected unless `alwaysShow`. */
   alwaysShow?: boolean;
   className?: string;
@@ -39,7 +39,7 @@ export function SelectionToolbar({ selection, actions, alwaysShow, className }: 
       >
         clear
       </button>
-      <span className="qt-selection-actions">{actions(selectedIds)}</span>
+      <span className="qt-selection-actions">{actions(selectedIds, selection)}</span>
     </div>
   );
 }

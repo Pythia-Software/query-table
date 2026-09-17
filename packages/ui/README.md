@@ -55,6 +55,11 @@ current query, including a saved default query. Configure `useQueryTable` with
 `syncUrl: true` so recipients load shared query URLs. Query tokens are encoded,
 not encrypted, and may contain raw filter values.
 
+`SelectionToolbar` action callbacks receive `(selectedIds, selection)`, so
+consumer-owned bulk actions can call `selection.replace(ids)` or
+`selection.retain(ids)` atomically. Existing callbacks that use only the first
+argument remain compatible.
+
 ## Mobile behavior
 
 The bundled theme keeps the table as a horizontally scrollable grid on narrow
