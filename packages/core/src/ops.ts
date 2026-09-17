@@ -14,7 +14,16 @@ const NULLITY: FilterOp[] = ["is_null", "is_not_null"];
 
 /** Default operator set per type. A FieldDef.filter.ops overrides this. */
 export const OPS_BY_TYPE: Record<FieldType, FilterOp[]> = {
-  text: ["=", "!=", "contains", "starts_with", "ends_with", ...NULLITY],
+  text: [
+    "=",
+    "!=",
+    "contains",
+    "starts_with",
+    "ends_with",
+    "matches_regex",
+    "not_matches_regex",
+    ...NULLITY,
+  ],
   enum: ["=", "!=", ...NULLITY],
   number: ["=", "!=", ">", ">=", "<", "<=", ...NULLITY],
   datetime: ["=", "!=", ">", ">=", "<", "<=", ...NULLITY],

@@ -33,8 +33,9 @@ type CompileResult struct {
 // interleave their own params; the returned int is the next free index.
 //
 // Errors (never a panic) on: unknown field, an operator not allowed for a
-// field's kind, a filter on a non-server-filterable field, a sort on a
-// non-sortable field, an unknown select field, or a value that fails coercion.
+// field's kind or per-field operator allowlist, a filter on a
+// non-server-filterable field, a sort on a non-sortable field, an unknown
+// select field, or a value that fails coercion.
 func Compile(q WireQuery, schema Schema, startIdx int) (CompileResult, int, error) {
 	var res CompileResult
 	idx := startIdx
@@ -51,6 +52,9 @@ func Compile(q WireQuery, schema Schema, startIdx int) (CompileResult, int, erro
 		}
 		if !spec.ServerFilter {
 			return res, idx, fmt.Errorf("field %q is not server-filterable", c.Field)
+		}
+		if !fieldOpEnabled(spec, c.Op) {
+			return res, idx, fmt.Errorf("field %q: op %q is not enabled", c.Field, c.Op)
 		}
 		sql, args, next, err := compileWhere(spec, c.Op, c.Value, idx)
 		if err != nil {
@@ -77,17 +81,21 @@ func Compile(q WireQuery, schema Schema, startIdx int) (CompileResult, int, erro
 		if !spec.Sortable {
 			return res, idx, fmt.Errorf("field %q is not sortable", ob.Field)
 		}
-		t, err := orderTerm(spec.SortExpr, ob.Dir, ob.Nulls)
+		t, args, next, err := compileOrderTerm(spec.SortExpr, ob, idx)
 		if err != nil {
 			return res, idx, fmt.Errorf("field %q: %w", ob.Field, err)
 		}
 		terms = append(terms, t)
+		res.Args = append(res.Args, args...)
+		idx = next
 	}
 	if len(terms) > 0 {
 		for _, tb := range schema.TiebreakSort {
 			if spec, ok := schema.Fields[tb.Field]; ok {
-				if t, err := orderTerm(spec.SortExpr, tb.Dir, tb.Nulls); err == nil {
+				if t, args, next, err := compileOrderTerm(spec.SortExpr, tb, idx); err == nil {
 					terms = append(terms, t)
+					res.Args = append(res.Args, args...)
+					idx = next
 				}
 			}
 		}
@@ -243,6 +251,17 @@ func orderTerm(expr, dir, nulls string) (string, error) {
 	return expr + " " + d + " " + n, nil
 }
 
+func compileOrderTerm(expr string, term OrderBy, idx int) (string, []any, int, error) {
+	var args []any
+	if term.Extract != nil {
+		expr = fmt.Sprintf("substring((%s)::text FROM $%d)", expr, idx)
+		args = []any{term.Extract.Regex}
+		idx++
+	}
+	t, err := orderTerm(expr, term.Dir, term.Nulls)
+	return t, args, idx, err
+}
+
 func compileWhere(spec FieldSpec, op, value string, idx int) (string, []any, int, error) {
 	switch op {
 	case "is_null":
@@ -286,6 +305,10 @@ func compileWhere(spec FieldSpec, op, value string, idx int) (string, []any, int
 		return fmt.Sprintf("POSITION(LOWER($%d) IN LOWER(%s)) = 1", idx, spec.Expr), []any{value}, idx + 1, nil
 	case "ends_with":
 		return fmt.Sprintf("RIGHT(LOWER(%s), LENGTH($%d)) = LOWER($%d)", spec.Expr, idx, idx), []any{value}, idx + 1, nil
+	case "matches_regex":
+		return fmt.Sprintf("(%s)::text ~ $%d", spec.Expr, idx), []any{value}, idx + 1, nil
+	case "not_matches_regex":
+		return fmt.Sprintf("(%s)::text !~ $%d", spec.Expr, idx), []any{value}, idx + 1, nil
 	case "includes":
 		// Case-insensitive membership in a text[] column (ARRAY_HAS semantics).
 		return fmt.Sprintf("EXISTS (SELECT 1 FROM unnest(%s) AS _e WHERE LOWER(_e) = LOWER($%d))", spec.Expr, idx),
@@ -293,6 +316,18 @@ func compileWhere(spec FieldSpec, op, value string, idx int) (string, []any, int
 	default:
 		return "", nil, idx, fmt.Errorf("unknown op %q", op)
 	}
+}
+
+func fieldOpEnabled(spec FieldSpec, op string) bool {
+	if spec.FilterOps == nil {
+		return true
+	}
+	for _, enabled := range spec.FilterOps {
+		if enabled == op {
+			return true
+		}
+	}
+	return false
 }
 
 // opAllowed mirrors @pythia-software/query-table-core OPS_BY_TYPE — the server-side enforcement
@@ -305,7 +340,7 @@ func opAllowed(kind FieldKind, op string) bool {
 	switch kind {
 	case FieldText:
 		switch op {
-		case "=", "!=", "contains", "starts_with", "ends_with":
+		case "=", "!=", "contains", "starts_with", "ends_with", "matches_regex", "not_matches_regex":
 			return true
 		}
 	case FieldEnum:

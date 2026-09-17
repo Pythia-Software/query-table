@@ -49,9 +49,12 @@ type FieldSpec struct {
 	Kind         FieldKind
 	Expr         string
 	Synthetic    bool
-	ServerFilter bool   // false → field is client-only; Compile rejects filters on it
-	Sortable     bool
-	SortExpr     string // expr to ORDER BY when it differs from Expr (FieldDef.sort.field → that field's Expr)
+	ServerFilter bool // false → field is client-only; Compile rejects filters on it
+	// FilterOps is nil for the type's default matrix; a non-nil slice is the
+	// field's explicit operator allowlist. An empty slice disables every op.
+	FilterOps []string
+	Sortable  bool
+	SortExpr  string // expr to ORDER BY when it differs from Expr (FieldDef.sort.field → that field's Expr)
 }
 
 // Schema is the compiled, server-side field allowlist for one dataset.
@@ -77,8 +80,9 @@ type docField struct {
 	Type   string `json:"type"`
 	Source any    `json:"source"` // "backend"|"derived" | object | absent
 	Filter *struct {
-		Enabled  *bool `json:"enabled"`
-		Pushdown *bool `json:"pushdown"`
+		Enabled  *bool    `json:"enabled"`
+		Pushdown *bool    `json:"pushdown"`
+		Ops      []string `json:"ops"`
 	} `json:"filter"`
 	Sort *struct {
 		Enabled *bool  `json:"enabled"`
@@ -149,12 +153,17 @@ func LoadSchema(doc []byte) (Schema, error) {
 		}
 
 		serverFilter := true
+		var filterOps []string
 		if f.Filter != nil {
 			if f.Filter.Enabled != nil {
 				serverFilter = *f.Filter.Enabled
 			}
 			if f.Filter.Pushdown != nil {
 				serverFilter = serverFilter && *f.Filter.Pushdown
+			}
+			if f.Filter.Ops != nil {
+				filterOps = make([]string, len(f.Filter.Ops))
+				copy(filterOps, f.Filter.Ops)
 			}
 		}
 
@@ -177,6 +186,7 @@ func LoadSchema(doc []byte) (Schema, error) {
 			Expr:         pg.Expr,
 			Synthetic:    pg.Synthetic,
 			ServerFilter: serverFilter,
+			FilterOps:    filterOps,
 			Sortable:     sortable,
 			SortExpr:     sortExpr,
 		}

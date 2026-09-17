@@ -125,4 +125,68 @@ describe("QueryBuilder sharing", () => {
     expect(queriesEqual(decodeQuery(sharedUrl.searchParams.get("q")!), currentQuery!)).toBe(true);
     expect(share!.textContent).toBe("Copied!");
   });
+
+  it("edits regex filters and regex-extract sort terms", async () => {
+    let currentQuery: ReturnType<typeof useQueryTable<Row>>["query"] | undefined;
+
+    function TestTable() {
+      const api = useQueryTable<Row>({
+        schema,
+        clientRows: [],
+        debounceMs: 0,
+        initialQuery: {
+          select: [{ field: "name" }],
+          where: [{ field: "name", op: "matches_regex", value: "^item-" }],
+          orderBy: [{ field: "name", dir: "asc" }],
+          limit: 25,
+          offset: 0,
+        },
+      });
+      currentQuery = api.query;
+      return createElement(QueryBuilder<Row>, { api, fields: schema.fields, total: api.total });
+    }
+
+    await act(async () => {
+      root = createRoot(container!);
+      root.render(createElement(TestTable));
+      await Promise.resolve();
+    });
+
+    const filterOp = container!.querySelector<HTMLSelectElement>(".qt-chip-op");
+    const filterInput = container!.querySelector<HTMLInputElement>('.qt-chip--where input[placeholder="regex"]');
+    expect(filterOp?.value).toBe("matches_regex");
+    expect(filterInput?.value).toBe("^item-");
+    expect(filterInput?.hasAttribute("list")).toBe(false);
+
+    await act(async () => Promise.resolve());
+    expect(Array.from(container!.querySelectorAll("button")).some((button) => button.textContent?.trim() === "nulls last")).toBe(
+      false,
+    );
+
+    const addExtract = Array.from(container!.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "+ regex extract",
+    );
+    expect(addExtract).toBeDefined();
+    await act(async () => addExtract!.click());
+    expect(currentQuery!.orderBy[0]!.extract).toEqual({ regex: "" });
+    expect(Array.from(container!.querySelectorAll("button")).some((button) => button.textContent?.trim() === "nulls last")).toBe(
+      true,
+    );
+
+    const extractInput = container!.querySelector<HTMLInputElement>('input[aria-label="Regex extract for Name"]');
+    expect(extractInput).not.toBeNull();
+    await act(async () => {
+      const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+      setValue.call(extractInput, "item-(\\d+)");
+      extractInput!.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(currentQuery!.orderBy[0]!.extract).toEqual({ regex: "item-(\\d+)" });
+
+    const removeExtract = container!.querySelector<HTMLButtonElement>('button[aria-label="Remove regex extract for Name"]');
+    await act(async () => removeExtract!.click());
+    expect(currentQuery!.orderBy[0]!.extract).toBeUndefined();
+    expect(Array.from(container!.querySelectorAll("button")).some((button) => button.textContent?.trim() === "nulls last")).toBe(
+      false,
+    );
+  });
 });

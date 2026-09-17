@@ -471,6 +471,7 @@
 }
 .qt-chip-where-list { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .qt-chip-where-clause { display: inline-flex; align-items: center; gap: 4px; }
+.qt-sort-extract { display: inline-flex; align-items: center; gap: 4px; }
 .qt-chip-and { color: var(--qt-muted); font-size: 11px; padding: 0 1px; white-space: nowrap; }
 .qt-chip-op-btn,
 .qt-chip-x { display: inline-flex; align-items: center; box-sizing: border-box; }
@@ -887,7 +888,8 @@
   }
 
   .qt-chip-where-list,
-  .qt-chip-where-clause {
+  .qt-chip-where-clause,
+  .qt-sort-extract {
     max-width: 100%;
   }
 

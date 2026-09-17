@@ -31,6 +31,27 @@ describe("applyQuery — filtering", () => {
     const r = applyQuery(rows, base({ where: [{ field: "case_name", op: "contains", value: "ra" }] }), runsSchema);
     expect(r.rows.map((x) => x.id)).toEqual([2]); // only "bravo" contains "ra"
   });
+
+  it("matches and rejects a regular expression on text", () => {
+    const matching = applyQuery(
+      rows,
+      base({ where: [{ field: "case_name", op: "matches_regex", value: "^(alpha|charlie)$" }] }),
+      runsSchema,
+    );
+    expect(matching.rows.map((x) => x.id)).toEqual([1, 3]);
+
+    const notMatching = applyQuery(
+      rows,
+      base({ where: [{ field: "case_name", op: "not_matches_regex", value: "a$" }] }),
+      runsSchema,
+    );
+    expect(notMatching.rows.map((x) => x.id)).toEqual([2, 3]);
+  });
+
+  it("fails closed for an invalid regular expression", () => {
+    const r = applyQuery(rows, base({ where: [{ field: "case_name", op: "matches_regex", value: "[" }] }), runsSchema);
+    expect(r.rows).toEqual([]);
+  });
 });
 
 describe("applyQuery — multi-sort + nulls + pagination", () => {
@@ -52,6 +73,20 @@ describe("applyQuery — multi-sort + nulls + pagination", () => {
     );
     // macos: delta,bravo ; windows: charlie,alpha
     expect(r.rows.map((x) => x.id)).toEqual([4, 2, 3, 1]);
+  });
+
+  it("sorts by a regex capture and treats non-matches as null", () => {
+    const extractedRows = [
+      { ...rows[0]!, case_name: "item-3" },
+      { ...rows[1]!, case_name: "item-20" },
+      { ...rows[2]!, case_name: "other" },
+    ];
+    const r = applyQuery(
+      extractedRows,
+      base({ orderBy: [{ field: "case_name", dir: "asc", extract: { regex: "item-(\\d+)" } }] }),
+      runsSchema,
+    );
+    expect(r.rows.map((x) => x.id)).toEqual([2, 1, 3]); // lexical capture order: "20", "3", then NULL
   });
 
   it("paginates after filter+sort and reports pre-pagination total", () => {

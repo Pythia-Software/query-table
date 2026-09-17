@@ -36,7 +36,7 @@
   "$defs": {
     "fieldType": { "enum": ["text", "number", "enum", "datetime", "bool", "textarray"] },
     "filterOp": {
-      "enum": ["=", "!=", ">", ">=", "<", "<=", "contains", "starts_with", "ends_with", "includes", "is_null", "is_not_null"]
+      "enum": ["=", "!=", ">", ">=", "<", "<=", "contains", "starts_with", "ends_with", "matches_regex", "not_matches_regex", "includes", "is_null", "is_not_null"]
     },
     "aggOp": {
       "enum": ["count", "count_distinct", "sum", "avg", "min", "max"]
@@ -48,7 +48,14 @@
       "properties": {
         "field": { "type": "string" },
         "dir": { "enum": ["asc", "desc"] },
-        "nulls": { "enum": ["first", "last"] }
+        "nulls": { "enum": ["first", "last"] },
+        "extract": {
+          "type": "object",
+          "required": ["regex"],
+          "additionalProperties": false,
+          "description": "Sort by the first capture group of a regex match, or the whole match when there is no capture group. A non-match is NULL.",
+          "properties": { "regex": { "type": "string", "maxLength": 10000 } }
+        }
       }
     },
     "selectColumn": {

@@ -130,6 +130,25 @@ interface QueryState {
 }
 ```
 
+Text fields support `matches_regex` and `not_matches_regex` filters. Sort terms
+can optionally extract a regex match before comparison:
+
+```ts
+const query: QueryState = {
+  ...EMPTY_QUERY,
+  where: [{ field: "name", op: "matches_regex", value: "^build-\\d+$" }],
+  orderBy: [
+    { field: "name", dir: "asc", extract: { regex: "build-(\\d+)" }, nulls: "last" },
+  ],
+};
+```
+
+Extraction returns the first capture group when the pattern has one, otherwise
+the whole match. A non-match is `NULL`, so the term's normal `nulls` setting
+controls its placement. Patterns are case-sensitive and use the executor's
+regex dialect (JavaScript for local rows, PostgreSQL for the bundled Go
+backend); use the common syntax subset when a query must run in both places.
+
 ```ts
 // one field. `source` says WHAT KIND it is (value origin + server capability);
 // filter/sort/select are declarative capability config; `render` + the derived
@@ -158,8 +177,8 @@ type FilterValues =
 
 The backend mirror (`backends/go`) carries `{Expr, Kind, Synthetic}` per field —
 the SQL projection of the same schema row. The allowlist is the only thing that
-reaches SQL text; values are always bound parameters. Every type allows
-`is_null`/`is_not_null` (bool included) — any column can be NULL.
+reaches SQL text; values and regex patterns are always bound parameters. Every
+type allows `is_null`/`is_not_null` (bool included) — any column can be NULL.
 
 See `schema/query-table.schema.json` for the authoritative document format and
 `schema/examples/runs.schema.json` for a worked schema validated against the
