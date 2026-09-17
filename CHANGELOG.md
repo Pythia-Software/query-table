@@ -6,6 +6,8 @@ contain intentional API changes described in their release notes.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-17
+
 ### Added
 
 - Added a wide SELECT editor with column ordering, a searchable catalogue,
@@ -42,6 +44,10 @@ contain intentional API changes described in their release notes.
   the same two-column layout as the CellMenu, with the active choice
   highlighted — so a predicate and its negation are chosen from one place
   instead of a separate operator dropdown and NOT toggle.
+
+### Security
+
+- Updated Vitest to resolve a development-time path traversal advisory.
 
 ## [0.2.0] - 2026-09-08
 
@@ -91,6 +97,7 @@ contain intentional API changes described in their release notes.
 - Updated the JavaScript toolchain to remove known dependency advisories.
 - Added Git-history secret scanning and Go/npm vulnerability checks to CI.
 
-[Unreleased]: https://github.com/Pythia-Software/query-table/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Pythia-Software/query-table/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Pythia-Software/query-table/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Pythia-Software/query-table/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Pythia-Software/query-table/releases/tag/v0.1.0
