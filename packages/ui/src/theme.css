@@ -1242,3 +1242,60 @@
   .qt-qb-collapse-caret,
   .qt-qt-section-toggle-caret { transition: none; }
 }
+
+/* Wide SELECT workbench */
+.qt-select-editor { width: min(1480px, 97vw); height: min(900px, 94vh); display: flex; flex-direction: column; background: var(--qt-bg, #fff); color: var(--qt-fg, #172033); border: 1px solid var(--qt-border, #dbe1e8); border-radius: 12px; box-shadow: 0 24px 80px #0004; overflow: hidden; }
+.qt-select-editor-header, .qt-select-editor-footer { display: flex; align-items: center; gap: 12px; padding: 18px 24px; flex-shrink: 0; }
+.qt-select-editor-header { justify-content: space-between; border-bottom: 1px solid var(--qt-border, #dbe1e8); }
+.qt-select-editor h2, .qt-select-editor h3, .qt-select-editor p { margin: 0 0 10px; }
+.qt-select-editor h2 { font-size: 21px; }
+.qt-select-editor h3 { font-size: 15px; }
+.qt-select-editor p, .qt-select-editor label, .qt-select-editor small { font-size: 12px; line-height: 1.5; }
+.qt-select-editor-header p { margin: 0; color: var(--qt-muted, #64748b); }
+.qt-select-editor-body { display: grid; grid-template-columns: 240px 240px minmax(0, 1fr); flex: 1; min-height: 0; }
+.qt-selected-panel, .qt-catalogue-panel { padding: 18px 14px; border-right: 1px solid var(--qt-border, #dbe1e8); overflow-y: auto; }
+.qt-column-workbench { padding: 20px 24px; overflow: auto; min-width: 0; }
+.qt-editor-columns { list-style: none; padding: 0; margin: 14px 0; }
+.qt-editor-columns li { display: flex; align-items: center; gap: 3px; border: 1px solid var(--qt-border, #dbe1e8); border-radius: 6px; margin-bottom: 7px; padding: 7px 5px; }
+.qt-column-name { border: 0; background: transparent; text-align: left; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; cursor: pointer; color: inherit; }
+.qt-icon-btn { border: 0; background: transparent; color: inherit; padding: 3px; cursor: pointer; }
+.qt-icon-btn:disabled { opacity: .3; cursor: default; }
+.qt-catalogue-panel > .qt-input { width: 100%; box-sizing: border-box; }
+.qt-create-computed { width: 100%; margin: 10px 0; }
+.qt-catalogue-item { display: flex; align-items: center; gap: 8px; padding: 7px; border-radius: 6px; margin: 3px 0; }
+.qt-catalogue-item.is-active { background: var(--qt-accent-bg, #edf3ff); }
+.qt-catalogue-item button { display: flex; flex-direction: column; gap: 4px; text-align: left; border: 0; background: transparent; color: inherit; min-width: 0; cursor: pointer; }
+.qt-catalogue-item small { color: var(--qt-muted, #64748b); overflow-wrap: anywhere; }
+.qt-editor-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.qt-editor-label { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; font-weight: 600; }
+.qt-type-badge { border-radius: 20px; background: #eaf3ff; color: #275eb2; padding: 4px 10px; font-size: 11px; }
+.qt-function-library { margin: 10px 0; font-size: 12px; }
+.qt-function-library summary { cursor: pointer; margin-bottom: 8px; }
+.qt-function-list { max-height: 190px; overflow: auto; margin: 8px 0; }
+.qt-function-list button { display: flex; flex-direction: column; text-align: left; gap: 3px; padding: 8px; background: transparent; border: 0; border-bottom: 1px solid var(--qt-border, #dbe1e8); width: 100%; color: inherit; cursor: pointer; }
+.qt-function-list small { color: var(--qt-muted, #64748b); }
+.qt-function-help { padding: 10px; max-width: 400px; font: 12px/1.5 system-ui; }
+.qt-definition-actions { display: flex; gap: 10px; margin: 12px 0 8px; }
+.qt-preview-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; border-top: 1px solid var(--qt-border, #dbe1e8); padding-top: 18px; margin: 18px 0 10px; }
+.qt-preview-controls label { display: flex; align-items: center; gap: 6px; }
+.qt-preview-controls input { width: 88px; }
+.qt-preview-controls select { padding: 5px; border: 1px solid var(--qt-border, #dbe1e8); border-radius: 5px; background: var(--qt-bg, #fff); color: inherit; }
+.qt-preview-table-wrap { overflow: auto; max-height: 400px; border: 1px solid var(--qt-border, #dbe1e8); border-radius: 6px; }
+.qt-preview-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.qt-preview-table th { text-align: left; position: sticky; top: 0; background: var(--qt-bg, #f8fafc); }
+.qt-preview-table th, .qt-preview-table td { padding: 9px 12px; border-bottom: 1px solid var(--qt-border, #e2e8f0); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qt-preview-table td:nth-last-child(-n+2), .qt-preview-table th:nth-last-child(-n+2) { text-align: right; font-variant-numeric: tabular-nums; }
+.qt-formula-error { color: var(--qt-error, #b42318); }
+.qt-editor-notice { color: #16703a; }
+.qt-preview-pages { display: flex; gap: 12px; align-items: center; justify-content: flex-end; margin-top: 12px; font-size: 12px; }
+.qt-select-editor-footer { border-top: 1px solid var(--qt-border, #dbe1e8); justify-content: flex-end; }
+.qt-select-editor-footer > span { margin-right: auto; font-size: 12px; }
+.qt-select-editor .qt-primary { background: #285cc4; color: white; border-color: #285cc4; }
+@media (max-width: 1000px) { .qt-select-editor-body { grid-template-columns: 180px 200px minmax(0,1fr); } .qt-column-workbench { padding: 16px; } }
+@media (max-width: 760px) { .qt-select-editor-body { display: block; overflow: auto; } .qt-selected-panel, .qt-catalogue-panel { max-height: 230px; border-right: 0; border-bottom: 1px solid var(--qt-border, #dbe1e8); } .qt-column-workbench { overflow: visible; } .qt-select-editor-footer { flex-wrap: wrap; padding: 12px; } }
+.qt-regex-inspector { margin-top: 12px; padding: 12px; background: var(--qt-bg-muted, #f8fafc); border: 1px solid var(--qt-border, #dbe1e8); border-radius: 6px; font-size: 12px; }
+.qt-regex-inspector h4 { margin: 0 0 8px; }
+.qt-regex-inspector pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.qt-regex-inspector dl > div { display: flex; gap: 14px; margin: 4px 0; }
+.qt-regex-inspector dd { margin: 0; overflow-wrap: anywhere; }
+.qt-select-editor .qt-formula-hint { color: var(--qt-muted, #64748b); margin: 6px 0 12px; font-size: 11px; }

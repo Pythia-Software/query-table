@@ -7,6 +7,7 @@
 // and emits intents through onQueryChange. Its props mirror a conventional
 // schema-driven table so adoption is mechanical.
 
+import { isComputedCellError } from "@pythia-software/query-table-core";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type SetStateAction } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { OrderByClause, QueryState, FieldDef, RowId, SelectColumn, WhereClause } from "@pythia-software/query-table-core";
@@ -796,7 +797,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                         onContextMenu={(e) => openMenu(e, f, row)}
                         onDoubleClick={(e) => copyCellToClipboard(e, f, id, i, value)}
                       >
-                        {copiedCellKey === key ? <span className="qt-cell-copy-chip">✓ copied</span> : render({ value, row, field: f, query })}
+                        {copiedCellKey === key ? <span className="qt-cell-copy-chip">✓ copied</span> : isComputedCellError(value) ? <span className="qt-formula-error" title={value.computedError}>{value.computedError === "Calculating…" ? "Calculating…" : "Error"}</span> : render({ value, row, field: f, query })}
                       </td>
                     );
                   })}

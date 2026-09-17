@@ -6,6 +6,7 @@
 // Combines a chip layout, autocomplete, draggable column chips, a grouped
 // picker, per-clause operators, and multi-sort.
 
+import { SelectColumnEditor } from "./SelectColumnEditor";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
   AggOp,
@@ -787,6 +788,7 @@ function SelectRow<Row>({
   disabled: boolean | undefined;
 }) {
   const { select, columnDrag } = api;
+  const [editingColumns, setEditingColumns] = useState(false);
   const [adding, setAdding] = useState(false);
   const fieldLabelByName = useMemo(() => new Map(select.fields.map((f) => [f.name, f.label])), [select.fields]);
 
@@ -809,6 +811,8 @@ function SelectRow<Row>({
   return (
     <div className="qt-qb-row">
       <span className="qt-qb-kw">select</span>
+      <button type="button" className="qt-btn" disabled={disabled} onClick={() => setEditingColumns(true)}>Edit columns</button>
+      {editingColumns && <SelectColumnEditor api={api} onClose={() => setEditingColumns(false)} />}
       {rendered.map((name, position) => {
         const label = fieldLabelByName.get(name) ?? name;
         return (

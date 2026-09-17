@@ -1,3 +1,4 @@
+import { isComputedField } from "./computed";
 // query.ts — the canonical query state shape.
 //
 // We lean into SQL vocabulary at every layer (per design feedback): a QueryState
@@ -59,7 +60,7 @@ export interface OrderByClause {
 /** One column in the SELECT list, plus the view state that travels with it.
  *  Order in `QueryState.select` is the left-to-right display order. */
 export interface SelectColumn {
-  field: string; // FieldDef.name
+  field: string; // FieldDef.name, or @computed/<id> (source lives in ComputedColumnStore)
   /** Pixel width override. Omitted = FieldDef.select.width, else the type default. */
   width?: number;
 }
@@ -201,7 +202,7 @@ export function normalizeQueryState(input: unknown, fallback: QueryState = EMPTY
       if (!isRecord(item)) continue;
       const field = boundedString(item.field, MAX_FIELD_NAME_LENGTH);
       const value = typeof item.value === "string" && item.value.length <= MAX_FILTER_VALUE_LENGTH ? item.value : null;
-      if (!field || typeof item.op !== "string" || !FILTER_OPS.has(item.op) || value == null) continue;
+      if (!field || isComputedField(field) || typeof item.op !== "string" || !FILTER_OPS.has(item.op) || value == null) continue;
       where.push({ field, op: item.op as FilterOp, value });
     }
   } else {
@@ -213,7 +214,7 @@ export function normalizeQueryState(input: unknown, fallback: QueryState = EMPTY
     for (const item of raw.orderBy.slice(0, MAX_ORDER_BY_TERMS)) {
       if (!isRecord(item)) continue;
       const field = boundedString(item.field, MAX_FIELD_NAME_LENGTH);
-      if (!field || (item.dir !== "asc" && item.dir !== "desc")) continue;
+      if (!field || isComputedField(field) || (item.dir !== "asc" && item.dir !== "desc")) continue;
       const term: OrderByClause = { field, dir: item.dir };
       if (item.nulls === "first" || item.nulls === "last") term.nulls = item.nulls;
       if (
@@ -252,6 +253,7 @@ export function normalizeQueryState(input: unknown, fallback: QueryState = EMPTY
       const aggregation: AggregationClause = { id, op: item.op as AggOp, groupBy };
       const field = boundedString(item.field, MAX_FIELD_NAME_LENGTH);
       const label = boundedString(item.label, MAX_LABEL_LENGTH);
+      if ((field && isComputedField(field)) || groupBy.some(isComputedField)) continue;
       if (field) aggregation.field = field;
       if (label) aggregation.label = label;
       aggregations.push(aggregation);

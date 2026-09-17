@@ -6,6 +6,9 @@
 // never hand-edits QueryState. @pythia-software/query-table-ui is a thin layer over this; you
 // can also build an entirely custom table on it.
 
+import { useComputedColumns, type ComputedColumnsApi } from "./useComputedColumns";
+import type { FormulaWorkerFactory } from "./formulaWorker";
+import type { ComputedColumnStore } from "@pythia-software/query-table-core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   EMPTY_QUERY,
@@ -52,6 +55,10 @@ export interface UseQueryTableOptions<Row> {
    * Pass localStorageAdapter() explicitly only when filter values are safe to
    * retain as cleartext JSON on the device. */
   storage?: StorageAdapter;
+  /** Shared reusable definitions, independent of saved-query storage. */
+  computedColumnStore?: ComputedColumnStore;
+  /** Override the worker factory when CSP disallows blob workers. */
+  formulaWorkerFactory?: FormulaWorkerFactory;
   /** Seed query, normalized and resource-bounded before use. When omitted the
    * hook resolves: opted-in URL → storage.loadLast → schema defaults. */
   initialQuery?: QueryState;
@@ -163,6 +170,7 @@ export interface QueryTableApi<Row> {
 
   // select + pagination + selection + saved
   select: SelectApi<Row>;
+  computed: ComputedColumnsApi<Row>;
   setLimit: (limit: number) => void;
   setOffset: (offset: number) => void;
   nextPage: () => void;
@@ -330,9 +338,16 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const { api: computed, displaySchema } = useComputedColumns({
+    schema, query, rows,
+    ...(opts.computedColumnStore ? {store:opts.computedColumnStore} : {}),
+    ...(opts.formulaWorkerFactory ? {workerFactory:opts.formulaWorkerFactory} : {}),
+    ...(transport ? {transport} : {}), ...(clientRows ? {clientRows} : {}),
+  });
+
   // Fetch (debounced + abortable). Transport mode, or client-side applyQuery.
   const queryKey = useMemo(() => encodeQuery(query), [query]);
-  const serverRowQuery = useMemo(() => toServerQuery(query, schema), [queryKey, schema]);
+  const serverRowQuery = useMemo(() => toServerQuery(query, displaySchema), [queryKey, displaySchema]);
   // Keep presentation-only query changes out of the expensive row pipeline.
   // Widths do not leave the client at all, and SELECT does not affect client-side
   // filtering/sorting/paging. The full queryKey still drives URL + persistence.
@@ -405,7 +420,7 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
   // Sub-APIs.
   const displayedIds = useMemo(() => rows.map(rowId).filter((id): id is RowId => id != null), [rows, rowId]);
   const selection = useSelection(displayedIds);
-  const select = useSelect(query, setQuery, schema);
+  const select = useSelect(query, setQuery, displaySchema);
   const columnDrag = useColumnDrag();
   const saved = useSavedQueries(
     schema.name,
@@ -605,7 +620,7 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
     [transport, rowId],
   );
 
-  const visibleFields = useMemo(() => selectedFields(schema, query), [schema, query]);
+  const visibleFields = useMemo(() => selectedFields(displaySchema, query), [displaySchema, query]);
 
   const aggregations = useMemo<AggregationsApi>(
     () => ({
@@ -657,6 +672,7 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
     toggleSort,
     setSort,
     select,
+    computed,
     setLimit,
     setOffset,
     nextPage,

@@ -85,3 +85,6 @@ export type {
   StorageAdapter,
 } from "./adapters";
 export { localStorageAdapter, memoryStorageAdapter } from "./adapters";
+
+export * from "./formula";
+export * from "./computed";
