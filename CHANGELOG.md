@@ -19,6 +19,8 @@ contain intentional API changes described in their release notes.
 - Added positive and negative regex filters plus regex-extract ordering across
   query state, local execution, the QueryBuilder UI, schema codegen, and the Go
   PostgreSQL compiler.
+- Added atomic `selection.replace(ids)` and `selection.retain(ids)` operations;
+  `SelectionToolbar` action callbacks now also receive the public selection API.
 
 ### Changed
 

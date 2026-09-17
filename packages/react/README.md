@@ -20,6 +20,11 @@ function Orders({ schema, rows }) {
 }
 ```
 
+`table.selection.replace(ids)` atomically makes any iterable of stable row IDs
+the complete selection, including IDs outside the displayed page.
+`table.selection.retain(ids)` atomically intersects the current selection with
+an iterable. Both operations reset the Shift-click range anchor.
+
 ## Privacy defaults
 
 URL synchronization and durable browser storage are disabled by default. Set
