@@ -39,6 +39,7 @@
     "release:check": "npm run version:check && npm run check && npm run build:demo && npm run package:check && npm run audit",
     "demo": "npm run dev --workspace @pythia-software/query-table-demo",
     "test:dnd": "node demo/dnd-test.mjs",
+    "test:computed": "node demo/computed-test.mjs",
     "prepare": "husky"
   },
   "devDependencies": {

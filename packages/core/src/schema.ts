@@ -56,6 +56,10 @@ export interface BackendField {
  *  pushed to the server; client-side filtering/sorting (if any) reads `accessor`. */
 export interface DerivedField<Row = any, V = unknown> {
   kind: "derived";
+  /** Backend inputs required for accessors and computed formulas. */
+  dependencies?: string[];
+  /** Reusable computed column ID; always select-only. */
+  computedId?: string;
   /** Compute the value from the row for client filter/sort. Omit for render-only
    *  columns (the renderer reads the whole row from CellContext instead). */
   accessor?: (row: Row) => V;
@@ -160,12 +164,14 @@ export interface FieldSchema<Row = any> {
 // ---- derived capability helpers (the per-source defaults, in one place) ----
 
 export function isFilterable(f: FieldDef): boolean {
+  if (f.source.kind === "derived" && f.source.computedId) return false;
   return f.filter?.enabled ?? f.source.kind === "backend";
 }
 export function isPushdownFilter(f: FieldDef): boolean {
   return isFilterable(f) && (f.filter?.pushdown ?? f.source.kind === "backend");
 }
 export function isSortable(f: FieldDef): boolean {
+  if (f.source.kind === "derived" && f.source.computedId) return false;
   return f.sort?.enabled ?? f.source.kind === "backend";
 }
 export function isSelectable(f: FieldDef): boolean {

@@ -31,3 +31,7 @@ is appropriate; sensitive applications should use an access-controlled server
 
 See the [repository README](https://github.com/Pythia-Software/query-table#readme)
 for transport and schema examples.
+
+## Shared computed column definitions
+
+Pass a stable `computedColumnStore` (for example, `httpComputedColumnStore("/api/computed-columns")` from core) to `useQueryTable`. `api.computed` exposes the catalogue, compile/preview, save with revision checking, and reload operations. Queries store only `@computed/<id>` SELECT references; formula evaluation stays in browser workers. Without a store, definitions are in memory for the mounted hook. See the repository’s `docs/computed-columns.md` for the complete integration contract and PostgreSQL adapter.

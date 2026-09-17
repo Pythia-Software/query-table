@@ -27,3 +27,6 @@ export { SelectionToolbar } from "./SelectionToolbar";
 
 export type { SavedQueriesModalProps } from "./SavedQueriesModal";
 export { SavedQueriesModal } from "./SavedQueriesModal";
+
+export { SelectColumnEditor } from "./SelectColumnEditor";
+export type { SelectColumnEditorProps } from "./SelectColumnEditor";

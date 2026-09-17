@@ -5,7 +5,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import type { FieldDef, FilterOp, WhereClause } from "@pythia-software/query-table-core";
-import { NULLARY_OPS, opsForField } from "@pythia-software/query-table-core";
+import { NULLARY_OPS, opsForField, isFilterable } from "@pythia-software/query-table-core";
 import type { MenuClassNames } from "./classNames";
 
 export interface CellMenuProps<Row> {
@@ -45,7 +45,7 @@ export function CellMenu<Row>({ field, value, x, y, onAddFilter, onClose, classN
     };
   }, [onClose]);
 
-  const ops = opsForField(field);
+  const ops = isFilterable(field) ? opsForField(field) : [];
   const isArray = Array.isArray(value);
   const isNullish = value == null || value === "" || (isArray && (value as unknown[]).length === 0);
 
@@ -59,7 +59,7 @@ export function CellMenu<Row>({ field, value, x, y, onAddFilter, onClose, classN
   // shortcut (so a tag column filters by the clicked tag); otherwise we offer
   // every operator the field type allows, prefilled with the cell value.
   const filterItems: ReactNode[] = [];
-  if (isArray && !isNullish) {
+  if (ops.length && isArray && !isNullish) {
     (value as unknown[]).forEach((el, i) => {
       const s = String(el);
       const arrayOp: FilterOp = ops.includes("includes") ? "includes" : ops[0] ?? "=";

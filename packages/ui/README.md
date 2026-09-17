@@ -72,3 +72,7 @@ providing their own responsive and touch-target styles.
 
 See the [repository README](https://github.com/Pythia-Software/query-table#readme)
 for customization and backend integration details.
+
+## SELECT editor
+
+`QueryBuilder` includes an **Edit columns** action. The exported `SelectColumnEditor` also accepts `{ api, onClose }` for standalone use. It supports draft column ordering, a searchable catalogue, sampled value frequencies, and a lazy-loaded CodeMirror formula editor with grouped live previews and regex inspection. Shared-definition saves and query-layout application are separate actions.

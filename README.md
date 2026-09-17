@@ -245,3 +245,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the development and release checks,
 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community expectations, and
 [SECURITY.md](SECURITY.md) for private vulnerability reporting. User-visible
 changes are recorded in [CHANGELOG.md](CHANGELOG.md).
+
+### Reusable computed columns
+
+The SELECT editor supports column ordering, value-frequency browsing, and reusable browser-evaluated formulas. Definitions can be stored in your database and referenced by ID across saved queries. See the [computed columns guide](docs/computed-columns.md) for the formula language, preview behavior, persistence adapter, and optional PostgreSQL implementation.

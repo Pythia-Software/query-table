@@ -161,6 +161,13 @@ export function toServerQuery<Row>(q: QueryState, schema: FieldSchema<Row>): Ser
       .filter((f) => f.source.kind === "backend")
       .map((f) => f.name),
   );
+  for (const field of selectedFields(schema, q)) {
+    if (field.source.kind === "derived") {
+      for (const name of field.source.dependencies ?? []) {
+        if (byName.get(name)?.source.kind === "backend") select.add(name);
+      }
+    }
+  }
   select.add(schema.idField);
   for (const cl of q.where) {
     const field = resolveField(cl.field);
@@ -168,7 +175,7 @@ export function toServerQuery<Row>(q: QueryState, schema: FieldSchema<Row>): Ser
     if (f && isFilterable(f) && !isPushdownFilter(f) && f.source.kind === "backend") select.add(field);
   }
 
-  return { select: [...select], where, orderBy, limit: q.limit, offset: q.offset };
+  return { select: [...select].sort(), where, orderBy, limit: q.limit, offset: q.offset };
 }
 
 // ---- aggregation server subset --------------------------------------------

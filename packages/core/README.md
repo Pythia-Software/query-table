@@ -42,3 +42,7 @@ configuration; request values are never SQL fragments.
 
 See the [repository README](https://github.com/Pythia-Software/query-table#readme)
 for the complete schema and backend documentation.
+
+## Computed SELECT definitions
+
+Exports include `ComputedColumnStore`, `httpComputedColumnStore`, `memoryComputedColumnStore`, `compileFormula`, `FORMULA_FUNCTIONS`, and `formulaRuntime`. Shared source definitions are versioned separately from queries; query SELECT entries use `{ field: "@computed/<id>" }`. The React package executes the interpreter in a bounded worker. Do not run user regex on the browser main thread. See the repository’s `docs/computed-columns.md` for semantics and persistence details.

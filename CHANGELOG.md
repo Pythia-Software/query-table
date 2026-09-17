@@ -6,6 +6,17 @@ contain intentional API changes described in their release notes.
 
 ## [Unreleased]
 
+### Added
+
+- Added a wide SELECT editor with column ordering, a searchable catalogue,
+  sampled value frequencies, and grouped live formula previews.
+- Added reusable computed SELECT columns with text, regex, numeric, conditional,
+  array, and UTC date operators, evaluated in bounded browser workers.
+- Added shared definition storage by ID with optimistic revisions, HTTP and
+  in-memory adapters, and an optional authorized PostgreSQL-backed Go endpoint.
+- Added formula documentation and regression coverage for Unicode limits,
+  opaque revisions, missing-definition repair, and worker timeout recovery.
+
 ## [0.2.0] - 2026-09-08
 
 ### Added

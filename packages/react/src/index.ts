@@ -17,3 +17,7 @@ export { useColumnDrag } from "./useColumnDrag";
 
 export type { SavedQueriesApi } from "./useSavedQueries";
 export { useSavedQueries } from "./useSavedQueries";
+
+export type { ComputedColumnsApi } from "./useComputedColumns";
+export { createFormulaWorker, evaluateFormulaRows } from "./formulaWorker";
+export type { FormulaWorkerFactory } from "./formulaWorker";

@@ -13,6 +13,7 @@
 //   - NULLs sort per OrderByClause.nulls (default "last")
 //   - multi-sort is a stable lexicographic fold over orderBy in priority order
 
+import { isComputedField } from "./computed";
 import type { AggOp, AggregationClause, QueryState, WhereClause } from "./query";
 import type { FieldSchema, FieldDef } from "./schema";
 import type { AggregationBucket, AggregationResult } from "./encode";
@@ -32,8 +33,8 @@ export interface ApplyResult<Row> {
 export function applyQuery<Row>(rows: Row[], q: QueryState, schema: FieldSchema<Row>): ApplyResult<Row> {
   const byName = indexFields(schema);
   const resolveField = (name: string) => resolveFieldName(schema, name) ?? name;
-  const whereClauses = q.where.map((clause) => ({ ...clause, field: resolveField(clause.field) }));
-  const orderBy = q.orderBy.map((term) => ({ ...term, field: resolveField(term.field) }));
+  const whereClauses = q.where.filter(c => !isComputedField(c.field)).map((clause) => ({ ...clause, field: resolveField(clause.field) }));
+  const orderBy = q.orderBy.filter(c => !isComputedField(c.field)).map((term) => ({ ...term, field: resolveField(term.field) }));
 
   let out = rows.filter((row) => whereClauses.every((cl) => matchesWith(byName, row, cl)));
   const total = out.length;
@@ -77,9 +78,9 @@ export function matchesClause<Row>(row: Row, clause: WhereClause, schema: FieldS
 export function applyAggregations<Row>(rows: Row[], q: QueryState, schema: FieldSchema<Row>): AggregationResult {
   const byName = indexFields(schema);
   const resolveField = (name: string) => resolveFieldName(schema, name) ?? name;
-  const whereClauses = q.where.map((clause) => ({ ...clause, field: resolveField(clause.field) }));
+  const whereClauses = q.where.filter(c => !isComputedField(c.field)).map((clause) => ({ ...clause, field: resolveField(clause.field) }));
   const filtered = rows.filter((row) => whereClauses.every((cl) => matchesWith(byName, row, cl)));
-  const metrics = (q.aggregations ?? []).map((agg) => ({
+  const metrics = (q.aggregations ?? []).filter(a => !isComputedField(a.field ?? "") && !a.groupBy.some(isComputedField)).map((agg) => ({
     id: agg.id,
     buckets: computeBuckets(filtered, agg, byName, resolveField),
   }));
