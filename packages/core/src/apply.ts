@@ -32,20 +32,28 @@ export interface ApplyResult<Row> {
 export function applyQuery<Row>(rows: Row[], q: QueryState, schema: FieldSchema<Row>): ApplyResult<Row> {
   const byName = indexFields(schema);
   const resolveField = (name: string) => resolveFieldName(schema, name) ?? name;
-  const whereClauses = q.where.map((clause) => ({ ...clause, field: resolveField(clause.field) }));
+  const whereClauses = q.where.map((clause) => prepareWhereClause({ ...clause, field: resolveField(clause.field) }));
   const orderBy = q.orderBy.map((term) => ({ ...term, field: resolveField(term.field) }));
 
-  let out = rows.filter((row) => whereClauses.every((cl) => matchesWith(byName, row, cl)));
+  let out = rows.filter((row) => whereClauses.every((prepared) => matchesWith(byName, row, prepared)));
   const total = out.length;
 
   if (orderBy.length) {
     const terms = orderBy
-      .map((t) => ({ field: byName.get(t.field), dir: t.dir, nullsLast: (t.nulls ?? "last") === "last" }))
-      .filter((t): t is { field: FieldDef<Row>; dir: "asc" | "desc"; nullsLast: boolean } => t.field != null);
+      .map((t) => ({
+        field: byName.get(t.field),
+        dir: t.dir,
+        nullsLast: (t.nulls ?? "last") === "last",
+        extract: compileRegex(t.extract?.regex),
+      }))
+      .filter(
+        (t): t is { field: FieldDef<Row>; dir: "asc" | "desc"; nullsLast: boolean; extract: RegExp | null | undefined } =>
+          t.field != null,
+      );
     out = [...out].sort((a, b) => {
       for (const t of terms) {
-        const av = readFieldValue(t.field, a);
-        const bv = readFieldValue(t.field, b);
+        const av = extractSortValue(readFieldValue(t.field, a), t.extract);
+        const bv = extractSortValue(readFieldValue(t.field, b), t.extract);
         const aNull = av == null;
         const bNull = bv == null;
         if (aNull || bNull) {
@@ -66,7 +74,7 @@ export function applyQuery<Row>(rows: Row[], q: QueryState, schema: FieldSchema<
 
 /** Does one row satisfy one clause? Exposed for the CellMenu preview + tests. */
 export function matchesClause<Row>(row: Row, clause: WhereClause, schema: FieldSchema<Row>): boolean {
-  return matchesWith(indexFields(schema), row, clause);
+  return matchesWith(indexFields(schema), row, prepareWhereClause(clause));
 }
 
 /** Client-side mirror of the backend GROUP BY (the executor for `clientRows`
@@ -77,8 +85,8 @@ export function matchesClause<Row>(row: Row, clause: WhereClause, schema: FieldS
 export function applyAggregations<Row>(rows: Row[], q: QueryState, schema: FieldSchema<Row>): AggregationResult {
   const byName = indexFields(schema);
   const resolveField = (name: string) => resolveFieldName(schema, name) ?? name;
-  const whereClauses = q.where.map((clause) => ({ ...clause, field: resolveField(clause.field) }));
-  const filtered = rows.filter((row) => whereClauses.every((cl) => matchesWith(byName, row, cl)));
+  const whereClauses = q.where.map((clause) => prepareWhereClause({ ...clause, field: resolveField(clause.field) }));
+  const filtered = rows.filter((row) => whereClauses.every((prepared) => matchesWith(byName, row, prepared)));
   const metrics = (q.aggregations ?? []).map((agg) => ({
     id: agg.id,
     buckets: computeBuckets(filtered, agg, byName, resolveField),
@@ -180,7 +188,18 @@ function sortBuckets(buckets: AggregationBucket[]): AggregationBucket[] {
   });
 }
 
-function matchesWith<Row>(byName: Map<string, FieldDef<Row>>, row: Row, clause: WhereClause): boolean {
+interface PreparedWhereClause {
+  clause: WhereClause;
+  regex: RegExp | null | undefined;
+}
+
+function prepareWhereClause(clause: WhereClause): PreparedWhereClause {
+  const usesRegex = clause.op === "matches_regex" || clause.op === "not_matches_regex";
+  return { clause, regex: usesRegex ? compileRegex(clause.value) : undefined };
+}
+
+function matchesWith<Row>(byName: Map<string, FieldDef<Row>>, row: Row, prepared: PreparedWhereClause): boolean {
+  const { clause, regex } = prepared;
   const field = byName.get(clause.field);
   if (!field) return true; // unknown field → no client opinion
   const v = readFieldValue(field, row);
@@ -199,6 +218,13 @@ function matchesWith<Row>(byName: Map<string, FieldDef<Row>>, row: Row, clause: 
     const arr = Array.isArray(v) ? v : [];
     const needle = clause.value.toLowerCase();
     return arr.some((x) => String(x).toLowerCase() === needle);
+  }
+
+  if (clause.op === "matches_regex" || clause.op === "not_matches_regex") {
+    if (v == null || Array.isArray(v)) return false;
+    if (!regex) return false;
+    const matches = regex.test(String(v));
+    return clause.op === "matches_regex" ? matches : !matches;
   }
 
   if (Array.isArray(v)) {
@@ -238,6 +264,24 @@ function matchesWith<Row>(byName: Map<string, FieldDef<Row>>, row: Row, clause: 
     default:
       return true;
   }
+}
+
+/** `null` means an invalid pattern; `undefined` means no regex was requested. */
+function compileRegex(pattern: string | undefined): RegExp | null | undefined {
+  if (pattern === undefined) return undefined;
+  try {
+    return new RegExp(pattern);
+  } catch {
+    return null;
+  }
+}
+
+function extractSortValue(value: unknown, regex: RegExp | null | undefined): unknown {
+  if (regex === undefined) return value;
+  if (regex === null || value == null) return null;
+  const match = regex.exec(String(value));
+  if (!match) return null;
+  return match.length > 1 ? (match[1] ?? null) : match[0];
 }
 
 /** Coerce per the field type, falling back to the raw string if coercion fails

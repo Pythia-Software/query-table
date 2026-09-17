@@ -191,7 +191,7 @@ function cloneQueryState(q: QueryState): QueryState {
   const clone: QueryState = {
     select: q.select.map((column) => ({ ...column })),
     where: q.where.map((clause) => ({ ...clause })),
-    orderBy: q.orderBy.map((term) => ({ ...term })),
+    orderBy: q.orderBy.map((term) => (term.extract ? { ...term, extract: { ...term.extract } } : { ...term })),
     limit: q.limit,
     offset: q.offset,
   };
@@ -679,7 +679,7 @@ function nextOrderBy(existing: OrderByClause[], field: string, additive: boolean
   if (!additive) {
     if (i === 0 && existing.length === 1) {
       const flipped: "asc" | "desc" = existing[0]!.dir === "desc" ? "asc" : "desc";
-      return [{ field, dir: flipped }];
+      return [{ ...existing[0]!, dir: flipped }];
     }
     return [{ field, dir: "desc" }];
   }
@@ -687,7 +687,7 @@ function nextOrderBy(existing: OrderByClause[], field: string, additive: boolean
   const cur = existing[i]!;
   if (cur.dir === "desc") {
     const next = [...existing];
-    next[i] = { field, dir: "asc" };
+    next[i] = { ...cur, dir: "asc" };
     return next;
   }
   return existing.filter((_, k) => k !== i); // asc → remove

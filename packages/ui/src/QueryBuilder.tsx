@@ -139,8 +139,9 @@ function whereClauseAsText<Row>(clause: WhereClause, byName: Map<string, FieldDe
 
 function orderByAsText<Row>(term: OrderByClause, byName: Map<string, FieldDef<Row>>): string {
   const field = byName.get(term.field)?.label ?? term.field;
+  const expression = term.extract ? `regex_extract(${field}, /${term.extract.regex}/)` : field;
   const nulls = term.nulls ? ` nulls ${term.nulls}` : "";
-  return `${field} ${term.dir}${nulls}`;
+  return `${expression} ${term.dir}${nulls}`;
 }
 
 function chipFieldWidthChars(text: string, fallback = 5, max = 30): number {
@@ -1028,6 +1029,10 @@ function ClauseChip<Row>({
                   api={api}
                   field={field}
                   value={clause.value}
+                  forceFreeform={clause.op === "matches_regex" || clause.op === "not_matches_regex"}
+                  placeholder={
+                    clause.op === "matches_regex" || clause.op === "not_matches_regex" ? "regex" : "value"
+                  }
                   classNames={classNames}
                   onChange={(v) => onChange(entry.index, { ...clause, value: v })}
                 />
@@ -1054,19 +1059,23 @@ function ValueInput<Row>({
   api,
   field,
   value,
+  forceFreeform,
+  placeholder = "value",
   classNames,
   onChange,
 }: {
   api: QueryTableApi<Row>;
   field: FieldDef<Row> | undefined;
   value: string;
+  forceFreeform?: boolean;
+  placeholder?: string;
   classNames: QueryBuilderClassNames | undefined;
   onChange: (v: string) => void;
 }) {
   const strategy = field ? filterValuesFor(field) : { source: "freeform" as const };
 
   // Static closed domain → a plain <select> of the options.
-  if (strategy.source === "static") {
+  if (!forceFreeform && strategy.source === "static") {
     const selectedText = value || "—";
     const widthChars = chipFieldWidthForSelect(selectedText, 4);
     return (
@@ -1087,13 +1096,13 @@ function ValueInput<Row>({
   }
 
   // Freeform → a plain input, no suggestions.
-  if (strategy.source === "freeform" || !field) {
-    const widthChars = chipFieldWidthForInput(value || "value", field?.type, 5, 4);
+  if (forceFreeform || strategy.source === "freeform" || !field) {
+    const widthChars = chipFieldWidthForInput(value || placeholder, field?.type, 5, 4);
     return (
       <input
         className={cx("qt-chip-val", classNames?.input)}
         value={value}
-        placeholder="value"
+        placeholder={placeholder}
         size={widthChars}
         style={{ width: `${widthChars}ch` }}
         onChange={(e) => onChange(e.target.value)}
@@ -1176,6 +1185,7 @@ function OrderTermChip<Row>({
   onDragEnd,
   disabled,
   updateTerm,
+  clearExtract,
   removeTerm,
   position,
   count,
@@ -1198,6 +1208,7 @@ function OrderTermChip<Row>({
   onDragEnd: () => void;
   disabled: boolean | undefined;
   updateTerm: (i: number, patch: Partial<OrderByClause>) => void;
+  clearExtract: (i: number) => void;
   removeTerm: (i: number) => void;
   position: number;
   count: number;
@@ -1238,7 +1249,42 @@ function OrderTermChip<Row>({
       >
         {term.dir === "asc" ? "↑ asc" : "↓ desc"}
       </button>
-      {fieldHasNull !== false && (
+      {term.extract ? (
+        <span className="qt-sort-extract">
+          <span className="qt-chip-and">extract</span>
+          <input
+            className={cx("qt-chip-val", classNames?.input)}
+            value={term.extract.regex}
+            placeholder="regex"
+            aria-label={`Regex extract for ${label}`}
+            size={chipFieldWidthForInput(term.extract.regex || "regex", "text", 5, 4)}
+            style={{ width: `${chipFieldWidthForInput(term.extract.regex || "regex", "text", 5, 4)}ch` }}
+            disabled={disabled}
+            onChange={(e) => updateTerm(dataIndex, { extract: { regex: e.target.value } })}
+          />
+          <button
+            type="button"
+            className="qt-chip-x"
+            title="Remove regex extraction"
+            aria-label={`Remove regex extract for ${label}`}
+            disabled={disabled}
+            onClick={() => clearExtract(dataIndex)}
+          >
+            ✕
+          </button>
+        </span>
+      ) : (
+        <button
+          type="button"
+          className="qt-chip-op-btn"
+          title="Sort by text extracted with a regular expression"
+          disabled={disabled}
+          onClick={() => updateTerm(dataIndex, { extract: { regex: "" } })}
+        >
+          + regex extract
+        </button>
+      )}
+      {(term.extract != null || fieldHasNull !== false) && (
         <button
           type="button"
           className="qt-chip-op-btn"
@@ -1286,6 +1332,15 @@ function OrderRow<Row>({
   }
   function updateTerm(i: number, patch: Partial<OrderByClause>) {
     setOrderBy(orderBy.map((o, k) => (k === i ? { ...o, ...patch } : o)));
+  }
+  function clearExtract(i: number) {
+    setOrderBy(
+      orderBy.map((term, index) => {
+        if (index !== i) return term;
+        const { extract: _extract, ...plainTerm } = term;
+        return plainTerm;
+      }),
+    );
   }
   function removeTerm(i: number) {
     setOrderBy(orderBy.filter((_, k) => k !== i));
@@ -1354,7 +1409,8 @@ function OrderRow<Row>({
       return (
         term.field === next?.field &&
         term.dir === next?.dir &&
-        (term.nulls ?? "last") === (next?.nulls ?? "last")
+        (term.nulls ?? "last") === (next?.nulls ?? "last") &&
+        (term.extract?.regex ?? null) === (next?.extract?.regex ?? null)
       );
     });
 
@@ -1381,6 +1437,7 @@ function OrderRow<Row>({
             onDragEnd={() => setDrag(null)}
             disabled={disabled}
             updateTerm={updateTerm}
+            clearExtract={clearExtract}
             removeTerm={removeTerm}
             position={pos}
             count={rendered.length}

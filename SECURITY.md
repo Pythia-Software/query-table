@@ -29,6 +29,10 @@ only. This policy will be updated when multiple release lines are supported.
   access controls for sensitive datasets.
 - The Go SQL compiler parameterizes values and allowlists field expressions.
   Applications must define schema expressions exclusively in trusted server
-  configuration and must not derive them from request input.
+  configuration and must not derive them from request input. Regex filter and
+  extraction patterns are also bound parameters, never SQL fragments.
+- User-provided regular expressions can consume significant CPU in JavaScript
+  or PostgreSQL. Applications exposing regex queries to untrusted users should
+  use conservative request-size and database statement-timeout limits.
 - Applications should still enforce authentication, authorization, request-size
   limits, timeouts, and database statement timeouts at their API boundary.

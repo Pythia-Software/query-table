@@ -17,9 +17,9 @@ describe("encodeQuery / decodeQuery", () => {
   it("round-trips a full query including widths and multi-sort", () => {
     const q: QueryState = {
       select: [{ field: "case_name", width: 200 }, { field: "overall" }],
-      where: [{ field: "overall", op: "=", value: "FAIL" }],
+      where: [{ field: "case_name", op: "matches_regex", value: "^[a-z]+$" }],
       orderBy: [
-        { field: "total_ms", dir: "desc", nulls: "last" },
+        { field: "total_ms", dir: "desc", nulls: "last", extract: { regex: "(\\d+)" } },
         { field: "case_name", dir: "asc" },
       ],
       limit: 50,

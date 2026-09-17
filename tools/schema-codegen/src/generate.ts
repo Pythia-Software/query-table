@@ -52,6 +52,7 @@ interface GoField {
   expr: string;
   synthetic: boolean;
   serverFilter: boolean;
+  filterOps?: string[];
   sortable: boolean;
   sortExpr: string;
 }
@@ -60,6 +61,7 @@ interface OrderTerm {
   field: string;
   dir: "asc" | "desc";
   nulls?: "first" | "last";
+  extract?: { regex: string };
 }
 
 function asObject(value: unknown, label: string): JsonObject {
@@ -105,6 +107,14 @@ function orderTerms(value: unknown, label: string, fieldNames: Set<string>): Ord
       }
       term.nulls = raw.nulls;
     }
+    if (raw.extract != null) {
+      const extract = asObject(raw.extract, `${label}[${index}].extract`);
+      if (typeof extract.regex !== "string") throw new Error(`${label}[${index}].extract.regex must be a string`);
+      if (extract.regex.length > 10_000) {
+        throw new Error(`${label}[${index}].extract.regex exceeds 10000 characters`);
+      }
+      term.extract = { regex: extract.regex };
+    }
     return term;
   });
 }
@@ -113,7 +123,10 @@ function renderOrderTerms(terms: OrderTerm[]): string {
   if (terms.length === 0) return "nil";
   const members = terms.map((term) => {
     const nulls = term.nulls ? `, Nulls: ${goString(term.nulls)}` : "";
-    return `{Field: ${goString(term.field)}, Dir: ${goString(term.dir)}${nulls}}`;
+    const extract = term.extract
+      ? `, Extract: &querytable.RegexExtract{Regex: ${goString(term.extract.regex)}}`
+      : "";
+    return `{Field: ${goString(term.field)}, Dir: ${goString(term.dir)}${nulls}${extract}}`;
   });
   return `[]querytable.OrderBy{${members.join(", ")}}`;
 }
@@ -144,10 +157,17 @@ function projectGoFields(doc: JsonObject): GoField[] {
     if (!kind) throw new Error(`field ${JSON.stringify(name)} has unknown postgres kind ${JSON.stringify(kindName)}`);
 
     let serverFilter = true;
+    let filterOps: string[] | undefined;
     if (field.filter != null) {
       const filter = asObject(field.filter, `schema.fields[${index}].filter`);
       if (typeof filter.enabled === "boolean") serverFilter = filter.enabled;
       if (typeof filter.pushdown === "boolean") serverFilter = serverFilter && filter.pushdown;
+      if (filter.ops != null) {
+        if (!Array.isArray(filter.ops) || !filter.ops.every((op) => typeof op === "string")) {
+          throw new Error(`schema.fields[${index}].filter.ops must be an array of strings`);
+        }
+        filterOps = [...filter.ops] as string[];
+      }
     }
 
     let sortable = true;
@@ -164,7 +184,7 @@ function projectGoFields(doc: JsonObject): GoField[] {
       }
     }
 
-    fields.push({
+    const projected: GoField = {
       name,
       kind,
       expr,
@@ -172,7 +192,9 @@ function projectGoFields(doc: JsonObject): GoField[] {
       serverFilter,
       sortable,
       sortExpr,
-    });
+    };
+    if (filterOps !== undefined) projected.filterOps = filterOps;
+    fields.push(projected);
   }
   return fields;
 }
@@ -213,7 +235,10 @@ export function generateGo(input: unknown, options: GoGenerationOptions): string
     (field) => {
       const key = goString(field.name);
       const spacing = " ".repeat(longestFieldKey - key.length + 1);
-      return `\t\t\t${key}:${spacing}{Name: ${goString(field.name)}, Kind: querytable.${field.kind}, Expr: ${goString(field.expr)}, Synthetic: ${field.synthetic}, ServerFilter: ${field.serverFilter}, Sortable: ${field.sortable}, SortExpr: ${goString(field.sortExpr)}},`;
+      const filterOps = field.filterOps
+        ? `, FilterOps: []string{${field.filterOps.map(goString).join(", ")}}`
+        : "";
+      return `\t\t\t${key}:${spacing}{Name: ${goString(field.name)}, Kind: querytable.${field.kind}, Expr: ${goString(field.expr)}, Synthetic: ${field.synthetic}, ServerFilter: ${field.serverFilter}${filterOps}, Sortable: ${field.sortable}, SortExpr: ${goString(field.sortExpr)}},`;
     },
   );
 

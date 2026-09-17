@@ -6,6 +6,17 @@ contain intentional API changes described in their release notes.
 
 ## [Unreleased]
 
+### Added
+
+- Added positive and negative regex filters plus regex-extract ordering across
+  query state, local execution, the QueryBuilder UI, schema codegen, and the Go
+  PostgreSQL compiler.
+
+### Changed
+
+- The Go backend now enforces per-field `filter.ops` overrides when compiling
+  queries.
+
 ## [0.2.0] - 2026-09-08
 
 ### Added

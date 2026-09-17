@@ -14,6 +14,9 @@ const schemaJSON = `{
   "tiebreakSort": [{"field": "id", "dir": "desc"}],
   "fields": [
     {"name": "id", "label": "ID", "type": "number", "bindings": {"postgres": {"expr": "r.id"}}},
+    {"name": "case_name", "label": "Case", "type": "text", "bindings": {"postgres": {"expr": "r.case_name"}}},
+    {"name": "restricted_name", "label": "Restricted", "type": "text", "filter": {"ops": ["="]},
+      "bindings": {"postgres": {"expr": "r.restricted_name"}}},
     {"name": "overall", "label": "Overall", "type": "enum", "bindings": {"postgres": {"expr": "r.overall"}}},
     {"name": "total_ms", "label": "Total", "type": "number", "bindings": {"postgres": {"expr": "r.total_ms"}}},
     {"name": "is_starred", "label": "Star", "type": "bool", "sort": {"field": "is_starred"},
@@ -39,11 +42,14 @@ func TestLoadSchema_skipsDerived(t *testing.T) {
 	if _, ok := s.Fields["details"]; ok {
 		t.Error("derived field should be absent from the backend schema")
 	}
-	if len(s.Fields) != 6 {
-		t.Errorf("want 6 backend fields, got %d", len(s.Fields))
+	if len(s.Fields) != 8 {
+		t.Errorf("want 8 backend fields, got %d", len(s.Fields))
 	}
 	if s.Fields["error_codes"].ServerFilter {
 		t.Error("error_codes has pushdown:false → ServerFilter should be false")
+	}
+	if !reflect.DeepEqual(s.Fields["restricted_name"].FilterOps, []string{"="}) {
+		t.Errorf("restricted_name FilterOps = %#v", s.Fields["restricted_name"].FilterOps)
 	}
 }
 
@@ -93,6 +99,22 @@ func TestCompile_opMatrix(t *testing.T) {
 	}
 }
 
+func TestCompile_enforcesPerFieldOperatorOverride(t *testing.T) {
+	s := mustSchema(t)
+	_, _, err := Compile(WireQuery{Where: []WhereClause{{
+		Field: "restricted_name", Op: "matches_regex", Value: "^item-",
+	}}}, s, 1)
+	if err == nil || !strings.Contains(err.Error(), `op "matches_regex" is not enabled`) {
+		t.Fatalf("want per-field operator rejection, got %v", err)
+	}
+
+	if _, _, err := Compile(WireQuery{Where: []WhereClause{{
+		Field: "restricted_name", Op: "=", Value: "item-1",
+	}}}, s, 1); err != nil {
+		t.Fatalf("configured operator should compile: %v", err)
+	}
+}
+
 func TestCompile_multiSortWithTiebreak(t *testing.T) {
 	s := mustSchema(t)
 	q := WireQuery{OrderBy: OrderBys{
@@ -106,6 +128,36 @@ func TestCompile_multiSortWithTiebreak(t *testing.T) {
 	want := "r.total_ms DESC NULLS LAST, (w.tags ? 'x') ASC NULLS FIRST, r.id DESC NULLS LAST"
 	if res.OrderSQL != want {
 		t.Errorf("OrderSQL\n got: %s\nwant: %s", res.OrderSQL, want)
+	}
+}
+
+func TestCompile_regexFilterAndExtractSort(t *testing.T) {
+	s := mustSchema(t)
+	q := WireQuery{
+		Where: []WhereClause{
+			{Field: "case_name", Op: "matches_regex", Value: `^item-\d+$`},
+			{Field: "case_name", Op: "not_matches_regex", Value: `draft$`},
+		},
+		OrderBy: OrderBys{{
+			Field: "case_name", Dir: "asc", Nulls: "first",
+			Extract: &RegexExtract{Regex: `item-(\d+)`},
+		}},
+	}
+	res, next, err := Compile(q, s, 4)
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	wantWhere := `((r.case_name)::text ~ $4) AND ((r.case_name)::text !~ $5)`
+	if res.WhereSQL != wantWhere {
+		t.Errorf("WhereSQL\n got: %s\nwant: %s", res.WhereSQL, wantWhere)
+	}
+	wantOrder := "substring((r.case_name)::text FROM $6) ASC NULLS FIRST, r.id DESC NULLS LAST"
+	if res.OrderSQL != wantOrder {
+		t.Errorf("OrderSQL\n got: %s\nwant: %s", res.OrderSQL, wantOrder)
+	}
+	wantArgs := []any{`^item-\d+$`, `draft$`, `item-(\d+)`}
+	if !reflect.DeepEqual(res.Args, wantArgs) || next != 7 {
+		t.Errorf("args=%#v next=%d, want %#v / 7", res.Args, next, wantArgs)
 	}
 }
 
@@ -249,7 +301,7 @@ func TestWireQueryJSON_acceptsServerQueryNamesAndValidates(t *testing.T) {
 	err := json.Unmarshal([]byte(`{
 		"select":["overall"],
 		"where":[{"field":"overall","op":"=","value":"FAIL"}],
-		"orderBy":[{"field":"total_ms","dir":"desc"}],
+		"orderBy":[{"field":"case_name","dir":"asc","extract":{"regex":"item-(\\d+)"}}],
 		"limit":50,
 		"offset":10,
 		"aggregations":[{"id":"count","op":"count"}]
@@ -259,6 +311,9 @@ func TestWireQueryJSON_acceptsServerQueryNamesAndValidates(t *testing.T) {
 	}
 	if q.Limit != 50 || q.Offset != 10 || len(q.Where) != 1 || len(q.OrderBy) != 1 || len(q.Aggregations) != 1 {
 		t.Fatalf("unexpected query: %#v", q)
+	}
+	if q.OrderBy[0].Extract == nil || q.OrderBy[0].Extract.Regex != `item-(\d+)` {
+		t.Fatalf("regex extract did not decode: %#v", q.OrderBy[0])
 	}
 
 	if err := json.Unmarshal([]byte(`{"limit":10000}`), &q); err != nil {
@@ -273,6 +328,7 @@ func TestDecodeWireQuery_rejectsResourceLimitViolations(t *testing.T) {
 	for name, payload := range map[string]string{
 		"offset": `{"f":1000001}`,
 		"value":  `{"w":[{"field":"overall","op":"=","value":"` + strings.Repeat("x", maxFilterValueBytes+1) + `"}]}`,
+		"regex":  `{"o":[{"field":"case_name","dir":"asc","extract":{"regex":"` + strings.Repeat("x", maxRegexBytes+1) + `"}}]}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := DecodeWireQuery(b64url(payload)); err == nil {
