@@ -24,6 +24,8 @@ export type FilterOp =
   | "contains"
   | "starts_with"
   | "ends_with"
+  | "matches_regex"
+  | "not_matches_regex"
   // array (textarray) containment
   | "includes"
   // nullity — valid for EVERY type; for arrays, "empty" vs "non-empty"
@@ -47,6 +49,12 @@ export interface OrderByClause {
   /** NULL placement. Omitted = "last" (the historical default both projects used,
    *  preserved so old `?q=` links round-trip identically). */
   nulls?: "first" | "last";
+  /** Sort by the first capture group of a regex match (or by the whole match
+   *  when the pattern has no capture group). A non-match produces NULL. Regex
+   *  syntax is interpreted by the executor (JavaScript locally, PostgreSQL on
+   *  the bundled Go backend), so portable patterns should use their common
+   *  syntax subset. */
+  extract?: { regex: string };
 }
 
 /** One column in the SELECT list, plus the view state that travels with it.
@@ -143,6 +151,8 @@ const FILTER_OPS: ReadonlySet<string> = new Set([
   "contains",
   "starts_with",
   "ends_with",
+  "matches_regex",
+  "not_matches_regex",
   "includes",
   "is_null",
   "is_not_null",
@@ -207,10 +217,19 @@ export function normalizeQueryState(input: unknown, fallback: QueryState = EMPTY
       if (!field || isComputedField(field) || (item.dir !== "asc" && item.dir !== "desc")) continue;
       const term: OrderByClause = { field, dir: item.dir };
       if (item.nulls === "first" || item.nulls === "last") term.nulls = item.nulls;
+      if (
+        isRecord(item.extract) &&
+        typeof item.extract.regex === "string" &&
+        item.extract.regex.length <= MAX_FILTER_VALUE_LENGTH
+      ) {
+        term.extract = { regex: item.extract.regex };
+      }
       orderBy.push(term);
     }
   } else {
-    orderBy.push(...fallback.orderBy.map((term) => ({ ...term })));
+    orderBy.push(
+      ...fallback.orderBy.map((term) => (term.extract ? { ...term, extract: { ...term.extract } } : { ...term })),
+    );
   }
 
   const out: QueryState = {

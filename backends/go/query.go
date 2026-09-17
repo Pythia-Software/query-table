@@ -33,6 +33,7 @@ const (
 	MaxGroupByFields    = 20
 	maxFieldNameLength  = 256
 	maxFilterValueBytes = 10_000
+	maxRegexBytes       = 10_000
 	maxQueryTokenBytes  = 2 * 1024 * 1024
 )
 
@@ -45,9 +46,17 @@ type WhereClause struct {
 
 // OrderBy mirrors @pythia-software/query-table-core OrderByClause.
 type OrderBy struct {
-	Field string `json:"field"`
-	Dir   string `json:"dir"`             // "asc" | "desc"
-	Nulls string `json:"nulls,omitempty"` // "first" | "last" | "" (default last)
+	Field   string        `json:"field"`
+	Dir     string        `json:"dir"`             // "asc" | "desc"
+	Nulls   string        `json:"nulls,omitempty"` // "first" | "last" | "" (default last)
+	Extract *RegexExtract `json:"extract,omitempty"`
+}
+
+// RegexExtract transforms a sort value before comparison. PostgreSQL's
+// substring(text FROM regex) returns the first capture group when present and
+// the whole match otherwise; a non-match is NULL.
+type RegexExtract struct {
+	Regex string `json:"regex"`
 }
 
 // AggSpec mirrors @pythia-software/query-table-core AggregationClause: one aggregate op over one
@@ -164,6 +173,9 @@ func (q WireQuery) Validate() error {
 	for _, term := range q.OrderBy {
 		if term.Field == "" || len(term.Field) > maxFieldNameLength {
 			return fmt.Errorf("invalid sort field name")
+		}
+		if term.Extract != nil && len(term.Extract.Regex) > maxRegexBytes {
+			return fmt.Errorf("sort regex for %q exceeds %d bytes", term.Field, maxRegexBytes)
 		}
 	}
 	for _, aggregation := range q.Aggregations {

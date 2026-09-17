@@ -40,6 +40,10 @@ Query state is bounded whenever it crosses the library's URL, storage, or
 server-projection boundaries. SQL expressions remain trusted server-side schema
 configuration; request values are never SQL fragments.
 
+Text filters include `matches_regex` / `not_matches_regex`. An order term may
+set `extract: { regex: "..." }` to compare the first capture group (or the whole
+match when there is no capture group); non-matches sort as nulls.
+
 See the [repository README](https://github.com/Pythia-Software/query-table#readme)
 for the complete schema and backend documentation.
 
