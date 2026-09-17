@@ -21,11 +21,27 @@ contain intentional API changes described in their release notes.
   PostgreSQL compiler.
 - Added atomic `selection.replace(ids)` and `selection.retain(ids)` operations;
   `SelectionToolbar` action callbacks now also receive the public selection API.
+- Added filter negation and OR groups (conjunctive normal form). Any predicate
+  can be negated — ops flip to their complement (`>=`→`<`, `=`→`!=`,
+  `is_null`→`is_not_null`) or carry a null-exclusive `negated` flag when they
+  have none (`contains`/`starts_with`/`ends_with`/`includes`). WHERE filters are
+  now draggable chips: drop one onto another to build an OR group and drag more
+  in later. Spans query state, local execution, `?q=` encoding, saved queries,
+  the QueryBuilder UI, a two-column positive/negative CellMenu, and the Go
+  PostgreSQL compiler.
 
 ### Changed
 
 - The Go backend now enforces per-field `filter.ops` overrides when compiling
   queries.
+- `QueryState.where` is now `WhereTerm[]` — each term a predicate or an
+  `{ any: [...] }` OR group — instead of a flat `WhereClause[]`; flat legacy
+  queries and `?q=` tokens decode unchanged. `useQueryTable` adds
+  `updatePredicate`, `removePredicate`, `negatePredicate`, `reorderFilters`, and
+  `mergeFilters` intents. The WHERE operator control is a keep/exclude picker —
+  the same two-column layout as the CellMenu, with the active choice
+  highlighted — so a predicate and its negation are chosen from one place
+  instead of a separate operator dropdown and NOT toggle.
 
 ## [0.2.0] - 2026-09-08
 

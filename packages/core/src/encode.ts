@@ -16,9 +16,9 @@
 // Back-compat: decodeQuery accepts legacy compact shapes: `o` as a single
 // object (pre-multi-sort) and `c`/`s` as a string[] (pre-width).
 
-import { EMPTY_QUERY, MAX_QUERY_TOKEN_LENGTH, normalizeQueryState } from "./query";
-import type { QueryState, WhereClause, OrderByClause, SelectColumn, AggregationClause } from "./query";
-import type { FieldSchema } from "./schema";
+import { EMPTY_QUERY, MAX_QUERY_TOKEN_LENGTH, normalizeQueryState, predicatesOf } from "./query";
+import type { QueryState, WhereTerm, OrderByClause, SelectColumn, AggregationClause } from "./query";
+import type { FieldSchema, FieldDef } from "./schema";
 import { indexFields, isFilterable, isPushdownFilter, isSortable, resolveFieldName, selectedFields } from "./schema";
 
 // ---- base64url (browser + node) -------------------------------------------
@@ -51,7 +51,7 @@ function fromBase64Url(s: string): string {
 
 interface CompactQuery {
   s?: Array<[string] | [string, number]> | string[]; // string[] = legacy
-  w?: WhereClause[];
+  w?: WhereTerm[];
   o?: OrderByClause[] | OrderByClause; // object accepted for legacy decode
   l?: number;
   f?: number;
@@ -121,8 +121,8 @@ function normalizeOrderBy(o: CompactQuery["o"]): OrderByClause[] {
 export interface ServerQuery {
   /** field names to return — visible columns ∪ fields referenced by where/orderBy. */
   select: string[];
-  /** only clauses on pushdown-filterable fields. */
-  where: WhereClause[];
+  /** only terms whose every predicate is on a pushdown-filterable field. */
+  where: WhereTerm[];
   /** only terms on server-sortable fields, with `field` already remapped to the
    *  field's server sort key (FieldDef.sort.field) when set. */
   orderBy: OrderByClause[];
@@ -137,11 +137,7 @@ export function toServerQuery<Row>(q: QueryState, schema: FieldSchema<Row>): Ser
   const byName = indexFields(schema);
   const resolveField = (name: string) => resolveFieldName(schema, name) ?? name;
 
-  const where = q.where.filter((cl) => {
-    const field = resolveField(cl.field);
-    const f = byName.get(field);
-    return f != null && isPushdownFilter(f);
-  });
+  const where = q.where.filter((term) => termIsPushdown(term, byName, resolveField));
 
   const orderBy: OrderByClause[] = [];
   for (const term of q.orderBy) {
@@ -169,13 +165,30 @@ export function toServerQuery<Row>(q: QueryState, schema: FieldSchema<Row>): Ser
     }
   }
   select.add(schema.idField);
-  for (const cl of q.where) {
-    const field = resolveField(cl.field);
-    const f = byName.get(field);
-    if (f && isFilterable(f) && !isPushdownFilter(f) && f.source.kind === "backend") select.add(field);
+  for (const term of q.where) {
+    for (const cl of predicatesOf(term)) {
+      const field = resolveField(cl.field);
+      const f = byName.get(field);
+      if (f && isFilterable(f) && !isPushdownFilter(f) && f.source.kind === "backend") select.add(field);
+    }
   }
 
   return { select: [...select].sort(), where, orderBy, limit: q.limit, offset: q.offset };
+}
+
+/** A term can push down only if EVERY predicate it contains is on a
+ *  pushdown-filterable field. An OR group is all-or-nothing: dropping one
+ *  disjunct would change the set the group matches, so a group with any
+ *  non-pushdown member stays client-side in full. */
+function termIsPushdown<Row>(
+  term: WhereTerm,
+  byName: Map<string, FieldDef<Row>>,
+  resolveField: (name: string) => string,
+): boolean {
+  return predicatesOf(term).every((cl) => {
+    const f = byName.get(resolveField(cl.field));
+    return f != null && isPushdownFilter(f);
+  });
 }
 
 // ---- aggregation server subset --------------------------------------------
@@ -185,7 +198,7 @@ export function toServerQuery<Row>(q: QueryState, schema: FieldSchema<Row>): Ser
  *  metrics describe every matching row, not the visible page. Mirrors the Go
  *  AggSpec list. */
 export interface AggregationRequest {
-  where: WhereClause[];
+  where: WhereTerm[];
   aggregations: AggregationClause[];
 }
 
@@ -222,10 +235,7 @@ export function toAggregationQuery<Row>(q: QueryState, schema: FieldSchema<Row>)
   const byName = indexFields(schema);
   const resolveField = (name: string) => resolveFieldName(schema, name) ?? name;
 
-  const where = q.where.filter((cl) => {
-    const f = byName.get(resolveField(cl.field));
-    return f != null && isPushdownFilter(f);
-  });
+  const where = q.where.filter((term) => termIsPushdown(term, byName, resolveField));
 
   const isBackend = (name: string | undefined): boolean => {
     if (name == null) return true; // omitted measure (count(*)) is fine

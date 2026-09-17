@@ -14,10 +14,11 @@
 //   - multi-sort is a stable lexicographic fold over orderBy in priority order
 
 import { isComputedField } from "./computed";
-import type { AggOp, AggregationClause, QueryState, WhereClause } from "./query";
+import type { AggOp, AggregationClause, QueryState, WhereClause, WhereTerm } from "./query";
 import type { FieldSchema, FieldDef } from "./schema";
 import type { AggregationBucket, AggregationResult } from "./encode";
 import { indexFields, readFieldValue, resolveFieldName } from "./schema";
+import { isOrGroup, predicatesOf } from "./query";
 import { coerceValue } from "./ops";
 
 export interface ApplyResult<Row> {
@@ -33,14 +34,17 @@ export interface ApplyResult<Row> {
 export function applyQuery<Row>(rows: Row[], q: QueryState, schema: FieldSchema<Row>): ApplyResult<Row> {
   const byName = indexFields(schema);
   const resolveField = (name: string) => resolveFieldName(schema, name) ?? name;
-  const whereClauses = q.where
-    .filter((clause) => !isComputedField(clause.field))
-    .map((clause) => prepareWhereClause({ ...clause, field: resolveField(clause.field) }));
+  // Terms touching a computed column are dropped here (the formula engine
+  // evaluates those separately; `byName` has no opinion on them anyway). An OR
+  // group is all-or-nothing, so a single computed member drops the whole term.
+  const whereTerms = q.where
+    .filter((term) => !predicatesOf(term).some((c) => isComputedField(c.field)))
+    .map((term) => prepareWhereTerm(term, resolveField));
   const orderBy = q.orderBy
     .filter((term) => !isComputedField(term.field))
     .map((term) => ({ ...term, field: resolveField(term.field) }));
 
-  let out = rows.filter((row) => whereClauses.every((prepared) => matchesWith(byName, row, prepared)));
+  let out = rows.filter((row) => whereTerms.every((term) => matchesTerm(byName, row, term)));
   const total = out.length;
 
   if (orderBy.length) {
@@ -90,14 +94,16 @@ export function matchesClause<Row>(row: Row, clause: WhereClause, schema: FieldS
 export function applyAggregations<Row>(rows: Row[], q: QueryState, schema: FieldSchema<Row>): AggregationResult {
   const byName = indexFields(schema);
   const resolveField = (name: string) => resolveFieldName(schema, name) ?? name;
-  const whereClauses = q.where
-    .filter((clause) => !isComputedField(clause.field))
-    .map((clause) => prepareWhereClause({ ...clause, field: resolveField(clause.field) }));
-  const filtered = rows.filter((row) => whereClauses.every((prepared) => matchesWith(byName, row, prepared)));
-  const metrics = (q.aggregations ?? []).filter(a => !isComputedField(a.field ?? "") && !a.groupBy.some(isComputedField)).map((agg) => ({
-    id: agg.id,
-    buckets: computeBuckets(filtered, agg, byName, resolveField),
-  }));
+  const whereTerms = q.where
+    .filter((term) => !predicatesOf(term).some((c) => isComputedField(c.field)))
+    .map((term) => prepareWhereTerm(term, resolveField));
+  const filtered = rows.filter((row) => whereTerms.every((term) => matchesTerm(byName, row, term)));
+  const metrics = (q.aggregations ?? [])
+    .filter((a) => !isComputedField(a.field ?? "") && !a.groupBy.some(isComputedField))
+    .map((agg) => ({
+      id: agg.id,
+      buckets: computeBuckets(filtered, agg, byName, resolveField),
+    }));
   return { metrics };
 }
 
@@ -200,24 +206,67 @@ interface PreparedWhereClause {
   regex: RegExp | null | undefined;
 }
 
+type PreparedWhereTerm =
+  | { kind: "lit"; predicate: PreparedWhereClause }
+  | { kind: "or"; predicates: PreparedWhereClause[] };
+
 function prepareWhereClause(clause: WhereClause): PreparedWhereClause {
   const usesRegex = clause.op === "matches_regex" || clause.op === "not_matches_regex";
   return { clause, regex: usesRegex ? compileRegex(clause.value) : undefined };
 }
 
+function prepareWhereTerm(term: WhereTerm, resolveField: (name: string) => string): PreparedWhereTerm {
+  if (isOrGroup(term)) {
+    return { kind: "or", predicates: term.any.map((c) => prepareWhereClause({ ...c, field: resolveField(c.field) })) };
+  }
+  return { kind: "lit", predicate: prepareWhereClause({ ...term, field: resolveField(term.field) }) };
+}
+
+/** A row satisfies the WHERE when every term matches (AND); a term matches when
+ *  its sole predicate matches, or — for an OR group — when any member does. */
+function matchesTerm<Row>(byName: Map<string, FieldDef<Row>>, row: Row, term: PreparedWhereTerm): boolean {
+  if (term.kind === "lit") return matchesWith(byName, row, term.predicate);
+  // Normalization never yields an empty group (0 dropped, 1 flattened), so
+  // `some` over a non-empty list is the OR.
+  return term.predicates.some((p) => matchesWith(byName, row, p));
+}
+
 function matchesWith<Row>(byName: Map<string, FieldDef<Row>>, row: Row, prepared: PreparedWhereClause): boolean {
-  const { clause, regex } = prepared;
+  const { clause } = prepared;
   const field = byName.get(clause.field);
   if (!field) return true; // unknown field → no client opinion
   const v = readFieldValue(field, row);
 
+  // Empty value on a non-equality, value-taking op is a "no filter" signal —
+  // true for BOTH the predicate and its negation (matches the UI + the Go
+  // compiler, which skip such clauses). Nullary ops legitimately use value "".
+  if (
+    clause.value === "" &&
+    clause.op !== "=" &&
+    clause.op !== "!=" &&
+    clause.op !== "is_null" &&
+    clause.op !== "is_not_null"
+  ) {
+    return true;
+  }
+
+  const base = matchesBase(field, v, prepared);
+  if (!clause.negated) return base;
+  // Null-exclusive NOT: a NULL/empty value satisfies neither the predicate nor
+  // its negation (mirrors `not_matches_regex` and the server's trailing
+  // `AND <expr> IS NOT NULL`).
+  const isNull = Array.isArray(v) ? v.length === 0 : v == null || v === "";
+  return !isNull && !base;
+}
+
+/** The bare predicate result, ignoring `negated` and the empty-value skip
+ *  (both handled by `matchesWith`). */
+function matchesBase<Row>(field: FieldDef<Row>, v: unknown, prepared: PreparedWhereClause): boolean {
+  const { clause, regex } = prepared;
+
   // Nullity, with array-aware semantics.
   if (clause.op === "is_null") return Array.isArray(v) ? v.length === 0 : v == null || v === "";
   if (clause.op === "is_not_null") return Array.isArray(v) ? v.length > 0 : v != null && v !== "";
-
-  // Empty value on a non-equality op is a "no filter" signal (matches the UI +
-  // the Go compiler, which skip such clauses).
-  if (clause.value === "" && clause.op !== "=" && clause.op !== "!=") return true;
 
   // `includes` is array membership (ARRAY_HAS): a null/missing array contains
   // nothing. Handle before the array/scalar split so null can't fall through.

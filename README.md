@@ -122,7 +122,7 @@ regression check (`node demo/dnd-test.mjs`).
 // what data + how to view it — reads like the SQL it compiles to
 interface QueryState {
   select:  SelectColumn[];   // ordered visible columns + per-column width; [] = schema defaults
-  where:   WhereClause[];    // AND-combined filters
+  where:   WhereTerm[];      // WHERE in conjunctive normal form: AND of terms (see below)
   orderBy: OrderByClause[];  // multi-sort, priority = array order
   limit:   number;
   offset:  number;
@@ -130,11 +130,41 @@ interface QueryState {
 }
 ```
 
-Text fields support `matches_regex` and `not_matches_regex` filters. Sort terms
-can optionally extract a regex match before comparison:
+The WHERE clause is **conjunctive normal form**: `where` is the AND of its
+terms, where each term is either a single predicate or an `{ any: [...] }` OR
+group. A flat list of predicates (the common case, and the legacy shape) is all
+one-predicate terms, so old `?q=` tokens and saved queries decode unchanged.
+
+```ts
+type WhereClause = { field: string; op: FilterOp; value: string; negated?: boolean };
+type WhereTerm   = WhereClause | { any: WhereClause[] };
+```
+
+Any predicate can be **negated**. Ops with a complement flip to it
+(`>=`→`<`, `=`→`!=`, `is_null`→`is_not_null`, `matches_regex`→`not_matches_regex`);
+ops without one (`contains`/`starts_with`/`ends_with`/`includes`) carry a
+`negated` flag. `negateClause(clause, allowedOps?)` returns the negation, and the
+CellMenu lays candidate filters out as positive/negative pairs. NOT is
+null-exclusive: a NULL value satisfies neither a predicate nor its negation.
 
 ```ts
 const query: QueryState = {
+  ...EMPTY_QUERY,
+  where: [
+    // (status = "done" OR status = "shipped") AND NOT (name contains "wip")
+    { any: [
+      { field: "status", op: "=", value: "done" },
+      { field: "status", op: "=", value: "shipped" },
+    ] },
+    { field: "name", op: "contains", value: "wip", negated: true },
+  ],
+};
+```
+
+Sort terms can optionally extract a regex match before comparison:
+
+```ts
+const sorted: QueryState = {
   ...EMPTY_QUERY,
   where: [{ field: "name", op: "matches_regex", value: "^build-\\d+$" }],
   orderBy: [

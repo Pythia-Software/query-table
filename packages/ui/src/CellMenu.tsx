@@ -1,11 +1,13 @@
 // CellMenu — right-click (or left-click) a cell → quick-filter popover + copy.
-// Offers only the operators valid for that field's type (opsForField), prefilled
-// with the clicked cell's value, plus "copy value". Anchors just off the click
-// point and clamps to the viewport. Present in both source projects; unified here.
+// Filters are laid out in two columns: each row is a candidate predicate on the
+// left and its logical negation directly opposite (`= 5 | ≠ 5`, `≥ 5 | < 5`,
+// `is null | is not null`, `contains | not contains`). Value ops are prefilled
+// with the clicked cell's value; array cells get a per-element `includes` row.
+// Anchors just off the click point and clamps to the viewport.
 
 import { useEffect, useState, type ReactNode } from "react";
 import type { FieldDef, FilterOp, WhereClause } from "@pythia-software/query-table-core";
-import { NULLARY_OPS, opsForField, isFilterable } from "@pythia-software/query-table-core";
+import { NULLARY_OPS, negateClause, opsForField, opPairsForField, isFilterable } from "@pythia-software/query-table-core";
 import type { MenuClassNames } from "./classNames";
 
 export interface CellMenuProps<Row> {
@@ -19,12 +21,17 @@ export interface CellMenuProps<Row> {
   classNames?: MenuClassNames;
 }
 
-const cx = (...parts: Array<string | undefined>): string => parts.filter(Boolean).join(" ");
+const cx = (...parts: Array<string | undefined | false>): string => parts.filter(Boolean).join(" ");
 
 /** Approximate sizing so the popover can clamp itself into the viewport. */
-const MENU_WIDTH = 240;
+const MENU_WIDTH = 320;
 const ROW_HEIGHT = 32;
 const POINTER_OFFSET = 4;
+
+interface FilterRow {
+  positive?: WhereClause;
+  negative?: WhereClause;
+}
 
 export function CellMenu<Row>({ field, value, x, y, onAddFilter, onClose, classNames }: CellMenuProps<Row>): ReactNode {
   // Dismiss on Escape or an outside click. The opening click is deferred a tick
@@ -45,77 +52,47 @@ export function CellMenu<Row>({ field, value, x, y, onAddFilter, onClose, classN
     };
   }, [onClose]);
 
+  // A non-filterable field (e.g. a computed column that opted out) offers no
+  // filter rows; only the header + copy remain. `pairs` is the shared keep/
+  // exclude op source the WHERE op picker uses too, so the two read identically.
   const ops = isFilterable(field) ? opsForField(field) : [];
+  const pairs = isFilterable(field) ? opPairsForField(field) : [];
+  const hasNullity = pairs.some((p) => p.keep.op === "is_null");
   const isArray = Array.isArray(value);
   const isNullish = value == null || value === "" || (isArray && (value as unknown[]).length === 0);
+  const cellText = valueToString(value);
 
-  function apply(op: FilterOp, raw?: string) {
-    const v = raw != null ? raw : valueToString(value);
-    onAddFilter({ field: field.name, op, value: NULLARY_OPS.has(op) ? "" : v });
+  function applyClause(clause: WhereClause) {
+    onAddFilter(clause);
     onClose();
   }
 
-  // Build the actionable filter items. For arrays we offer a per-element
-  // shortcut (so a tag column filters by the clicked tag); otherwise we offer
-  // every operator the field type allows, prefilled with the cell value.
-  const filterItems: ReactNode[] = [];
-  if (ops.length && isArray && !isNullish) {
-    (value as unknown[]).forEach((el, i) => {
-      const s = String(el);
-      const arrayOp: FilterOp = ops.includes("includes") ? "includes" : ops[0] ?? "=";
-      filterItems.push(
-        <MenuItem key={`el-${i}`} classNames={classNames} onClick={() => apply(arrayOp, s)}>
-          filter: {opSymbol(arrayOp)} <code>{s}</code>
-        </MenuItem>,
-      );
-    });
-  }
-  for (const op of ops) {
-    const nullary = NULLARY_OPS.has(op);
-    // When the cell is empty, only the nullary ops make sense; when it has a
-    // value, offer both (so a user can still ask "is null" off a present cell).
-    if (isNullish && !nullary) continue;
-    // Array element shortcuts above already covered the value ops.
-    if (isArray && !nullary && !isNullish) continue;
-    filterItems.push(
-      <MenuItem key={op} classNames={classNames} onClick={() => apply(op)}>
-        filter: {opSymbol(op)}
-        {!nullary && !isNullish ? <> <code>{previewValue(value)}</code></> : null}
-      </MenuItem>,
-    );
-  }
+  // Build one row = a positive predicate and its negation opposite.
+  const rows: FilterRow[] = [];
+  const pairRow = (op: FilterOp, raw: string) => {
+    const positive: WhereClause = { field: field.name, op, value: NULLARY_OPS.has(op) ? "" : raw };
+    rows.push({ positive, negative: negateClause(positive, ops) });
+  };
 
-  const copyItem = (
-    <MenuItem
-      key="copy"
-      classNames={classNames}
-      onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(valueToString(value));
-        } catch {
-          /* clipboard denial is non-fatal */
-        }
-        onClose();
-      }}
-    >
-      copy value
-    </MenuItem>
-  );
-
-  const items: ReactNode[] = [
-    <div key="header" className="qt-cm-header">
-      <span className="qt-cm-field">{field.label}</span>
-      <span className="qt-cm-value">{previewValue(value)}</span>
-    </div>,
-    copyItem,
-    <div key="sep" className={cx("qt-cm-sep", classNames?.separator)} />,
-    ...filterItems,
-  ];
+  if (isArray && !isNullish) {
+    // A tag column: filter by the clicked tag (and its negation), then nullity.
+    const arrayOp: FilterOp = pairs.find((p) => p.keep.op === "includes")?.keep.op ?? pairs[0]?.keep.op ?? "=";
+    (value as unknown[]).forEach((el) => pairRow(arrayOp, String(el)));
+    if (hasNullity) pairRow("is_null", cellText);
+  } else if (!isNullish) {
+    // Every keep op (value ops + nullity) prefilled with the cell value.
+    for (const pair of pairs) pairRow(pair.keep.op, cellText);
+  } else if (hasNullity) {
+    // Empty cell → only the nullity row makes sense.
+    pairRow("is_null", cellText);
+  }
 
   const vw = typeof window !== "undefined" ? window.innerWidth : 9999;
   const vh = typeof window !== "undefined" ? window.innerHeight : 9999;
+  // header + copy + separator + one line per filter row.
+  const approxRows = 3 + rows.length;
   const left = Math.max(8, Math.min(x + POINTER_OFFSET, vw - MENU_WIDTH - 8));
-  const top = Math.max(8, Math.min(y + POINTER_OFFSET, vh - ROW_HEIGHT * items.length - 8));
+  const top = Math.max(8, Math.min(y + POINTER_OFFSET, vh - ROW_HEIGHT * approxRows - 8));
 
   return (
     <div
@@ -125,8 +102,86 @@ export function CellMenu<Row>({ field, value, x, y, onAddFilter, onClose, classN
       onContextMenu={(e) => e.preventDefault()}
       role="menu"
     >
-      {items}
+      <div className="qt-cm-header">
+        <span className="qt-cm-field">{field.label}</span>
+        <span className="qt-cm-value">{previewValue(value)}</span>
+      </div>
+      <MenuItem
+        classNames={classNames}
+        onClick={async () => {
+          try {
+            await navigator.clipboard.writeText(cellText);
+          } catch {
+            /* clipboard denial is non-fatal */
+          }
+          onClose();
+        }}
+      >
+        copy value
+      </MenuItem>
+      <div className={cx("qt-cm-sep", classNames?.separator)} />
+      {rows.length > 0 && (
+        <div className="qt-cm-filter-grid" role="group" aria-label="Filter by this cell">
+          <span className="qt-cm-col-head">keep</span>
+          <span className="qt-cm-col-head qt-cm-col-head--neg">exclude</span>
+          {rows.map((row, i) => (
+            <FilterPairRow key={i} row={row} value={value} classNames={classNames} onApply={applyClause} />
+          ))}
+        </div>
+      )}
     </div>
+  );
+}
+
+function FilterPairRow<Row>({
+  row,
+  value,
+  classNames,
+  onApply,
+}: {
+  row: FilterRow;
+  value: unknown;
+  classNames: MenuClassNames | undefined;
+  onApply: (clause: WhereClause) => void;
+}): ReactNode {
+  return (
+    <>
+      <FilterButton clause={row.positive} value={value} classNames={classNames} onApply={onApply} />
+      <FilterButton clause={row.negative} value={value} negative classNames={classNames} onApply={onApply} />
+    </>
+  );
+}
+
+function FilterButton({
+  clause,
+  value,
+  negative,
+  classNames,
+  onApply,
+}: {
+  clause: WhereClause | undefined;
+  value: unknown;
+  negative?: boolean;
+  classNames: MenuClassNames | undefined;
+  onApply: (clause: WhereClause) => void;
+}): ReactNode {
+  if (!clause) return <span className="qt-cm-filter-empty" aria-hidden />;
+  const nullary = NULLARY_OPS.has(clause.op);
+  return (
+    <button
+      type="button"
+      className={cx("qt-cm-item", "qt-cm-filter", negative && "qt-cm-filter--neg", classNames?.item)}
+      onClick={() => onApply(clause)}
+      role="menuitem"
+    >
+      <span className="qt-cm-op">{predicateSymbol(clause)}</span>
+      {!nullary ? (
+        <>
+          {" "}
+          <code>{previewValue(value)}</code>
+        </>
+      ) : null}
+    </button>
   );
 }
 
@@ -146,6 +201,12 @@ function MenuItem({
   );
 }
 
+/** Human-readable label for a predicate, honoring the `negated` flag. */
+function predicateSymbol(clause: WhereClause): string {
+  const base = opSymbol(clause.op);
+  return clause.negated ? `not ${base}` : base;
+}
+
 function opSymbol(op: FilterOp): string {
   switch (op) {
     case "!=":
@@ -154,6 +215,14 @@ function opSymbol(op: FilterOp): string {
       return "≥";
     case "<=":
       return "≤";
+    case "starts_with":
+      return "starts with";
+    case "ends_with":
+      return "ends with";
+    case "matches_regex":
+      return "matches";
+    case "not_matches_regex":
+      return "not matches";
     case "is_null":
       return "is null";
     case "is_not_null":

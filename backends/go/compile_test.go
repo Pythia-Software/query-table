@@ -55,7 +55,7 @@ func TestLoadSchema_skipsDerived(t *testing.T) {
 
 func TestCompile_where(t *testing.T) {
 	s := mustSchema(t)
-	q := WireQuery{Where: []WhereClause{
+	q := WireQuery{Where: []WhereTerm{
 		{Field: "overall", Op: "=", Value: "FAIL"},
 		{Field: "total_ms", Op: ">", Value: "100"},
 		{Field: "function_names", Op: "includes", Value: "SUM"},
@@ -80,7 +80,7 @@ func TestCompile_where(t *testing.T) {
 
 func TestCompile_rejectsClientOnlyFilter(t *testing.T) {
 	s := mustSchema(t)
-	_, _, err := Compile(WireQuery{Where: []WhereClause{{Field: "error_codes", Op: "includes", Value: "x"}}}, s, 1)
+	_, _, err := Compile(WireQuery{Where: []WhereTerm{{Field: "error_codes", Op: "includes", Value: "x"}}}, s, 1)
 	if err == nil || !strings.Contains(err.Error(), "not server-filterable") {
 		t.Errorf("want not-server-filterable error, got %v", err)
 	}
@@ -89,11 +89,11 @@ func TestCompile_rejectsClientOnlyFilter(t *testing.T) {
 func TestCompile_opMatrix(t *testing.T) {
 	s := mustSchema(t)
 	// '>' is invalid on an enum.
-	if _, _, err := Compile(WireQuery{Where: []WhereClause{{Field: "overall", Op: ">", Value: "x"}}}, s, 1); err == nil {
+	if _, _, err := Compile(WireQuery{Where: []WhereTerm{{Field: "overall", Op: ">", Value: "x"}}}, s, 1); err == nil {
 		t.Error("want error for '>' on enum")
 	}
 	// is_null is valid on bool (nullity on every type).
-	res, _, err := Compile(WireQuery{Where: []WhereClause{{Field: "is_starred", Op: "is_null", Value: ""}}}, s, 1)
+	res, _, err := Compile(WireQuery{Where: []WhereTerm{{Field: "is_starred", Op: "is_null", Value: ""}}}, s, 1)
 	if err != nil || res.WhereSQL != "((w.tags ? 'x') IS NULL)" {
 		t.Errorf("bool is_null: sql=%q err=%v", res.WhereSQL, err)
 	}
@@ -101,17 +101,86 @@ func TestCompile_opMatrix(t *testing.T) {
 
 func TestCompile_enforcesPerFieldOperatorOverride(t *testing.T) {
 	s := mustSchema(t)
-	_, _, err := Compile(WireQuery{Where: []WhereClause{{
+	_, _, err := Compile(WireQuery{Where: []WhereTerm{{
 		Field: "restricted_name", Op: "matches_regex", Value: "^item-",
 	}}}, s, 1)
 	if err == nil || !strings.Contains(err.Error(), `op "matches_regex" is not enabled`) {
 		t.Fatalf("want per-field operator rejection, got %v", err)
 	}
 
-	if _, _, err := Compile(WireQuery{Where: []WhereClause{{
+	if _, _, err := Compile(WireQuery{Where: []WhereTerm{{
 		Field: "restricted_name", Op: "=", Value: "item-1",
 	}}}, s, 1); err != nil {
 		t.Fatalf("configured operator should compile: %v", err)
+	}
+}
+
+func TestCompile_orGroup(t *testing.T) {
+	s := mustSchema(t)
+	q := WireQuery{Where: []WhereTerm{
+		{Any: []WhereClause{{Field: "overall", Op: "=", Value: "PASS"}, {Field: "overall", Op: "=", Value: "FAIL"}}},
+		{Field: "total_ms", Op: ">", Value: "100"},
+	}}
+	res, next, err := Compile(q, s, 1)
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	want := "((r.overall = $1) OR (r.overall = $2)) AND (r.total_ms > $3)"
+	if res.WhereSQL != want {
+		t.Errorf("WhereSQL\n got: %s\nwant: %s", res.WhereSQL, want)
+	}
+	if next != 4 {
+		t.Errorf("next idx = %d, want 4", next)
+	}
+	if !reflect.DeepEqual(res.Args, []any{"PASS", "FAIL", float64(100)}) {
+		t.Errorf("Args = %#v", res.Args)
+	}
+}
+
+func TestCompile_negatedLiteralIsNullExclusive(t *testing.T) {
+	s := mustSchema(t)
+	q := WireQuery{Where: []WhereTerm{{Field: "case_name", Op: "contains", Value: "x", Negated: true}}}
+	res, _, err := Compile(q, s, 1)
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	want := "(NOT (POSITION(LOWER($1) IN LOWER(r.case_name)) > 0) AND r.case_name IS NOT NULL)"
+	if res.WhereSQL != want {
+		t.Errorf("WhereSQL\n got: %s\nwant: %s", res.WhereSQL, want)
+	}
+	if !reflect.DeepEqual(res.Args, []any{"x"}) {
+		t.Errorf("Args = %#v", res.Args)
+	}
+}
+
+func TestCompile_alwaysTrueDisjunctDropsGroup(t *testing.T) {
+	s := mustSchema(t)
+	// An empty-value "contains" is a no-op; ORed with anything the group is
+	// always true and must emit no SQL (mirrors applyQuery).
+	q := WireQuery{Where: []WhereTerm{
+		{Any: []WhereClause{{Field: "case_name", Op: "contains", Value: ""}, {Field: "overall", Op: "=", Value: "PASS"}}},
+	}}
+	res, next, err := Compile(q, s, 1)
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	if res.WhereSQL != "" {
+		t.Errorf("WhereSQL = %q, want empty (group dropped)", res.WhereSQL)
+	}
+	if next != 1 || len(res.Args) != 0 {
+		t.Errorf("next=%d args=%#v, want no placeholders consumed", next, res.Args)
+	}
+}
+
+func TestCompile_orGroupValidatesEveryMember(t *testing.T) {
+	s := mustSchema(t)
+	// An unknown field inside a group is still reported even though the group
+	// would otherwise be dropped for the empty-value member.
+	q := WireQuery{Where: []WhereTerm{
+		{Any: []WhereClause{{Field: "case_name", Op: "contains", Value: ""}, {Field: "nope", Op: "=", Value: "x"}}},
+	}}
+	if _, _, err := Compile(q, s, 1); err == nil || !strings.Contains(err.Error(), "unknown filter field") {
+		t.Errorf("want unknown-field error, got %v", err)
 	}
 }
 
@@ -134,7 +203,7 @@ func TestCompile_multiSortWithTiebreak(t *testing.T) {
 func TestCompile_regexFilterAndExtractSort(t *testing.T) {
 	s := mustSchema(t)
 	q := WireQuery{
-		Where: []WhereClause{
+		Where: []WhereTerm{
 			{Field: "case_name", Op: "matches_regex", Value: `^item-\d+$`},
 			{Field: "case_name", Op: "not_matches_regex", Value: `draft$`},
 		},

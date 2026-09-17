@@ -43,25 +43,26 @@ func Compile(q WireQuery, schema Schema, startIdx int) (CompileResult, int, erro
 		return res, idx, fmt.Errorf("invalid query: %w", err)
 	}
 
-	// WHERE
+	// WHERE — conjunctive normal form: the AND of terms, each a single predicate
+	// or an OR group of predicates.
 	clauses := make([]string, 0, len(q.Where))
-	for _, c := range q.Where {
-		spec, ok := schema.Fields[c.Field]
-		if !ok {
-			return res, idx, fmt.Errorf("unknown filter field %q", c.Field)
+	for _, term := range q.Where {
+		var (
+			sql  string
+			args []any
+			next int
+			err  error
+		)
+		if term.IsGroup() {
+			sql, args, next, err = compileOrGroup(term.Any, schema, idx)
+		} else {
+			sql, args, next, err = compileLiteral(term.Literal(), schema, idx)
 		}
-		if !spec.ServerFilter {
-			return res, idx, fmt.Errorf("field %q is not server-filterable", c.Field)
-		}
-		if !fieldOpEnabled(spec, c.Op) {
-			return res, idx, fmt.Errorf("field %q: op %q is not enabled", c.Field, c.Op)
-		}
-		sql, args, next, err := compileWhere(spec, c.Op, c.Value, idx)
 		if err != nil {
-			return res, idx, fmt.Errorf("field %q: %w", c.Field, err)
+			return res, idx, err
 		}
 		if sql == "" {
-			continue // skipped (empty value)
+			continue // skipped (empty value / always-true group)
 		}
 		clauses = append(clauses, "("+sql+")")
 		res.Args = append(res.Args, args...)
@@ -260,6 +261,65 @@ func compileOrderTerm(expr string, term OrderBy, idx int) (string, []any, int, e
 	}
 	t, err := orderTerm(expr, term.Dir, term.Nulls)
 	return t, args, idx, err
+}
+
+// compileLiteral validates one predicate against the schema allowlist and emits
+// its SQL. A negated predicate is wrapped in a null-exclusive NOT
+// (`NOT (<base>) AND <expr> IS NOT NULL`) so a NULL value satisfies neither the
+// predicate nor its negation — matching applyQuery and the not_matches_regex
+// convention. Returns "" (no SQL) for an empty-value no-op, exactly like the
+// positive form.
+func compileLiteral(c WhereClause, schema Schema, idx int) (string, []any, int, error) {
+	spec, ok := schema.Fields[c.Field]
+	if !ok {
+		return "", nil, idx, fmt.Errorf("unknown filter field %q", c.Field)
+	}
+	if !spec.ServerFilter {
+		return "", nil, idx, fmt.Errorf("field %q is not server-filterable", c.Field)
+	}
+	if !fieldOpEnabled(spec, c.Op) {
+		return "", nil, idx, fmt.Errorf("field %q: op %q is not enabled", c.Field, c.Op)
+	}
+	sql, args, next, err := compileWhere(spec, c.Op, c.Value, idx)
+	if err != nil {
+		return "", nil, idx, fmt.Errorf("field %q: %w", c.Field, err)
+	}
+	if sql == "" {
+		return "", nil, idx, nil // skipped (empty value)
+	}
+	if c.Negated {
+		sql = fmt.Sprintf("NOT (%s) AND %s IS NOT NULL", sql, spec.Expr)
+	}
+	return sql, args, next, nil
+}
+
+// compileOrGroup compiles a disjunction: `(p1) OR (p2) OR ...`. Every member is
+// validated (so an unknown field or disabled op is reported) even when the group
+// is dropped. If any disjunct is an always-true no-op (empty value), the whole
+// group is always true and is dropped — mirroring applyQuery, where an
+// always-true member short-circuits the OR to "match everything".
+func compileOrGroup(lits []WhereClause, schema Schema, idx int) (string, []any, int, error) {
+	start := idx
+	parts := make([]string, 0, len(lits))
+	var args []any
+	alwaysTrue := false
+	for _, c := range lits {
+		sql, a, next, err := compileLiteral(c, schema, idx)
+		if err != nil {
+			return "", nil, start, err
+		}
+		if sql == "" {
+			alwaysTrue = true // keep validating the rest, then drop the group
+			continue
+		}
+		parts = append(parts, "("+sql+")")
+		args = append(args, a...)
+		idx = next
+	}
+	if alwaysTrue || len(parts) == 0 {
+		return "", nil, start, nil
+	}
+	return strings.Join(parts, " OR "), args, idx, nil
 }
 
 func compileWhere(spec FieldSpec, op, value string, idx int) (string, []any, int, error) {

@@ -242,7 +242,7 @@ export default function FormulaEditor({
             ".cm-content": { padding: "12px 0" },
             ".cm-gutters": {
               background: "var(--qt-bg-muted, #f8fafc)",
-              color: "#64748b",
+              color: "var(--qt-muted, #64748b)",
             },
           }),
         ],

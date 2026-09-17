@@ -32,14 +32,49 @@ export type FilterOp =
   | "is_null"
   | "is_not_null";
 
-/** A single AND-combined filter. `value` is always the raw string the UI
- *  captured; coercion to number/bool/date happens at apply/compile time based on
- *  the field's declared type (never on the value's runtime shape). Unused for
- *  the nullary ops (`is_null`/`is_not_null`). */
+/** A single filter predicate (a "literal" in CNF terms). `value` is always the
+ *  raw string the UI captured; coercion to number/bool/date happens at
+ *  apply/compile time based on the field's declared type (never on the value's
+ *  runtime shape). Unused for the nullary ops (`is_null`/`is_not_null`).
+ *
+ *  `negated` wraps the predicate in a logical NOT. It is only ever set for ops
+ *  that have no complementary operator (`contains`/`starts_with`/`ends_with`/
+ *  `includes`); ops with a complement negate by flipping the op itself (`>=`→`<`,
+ *  `=`→`!=`, `is_null`→`is_not_null`, `matches_regex`→`not_matches_regex`) — see
+ *  `negateClause` in ops.ts. NOT is null-exclusive: a NULL/empty value satisfies
+ *  neither the predicate nor its negation, matching `not_matches_regex`. */
 export interface WhereClause {
   field: string; // FieldDef.name
   op: FilterOp;
   value: string;
+  negated?: boolean;
+}
+
+/** A disjunction of predicates — the inner OR of conjunctive normal form. Every
+ *  member is a plain literal; nesting is intentionally not allowed yet (CNF
+ *  only), but the object shape leaves room to grow. */
+export interface OrGroup {
+  any: WhereClause[];
+}
+
+/** One conjunct of the WHERE clause: either a single predicate or an OR group.
+ *  `QueryState.where` is the AND of these terms, so the whole WHERE is
+ *  conjunctive normal form — `(a) AND (b OR c) AND (d)`. A bare literal is
+ *  equivalent to a one-element OR group; normalization flattens singleton groups
+ *  back to a literal so equality/encoding stay canonical. */
+export type WhereTerm = WhereClause | OrGroup;
+
+/** Narrow a term to an OR group. A literal always carries `field`; a group never
+ *  does and always carries an `any` array. */
+export function isOrGroup(term: WhereTerm): term is OrGroup {
+  return Array.isArray((term as OrGroup).any);
+}
+
+/** The predicate literals a term contributes, in order: the term itself for a
+ *  literal, or its members for a group. Handy for anything that must visit every
+ *  predicate regardless of grouping (field allowlisting, SELECT projection). */
+export function predicatesOf(term: WhereTerm): WhereClause[] {
+  return isOrGroup(term) ? term.any : [term];
 }
 
 /** One ORDER BY term. Array order in `QueryState.orderBy` is the sort priority. */
@@ -95,8 +130,10 @@ export interface AggregationClause {
 export interface QueryState {
   /** Ordered SELECT list + per-column widths. Empty = the schema's default columns. */
   select: SelectColumn[];
-  /** AND-combined filters. */
-  where: WhereClause[];
+  /** WHERE in conjunctive normal form: the AND of these terms, each a single
+   *  predicate or an OR group. A flat list of literals (no groups) is the common
+   *  case and the legacy shape, decoded unchanged. */
+  where: WhereTerm[];
   /** Multi-sort terms in priority order. Empty = the schema's default sort. */
   orderBy: OrderByClause[];
   /** Page size. */
@@ -173,6 +210,26 @@ function boundedInteger(value: unknown, fallback: number, min: number, max: numb
   return Math.max(min, Math.min(max, Math.round(value)));
 }
 
+/** Validate one raw predicate into a bounded WhereClause, or null if malformed.
+ *  Shared by top-level literals and the members of an OR group. */
+function normalizeWhereClause(item: unknown): WhereClause | null {
+  if (!isRecord(item)) return null;
+  const field = boundedString(item.field, MAX_FIELD_NAME_LENGTH);
+  const value = typeof item.value === "string" && item.value.length <= MAX_FILTER_VALUE_LENGTH ? item.value : null;
+  if (!field || isComputedField(field) || typeof item.op !== "string" || !FILTER_OPS.has(item.op) || value == null) {
+    return null;
+  }
+  const clause: WhereClause = { field, op: item.op as FilterOp, value };
+  if (item.negated === true) clause.negated = true;
+  return clause;
+}
+
+/** Deep-clone one WHERE term (literal or group) so a normalized/fallback state
+ *  never aliases the caller's arrays. */
+function cloneWhereTerm(term: WhereTerm): WhereTerm {
+  return isOrGroup(term) ? { any: term.any.map((c) => ({ ...c })) } : { ...term };
+}
+
 /** Convert unknown input into a bounded, structurally valid QueryState.
  * Invalid members are dropped; invalid scalar paging values use the supplied
  * fallback. This function is intentionally schema-agnostic—field allowlisting
@@ -196,17 +253,38 @@ export function normalizeQueryState(input: unknown, fallback: QueryState = EMPTY
     select.push(...fallback.select.map((column) => ({ ...column })));
   }
 
-  const where: WhereClause[] = [];
+  // WHERE is CNF: an array of terms, each a literal or an `{ any: [...] }` OR
+  // group. MAX_WHERE_CLAUSES bounds the TOTAL predicate count across all terms
+  // (legacy flat lists are all literals, so the cap is unchanged for them).
+  // Singleton/empty groups are canonicalized (flattened / dropped).
+  const where: WhereTerm[] = [];
   if (Array.isArray(raw.where)) {
-    for (const item of raw.where.slice(0, MAX_WHERE_CLAUSES)) {
-      if (!isRecord(item)) continue;
-      const field = boundedString(item.field, MAX_FIELD_NAME_LENGTH);
-      const value = typeof item.value === "string" && item.value.length <= MAX_FILTER_VALUE_LENGTH ? item.value : null;
-      if (!field || isComputedField(field) || typeof item.op !== "string" || !FILTER_OPS.has(item.op) || value == null) continue;
-      where.push({ field, op: item.op as FilterOp, value });
+    let literalBudget = MAX_WHERE_CLAUSES;
+    for (const item of raw.where) {
+      if (literalBudget <= 0) break;
+      if (isRecord(item) && Array.isArray((item as { any?: unknown }).any)) {
+        const members: WhereClause[] = [];
+        for (const inner of (item as { any: unknown[] }).any) {
+          if (literalBudget <= 0) break;
+          const clause = normalizeWhereClause(inner);
+          if (clause) {
+            members.push(clause);
+            literalBudget--;
+          }
+        }
+        if (members.length === 1) where.push(members[0]!);
+        else if (members.length > 1) where.push({ any: members });
+        // 0 members → drop the term entirely
+      } else {
+        const clause = normalizeWhereClause(item);
+        if (clause) {
+          where.push(clause);
+          literalBudget--;
+        }
+      }
     }
   } else {
-    where.push(...fallback.where.map((clause) => ({ ...clause })));
+    where.push(...fallback.where.map(cloneWhereTerm));
   }
 
   const orderBy: OrderByClause[] = [];
@@ -281,7 +359,8 @@ export function queriesEqual(a: QueryState, b: QueryState): boolean {
 function sameArray<T>(a: readonly T[], b: readonly T[]): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
-    // Members are flat records of primitives — JSON compare is correct and cheap here.
+    // Members are records of primitives (WHERE terms may nest one `any` array of
+    // them) — a structural JSON compare is correct and cheap here.
     if (JSON.stringify(a[i]) !== JSON.stringify(b[i])) return false;
   }
   return true;
