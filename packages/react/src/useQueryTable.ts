@@ -43,6 +43,7 @@ import type {
   Transport,
   StorageAdapter,
   DistinctValuesResult,
+  FieldStats,
 } from "@pythia-software/query-table-core";
 import { useAggregations } from "./useAggregations";
 import { useSelection, type SelectionApi } from "./useSelection";
@@ -186,6 +187,11 @@ export interface QueryTableApi<Row> {
   resetAll: () => void;
   /** Keystroke-driven filter-value autocomplete (Transport.fetchDistinctValues). */
   filterValues: (field: string, search: string) => Promise<DistinctValuesResult>;
+  /** Dataset-wide field statistics for catalogue and picker affordances. */
+  fieldStats: (
+    fields: string[],
+    signal?: AbortSignal,
+  ) => Promise<Record<string, FieldStats>>;
 
   // sorting (multi-sort): click header sets/cycles primary; shift-click appends.
   toggleSort: (field: string, additive?: boolean) => void;
@@ -650,6 +656,36 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
     [transport, byName, clientRows],
   );
 
+  const fieldStats = useCallback<QueryTableApi<Row>["fieldStats"]>(
+    async (fields, signal) => {
+      const requested = [...new Set(fields)];
+      if (transport?.fetchFieldStats) {
+        const backendFields = requested.filter(
+          (name) => byName.get(name)?.source.kind === "backend",
+        );
+        return backendFields.length
+          ? transport.fetchFieldStats(backendFields, signal)
+          : {};
+      }
+      if (!clientRows) return {};
+
+      const result: Record<string, FieldStats> = {};
+      for (const name of requested) {
+        if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+        const field = byName.get(name);
+        if (!field) continue;
+        const distinct = new Set<string>();
+        for (const row of clientRows) {
+          const value = readFieldValue(field, row);
+          if (value !== null) distinct.add(JSON.stringify(value));
+        }
+        result[name] = { distinct: distinct.size };
+      }
+      return result;
+    },
+    [transport, byName, clientRows],
+  );
+
   // Single refresh seam: re-runs the internal query (setNonce) and fires the
   // consumer's onRefresh, if any. Both the manual `api.refresh()` and every
   // auto-refresh tick go through here, so they stay observably identical. Read
@@ -784,6 +820,7 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
     mergeFilters,
     resetAll,
     filterValues,
+    fieldStats,
     toggleSort,
     setSort,
     select,

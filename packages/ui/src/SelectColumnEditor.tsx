@@ -14,6 +14,7 @@ import {
   isComputedField,
   isSelectable,
   type ColumnPreview,
+  type FieldStats,
   type SelectColumn,
   type RegexInspection,
 } from "@pythia-software/query-table-core";
@@ -65,6 +66,7 @@ export function SelectColumnEditor<Row>({
     [retry, setRetry] = useState(0),
     [functionSearch, setFunctionSearch] = useState("");
   const [previewSort, setPreviewSort] = useState<PreviewSort | null>(null);
+  const [fieldStats, setFieldStats] = useState<Record<string, FieldStats>>({});
   const drag = useRef<string | null>(null);
   const [inspection, setInspection] = useState<RegexInspection | null>(null);
   const catalogue = api.computed.catalogue.filter(isSelectable);
@@ -81,6 +83,16 @@ export function SelectColumnEditor<Row>({
       return { error: e instanceof Error ? e.message : String(e) };
     }
   }, [expression, editing, id, api.computed.compile]);
+  const previewPlanKey = validation.error
+    ? `error:${validation.error}`
+    : `plan:${JSON.stringify(validation.plan)}`;
+  // Parent refreshes may recreate the API methods without changing the preview.
+  // Use the latest method, but restart only when the request itself changes.
+  const previewRequest = useRef(api.computed.preview);
+  previewRequest.current = api.computed.preview;
+  const fieldStatsRequest = useRef(api.fieldStats);
+  fieldStatsRequest.current = api.fieldStats;
+  const catalogueKey = JSON.stringify(catalogue.map((field) => field.name));
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     dialog.current?.focus();
@@ -121,6 +133,24 @@ export function SelectColumnEditor<Row>({
   }, []);
   useEffect(() => {
     const ac = new AbortController();
+    void fieldStatsRequest
+      .current(
+        catalogue.map((field) => field.name),
+        ac.signal,
+      )
+      .then((result) => {
+        if (!ac.signal.aborted) setFieldStats(result);
+      })
+      .catch(() => {
+        // Stats are an optional enhancement; catalogue browsing still works.
+      });
+    return () => ac.abort();
+    // catalogueKey captures membership without refetching when refreshes merely
+    // recreate catalogue/API objects.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [catalogueKey]);
+  useEffect(() => {
+    const ac = new AbortController();
     setPreview(null);
     setError(null);
     setPage(0);
@@ -136,14 +166,14 @@ export function SelectColumnEditor<Row>({
     }
     setLoading(true);
     const timer = setTimeout(() => {
-      void api.computed
-        .preview(
-          expression,
-          count,
-          ac.signal,
-          editing ? id : undefined,
-          editing,
-        )
+      const request = previewRequest.current;
+      void request(
+        expression,
+        count,
+        ac.signal,
+        editing ? id : undefined,
+        editing,
+      )
         .then((result) => {
           if (!ac.signal.aborted) setPreview(result);
         })
@@ -159,7 +189,7 @@ export function SelectColumnEditor<Row>({
       ac.abort();
       clearTimeout(timer);
     };
-  }, [expression, count, editing, id, validation, api.computed.preview, retry]);
+  }, [expression, count, editing, id, previewPlanKey, retry]);
   const move = (field: string, index: number) =>
     setColumns((cols) => {
       const next = cols.filter((c) => c.field !== field),
@@ -230,6 +260,23 @@ export function SelectColumnEditor<Row>({
         previewSort,
       ),
     [preview, filter, previewSort],
+  );
+  const catalogueResults = useMemo(
+    () =>
+      catalogue
+        .filter((f) =>
+          `${f.label} ${f.name} ${f.type} ${f.group ?? ""}`
+            .toLowerCase()
+            .includes(search.toLowerCase()),
+        )
+        .map((field, index) => ({ field, index }))
+        .sort((a, b) => {
+          const aLow = (fieldStats[a.field.name]?.distinct ?? 2) <= 1;
+          const bLow = (fieldStats[b.field.name]?.distinct ?? 2) <= 1;
+          return Number(aLow) - Number(bLow) || a.index - b.index;
+        })
+        .map(({ field }) => field),
+    [catalogue, search, fieldStats],
   );
   const shown = groups.slice(page * 50, (page + 1) * 50);
   const samePreviewSortKey = (a: PreviewSortKey, b: PreviewSortKey) => {
@@ -406,15 +453,11 @@ export function SelectColumnEditor<Row>({
             {api.computed.loading && <p role="status">Loading definitions…</p>}
             {api.computed.error && <p role="alert">{api.computed.error}</p>}
             <div className="qt-catalogue-list">
-              {catalogue
-                .filter((f) =>
-                  `${f.label} ${f.name} ${f.type} ${f.group ?? ""}`
-                    .toLowerCase()
-                    .includes(search.toLowerCase()),
-                )
-                .map((f) => (
+              {catalogueResults.map((f) => {
+                const distinct = fieldStats[f.name]?.distinct;
+                return (
                   <div
-                    className={`qt-catalogue-item ${active === f.name && !editing ? "is-active" : ""}`}
+                    className={`qt-catalogue-item ${active === f.name && !editing ? "is-active" : ""} ${distinct != null && distinct <= 1 ? "is-low-cardinality" : ""}`}
                     key={f.name}
                   >
                     <input
@@ -428,10 +471,13 @@ export function SelectColumnEditor<Row>({
                       <small>
                         {isComputedField(f.name) ? "ƒ · " : ""}
                         {f.type} · {f.group ?? f.name}
+                        {distinct != null &&
+                          ` · ${distinct.toLocaleString()} distinct`}
                       </small>
                     </button>
                   </div>
-                ))}
+                );
+              })}
             </div>
             <button
               type="button"

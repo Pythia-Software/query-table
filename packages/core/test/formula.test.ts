@@ -75,6 +75,14 @@ describe("computed formula language", () => {
     ['TO_NUMBER("12.5")', 12.5],
     ['TO_BOOLEAN("false")', false],
     ['TO_DATETIME("2024-02-29")', "2024-02-29T00:00:00.000Z"],
+    [
+      'TO_DATETIME("2024-02-29T12:34:56.123456789Z")',
+      "2024-02-29T12:34:56.123Z",
+    ],
+    [
+      'TO_DATETIME("2024-02-29T12:34:56.123456-07:00")',
+      "2024-02-29T19:34:56.123Z",
+    ],
     ['SPLIT("a:b",":")', ["a", "b"]],
     ['JOIN([tags],",")', "b,a,b"],
     ["ARRAY_LENGTH([tags])", 3],

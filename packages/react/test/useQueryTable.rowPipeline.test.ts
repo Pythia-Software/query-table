@@ -64,6 +64,33 @@ beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
 describe("useQueryTable row pipeline", () => {
+  it("computes client field cardinality and delegates server stats", async () => {
+    const local = renderQueryTable({
+      clientRows: [
+        { id: 1, name: "alpha", status: "ready" },
+        { id: 2, name: "bravo", status: "ready" },
+      ],
+    });
+    await expect(local.result.current.fieldStats(["status", "name"])).resolves.toEqual({
+      status: { distinct: 1 },
+      name: { distinct: 2 },
+    });
+    local.unmount();
+
+    const fetchFieldStats = vi.fn(async () => ({ status: { distinct: 7 } }));
+    const remote = renderQueryTable({
+      transport: {
+        fetchRows: async () => ({ rows: [], total: 0 }),
+        fetchFieldStats,
+      },
+    });
+    await expect(
+      remote.result.current.fieldStats(["status", "missing"]),
+    ).resolves.toEqual({ status: { distinct: 7 } });
+    expect(fetchFieldStats).toHaveBeenCalledWith(["status"], undefined);
+    remote.unmount();
+  });
+
   it("does not recompute client rows for a width-only query change", () => {
     const { result, unmount } = renderQueryTable({ clientRows });
     advance(20);
