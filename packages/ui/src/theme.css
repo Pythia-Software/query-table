@@ -1348,6 +1348,7 @@
 .qt-create-computed { width: 100%; margin: 10px 0; }
 .qt-catalogue-item { display: flex; align-items: center; gap: 8px; padding: 7px; border-radius: 6px; margin: 3px 0; }
 .qt-catalogue-item.is-active { background: var(--qt-accent-bg, #edf3ff); }
+.qt-catalogue-item.is-low-cardinality:not(.is-active) { opacity: .62; }
 .qt-catalogue-item button { display: flex; flex-direction: column; gap: 4px; text-align: left; border: 0; background: transparent; color: inherit; min-width: 0; cursor: pointer; }
 .qt-catalogue-item small { color: var(--qt-muted, #64748b); overflow-wrap: anywhere; }
 .qt-editor-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
