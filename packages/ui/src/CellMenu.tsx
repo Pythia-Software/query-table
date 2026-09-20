@@ -1,3 +1,4 @@
+import { PresentedFilterValue } from "./FilterValuePresentation";
 // CellMenu — right-click (or left-click) a cell → quick-filter popover + copy.
 // Filters are laid out in two columns: each row is a candidate predicate on the
 // left and its logical negation directly opposite (`= 5 | ≠ 5`, `≥ 5 | < 5`,
@@ -104,7 +105,7 @@ export function CellMenu<Row>({ field, value, x, y, onAddFilter, onClose, classN
     >
       <div className="qt-cm-header">
         <span className="qt-cm-field">{field.label}</span>
-        <span className="qt-cm-value">{previewValue(value)}</span>
+        <span className="qt-cm-value">{Array.isArray(value) ? value.map(v => <PresentedFilterValue key={String(v)} field={field.name} value={String(v)}/>) : <PresentedFilterValue field={field.name} value={String(value ?? "")}/>}</span>
       </div>
       <MenuItem
         classNames={classNames}
@@ -178,7 +179,7 @@ function FilterButton({
       {!nullary ? (
         <>
           {" "}
-          <code>{previewValue(value)}</code>
+          <code><PresentedFilterValue field={clause.field} value={clause.value}/></code>
         </>
       ) : null}
     </button>

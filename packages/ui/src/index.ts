@@ -30,3 +30,6 @@ export { SavedQueriesModal } from "./SavedQueriesModal";
 
 export { SelectColumnEditor } from "./SelectColumnEditor";
 export type { SelectColumnEditorProps } from "./SelectColumnEditor";
+
+export { FilterValueProvider, PresentedFilterValue } from "./FilterValuePresentation";
+export type { FilterValuePresentation } from "./FilterValuePresentation";

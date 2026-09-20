@@ -40,3 +40,17 @@ for transport and schema examples.
 ## Shared computed column definitions
 
 Pass a stable `computedColumnStore` (for example, `httpComputedColumnStore("/api/computed-columns")` from core) to `useQueryTable`. `api.computed` exposes the catalogue, compile/preview, save with revision checking, and reload operations. Queries store only `@computed/<id>` SELECT references; formula evaluation stays in browser workers. Without a store, definitions are in memory for the mounted hook. See the repository’s `docs/computed-columns.md` for the complete integration contract and PostgreSQL adapter.
+
+### Canonical keys and unavailable filters
+
+`useQueryTable` accepts two optional pure callbacks:
+
+- `canonicalizeQuery(query)` returns a query with external aliases resolved. It must
+  not throw. The returned query drives evaluation, sharing, and saved state.
+- `validateQuery(query)` may throw an actionable error before row or metric execution.
+  Both local and server transports honor it, including restored queries. Rejection
+  clears results/totals while retaining the query so the user can repair its filters.
+
+Memoize these callbacks and change their identity when external validation metadata
+changes. Return immutable query values from the canonicalizer. No callback is required
+for ordinary tables; the existing execution behavior remains the default.

@@ -25,6 +25,7 @@ export function useAggregations<Row>(
   clientRows: Row[] | undefined,
   debounceMs: number,
   nonce: number,
+  validateQuery?: (query: QueryState) => void,
 ): AggregationsApiState {
   const [results, setResults] = useState<AggregationResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -52,6 +53,7 @@ export function useAggregations<Row>(
       setLoading(true);
       setError(null);
       try {
+        validateQuery?.(query);
         let res: AggregationResult;
         if (transport?.fetchAggregations) {
           res = await transport.fetchAggregations(toAggregationQuery(query, schema), ac.signal);
@@ -62,7 +64,7 @@ export function useAggregations<Row>(
         }
         if (!cancelled) setResults(res);
       } catch (e) {
-        if (!cancelled && !ac.signal.aborted) setError(e as Error);
+        if (!cancelled && !ac.signal.aborted) { setError(e as Error); setResults(null); }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -75,7 +77,7 @@ export function useAggregations<Row>(
     };
     // `key` captures the relevant query subset; clientRows/nonce force a refetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, hasAggregations, transport, clientRows, schema, debounceMs, nonce]);
+  }, [key, hasAggregations, transport, clientRows, schema, debounceMs, nonce, validateQuery]);
 
   return { results, loading, error };
 }

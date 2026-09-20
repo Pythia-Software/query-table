@@ -52,6 +52,11 @@ import { useColumnDrag, type ColumnDragApi } from "./useColumnDrag";
 import { useSavedQueries, type SavedQueriesApi } from "./useSavedQueries";
 
 export interface UseQueryTableOptions<Row> {
+  /** Normalize external aliases without storing presentation in query state. Must be pure and not throw. */
+  canonicalizeQuery?: (query: QueryState) => QueryState;
+  /** Reject an entire query before rows or metrics execute. Errors retain editable query state. */
+  validateQuery?: (query: QueryState) => void;
+
   schema: FieldSchema<Row>;
   /** Data access. Omit for a purely client-side table driven by `clientRows`. */
   transport?: Transport<Row>;
@@ -320,7 +325,8 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
 
   const initRef = useRef(resolveInitial(opts));
   const aggIdRef = useRef(0);
-  const [query, setQueryState] = useState<QueryState>(initRef.current.q);
+  const [storedQuery, setQueryState] = useState<QueryState>(initRef.current.q);
+  const query = useMemo(() => opts.canonicalizeQuery?.(storedQuery) ?? storedQuery, [storedQuery, opts.canonicalizeQuery]);
   const undoStack = useRef<QueryState[]>([cloneQueryState(initRef.current.q)]);
   const redoStack = useRef<QueryState[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
@@ -397,6 +403,7 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
       setLoading(true);
       setError(null);
       try {
+        opts.validateQuery?.(query);
         if (transport) {
           const res = await transport.fetchRows(serverRowQuery, ac.signal);
           if (!cancelled) {
@@ -411,7 +418,7 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
           }
         }
       } catch (e) {
-        if (!cancelled && !ac.signal.aborted) setError(e as Error);
+        if (!cancelled && !ac.signal.aborted) { setError(e as Error); setRows([]); setTotal(null); }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -425,7 +432,7 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
     // rowQueryKey captures only row-affecting query state; clientRows/nonce
     // force refetch. Presentation changes still sync/persist via queryKey below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rowQueryKey, transport, clientRows, schema, debounceMs, nonce]);
+  }, [rowQueryKey, transport, clientRows, schema, debounceMs, nonce, opts.validateQuery]);
 
   // URL sync.
   useEffect(() => {
@@ -462,7 +469,7 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
     storage,
     now,
   );
-  const aggState = useAggregations(query, schema, transport, clientRows, debounceMs, nonce);
+  const aggState = useAggregations(query, schema, transport, clientRows, debounceMs, nonce, opts.validateQuery);
 
   const canUndo = undoStack.current.length > 0;
   const canRedo = redoStack.current.length > 0;

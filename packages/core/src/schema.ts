@@ -76,7 +76,7 @@ export type FieldSource<Row = any, V = unknown> = BackendField | DerivedField<Ro
  *  want a round-trip for; `freeform` opts out of suggestions entirely. */
 export type FilterValues =
   | { source: "autocomplete" }
-  | { source: "static"; options: string[] }
+  | { source: "static"; options: Array<string | { value: string; label: string }> }
   | { source: "freeform" };
 
 export interface FilterConfig {

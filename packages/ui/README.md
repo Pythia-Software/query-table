@@ -81,3 +81,25 @@ for customization and backend integration details.
 ## SELECT editor
 
 `QueryBuilder` includes an **Edit columns** action. The exported `SelectColumnEditor` also accepts `{ api, onClose }` for standalone use. It supports draft column ordering, a searchable catalogue, sampled value frequencies, and a lazy-loaded CodeMirror formula editor with grouped live previews and regex inspection. Shared-definition saves and query-layout application are separate actions.
+
+### Filter value presentation
+
+Queries keep stable string keys while consumers can display names and rich badges.
+Static options accept either strings (the existing API) or `{ value, label }` objects.
+Wrap the table and query builder in `FilterValueProvider` to supply presentation for
+current values, suggestions, and cell quick filters:
+
+```tsx
+<FilterValueProvider value={{
+  label: (field, key) => lookup(field, key)?.name ?? key,
+  render: (field, key) => <Badge value={lookup(field, key)} fallback={key} />,
+}}>
+  <QueryBuilder api={api} fields={schema.fields} total={api.total} />
+  <DataTable {...tableProps} />
+</FilterValueProvider>
+```
+
+The searchable static picker matches both labels and keys. Selection emits the
+canonical `value` only; presentation is never serialized into queries. A resolver
+can present a current value even when it is absent from the options. Strings without
+a presentation provider retain the existing select control.
