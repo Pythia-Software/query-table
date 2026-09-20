@@ -26,14 +26,17 @@ public struct FilterValues: Codable, Equatable, Sendable {
   }
 }
 public struct FilterConfig: Codable, Equatable, Sendable {
+  public var arrayCaseSensitive: Bool?
   public var enabled: Bool?
   public var pushdown: Bool?
   public var ops: [String]?
   public var values: FilterValues?
   public init(
-    enabled: Bool? = nil, pushdown: Bool? = nil, ops: [String]? = nil, values: FilterValues? = nil
+    enabled: Bool? = nil, pushdown: Bool? = nil, ops: [String]? = nil, values: FilterValues? = nil,
+    arrayCaseSensitive: Bool? = nil
   ) {
     self.enabled = enabled
+    self.arrayCaseSensitive = arrayCaseSensitive
     self.pushdown = pushdown
     self.ops = ops
     self.values = values

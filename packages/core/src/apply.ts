@@ -268,12 +268,15 @@ function matchesBase<Row>(field: FieldDef<Row>, v: unknown, prepared: PreparedWh
   if (clause.op === "is_null") return Array.isArray(v) ? v.length === 0 : v == null || v === "";
   if (clause.op === "is_not_null") return Array.isArray(v) ? v.length > 0 : v != null && v !== "";
 
+  const arrayText = (value: unknown) => field.filter?.arrayCaseSensitive
+    ? String(value) : String(value).toLowerCase();
+
   // `includes` is array membership (ARRAY_HAS): a null/missing array contains
   // nothing. Handle before the array/scalar split so null can't fall through.
   if (clause.op === "includes") {
     const arr = Array.isArray(v) ? v : [];
-    const needle = clause.value.toLowerCase();
-    return arr.some((x) => String(x).toLowerCase() === needle);
+    const needle = arrayText(clause.value);
+    return arr.some((x) => arrayText(x) === needle);
   }
 
   if (clause.op === "matches_regex" || clause.op === "not_matches_regex") {
@@ -284,8 +287,8 @@ function matchesBase<Row>(field: FieldDef<Row>, v: unknown, prepared: PreparedWh
   }
 
   if (Array.isArray(v)) {
-    const needle = clause.value.toLowerCase();
-    const hay = v.map((x) => String(x).toLowerCase());
+    const needle = arrayText(clause.value);
+    const hay = v.map(arrayText);
     switch (clause.op) {
       case "contains":
         return hay.some((s) => s.includes(needle));

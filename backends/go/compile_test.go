@@ -468,3 +468,21 @@ func b64url(json string) string {
 	s = strings.ReplaceAll(s, "/", "_")
 	return s
 }
+
+func TestCaseSensitiveArrayMembership(t *testing.T) {
+	s, err := LoadSchema([]byte(strings.Replace(schemaJSON, `"name": "function_names",`, `"name": "function_names", "filter": {"arrayCaseSensitive": true},`, 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := s.Fields["function_names"]
+	if !spec.ArrayCaseSensitive {
+		t.Fatal("schema dropped arrayCaseSensitive")
+	}
+	sql, args, _, err := compileWhere(spec, "includes", "Bug", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(sql, "LOWER") || !strings.Contains(sql, "_e = $1") || args[0] != "Bug" {
+		t.Fatalf("%s %v", sql, args)
+	}
+}
