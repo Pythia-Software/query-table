@@ -44,6 +44,13 @@ For schema generation:
 npm install --save-dev @pythia-software/query-table-codegen
 ```
 
+For native macOS apps, add this repository as a Swift package and use
+`QueryTableUI` with `QueryTableCore` (macOS 14+). The native frontend uses the
+same schema and backend query contracts. Run the sample with
+`swift run --package-path native/macos QueryTableDemo`. See the
+[native integration guide](native/macos/README.md) for setup and compatibility
+boundaries.
+
 All npm packages are ESM-only and include bundled JavaScript, declarations,
 source maps, package documentation, and the MIT license. Node.js 22 or newer is
 supported by the published packages.
@@ -106,6 +113,7 @@ your own markup, or just `@pythia-software/query-table-core` for the wire types 
 | `backends/go` | `querytable` Go module: compiles a `WireQuery` to parameterized SQL against a schema allowlist. | — |
 | `@pythia-software/query-table-codegen` | CLI and JS API that emit the TS catalog + Go schema from a JSON schema document. | core |
 | `demo` | Runnable Vite playground over an in-memory dataset, for seeing UI changes live and manual testing. | core, react, ui |
+| `native/macos` | Native SwiftUI/AppKit frontend, Swift query contracts, HTTP/local transports, formula runtime, and sample app. | macOS 14+ |
 
 React is a **peer dependency `>=18 <20`**. The UI package also peers on React
 DOM in the same version range.

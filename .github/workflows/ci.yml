@@ -13,6 +13,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  macos:
+    name: Native macOS
+    runs-on: macos-15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Build native libraries and demo
+        run: swift build
+      - name: Test native packages
+        run: swift test
+      - name: Check native integration
+        run: swift run QueryTableChecks
+      - name: Set up Node.js for wire conformance
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install conformance dependencies
+        run: npm ci --ignore-scripts
+      - name: Verify TypeScript and Swift compatibility
+        env:
+          QUERY_TABLE_CHECKS: ${{ github.workspace }}/.build/debug/QueryTableChecks
+        run: node native/macos/scripts/check-wire-compatibility.mjs
+
   secrets:
     name: Secrets
     runs-on: ubuntu-latest
@@ -55,6 +79,10 @@ jobs:
           cache: false
       - name: Install exact dependencies
         run: npm ci --ignore-scripts
+      - name: Verify native formula runtime is current
+        run: |
+          node native/macos/scripts/build-formula-runtime.mjs
+          git diff --exit-code -- native/macos/Sources/QueryTableFormula/Resources/formula-runtime.js
       - name: Audit dependencies
         run: npm audit
       - name: Typecheck

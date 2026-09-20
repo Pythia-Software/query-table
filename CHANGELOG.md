@@ -6,6 +6,23 @@ contain intentional API changes described in their release notes.
 
 ## [Unreleased]
 
+### Fixed
+
+- Native compact query imports preserve valid WHERE predicates when neighboring
+  members are malformed, matching React's member-by-member normalization.
+- Native column display honors an explicitly empty `defaultSelect`, keeping
+  visible columns consistent with backend projections.
+
+### Added
+
+- Native macOS Swift packages with an AppKit table, SwiftUI query builder,
+  column layout, multi-sort, selection, saved queries, metrics, and query history.
+- Shared schema/query JSON contracts, compact query tokens, pluggable asynchronous
+  transports, HTTP integration, and an in-memory adapter for native applications.
+- Native computed-column editing and sampled previews using the shared qt-expr
+  interpreter in JavaScriptCore. Regex formulas report unsupported explicitly.
+- A runnable macOS sample, integration checks, XCTest coverage, and macOS CI.
+
 ## [0.3.0] - 2026-09-17
 
 ### Added
