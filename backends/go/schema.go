@@ -50,6 +50,8 @@ type FieldSpec struct {
 	Expr         string
 	Synthetic    bool
 	ServerFilter bool // false → field is client-only; Compile rejects filters on it
+	// ArrayCaseSensitive preserves exact text-array membership keys. Default false.
+	ArrayCaseSensitive bool
 	// FilterOps is nil for the type's default matrix; a non-nil slice is the
 	// field's explicit operator allowlist. An empty slice disables every op.
 	FilterOps []string
@@ -80,9 +82,10 @@ type docField struct {
 	Type   string `json:"type"`
 	Source any    `json:"source"` // "backend"|"derived" | object | absent
 	Filter *struct {
-		Enabled  *bool    `json:"enabled"`
-		Pushdown *bool    `json:"pushdown"`
-		Ops      []string `json:"ops"`
+		ArrayCaseSensitive bool     `json:"arrayCaseSensitive"`
+		Enabled            *bool    `json:"enabled"`
+		Pushdown           *bool    `json:"pushdown"`
+		Ops                []string `json:"ops"`
 	} `json:"filter"`
 	Sort *struct {
 		Enabled *bool  `json:"enabled"`
@@ -181,14 +184,15 @@ func LoadSchema(doc []byte) (Schema, error) {
 		}
 
 		s.Fields[f.Name] = FieldSpec{
-			Name:         f.Name,
-			Kind:         kind,
-			Expr:         pg.Expr,
-			Synthetic:    pg.Synthetic,
-			ServerFilter: serverFilter,
-			FilterOps:    filterOps,
-			Sortable:     sortable,
-			SortExpr:     sortExpr,
+			Name:               f.Name,
+			Kind:               kind,
+			Expr:               pg.Expr,
+			Synthetic:          pg.Synthetic,
+			ServerFilter:       serverFilter,
+			FilterOps:          filterOps,
+			ArrayCaseSensitive: f.Filter != nil && f.Filter.ArrayCaseSensitive,
+			Sortable:           sortable,
+			SortExpr:           sortExpr,
 		}
 	}
 	return s, nil

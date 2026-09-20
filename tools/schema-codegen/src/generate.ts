@@ -52,6 +52,7 @@ interface GoField {
   expr: string;
   synthetic: boolean;
   serverFilter: boolean;
+  arrayCaseSensitive: boolean;
   filterOps?: string[];
   sortable: boolean;
   sortExpr: string;
@@ -156,10 +157,12 @@ function projectGoFields(doc: JsonObject): GoField[] {
     const kind = GO_KINDS[kindName];
     if (!kind) throw new Error(`field ${JSON.stringify(name)} has unknown postgres kind ${JSON.stringify(kindName)}`);
 
+    let arrayCaseSensitive = false;
     let serverFilter = true;
     let filterOps: string[] | undefined;
     if (field.filter != null) {
       const filter = asObject(field.filter, `schema.fields[${index}].filter`);
+      arrayCaseSensitive = filter.arrayCaseSensitive === true;
       if (typeof filter.enabled === "boolean") serverFilter = filter.enabled;
       if (typeof filter.pushdown === "boolean") serverFilter = serverFilter && filter.pushdown;
       if (filter.ops != null) {
@@ -190,6 +193,7 @@ function projectGoFields(doc: JsonObject): GoField[] {
       expr,
       synthetic: postgres.synthetic === true,
       serverFilter,
+      arrayCaseSensitive,
       sortable,
       sortExpr,
     };
@@ -238,7 +242,7 @@ export function generateGo(input: unknown, options: GoGenerationOptions): string
       const filterOps = field.filterOps
         ? `, FilterOps: []string{${field.filterOps.map(goString).join(", ")}}`
         : "";
-      return `\t\t\t${key}:${spacing}{Name: ${goString(field.name)}, Kind: querytable.${field.kind}, Expr: ${goString(field.expr)}, Synthetic: ${field.synthetic}, ServerFilter: ${field.serverFilter}${filterOps}, Sortable: ${field.sortable}, SortExpr: ${goString(field.sortExpr)}},`;
+      return `\t\t\t${key}:${spacing}{Name: ${goString(field.name)}, Kind: querytable.${field.kind}, Expr: ${goString(field.expr)}, Synthetic: ${field.synthetic}, ServerFilter: ${field.serverFilter}${filterOps}${field.arrayCaseSensitive ? ", ArrayCaseSensitive: true" : ""}, Sortable: ${field.sortable}, SortExpr: ${goString(field.sortExpr)}},`;
     },
   );
 

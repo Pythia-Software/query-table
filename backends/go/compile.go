@@ -370,6 +370,9 @@ func compileWhere(spec FieldSpec, op, value string, idx int) (string, []any, int
 	case "not_matches_regex":
 		return fmt.Sprintf("(%s)::text !~ $%d", spec.Expr, idx), []any{value}, idx + 1, nil
 	case "includes":
+		if spec.ArrayCaseSensitive {
+			return fmt.Sprintf("EXISTS (SELECT 1 FROM unnest(%s) AS _e WHERE _e = $%d)", spec.Expr, idx), []any{value}, idx + 1, nil
+		}
 		// Case-insensitive membership in a text[] column (ARRAY_HAS semantics).
 		return fmt.Sprintf("EXISTS (SELECT 1 FROM unnest(%s) AS _e WHERE LOWER(_e) = LOWER($%d))", spec.Expr, idx),
 			[]any{value}, idx + 1, nil

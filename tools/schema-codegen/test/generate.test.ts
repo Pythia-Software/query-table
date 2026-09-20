@@ -19,12 +19,13 @@ describe("schema code generation", () => {
   it("generates a direct Go schema with backend capabilities", () => {
     const withRegexSort = structuredClone(document);
     withRegexSort.defaultSort = [{ field: "job_name", dir: "asc", extract: { regex: "build-(\\d+)" } }];
-    withRegexSort.fields.find((field: { name: string }) => field.name === "job_name").filter = { ops: ["="] };
+    withRegexSort.fields.find((field: { name: string }) => field.name === "job_name").filter = { ops: ["="], arrayCaseSensitive: true };
     const output = generateGo(withRegexSort, { packageName: "catalog" });
     expect(output).toContain("func RunsSchema() querytable.Schema");
     expect(output).toContain('"error_codes": {');
     expect(output).toContain("ServerFilter: false");
     expect(output).toContain("Synthetic: true");
+    expect(output).toContain("ArrayCaseSensitive: true");
     expect(output).toContain('FilterOps: []string{"="}');
     expect(output).toContain('Extract: &querytable.RegexExtract{Regex: "build-(\\\\d+)"}');
     expect(output).not.toContain('"details": {');

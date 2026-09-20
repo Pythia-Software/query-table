@@ -80,6 +80,8 @@ export type FilterValues =
   | { source: "freeform" };
 
 export interface FilterConfig {
+  /** Preserve case when matching textarray values. Default false. */
+  arrayCaseSensitive?: boolean;
   /** Whether this field is filterable. Default: backend ⇒ true, derived ⇒ false. */
   enabled?: boolean;
   /** Evaluate on the backend (predicate pushdown)? Default: backend ⇒ true.

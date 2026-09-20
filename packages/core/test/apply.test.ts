@@ -139,3 +139,20 @@ describe("regex execution with computed SELECT columns", () => {
     });
   });
 });
+
+it("supports opt-in exact array keys for rows, CNF negation, pagination and metrics", () => {
+  const data = [{ id: 1, tags: ["Bug"] }, { id: 2, tags: ["bug"] }, { id: 3, tags: [] }];
+  const schema: FieldSchema<(typeof data)[number]> = {
+    name: "labels", idField: "id", fields: [{ name: "tags", label: "Tags", type: "textarray",
+      source: { kind: "backend", path: "tags" }, filter: { arrayCaseSensitive: true } }],
+  };
+  const clause = { field: "tags", op: "includes" as const, value: "Bug" };
+  const query = base({ where: [clause], limit: 1, aggregations: [{ id: "n", op: "count", groupBy: [] }] });
+  expect(applyQuery(data, query, schema)).toEqual({ rows: [data[0]], total: 1 });
+  expect(applyAggregations(data, query, schema).metrics[0]!.buckets[0]!.value).toBe(1);
+  expect(applyQuery(data, base({ where: [{ ...clause, negated: true }] }), schema).rows).toEqual([data[1]]);
+  expect(applyQuery(data, base({ where: [{ any: [{ ...clause, negated: true },
+    { field: "tags", op: "is_null", value: "" }] }] }), schema).rows).toEqual([data[1], data[2]]);
+  schema.fields[0]!.filter = {};
+  expect(applyQuery(data, query, schema).total).toBe(2);
+});
