@@ -113,6 +113,20 @@ final class CoreTests: XCTestCase {
     XCTAssertTrue(distinct.hasMore)
     XCTAssertEqual(distinct.hasNull, true)
   }
+  func testExactArrayMembership() async throws {
+    var exactSchema = schema
+    let index = try XCTUnwrap(exactSchema.fields.firstIndex { $0.name == "tags" })
+    exactSchema.fields[index].filter = .init(arrayCaseSensitive: true)
+    let encoded = try JSONEncoder().encode(exactSchema)
+    let decoded = try JSONDecoder().decode(FieldSchema.self, from: encoded)
+    let adapter = LocalQueryTransport(schema: decoded, rows: rows)
+    let upper = try await adapter.fetchRows(
+      query: .init(whereTerms: [.predicate(.init(field: "tags", op: "includes", value: "X"))]))
+    let lower = try await adapter.fetchRows(
+      query: .init(whereTerms: [.predicate(.init(field: "tags", op: "includes", value: "x"))]))
+    XCTAssertEqual(upper.total, 0)
+    XCTAssertEqual(lower.total, 1)
+  }
   func testLocalCaseSemanticsEmptyDraftAndCountMeasure() async throws {
     let adapter = LocalQueryTransport(schema: schema, rows: rows)
     let exact = try await adapter.fetchRows(

@@ -2,7 +2,7 @@
 
 ## 0.4.2 — 2026-09-20
 
-- Add opt-in `filter.arrayCaseSensitive` for exact text-array keys in local queries, metrics, PostgreSQL compilation, and generated schemas. Existing fields remain case-insensitive.
+- Add opt-in `filter.arrayCaseSensitive` for exact text-array keys in local queries, metrics, PostgreSQL compilation, native macOS queries, and generated schemas. Existing fields remain case-insensitive.
 
 
 ## 0.4.1 — 2026-09-20

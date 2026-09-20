@@ -167,7 +167,10 @@ public struct LocalQueryTransport: QueryTransport {
     case "ends_with": result = text.hasSuffix(needle)
     case "includes":
       if case .array(let items) = value {
-        result = items.contains { $0.displayString.lowercased() == needle }
+        result = items.contains {
+          field.filter?.arrayCaseSensitive == true
+            ? $0.displayString == clause.value : $0.displayString.lowercased() == needle
+        }
       } else {
         result = false
       }
