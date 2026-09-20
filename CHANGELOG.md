@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1 — 2026-09-20
+
+- Resolve keyboard selection to canonical option keys after searching display names.
+- Display object-option labels even without a custom presentation provider.
+
+
 ## 0.4.0 — 2026-09-20
 
 - Add generic stable-value/display-label options and rich filter presentation for
