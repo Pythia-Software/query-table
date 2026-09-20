@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0 — 2026-09-20
+
+- Add generic stable-value/display-label options and rich filter presentation for
+  current values, searchable static choices, and cell quick filters.
+- Add consumer query canonicalization and whole-query validation hooks for both
+  local and server rows/metrics; rejected queries retain editable state and clear results.
+- Preserve string option and unconfigured consumer compatibility.
+
+
 Notable user-visible changes are documented here. This project follows
 [Semantic Versioning](https://semver.org/); before 1.0, minor releases may
 contain intentional API changes described in their release notes.

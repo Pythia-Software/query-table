@@ -147,7 +147,7 @@
           "type": "object",
           "required": ["source", "options"],
           "additionalProperties": false,
-          "properties": { "source": { "const": "static" }, "options": { "type": "array", "items": { "type": "string" } } }
+          "properties": { "source": { "const": "static" }, "options": { "type": "array", "items": { "oneOf": [{ "type": "string" }, { "type": "object", "required": ["value", "label"], "additionalProperties": false, "properties": { "value": { "type": "string" }, "label": { "type": "string" } } }] } } }
         },
         { "type": "object", "required": ["source"], "additionalProperties": false, "properties": { "source": { "const": "freeform" } } }
       ]

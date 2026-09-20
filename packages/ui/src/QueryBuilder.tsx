@@ -1,3 +1,4 @@
+import { PresentedValueInput, useFilterValuePresentation } from "./FilterValuePresentation";
 // QueryBuilder — the chip toolbar: WHERE filters, SELECT columns, ORDER BY
 // (multi-sort, reorderable), and LIMIT/OFFSET paging. Type-aware filter inputs
 // (enum/static <select>, value autocomplete via Transport.fetchDistinctValues).
@@ -152,7 +153,9 @@ function predicateAsText<Row>(clause: WhereClause, byName: Map<string, FieldDef<
   const op = clause.op.replace(/_/g, " ");
   const not = clause.negated ? "not " : "";
   if (NULLARY_OPS.has(clause.op)) return `${field} ${not}${op}`;
-  const value = clause.value === "" ? "''" : clause.value;
+  const strategy = byName.get(clause.field)?.filter?.values;
+  const option = strategy?.source === 'static' ? strategy.options.find(o => typeof o !== 'string' && o.value === clause.value) : undefined;
+  const value = clause.value === "" ? "''" : typeof option === 'object' ? option.label : clause.value;
   return `${field} ${not}${op} ${value}`;
 }
 
@@ -1333,27 +1336,15 @@ function ValueInput<Row>({
   classNames: QueryBuilderClassNames | undefined;
   onChange: (v: string) => void;
 }) {
+  const presentation = useFilterValuePresentation();
   const strategy = field ? filterValuesFor(field) : { source: "freeform" as const };
 
   // Static closed domain → a plain <select> of the options.
   if (!forceFreeform && strategy.source === "static") {
-    const selectedText = value || "—";
-    const widthChars = chipFieldWidthForSelect(selectedText, 4);
-    return (
-      <select
-        className={cx("qt-chip-val", classNames?.select)}
-        value={value}
-        style={{ width: `${widthChars}ch` }}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        <option value="">—</option>
-        {strategy.options.map((o) => (
-          <option key={o} value={o}>
-            {o}
-          </option>
-        ))}
-      </select>
-    );
+    if (presentation.render || presentation.label || strategy.options.some(o => typeof o !== 'string')) {
+      return <PresentedValueInput field={field?.name ?? ''} value={value} options={strategy.options} onChange={onChange}/>;
+    }
+    return <select className={cx('qt-chip-val',classNames?.select)} value={value} onChange={e=>onChange(e.target.value)}><option value="">—</option>{strategy.options.map(o=>{const option=typeof o==='string'?{value:o,label:o}:o;return <option key={option.value} value={option.value}>{option.label}</option>})}</select>;
   }
 
   // Freeform → a plain input, no suggestions.

@@ -101,3 +101,20 @@ describe("useQueryTable security defaults", () => {
     unmount();
   });
 });
+
+it('canonicalizes before local evaluation and rejects the entire row/metric query while retaining repairable state', async () => {
+  const canonicalizeQuery = (q: QueryState): QueryState => ({...q,where:q.where.map(term => 'any' in term ? term : {...term,value:term.value==='old'?'live':term.value})});
+  const validateQuery = (q: QueryState) => { if(q.where.some(term => !('any' in term) && term.value==='deleted')) throw Error('unavailable value'); };
+  const {result,unmount}=renderHook(()=>useQueryTable({schema,clientRows:[{id:1,name:'live'}],canonicalizeQuery,validateQuery,debounceMs:0,initialQuery:{...EMPTY_QUERY,where:[{field:'name',op:'=',value:'old'}],aggregations:[{id:'count',op:'count',groupBy:[]}]}}));
+  await act(async()=>{await vi.runOnlyPendingTimersAsync()});
+  expect(result.current.query.where).toEqual([{field:'name',op:'=',value:'live'}]);
+  expect(result.current.rows).toHaveLength(1);
+  act(()=>result.current.setQuery(q=>({...q,where:[{field:'name',op:'=',value:'deleted',negated:true}]})));
+  await act(async()=>{await vi.runOnlyPendingTimersAsync()});
+  expect(result.current.error?.message).toBe('unavailable value');
+  expect(result.current.rows).toEqual([]);
+  expect(result.current.total).toBeNull();
+  expect(result.current.aggregations.error?.message).toBe('unavailable value');
+  expect(result.current.query.where).toEqual([{field:'name',op:'=',value:'deleted',negated:true}]);
+  unmount();
+});
