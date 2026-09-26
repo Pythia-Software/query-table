@@ -614,12 +614,16 @@ public struct QueryTableView: View {
     }.fixedSize(horizontal: false, vertical: true)
   }
   private var footer: some View {
+    let start = controller.query.offset + 1
+    let end = controller.query.offset + controller.rows.count
+    let summary = controller.rows.isEmpty
+      ? "0 of \(formatRowCount(controller.total)) rows"
+      : "\(formatRowCount(start))–\(formatRowCount(end)) of \(formatRowCount(controller.total)) rows"
+    let exactSummary = controller.rows.isEmpty
+      ? "0 of \(exactRowCount(controller.total)) rows"
+      : "\(exactRowCount(start))–\(exactRowCount(end)) of \(exactRowCount(controller.total)) rows"
     HStack {
-      Text(
-        controller.rows.isEmpty
-          ? "0 of \(controller.total) rows"
-          : "\(controller.query.offset + 1)–\(controller.query.offset + controller.rows.count) of \(controller.total) rows"
-      ).monospacedDigit()
+      Text(summary).monospacedDigit().help(summary == exactSummary ? summary : exactSummary)
       if !controller.selectedIDs.isEmpty {
         Text("· \(controller.selectedIDs.count) selected")
         Button("Clear selection") { controller.selectedIDs = [] }

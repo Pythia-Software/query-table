@@ -41,6 +41,7 @@ import type { QueryTableApi } from "@pythia-software/query-table-react";
 import type { QueryBuilderClassNames } from "./classNames";
 import { FieldPicker } from "./FieldPicker";
 import { SavedQueriesModal } from "./SavedQueriesModal";
+import { formatRowCount, rowCountTitle } from "./formatRowCount";
 
 export interface QueryBuilderProps<Row> {
   /** The controller; QueryBuilder drives it through the intent helpers. */
@@ -265,7 +266,12 @@ export function QueryBuilder<Row>({
   const autoRefreshButtonText = autoRefreshStatus
     ? `⟳ Auto-Update ${formatDuration(autoRefreshStatus.frequencyMs)}`
     : "⟳ Auto-Update";
-  const rowSummary = `${api.rows.length} of ${total ?? "?"}`;
+  const rowSummary = `${formatRowCount(api.rows.length)} of ${total == null ? "?" : formatRowCount(total)}`;
+  const rowSummaryTitle = [api.rows.length, ...(total == null ? [] : [total])]
+    .map((count) => rowCountTitle(count))
+    .some((title) => title != null)
+    ? `${api.rows.length.toLocaleString()} of ${total == null ? "?" : total.toLocaleString()}`
+    : undefined;
   const lastUpdatedText = formatStatusTime(lastUpdatedAt);
   const failureText = api.error
     ? `Error: ${api.error.message}`
@@ -643,7 +649,7 @@ export function QueryBuilder<Row>({
       ) : null}
 
       <div className="qt-qb-bar qt-qb-run-bar qt-qb-row">
-        <span className="qt-qb-run-metric qt-qb-run-metric--strong">{api.loading ? "loading…" : `${rowSummary} rows`}</span>
+        <span className="qt-qb-run-metric qt-qb-run-metric--strong" title={api.loading ? undefined : rowSummaryTitle}>{api.loading ? "loading…" : `${rowSummary} rows`}</span>
         <span className="qt-qb-run-metric">Last updated {lastUpdatedText}</span>
         {failureText ? <span className="qt-qb-run-error">{failureText}</span> : null}
         <span className="qt-qb-run-actions">

@@ -16,6 +16,7 @@ import { useColumnDrag, type SelectionApi, type ColumnDragApi } from "@pythia-so
 import { resolveRenderer, type RenderRegistry } from "./renderers";
 import type { TableClassNames } from "./classNames";
 import { CellMenu } from "./CellMenu";
+import { formatRowCount, rowCountTitle } from "./formatRowCount";
 
 export interface DataTableProps<Row> {
   /** Ordered visible fields (widths already resolved), from `api.visibleFields`. */
@@ -537,8 +538,17 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
   const canNext = total != null ? end < total : rows.length >= query.limit;
   const prevPage = () => onQueryChange((prev) => ({ ...prev, offset: Math.max(0, prev.offset - prev.limit) }));
   const nextPage = () => onQueryChange((prev) => ({ ...prev, offset: prev.offset + prev.limit }));
-  const summaryText =
-    total == null || total === 0 ? `${rows.length} rows` : `${start + 1}–${end} of ${total}`;
+  const summaryCounts = total == null || total === 0
+    ? [rows.length]
+    : [start + 1, end, total];
+  const summaryText = total == null || total === 0
+    ? `${formatRowCount(rows.length)} rows`
+    : `${formatRowCount(start + 1)}–${formatRowCount(end)} of ${formatRowCount(total)}`;
+  const summaryTitle = summaryCounts.some((count) => rowCountTitle(count) != null)
+    ? total == null || total === 0
+      ? `${rows.length.toLocaleString()} rows`
+      : `${(start + 1).toLocaleString()}–${end.toLocaleString()} of ${total.toLocaleString()}`
+    : undefined;
   const virtualRows = rowVirtualizer.getVirtualItems();
   const firstVirtualRow = virtualRows[0];
   const lastVirtualRow = virtualRows[virtualRows.length - 1];
@@ -823,7 +833,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                   >
                     ← prev
                   </button>
-                  <span className={cx("qt-table-summary-hint", classNames?.summaryHint)}>{summaryText}</span>
+                  <span className={cx("qt-table-summary-hint", classNames?.summaryHint)} title={summaryTitle}>{summaryText}</span>
                   <button
                     type="button"
                     className={cx("qt-btn", classNames?.summaryButton)}
