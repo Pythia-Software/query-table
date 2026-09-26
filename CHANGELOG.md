@@ -35,6 +35,7 @@ contain intentional API changes described in their release notes.
 
 ### Added
 
+- Format large row totals with grouped or compact counts and reveal exact totals on hover.
 - Native macOS Swift packages with an AppKit table, SwiftUI query builder,
   column layout, multi-sort, selection, saved queries, metrics, and query history.
 - Shared schema/query JSON contracts, compact query tokens, pluggable asynchronous
