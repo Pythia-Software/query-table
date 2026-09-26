@@ -43,7 +43,9 @@ struct MetricPanel: View {
       } else if axes.isEmpty {
         Text(display(metric.buckets[0].value)).font(.title.monospacedDigit()).textSelection(
           .enabled)
-        Text("\(metric.buckets[0].count) matching rows").font(.caption2).foregroundStyle(.secondary)
+        Text("\(formatRowCount(metric.buckets[0].count)) matching rows")
+          .font(.caption2).foregroundStyle(.secondary)
+          .help("\(exactRowCount(metric.buckets[0].count)) matching rows")
       } else if axes.count == 1 {
         bars
       } else if axes.count == 2 {
@@ -73,7 +75,8 @@ struct MetricPanel: View {
                   label(bucket.keys.first ?? nil))
                 Spacer()
                 Text(display(bucket.value)).monospacedDigit().bold()
-                Text("n=\(bucket.count)").foregroundStyle(.secondary)
+                Text("n=\(formatRowCount(bucket.count))").foregroundStyle(.secondary)
+                  .help(exactRowCount(bucket.count))
               }.font(.caption)
               if let value = number(bucket.value) {
                 GeometryReader { geometry in
@@ -134,7 +137,7 @@ struct MetricPanel: View {
                   Text(bucket.map { display($0.value) } ?? "—")
                     .monospacedDigit().frame(width: 90, alignment: .trailing).padding(5)
                     .background(bucket == nil ? Color.clear : Color.accentColor.opacity(0.06))
-                    .help(bucket.map { "\($0.count) matching rows" } ?? "No matching rows")
+                    .help(bucket.map { "\(exactRowCount($0.count)) matching rows" } ?? "No matching rows")
                 }
               }
               Divider()
@@ -173,8 +176,9 @@ struct MetricPanel: View {
                 }
                 Text(display(bucket.value)).monospacedDigit().frame(width: 90, alignment: .trailing)
                   .padding(5)
-                Text("\(bucket.count)").monospacedDigit().frame(width: 70, alignment: .trailing)
-                  .padding(5)
+                Text(formatRowCount(bucket.count)).monospacedDigit()
+                  .frame(width: 70, alignment: .trailing).padding(5)
+                  .help(exactRowCount(bucket.count))
               }
               Divider()
             }
