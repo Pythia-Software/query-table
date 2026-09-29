@@ -158,6 +158,8 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     // Offset row measurements so the virtual range matches the body's origin.
     scrollMargin: headerHeight,
     initialRect,
+    // Row refs measure during React's commit phase; schedule size updates normally.
+    useFlushSync: false,
   });
 
   useEffect(() => {
