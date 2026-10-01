@@ -1,6 +1,5 @@
 # query-table
 
-[![CI](https://github.com/Pythia-Software/query-table/actions/workflows/ci.yml/badge.svg)](https://github.com/Pythia-Software/query-table/actions/workflows/ci.yml)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 An opinionated, schema-driven data table for backend-filtered datasets.
