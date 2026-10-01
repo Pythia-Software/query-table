@@ -36,7 +36,7 @@
   "$defs": {
     "fieldType": { "enum": ["text", "number", "enum", "datetime", "bool", "textarray"] },
     "filterOp": {
-      "enum": ["=", "!=", ">", ">=", "<", "<=", "contains", "starts_with", "ends_with", "matches_regex", "not_matches_regex", "includes", "is_null", "is_not_null"]
+      "enum": ["=", "!=", ">", ">=", "<", "<=", "contains", "starts_with", "ends_with", "matches_regex", "not_matches_regex", "length_gt", "length_lt", "length_eq", "includes", "is_null", "is_not_null"]
     },
     "aggOp": {
       "enum": ["count", "count_distinct", "sum", "avg", "min", "max"]

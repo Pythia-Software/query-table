@@ -622,7 +622,7 @@ public struct QueryTableView: View {
     let exactSummary = controller.rows.isEmpty
       ? "0 of \(exactRowCount(controller.total)) rows"
       : "\(exactRowCount(start))–\(exactRowCount(end)) of \(exactRowCount(controller.total)) rows"
-    HStack {
+    return HStack {
       Text(summary).monospacedDigit().help(summary == exactSummary ? summary : exactSummary)
       if !controller.selectedIDs.isEmpty {
         Text("· \(controller.selectedIDs.count) selected")
@@ -712,17 +712,26 @@ private struct PredicateEditor: View {
         selection: Binding(
           get: { positiveOp(clause.op) },
           set: { op in
-            var next = WhereClause(field: clause.field, op: op, value: clause.value)
+            let wasLength = ["length_gt", "length_lt", "length_eq"].contains(clause.op)
+            let isLength = ["length_gt", "length_lt", "length_eq"].contains(op)
+            var next = WhereClause(
+              field: clause.field, op: op, value: wasLength == isLength ? clause.value : "")
             if isExcluded { next = QueryPredicateOperations.negate(next, allowedOps: allowedOps) }
             changed(next)
           })
       ) {
         ForEach(operatorChoices, id: \.self) {
-          Text($0.replacingOccurrences(of: "_", with: " ")).tag($0)
+          Text(
+            clause.value == "0" && $0 == "length_eq" ? "is empty string"
+              : clause.value == "0" && $0 == "length_gt" ? "is not empty string"
+              : $0.replacingOccurrences(of: "_", with: " ")
+          ).tag($0)
         }
       }.labelsHidden().frame(width: 140)
       if clause.op != "is_null" && clause.op != "is_not_null" {
-        if field?.filter?.values?.source == "static", let options = field?.filter?.values?.options {
+        if ["length_gt", "length_lt", "length_eq"].contains(clause.op) {
+          TextField("Length", text: binding(\.value)).textFieldStyle(.roundedBorder)
+        } else if field?.filter?.values?.source == "static", let options = field?.filter?.values?.options {
           let choices = Array(Set(options + (clause.value.isEmpty ? [] : [clause.value]))).sorted()
           Picker("Value", selection: binding(\.value)) {
             if !choices.contains("") { Text("Choose value").tag("") }
@@ -771,9 +780,10 @@ private struct PredicateEditor: View {
         .disabled(!QueryPredicateOperations.canNegate(clause, allowedOps: allowedOps))
         .help("Negate this predicate using its complementary operator")
     }
-    .task(id: clause.field + "\u{0}" + clause.value) {
+    .task(id: clause.field + "\u{0}" + clause.op + "\u{0}" + clause.value) {
       suggestions = []
       more = false
+      if ["length_gt", "length_lt", "length_eq"].contains(clause.op) { return }
       if field?.filter?.values?.source == "freeform" { return }
       if let options = field?.filter?.values?.options {
         suggestions = options.filter {

@@ -101,6 +101,28 @@ final class CoreTests: XCTestCase {
       query: ServerQuery(whereTerms: [.predicate(.init(field: "tags", op: "is_null"))]))
     XCTAssertEqual(empty.total, 2)
   }
+  func testLocalStringLengthFilters() async throws {
+    let adapter = LocalQueryTransport(schema: schema, rows: rows)
+    let longer = try await adapter.fetchRows(query: ServerQuery(whereTerms: [
+      .predicate(.init(field: "name", op: "length_gt", value: "4"))
+    ]))
+    XCTAssertEqual(longer.rows.map { $0["id"] }, [.number(1)])
+    let shorter = try await adapter.fetchRows(query: ServerQuery(whereTerms: [
+      .predicate(.init(field: "name", op: "length_lt", value: "5"))
+    ]))
+    XCTAssertEqual(shorter.rows.map { $0["id"] }, [.number(2)])
+    let withEmpty = LocalQueryTransport(schema: schema, rows: rows + [
+      ["id": .number(4), "name": .string("")]
+    ])
+    let negated = try await withEmpty.fetchRows(query: ServerQuery(whereTerms: [
+      .predicate(.init(field: "name", op: "length_gt", value: "5", negated: true))
+    ]))
+    XCTAssertEqual(negated.rows.map { $0["id"] }, [.number(1), .number(2)])
+    let emptyOnly = try await withEmpty.fetchRows(query: ServerQuery(whereTerms: [
+      .predicate(.init(field: "name", op: "length_eq", value: "0"))
+    ]))
+    XCTAssertEqual(emptyOnly.rows.map { $0["id"] }, [.number(4)])
+  }
   func testMetricsUseEntireFilteredSet() async throws {
     let adapter = LocalQueryTransport(schema: schema, rows: rows)
     let q = QueryState(limit: 1, aggregations: [.init(id: "total", op: "sum", field: "amount")])

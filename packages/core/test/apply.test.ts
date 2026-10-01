@@ -32,6 +32,23 @@ describe("applyQuery — filtering", () => {
     expect(r.rows.map((x) => x.id)).toEqual([2]); // only "bravo" contains "ra"
   });
 
+  it("filters text above or below a character length", () => {
+    const over = (value: string) => applyQuery(rows, base({ where: [{ field: "case_name", op: "length_gt", value }] }), runsSchema).rows.map((r) => r.id);
+    const under = (value: string) => applyQuery(rows, base({ where: [{ field: "case_name", op: "length_lt", value }] }), runsSchema).rows.map((r) => r.id);
+    expect(over("5")).toEqual([3]);
+    expect(under("5")).toEqual([]);
+    expect(under("6")).toEqual([1, 2, 4]);
+    expect(over("bad")).toEqual([]);
+    expect(under("-1")).toEqual([]);
+    expect(over("5.5")).toEqual([]);
+    expect(applyQuery([{ ...rows[0]!, case_name: "😀a" }], base({ where: [{ field: "case_name", op: "length_gt", value: "1" }] }), runsSchema).total).toBe(1);
+    const withEmpty = [...rows, { ...rows[0]!, id: 5, case_name: "" }, { ...rows[0]!, id: 6, case_name: null }];
+    const matching = (op: "length_eq" | "length_gt", value: string) =>
+      applyQuery(withEmpty, base({ where: [{ field: "case_name", op, value }] }), runsSchema).rows.map((r) => r.id);
+    expect(matching("length_eq", "0")).toEqual([5]);
+    expect(matching("length_gt", "0")).toEqual([1, 2, 3, 4]);
+  });
+
   it("matches and rejects a regular expression on text", () => {
     const matching = applyQuery(
       rows,

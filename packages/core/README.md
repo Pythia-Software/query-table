@@ -44,6 +44,11 @@ Text filters include `matches_regex` / `not_matches_regex`. An order term may
 set `extract: { regex: "..." }` to compare the first capture group (or the whole
 match when there is no capture group); non-matches sort as nulls.
 
+Text fields also support `length_gt`, `length_lt`, and `length_eq` with a
+non-negative integer value. Length counts Unicode code points. `length_eq` with
+`"0"` matches empty strings but excludes NULL; `length_gt` with `"0"` matches
+nonempty strings.
+
 See the [repository README](https://github.com/Pythia-Software/query-table#readme)
 for the complete schema and backend documentation.
 

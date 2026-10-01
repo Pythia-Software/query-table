@@ -155,7 +155,7 @@ public struct FieldDefinition: Codable, Equatable, Sendable, Identifiable {
     case "bool", "enum": ops = ["=", "!="]
     default:
       ops = [
-        "=", "!=", "contains", "starts_with", "ends_with", "matches_regex", "not_matches_regex",
+        "=", "!=", "contains", "starts_with", "ends_with", "length_gt", "length_lt", "length_eq", "matches_regex", "not_matches_regex",
       ]
     }
     return ops + ["is_null", "is_not_null"]

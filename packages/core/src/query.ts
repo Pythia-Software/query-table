@@ -26,6 +26,9 @@ export type FilterOp =
   | "ends_with"
   | "matches_regex"
   | "not_matches_regex"
+  | "length_gt"
+  | "length_lt"
+  | "length_eq"
   // array (textarray) containment
   | "includes"
   // nullity — valid for EVERY type; for arrays, "empty" vs "non-empty"
@@ -190,6 +193,9 @@ const FILTER_OPS: ReadonlySet<string> = new Set([
   "ends_with",
   "matches_regex",
   "not_matches_regex",
+  "length_gt",
+  "length_lt",
+  "length_eq",
   "includes",
   "is_null",
   "is_not_null",

@@ -126,6 +126,18 @@ public struct LocalQueryTransport: QueryTransport {
     if clause.value.isEmpty && !["=", "!=", "is_null", "is_not_null"].contains(clause.op) {
       return true
     }
+    if clause.op == "length_gt" || clause.op == "length_lt" || clause.op == "length_eq" {
+      guard !clause.value.isEmpty,
+        clause.value.utf8.allSatisfy({ $0 >= 48 && $0 <= 57 }),
+        (clause.value == "0" || !clause.value.hasPrefix("0")),
+        let limit = Int(clause.value), limit >= 0, limit <= 9_007_199_254_740_991,
+        case .string(let text) = value
+      else { return false }
+      let result = clause.op == "length_gt"
+        ? text.unicodeScalars.count > limit
+        : clause.op == "length_lt" ? text.unicodeScalars.count < limit : text.unicodeScalars.count == limit
+      return clause.negated == true ? (!empty && !result) : result
+    }
     if clause.op == "is_null" { return clause.negated == true ? false : empty }
     if clause.op == "is_not_null" { return clause.negated == true ? false : !empty }
     if value == .null || (clause.negated == true && empty) { return false }

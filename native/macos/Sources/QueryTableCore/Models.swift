@@ -220,7 +220,7 @@ public struct QueryState: Codable, Equatable, Sendable {
   }
   public static let filterOps = [
     "=", "!=", ">", ">=", "<", "<=", "contains", "starts_with", "ends_with", "matches_regex",
-    "not_matches_regex", "includes", "is_null", "is_not_null",
+    "not_matches_regex", "length_gt", "length_lt", "length_eq", "includes", "is_null", "is_not_null",
   ]
   public func encodedToken() throws -> String {
     let q = normalized()

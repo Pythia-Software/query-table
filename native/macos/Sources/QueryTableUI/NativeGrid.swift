@@ -177,6 +177,15 @@ struct NativeGrid: NSViewRepresentable {
         if value == .null || value == .array([]) {
           filterAction("Filter to empty / NULL", value: "", op: "is_null")
           filterAction("Exclude empty / NULL", value: "", op: "is_not_null")
+        } else if value == .string("") && field.type == "text" {
+          filterAction("Include empty strings", value: "0", op: "length_eq")
+          if allowed.contains("length_gt") {
+            filterAction("Exclude empty strings", value: "0", op: "length_gt")
+          } else {
+            filterAction("Exclude empty strings", value: "0", op: "length_eq", negated: true)
+          }
+          filterAction("Filter to empty / NULL", value: "", op: "is_null")
+          filterAction("Exclude empty / NULL", value: "", op: "is_not_null")
         } else if case .array(let values) = value {
           for item in values {
             filterAction(

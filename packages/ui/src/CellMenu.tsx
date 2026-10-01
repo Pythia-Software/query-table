@@ -60,7 +60,7 @@ export function CellMenu<Row>({ field, value, x, y, onAddFilter, onClose, classN
   const pairs = isFilterable(field) ? opPairsForField(field) : [];
   const hasNullity = pairs.some((p) => p.keep.op === "is_null");
   const isArray = Array.isArray(value);
-  const isNullish = value == null || value === "" || (isArray && (value as unknown[]).length === 0);
+  const isNullish = value == null || (isArray && (value as unknown[]).length === 0);
   const cellText = valueToString(value);
 
   function applyClause(clause: WhereClause) {
@@ -80,9 +80,24 @@ export function CellMenu<Row>({ field, value, x, y, onAddFilter, onClose, classN
     const arrayOp: FilterOp = pairs.find((p) => p.keep.op === "includes")?.keep.op ?? pairs[0]?.keep.op ?? "=";
     (value as unknown[]).forEach((el) => pairRow(arrayOp, String(el)));
     if (hasNullity) pairRow("is_null", cellText);
+  } else if (value === "" && field.type === "text") {
+    if (ops.includes("length_eq")) {
+      rows.push({
+        positive: { field: field.name, op: "length_eq", value: "0" },
+        negative: ops.includes("length_gt")
+          ? { field: field.name, op: "length_gt", value: "0" }
+          : { field: field.name, op: "length_eq", value: "0", negated: true },
+      });
+    }
+    if (hasNullity) pairRow("is_null", cellText);
+  } else if (value === "") {
+    if (hasNullity) pairRow("is_null", cellText);
   } else if (!isNullish) {
     // Every keep op (value ops + nullity) prefilled with the cell value.
-    for (const pair of pairs) pairRow(pair.keep.op, cellText);
+    for (const pair of pairs) {
+      const op = pair.keep.op;
+      pairRow(op, op === "length_gt" || op === "length_lt" || op === "length_eq" ? String(Array.from(cellText).length) : cellText);
+    }
   } else if (hasNullity) {
     // Empty cell → only the nullity row makes sense.
     pairRow("is_null", cellText);
@@ -167,7 +182,9 @@ function FilterButton({
   onApply: (clause: WhereClause) => void;
 }): ReactNode {
   if (!clause) return <span className="qt-cm-filter-empty" aria-hidden />;
-  const nullary = NULLARY_OPS.has(clause.op);
+  const emptyStringLength = clause.value === "0" &&
+    (clause.op === "length_eq" || clause.op === "length_gt");
+  const nullary = NULLARY_OPS.has(clause.op) || emptyStringLength;
   return (
     <button
       type="button"
@@ -204,6 +221,12 @@ function MenuItem({
 
 /** Human-readable label for a predicate, honoring the `negated` flag. */
 function predicateSymbol(clause: WhereClause): string {
+  if (clause.value === "0" && clause.op === "length_eq") {
+    return clause.negated ? "exclude empty strings" : "include empty strings";
+  }
+  if (clause.value === "0" && clause.op === "length_gt" && !clause.negated) {
+    return "exclude empty strings";
+  }
   const base = opSymbol(clause.op);
   return clause.negated ? `not ${base}` : base;
 }
@@ -224,6 +247,12 @@ function opSymbol(op: FilterOp): string {
       return "matches";
     case "not_matches_regex":
       return "not matches";
+    case "length_eq":
+      return "length equals";
+    case "length_gt":
+      return "length above";
+    case "length_lt":
+      return "length below";
     case "is_null":
       return "is null";
     case "is_not_null":
