@@ -37,6 +37,12 @@ const COMPLEMENT_OP: Partial<Record<FilterOp, FilterOp>> = {
  *  could disable it, and the server would reject a disabled op). `allowedOps`,
  *  when given, is the field's effective operator set from `opsForField`. */
 export function negateClause(clause: WhereClause, allowedOps?: readonly FilterOp[]): WhereClause {
+  if (clause.value === "0" && !clause.negated) {
+    const zeroComplement = clause.op === "length_gt" ? "length_eq" : clause.op === "length_eq" ? "length_gt" : null;
+    if (zeroComplement && (!allowedOps || allowedOps.includes(zeroComplement))) {
+      return { field: clause.field, op: zeroComplement, value: "0" };
+    }
+  }
   const complement = COMPLEMENT_OP[clause.op];
   if (complement && (!allowedOps || allowedOps.includes(complement))) {
     const next: WhereClause = { field: clause.field, op: complement, value: clause.value };
@@ -72,7 +78,7 @@ export interface OpPair {
 /** Positive operators surfaced in the "keep" column, in display order. Each
  *  one's negation lands opposite via `negateClause`, so the pair covers
  *  `<`/`<=`/`!=`/`not_matches_regex` without listing them separately. */
-const POSITIVE_OP_ORDER: FilterOp[] = ["=", ">", ">=", "contains", "starts_with", "ends_with", "matches_regex", "includes"];
+const POSITIVE_OP_ORDER: FilterOp[] = ["=", ">", ">=", "contains", "starts_with", "ends_with", "length_gt", "length_lt", "length_eq", "matches_regex", "includes"];
 
 /** The keep/exclude operator pairs offered for a field: each positive op with
  *  its negation opposite, then a nullity row (`is null`/`is not null`) when the
@@ -103,6 +109,9 @@ export const OPS_BY_TYPE: Record<FieldType, FilterOp[]> = {
     "ends_with",
     "matches_regex",
     "not_matches_regex",
+    "length_gt",
+    "length_lt",
+    "length_eq",
     ...NULLITY,
   ],
   enum: ["=", "!=", ...NULLITY],

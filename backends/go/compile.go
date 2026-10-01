@@ -365,6 +365,18 @@ func compileWhere(spec FieldSpec, op, value string, idx int) (string, []any, int
 		return fmt.Sprintf("POSITION(LOWER($%d) IN LOWER(%s)) = 1", idx, spec.Expr), []any{value}, idx + 1, nil
 	case "ends_with":
 		return fmt.Sprintf("RIGHT(LOWER(%s), LENGTH($%d)) = LOWER($%d)", spec.Expr, idx, idx), []any{value}, idx + 1, nil
+	case "length_gt", "length_lt", "length_eq":
+		limit, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || limit < 0 || limit > 9007199254740991 || strings.HasPrefix(value, "+") || (len(value) > 1 && value[0] == '0') {
+			return "", nil, idx, fmt.Errorf("invalid string length %q: expected a non-negative integer", value)
+		}
+		comparison := ">"
+		if op == "length_lt" {
+			comparison = "<"
+		} else if op == "length_eq" {
+			comparison = "="
+		}
+		return fmt.Sprintf("CHAR_LENGTH(%s) %s $%d::bigint", spec.Expr, comparison, idx), []any{limit}, idx + 1, nil
 	case "matches_regex":
 		return fmt.Sprintf("(%s)::text ~ $%d", spec.Expr, idx), []any{value}, idx + 1, nil
 	case "not_matches_regex":
@@ -403,7 +415,7 @@ func opAllowed(kind FieldKind, op string) bool {
 	switch kind {
 	case FieldText:
 		switch op {
-		case "=", "!=", "contains", "starts_with", "ends_with", "matches_regex", "not_matches_regex":
+		case "=", "!=", "contains", "starts_with", "ends_with", "matches_regex", "not_matches_regex", "length_gt", "length_lt", "length_eq":
 			return true
 		}
 	case FieldEnum:

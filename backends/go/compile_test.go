@@ -99,6 +99,39 @@ func TestCompile_opMatrix(t *testing.T) {
 	}
 }
 
+func TestCompile_stringLength(t *testing.T) {
+	s := mustSchema(t)
+	q := WireQuery{Where: []WhereTerm{
+		{Field: "case_name", Op: "length_gt", Value: "5"},
+		{Field: "case_name", Op: "length_lt", Value: "10"},
+		{Field: "case_name", Op: "length_eq", Value: "0"},
+	}}
+	res, next, err := Compile(q, s, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.WhereSQL != "(CHAR_LENGTH(r.case_name) > $2::bigint) AND (CHAR_LENGTH(r.case_name) < $3::bigint) AND (CHAR_LENGTH(r.case_name) = $4::bigint)" {
+		t.Errorf("unexpected SQL: %s", res.WhereSQL)
+	}
+	if !reflect.DeepEqual(res.Args, []any{int64(5), int64(10), int64(0)}) || next != 5 {
+		t.Errorf("args = %#v, next = %d", res.Args, next)
+	}
+	large, _, err := Compile(WireQuery{Where: []WhereTerm{{Field: "case_name", Op: "length_lt", Value: "3000000000"}}}, s, 1)
+	if err != nil || large.WhereSQL != "(CHAR_LENGTH(r.case_name) < $1::bigint)" || !reflect.DeepEqual(large.Args, []any{int64(3000000000)}) {
+		t.Errorf("large length: result = %#v, err = %v", large, err)
+	}
+	for _, value := range []string{"-1", "1.5", "abc", "01"} {
+		_, _, err := Compile(WireQuery{Where: []WhereTerm{{Field: "case_name", Op: "length_gt", Value: value}}}, s, 1)
+		if err == nil {
+			t.Errorf("accepted invalid length %q", value)
+		}
+	}
+	_, _, err = Compile(WireQuery{Where: []WhereTerm{{Field: "overall", Op: "length_gt", Value: "2"}}}, s, 1)
+	if err == nil {
+		t.Error("length comparison should be text-only")
+	}
+}
+
 func TestCompile_enforcesPerFieldOperatorOverride(t *testing.T) {
 	s := mustSchema(t)
 	_, _, err := Compile(WireQuery{Where: []WhereTerm{{

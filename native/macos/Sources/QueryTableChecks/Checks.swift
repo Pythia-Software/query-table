@@ -97,6 +97,42 @@ struct QueryTableChecks {
     try check(
       negated.rows.count == 1 && negated.rows[0]["id"] == .number(1),
       "Negation excludes NULL values")
+    let longerNames = try await local.fetchRows(query: .init(whereTerms: [
+      .predicate(.init(field: "name", op: "length_gt", value: "4"))
+    ]))
+    let shorterNames = try await local.fetchRows(query: .init(whereTerms: [
+      .predicate(.init(field: "name", op: "length_lt", value: "5"))
+    ]))
+    try check(
+      longerNames.total == 2 && shorterNames.rows.map { $0["id"] } == [.number(2)],
+      "String length filters use strict comparisons")
+    let namesWithEmpty = LocalQueryTransport(
+      schema: schema,
+      rows: rows + [
+        ["id": .number(4), "name": .string("")],
+        ["id": .number(5), "name": .null],
+      ])
+    let negatedLength = try await namesWithEmpty.fetchRows(query: .init(whereTerms: [
+      .predicate(.init(field: "name", op: "length_gt", value: "5", negated: true))
+    ]))
+    try check(
+      negatedLength.rows.map { $0["id"] } == [.number(1), .number(2), .number(3)],
+      "Negated string length filters exclude empty and NULL values")
+    let emptyOnly = try await namesWithEmpty.fetchRows(query: .init(whereTerms: [
+      .predicate(.init(field: "name", op: "length_eq", value: "0"))
+    ]))
+    let nonemptyOnly = try await namesWithEmpty.fetchRows(query: .init(whereTerms: [
+      .predicate(.init(field: "name", op: "length_gt", value: "0"))
+    ]))
+    try check(
+      emptyOnly.rows.map { $0["id"] } == [.number(4)] && nonemptyOnly.total == 3,
+      "Zero-length filters distinguish empty strings from NULL")
+    let nonemptyClause = WhereClause(field: "name", op: "length_gt", value: "0")
+    try check(
+      QueryPredicateOperations.negate(
+        nonemptyClause, allowedOps: ["length_gt", "length_eq"])
+        == WhereClause(field: "name", op: "length_eq", value: "0"),
+      "Zero-length negation chooses the empty-string filter")
     let suggestions = try await local.fetchDistinctValues(
       query: .init(field: "status", search: "pa"))
     try check(suggestions.values == ["PASS"], "Autocomplete searches distinct values")

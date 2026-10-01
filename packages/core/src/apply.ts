@@ -250,6 +250,10 @@ function matchesWith<Row>(byName: Map<string, FieldDef<Row>>, row: Row, prepared
     return true;
   }
 
+  if (clause.op === "length_gt" || clause.op === "length_lt" || clause.op === "length_eq") {
+    if (!/^(0|[1-9]\d*)$/.test(clause.value) || !Number.isSafeInteger(Number(clause.value))) return false;
+  }
+
   const base = matchesBase(field, v, prepared);
   if (!clause.negated) return base;
   // Null-exclusive NOT: a NULL/empty value satisfies neither the predicate nor
@@ -284,6 +288,14 @@ function matchesBase<Row>(field: FieldDef<Row>, v: unknown, prepared: PreparedWh
     if (!regex) return false;
     const matches = regex.test(String(v));
     return clause.op === "matches_regex" ? matches : !matches;
+  }
+
+  if (clause.op === "length_gt" || clause.op === "length_lt" || clause.op === "length_eq") {
+    if (typeof v !== "string" || !/^(0|[1-9]\d*)$/.test(clause.value)) return false;
+    const limit = Number(clause.value);
+    if (!Number.isSafeInteger(limit)) return false;
+    const length = Array.from(v).length;
+    return clause.op === "length_gt" ? length > limit : clause.op === "length_lt" ? length < limit : length === limit;
   }
 
   if (Array.isArray(v)) {

@@ -45,7 +45,11 @@ describe("ops matrix — nullity on every type, incl. bool", () => {
   it("offers positive and negative regex matching for text", () => {
     expect(OPS_BY_TYPE.text).toContain("matches_regex");
     expect(OPS_BY_TYPE.text).toContain("not_matches_regex");
+    expect(OPS_BY_TYPE.text).toContain("length_gt");
+    expect(OPS_BY_TYPE.text).toContain("length_lt");
+    expect(OPS_BY_TYPE.text).toContain("length_eq");
     expect(OPS_BY_TYPE.enum).not.toContain("matches_regex");
+    expect(OPS_BY_TYPE.enum).not.toContain("length_gt");
   });
 });
 

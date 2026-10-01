@@ -15,6 +15,15 @@ public enum QueryPredicateOperations {
   /// use the backend's null-exclusive negation flag.
   public static func negate(_ clause: WhereClause, allowedOps: [String]? = nil) -> WhereClause {
     var next = clause
+    if clause.value == "0" && clause.negated != true {
+      let zeroComplement = clause.op == "length_gt" ? "length_eq"
+        : clause.op == "length_eq" ? "length_gt" : nil
+      if let zeroComplement, allowedOps?.contains(zeroComplement) != false {
+        next.op = zeroComplement
+        next.negated = nil
+        return next
+      }
+    }
     if let complement = complements[clause.op], allowedOps?.contains(complement) != false {
       next.op = complement
       next.negated = nil

@@ -36,7 +36,7 @@ describe("negateClause", () => {
   });
 
   it("toggles the negated flag for ops with no complement", () => {
-    for (const op of ["contains", "starts_with", "ends_with", "includes"] as const) {
+    for (const op of ["contains", "starts_with", "ends_with", "length_gt", "length_lt", "length_eq", "includes"] as const) {
       const once = negateClause({ field: "f", op, value: "v" });
       expect(once).toEqual({ field: "f", op, value: "v", negated: true });
       // Involution: negating twice returns to the positive predicate.
@@ -48,6 +48,12 @@ describe("negateClause", () => {
     // A field whose allowlist lacks `<` must not be negated into a disabled op.
     const out = negateClause({ field: "f", op: ">=", value: "1" }, ["=", ">="]);
     expect(out).toEqual({ field: "f", op: ">=", value: "1", negated: true });
+  });
+
+  it("uses the opposite zero-length filter for empty strings", () => {
+    const nonempty: WhereClause = { field: "name", op: "length_gt", value: "0" };
+    expect(negateClause(nonempty, ["length_gt", "length_eq"])).toEqual({ field: "name", op: "length_eq", value: "0" });
+    expect(negateClause({ field: "name", op: "length_eq", value: "0" }, ["length_gt", "length_eq"])).toEqual(nonempty);
   });
 
   it("classifies negative predicates for the two-column CellMenu", () => {
@@ -70,6 +76,12 @@ describe("applyQuery — negated predicates (null-exclusive)", () => {
   it("negated `contains` is the complement over present values", () => {
     // case_name: alpha, bravo, charlie, delta — only alpha contains "ph".
     expect(ids(base({ where: [{ field: "case_name", op: "contains", value: "ph", negated: true }] }))).toEqual([2, 3, 4]);
+  });
+
+  it("negates a length comparison without matching null values", () => {
+    const withNull = [...rows, { ...rows[0]!, id: 5, case_name: null }];
+    const result = applyQuery(withNull, base({ where: [{ field: "case_name", op: "length_gt", value: "5", negated: true }] }), runsSchema);
+    expect(result.rows.map((r) => r.id)).toEqual([1, 2, 4]);
   });
 
   it("a negated flag on a value op behaves like NOT over non-null rows", () => {

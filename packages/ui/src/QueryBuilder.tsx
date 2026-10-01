@@ -30,6 +30,7 @@ import {
   isMeasurable,
   isOrGroup,
   opPairsForField,
+  negateClause,
   predicatesOf,
   queriesEqual,
   isFilterable,
@@ -151,6 +152,10 @@ function positiveOpsForField<Row>(field: FieldDef<Row>): FilterOp[] {
 
 function predicateAsText<Row>(clause: WhereClause, byName: Map<string, FieldDef<Row>>): string {
   const field = byName.get(clause.field)?.label ?? clause.field;
+  if (clause.value === "0" && clause.op === "length_eq") {
+    return `${field} is ${clause.negated ? "not " : ""}empty string`;
+  }
+  if (clause.value === "0" && clause.op === "length_gt" && !clause.negated) return `${field} is not empty string`;
   const op = clause.op.replace(/_/g, " ");
   const not = clause.negated ? "not " : "";
   if (NULLARY_OPS.has(clause.op)) return `${field} ${not}${op}`;
@@ -1172,12 +1177,17 @@ const OP_LABEL: Record<FilterOp, string> = {
   ends_with: "ends with",
   matches_regex: "matches",
   not_matches_regex: "not matches",
+  length_gt: "length above",
+  length_lt: "length below",
+  length_eq: "length equals",
   includes: "includes",
   is_null: "is null",
   is_not_null: "is not null",
 };
 
-function choiceLabel(op: FilterOp, negated: boolean): string {
+function choiceLabel(op: FilterOp, negated: boolean, value?: string): string {
+  if (value === "0" && op === "length_eq") return negated ? "is not empty string" : "is empty string";
+  if (value === "0" && op === "length_gt") return negated ? "is empty string" : "is not empty string";
   return negated ? `not ${OP_LABEL[op]}` : OP_LABEL[op];
 }
 
@@ -1219,8 +1229,15 @@ function OpPicker<Row>({
   }, [open]);
 
   const pairs = useMemo(() => (field ? opPairsForField(field) : []), [field]);
-  const isActive = (choice: OpChoice) =>
-    choice.op === clause.op && Boolean(choice.negated) === Boolean(clause.negated);
+  const visiblePairs = clause.value === "0" && pairs.some((pair) => pair.keep.op === "length_gt")
+    ? pairs.filter((pair) => pair.keep.op !== "length_eq")
+    : pairs;
+  const isActive = (choice: OpChoice) => {
+    const resolved = choice.negated
+      ? negateClause({ field: clause.field, op: choice.op, value: clause.value }, field ? opsForField(field) : undefined)
+      : { op: choice.op, negated: false };
+    return resolved.op === clause.op && Boolean(resolved.negated) === Boolean(clause.negated);
+  };
 
   return (
     <span className="qt-op-picker" ref={wrapRef}>
@@ -1232,16 +1249,16 @@ function OpPicker<Row>({
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
       >
-        {choiceLabel(clause.op, Boolean(clause.negated))}
+        {choiceLabel(clause.op, Boolean(clause.negated), clause.value)}
         <span className="qt-op-caret" aria-hidden>
           ▾
         </span>
       </button>
-      {open && pairs.length > 0 && (
+      {open && visiblePairs.length > 0 && (
         <span className="qt-op-pop" role="dialog" aria-label="Choose condition">
           <span className="qt-cm-col-head">keep</span>
           <span className="qt-cm-col-head qt-cm-col-head--neg">exclude</span>
-          {pairs.map((pair, i) => (
+          {visiblePairs.map((pair, i) => (
             <Fragment key={i}>
               <button
                 type="button"
@@ -1251,7 +1268,7 @@ function OpPicker<Row>({
                   setOpen(false);
                 }}
               >
-                {choiceLabel(pair.keep.op, pair.keep.negated)}
+                {choiceLabel(pair.keep.op, pair.keep.negated, clause.value)}
               </button>
               <button
                 type="button"
@@ -1261,7 +1278,7 @@ function OpPicker<Row>({
                   setOpen(false);
                 }}
               >
-                {choiceLabel(pair.exclude.op, pair.exclude.negated)}
+                {choiceLabel(pair.exclude.op, pair.exclude.negated, clause.value)}
               </button>
             </Fragment>
           ))}
@@ -1293,12 +1310,13 @@ function PredicateEditor<Row>({
 }) {
   const needsValue = !NULLARY_OPS.has(clause.op);
   const isRegex = clause.op === "matches_regex" || clause.op === "not_matches_regex";
+  const isLength = clause.op === "length_gt" || clause.op === "length_lt" || clause.op === "length_eq";
 
   function pickOp(choice: OpChoice) {
-    // Keep the captured value; a nullary op just hides its input.
-    const next: WhereClause = { field: clause.field, op: choice.op, value: clause.value };
-    if (choice.negated) next.negated = true;
-    onChange(next);
+    const nextIsLength = choice.op === "length_gt" || choice.op === "length_lt" || choice.op === "length_eq";
+    const value = isLength === nextIsLength ? clause.value : "";
+    const next: WhereClause = { field: clause.field, op: choice.op, value };
+    onChange(choice.negated ? negateClause(next, field ? opsForField(field) : undefined) : next);
   }
 
   return (
@@ -1310,8 +1328,9 @@ function PredicateEditor<Row>({
           api={api}
           field={field}
           value={clause.value}
-          forceFreeform={isRegex}
-          placeholder={isRegex ? "regex" : "value"}
+          forceFreeform={isRegex || isLength}
+          numeric={isLength}
+          placeholder={isRegex ? "regex" : isLength ? "length" : "value"}
           classNames={classNames}
           onChange={(v) => onChange({ ...clause, value: v })}
         />
@@ -1330,6 +1349,7 @@ function ValueInput<Row>({
   field,
   value,
   forceFreeform,
+  numeric,
   placeholder = "value",
   classNames,
   onChange,
@@ -1338,6 +1358,7 @@ function ValueInput<Row>({
   field: FieldDef<Row> | undefined;
   value: string;
   forceFreeform?: boolean;
+  numeric?: boolean;
   placeholder?: string;
   classNames: QueryBuilderClassNames | undefined;
   onChange: (v: string) => void;
@@ -1361,6 +1382,8 @@ function ValueInput<Row>({
         className={cx("qt-chip-val", classNames?.input)}
         value={value}
         placeholder={placeholder}
+        inputMode={numeric ? "numeric" : undefined}
+        pattern={numeric ? "[0-9]*" : undefined}
         size={widthChars}
         style={{ width: `${widthChars}ch` }}
         onChange={(e) => onChange(e.target.value)}

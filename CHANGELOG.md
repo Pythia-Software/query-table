@@ -35,6 +35,9 @@ contain intentional API changes described in their release notes.
 
 ### Added
 
+- Add text length filters (`length_gt`, `length_lt`, and `length_eq`) across the
+  query builder, local and PostgreSQL execution, and native macOS. Zero-length
+  filters distinguish empty strings from NULL and offer direct cell-menu actions.
 - Format large row totals with grouped or compact counts and reveal exact totals on hover.
 - Native macOS Swift packages with an AppKit table, SwiftUI query builder,
   column layout, multi-sort, selection, saved queries, metrics, and query history.
