@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Tag each release for the Go module as `backends/go/v<version>` so `go get`
+  and pkg.go.dev resolve semantic versions instead of pseudo-versions.
+
 ## 0.5.0 — 2026-10-06
 
 ### Added

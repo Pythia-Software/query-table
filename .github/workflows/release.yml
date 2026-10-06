@@ -1,4 +1,4 @@
-name: Release npm packages
+name: Release
 
 on:
   push:
@@ -10,7 +10,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: npm-release
+  group: release
   cancel-in-progress: false
 
 jobs:
@@ -60,3 +60,39 @@ jobs:
           publish_workspace "@pythia-software/query-table-react"
           publish_workspace "@pythia-software/query-table-ui"
           publish_workspace "@pythia-software/query-table-codegen"
+
+  tag-go-module:
+    name: Tag Go module
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # The Go module lives in backends/go, so the Go toolchain only recognizes
+      # tags carrying that prefix. The root v* tag alone yields pseudo-versions.
+      - name: Create backends/go tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GO_TAG: backends/go/${{ github.ref_name }}
+        run: |
+          existing="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${GO_TAG}" --jq '.object.type + " " + .object.sha' 2>/dev/null || true)"
+          if [ "${existing%% *}" = "tag" ]; then
+            existing="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${existing#* }" --jq .object.sha)"
+          else
+            existing="${existing#* }"
+          fi
+          if [ -z "${existing}" ]; then
+            gh api "repos/${GITHUB_REPOSITORY}/git/refs" -f "ref=refs/tags/${GO_TAG}" -f "sha=${GITHUB_SHA}" >/dev/null
+            echo "Created ${GO_TAG} at ${GITHUB_SHA}."
+          elif [ "${existing}" = "${GITHUB_SHA}" ]; then
+            echo "${GO_TAG} already points at ${GITHUB_SHA}; skipping."
+          else
+            echo "::error::${GO_TAG} already points at ${existing}, not ${GITHUB_SHA}."
+            exit 1
+          fi
+      - name: Ask the Go module proxy to index the version
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: |
+          curl --fail --silent --show-error --retry 5 --retry-delay 10 --retry-all-errors \
+            "https://proxy.golang.org/github.com/!pythia-!software/query-table/backends/go/@v/${RELEASE_VERSION}.info"
