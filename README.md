@@ -1,4 +1,4 @@
-# query-table
+# <img src="assets/brand/query-table-icon.svg" width="48" height="48" alt=""> query-table
 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
