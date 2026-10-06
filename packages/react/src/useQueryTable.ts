@@ -230,7 +230,9 @@ function defaultsFor<Row>(schema: FieldSchema<Row>): QueryState {
 }
 
 function cloneWhereTerm(term: WhereTerm): WhereTerm {
-  return isOrGroup(term) ? { any: term.any.map((c) => ({ ...c })) } : { ...term };
+  const copy = isOrGroup(term) ? { ...term, any: term.any.map((c) => ({ ...c })) } : { ...term };
+  if (term.setFilter) copy.setFilter = { ...term.setFilter, values: [...term.setFilter.values] };
+  return copy;
 }
 
 function cloneQueryState(q: QueryState): QueryState {

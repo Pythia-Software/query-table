@@ -17,6 +17,7 @@
 // object (pre-multi-sort) and `c`/`s` as a string[] (pre-width).
 
 import { EMPTY_QUERY, MAX_QUERY_TOKEN_LENGTH, normalizeQueryState, predicatesOf } from "./query";
+import { stripSetFilter } from "./setFilter";
 import type { QueryState, WhereTerm, OrderByClause, SelectColumn, AggregationClause } from "./query";
 import type { FieldSchema, FieldDef } from "./schema";
 import { indexFields, isFilterable, isPushdownFilter, isSortable, resolveFieldName, selectedFields } from "./schema";
@@ -137,7 +138,7 @@ export function toServerQuery<Row>(q: QueryState, schema: FieldSchema<Row>): Ser
   const byName = indexFields(schema);
   const resolveField = (name: string) => resolveFieldName(schema, name) ?? name;
 
-  const where = q.where.filter((term) => termIsPushdown(term, byName, resolveField));
+  const where = q.where.filter((term) => termIsPushdown(term, byName, resolveField)).map(stripSetFilter);
 
   const orderBy: OrderByClause[] = [];
   for (const term of q.orderBy) {
@@ -235,7 +236,7 @@ export function toAggregationQuery<Row>(q: QueryState, schema: FieldSchema<Row>)
   const byName = indexFields(schema);
   const resolveField = (name: string) => resolveFieldName(schema, name) ?? name;
 
-  const where = q.where.filter((term) => termIsPushdown(term, byName, resolveField));
+  const where = q.where.filter((term) => termIsPushdown(term, byName, resolveField)).map(stripSetFilter);
 
   const isBackend = (name: string | undefined): boolean => {
     if (name == null) return true; // omitted measure (count(*)) is fine

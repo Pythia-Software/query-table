@@ -51,6 +51,16 @@ export interface WhereClause {
   op: FilterOp;
   value: string;
   negated?: boolean;
+  setFilter?: SetFilterMetadata;
+}
+
+export type SetFilterMode = "any" | "all" | "none" | "empty";
+
+/** Presentation-only identity; execution always uses the accompanying predicates. */
+export interface SetFilterMetadata {
+  id: string;
+  mode: SetFilterMode;
+  values: string[];
 }
 
 /** A disjunction of predicates — the inner OR of conjunctive normal form. Every
@@ -58,6 +68,7 @@ export interface WhereClause {
  *  only), but the object shape leaves room to grow. */
 export interface OrGroup {
   any: WhereClause[];
+  setFilter?: SetFilterMetadata;
 }
 
 /** One conjunct of the WHERE clause: either a single predicate or an OR group.
@@ -233,7 +244,17 @@ function normalizeWhereClause(item: unknown): WhereClause | null {
 /** Deep-clone one WHERE term (literal or group) so a normalized/fallback state
  *  never aliases the caller's arrays. */
 function cloneWhereTerm(term: WhereTerm): WhereTerm {
-  return isOrGroup(term) ? { any: term.any.map((c) => ({ ...c })) } : { ...term };
+  const copy = isOrGroup(term) ? { ...term, any: term.any.map((c) => ({ ...c })) } : { ...term };
+  if (term.setFilter) copy.setFilter = { ...term.setFilter, values: [...term.setFilter.values] };
+  return copy;
+}
+
+function normalizeSetFilter(item: unknown): SetFilterMetadata | undefined {
+  if (!isRecord(item)) return undefined;
+  const id = boundedString(item.id, MAX_FIELD_NAME_LENGTH);
+  if (!id || !["any", "all", "none", "empty"].includes(String(item.mode)) || !Array.isArray(item.values)) return undefined;
+  if (item.values.length > MAX_WHERE_CLAUSES || !item.values.every((value) => typeof value === "string" && value.length <= MAX_FILTER_VALUE_LENGTH)) return undefined;
+  return { id, mode: item.mode as SetFilterMode, values: [...item.values] as string[] };
 }
 
 /** Convert unknown input into a bounded, structurally valid QueryState.
@@ -268,6 +289,7 @@ export function normalizeQueryState(input: unknown, fallback: QueryState = EMPTY
     let literalBudget = MAX_WHERE_CLAUSES;
     for (const item of raw.where) {
       if (literalBudget <= 0) break;
+      const start = where.length;
       if (isRecord(item) && Array.isArray((item as { any?: unknown }).any)) {
         const members: WhereClause[] = [];
         for (const inner of (item as { any: unknown[] }).any) {
@@ -287,6 +309,10 @@ export function normalizeQueryState(input: unknown, fallback: QueryState = EMPTY
           where.push(clause);
           literalBudget--;
         }
+      }
+      if (where.length > start && isRecord(item)) {
+        const metadata = normalizeSetFilter(item.setFilter);
+        if (metadata) where[start]!.setFilter = metadata;
       }
     }
   } else {
