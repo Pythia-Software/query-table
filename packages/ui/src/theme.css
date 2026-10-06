@@ -651,6 +651,28 @@
 .qt-cm-item:hover { background: var(--qt-header-bg); }
 .qt-cm-item:disabled { cursor: default; opacity: 0.45; color: var(--qt-muted); }
 .qt-cm-item:disabled:hover { background: transparent; }
+.qt-cm-submenu-wrap { position: relative; }
+.qt-cm-submenu-trigger { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.qt-cm-submenu-trigger .qt-icon { color: var(--qt-muted); }
+.qt-cm-item--open { background: var(--qt-header-bg); }
+.qt-cm-submenu {
+  position: absolute;
+  top: -4px;
+  left: calc(100% + 4px);
+  z-index: 1;
+  background: #fff;
+  border: 1px solid var(--qt-border);
+  border-radius: var(--qt-radius);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  padding: 4px;
+  box-sizing: border-box;
+}
+/* Invisible bridge across the gap so the pointer can travel into the submenu. */
+.qt-cm-submenu::before { content: ""; position: absolute; top: 0; bottom: 0; left: -6px; width: 6px; }
+.qt-cm-submenu--left { left: auto; right: calc(100% + 4px); }
+.qt-cm-submenu--left::before { left: auto; right: -6px; }
+.qt-sheet .qt-cm-submenu { position: static; border: 0; border-radius: 0; box-shadow: none; padding: 0 0 4px 12px; }
+.qt-sheet .qt-cm-submenu::before { display: none; }
 .qt-cm-item code { background: var(--qt-border-subtle); padding: 1px 4px; border-radius: 3px; font-size: 11px; }
 /* Two-column quick-filter grid: positive on the left, its negation opposite. */
 .qt-cm-filter-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px 4px; padding: 0 2px 2px; }

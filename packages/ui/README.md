@@ -10,6 +10,20 @@ and selection toolbar.
 npm install @pythia-software/query-table-core @pythia-software/query-table-react @pythia-software/query-table-ui react react-dom
 ```
 
+## Column widths
+
+Drag a header edge to resize one column (arrow keys nudge, Enter auto-fits).
+Click a header and open **Column Widths** to resize in one step:
+
+- **Fit This Column** sizes the clicked column to its widest rendered value.
+- **Fit All to Content** does the same for every column.
+- **Fit All to Screen** fills the viewport; when content overflows, narrow
+  columns keep their content width and only the widest ones are trimmed.
+- **Equal Widths** splits the viewport evenly.
+- **Reset Widths** drops explicit widths back to schema defaults.
+
+Widths live in `query.select`, so presets are shareable and undoable.
+
 ## Tag/set filters
 
 Set `filter.editor: "set"` on a `textarray` field to use the native WHERE
