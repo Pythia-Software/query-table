@@ -2,6 +2,7 @@ import { useState } from "react";
 import { loadSchema, type RowId } from "@pythia-software/query-table-core";
 import { useQueryTable } from "@pythia-software/query-table-react";
 import {
+  Icon,
   DataTable,
   MetricsPanel,
   QueryBuilder,
@@ -32,7 +33,7 @@ const renderers: RenderRegistry<Run> = {
   ...defaultRenderers,
   overall_pill: ({ value }: CellContext<Run>) =>
     value ? <span className={`qt-pill--${String(value).toLowerCase()}`}>{String(value)}</span> : <span>—</span>,
-  tag_marker: ({ value }: CellContext<Run>) => <span title="priority">{value ? "★" : "☆"}</span>,
+  tag_marker: ({ value }: CellContext<Run>) => <span role="img" aria-label={value ? "Priority" : "Not priority"}><Icon name="star" filled={Boolean(value)} /></span>,
   link_run: ({ value }: CellContext<Run>) => <a href={`#run-${value}`}>{String(value)}</a>,
   code_tags: ({ value }: CellContext<Run>) => (
     <>
@@ -71,7 +72,7 @@ export function App() {
           headers to reorder columns; drag the <code>order by</code> chips to re-prioritize sort.
         </span>
         <span className="qt-demo-mobile-copy">
-          Explore {RUNS.length} mock rows. Build a query above, tap any cell for actions, and swipe the table to see every column.
+          Explore {RUNS.length} mock rows. Tap the pencil to edit or remove a clause, drag handles to reorder, and swipe the table to see every column.
         </span>
       </p>
 

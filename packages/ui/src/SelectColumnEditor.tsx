@@ -7,6 +7,9 @@ import {
   useRef,
   useState,
 } from "react";
+import { ModalSurface, useMobileLayout } from "./AdaptiveOverlay";
+import { ReorderList } from "./ReorderList";
+import { Icon } from "./Icon";
 import type { QueryTableApi } from "@pythia-software/query-table-react";
 import {
   computedFieldName,
@@ -41,10 +44,9 @@ export function SelectColumnEditor<Row>({
   api,
   onClose,
 }: SelectColumnEditorProps<Row>) {
-  const titleId = useId(),
-    dialog = useRef<HTMLDivElement>(null);
-  const closeRef = useRef(onClose);
-  closeRef.current = onClose;
+  const titleId = useId();
+  const mobile = useMobileLayout();
+  const [mobilePanel, setMobilePanel] = useState("selected");
   const [columns, setColumns] = useState<SelectColumn[]>(() =>
     api.select.visible.map((c) => ({ ...c })),
   );
@@ -93,44 +95,6 @@ export function SelectColumnEditor<Row>({
   const fieldStatsRequest = useRef(api.fieldStats);
   fieldStatsRequest.current = api.fieldStats;
   const catalogueKey = JSON.stringify(catalogue.map((field) => field.name));
-  useEffect(() => {
-    const previous = document.activeElement as HTMLElement | null;
-    dialog.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        if (document.querySelector(".cm-tooltip-autocomplete")) return;
-        closeRef.current();
-      }
-      if (e.key === "Tab") {
-        const focusable = Array.from(
-          dialog.current?.querySelectorAll<HTMLElement>(
-            'button:not([disabled]), input:not([disabled]), select, textarea, [tabindex="0"], [contenteditable="true"]',
-          ) ?? [],
-        ).filter((el) => el.getClientRects().length);
-        const first = focusable[0],
-          last = focusable[focusable.length - 1];
-        if (
-          e.shiftKey &&
-          (document.activeElement === first ||
-            document.activeElement === dialog.current)
-        ) {
-          e.preventDefault();
-          last?.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first?.focus();
-        }
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    const old = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = old;
-      previous?.focus();
-    };
-  }, []);
   useEffect(() => {
     const ac = new AbortController();
     void fieldStatsRequest
@@ -205,6 +169,7 @@ export function SelectColumnEditor<Row>({
     );
   function browse(field: string) {
     setActive(field);
+    setMobilePanel("preview");
     setEditing(false);
     setNotice("");
   }
@@ -218,6 +183,7 @@ export function SelectColumnEditor<Row>({
         (defId ? "" : active ? fieldExpression(active) : "LEFT([field], 3)"),
     );
     setEditing(true);
+    setMobilePanel("preview");
     setNotice("");
   }
   async function save() {
@@ -320,20 +286,12 @@ export function SelectColumnEditor<Row>({
         title={`Sort by ${label}`}
       >
         {label}
-        {currentDirection && (currentDirection === "asc" ? " ↑" : " ↓")}
+        {currentDirection && <Icon name={currentDirection === "asc" ? "arrowUp" : "arrowDown"} />}
       </button>
     );
   };
   return (
-    <div className="qt-modal-backdrop qt-select-editor-backdrop">
-      <div
-        className="qt-select-editor"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        ref={dialog}
-        tabIndex={-1}
-      >
+    <ModalSurface title="Select columns" onClose={onClose} className={`qt-select-editor qt-select-editor--${mobilePanel}`} chrome={false}>
         <header className="qt-select-editor-header">
           <div>
             <h2 id={titleId}>Select columns</h2>
@@ -348,17 +306,33 @@ export function SelectColumnEditor<Row>({
             onClick={onClose}
             aria-label="Close column editor"
           >
-            ✕
+            <Icon name="close" />
           </button>
         </header>
-        <div className="qt-select-editor-body">
+        <nav className="qt-editor-mobile-nav" aria-label="Column editor sections">
+          {[["selected", `Selected (${columns.length})`], ["catalogue", "Catalogue"], ["preview", "Preview"]].map(([panel, name]) => (
+            <button key={panel} type="button" className="qt-btn" aria-pressed={mobilePanel === panel} onClick={() => setMobilePanel(panel!)}>{name}</button>
+          ))}
+        </nav>
+        <div className={`qt-select-editor-body qt-select-editor-body--${mobilePanel}`}>
           <aside className="qt-selected-panel">
             <h3>
               Selected <span className="qt-muted">{columns.length}</span>
             </h3>
-            <p className="qt-muted">
-              Drag to reorder, or use the arrow buttons.
-            </p>
+            {mobile ? (
+              <ReorderList
+                className="qt-editor-columns"
+                showHint={false}
+                items={columns.map((column) => ({ id: column.field, label: catalogue.find((field) => field.name === column.field)?.label ?? column.field }))}
+                onMove={move}
+                renderItem={(item) => (
+                  <>
+                    <button type="button" className="qt-column-name" onClick={() => browse(item.id)}>{item.label}</button>
+                    <button type="button" className="qt-icon-btn" onClick={() => toggle(item.id)} aria-label={`Remove ${item.label}`}><Icon name="close" /></button>
+                  </>
+                )}
+              />
+            ) : (
             <ol className="qt-editor-columns">
               {columns.map((c, i) => {
                 const f = catalogue.find((f) => f.name === c.field);
@@ -380,7 +354,7 @@ export function SelectColumnEditor<Row>({
                       drag.current = null;
                     }}
                   >
-                    <span aria-hidden="true">⠿</span>
+                    <Icon name="grip" />
                     <button
                       type="button"
                       className="qt-column-name"
@@ -390,21 +364,21 @@ export function SelectColumnEditor<Row>({
                     </button>
                     <button
                       type="button"
-                      className="qt-icon-btn"
+                      className="qt-icon-btn qt-editor-move"
                       disabled={i === 0}
                       onClick={() => move(c.field, i - 1)}
                       aria-label={`Move ${f?.label ?? c.field} up`}
                     >
-                      ↑
+                      <Icon name="arrowUp" />
                     </button>
                     <button
                       type="button"
-                      className="qt-icon-btn"
+                      className="qt-icon-btn qt-editor-move"
                       disabled={i === columns.length - 1}
                       onClick={() => move(c.field, i + 1)}
                       aria-label={`Move ${f?.label ?? c.field} down`}
                     >
-                      ↓
+                      <Icon name="arrowDown" />
                     </button>
                     <button
                       type="button"
@@ -412,12 +386,13 @@ export function SelectColumnEditor<Row>({
                       onClick={() => toggle(c.field)}
                       aria-label={`Remove ${f?.label ?? c.field}`}
                     >
-                      ×
+                      <Icon name="close" />
                     </button>
                   </li>
                 );
               })}
             </ol>
+            )}
             <button
               type="button"
               className="qt-link-btn"
@@ -448,7 +423,7 @@ export function SelectColumnEditor<Row>({
               className="qt-btn qt-create-computed"
               onClick={() => edit()}
             >
-              ＋ Computed column
+              <Icon name="add" />Computed column
             </button>
             {api.computed.loading && <p role="status">Loading definitions…</p>}
             {api.computed.error && <p role="alert">{api.computed.error}</p>}
@@ -469,7 +444,7 @@ export function SelectColumnEditor<Row>({
                     <button type="button" onClick={() => browse(f.name)}>
                       <strong>{f.label}</strong>
                       <small>
-                        {isComputedField(f.name) ? "ƒ · " : ""}
+                        {isComputedField(f.name) ? "Computed · " : ""}
                         {f.type} · {f.group ?? f.name}
                         {distinct != null &&
                           ` · ${distinct.toLocaleString()} distinct`}
@@ -601,9 +576,11 @@ export function SelectColumnEditor<Row>({
                     <button
                       type="button"
                       className="qt-btn"
+                      aria-label="Edit definition"
+                      title="Edit definition"
                       onClick={() => edit(chosen.name.slice(10))}
                     >
-                      Edit definition
+                      <Icon name="pencil" />
                     </button>
                     <button
                       type="button"
@@ -846,7 +823,6 @@ export function SelectColumnEditor<Row>({
             Apply columns
           </button>
         </footer>
-      </div>
-    </div>
+    </ModalSurface>
   );
 }

@@ -5,6 +5,7 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import type { FieldDef, FieldStats } from "@pythia-software/query-table-core";
+import { AdaptiveOverlay, useMobileLayout } from "./AdaptiveOverlay";
 
 export interface FieldPickerProps<Row> {
   fields: FieldDef<Row>[];
@@ -28,6 +29,7 @@ export function FieldPicker<Row>({
   onPick,
   onClose,
 }: FieldPickerProps<Row>): ReactNode {
+  const mobile = useMobileLayout();
   const [search, setSearch] = useState("");
   const needle = search.trim().toLowerCase();
   const excludedSet = useMemo(() => new Set(excluded ?? []), [excluded]);
@@ -51,9 +53,13 @@ export function FieldPicker<Row>({
   const firstEnabled = matched.find((f) => isEnabled(f, stats, gateOnDistinct));
 
   return (
-    <div className="qt-picker">
+    <AdaptiveOverlay title="Choose a field" onClose={() => onClose?.()} enabled={Boolean(onClose)}>
+    <div className="qt-picker" onBlur={(event) => {
+      if (!mobile && !event.currentTarget.contains(event.relatedTarget as Node | null)) onClose?.();
+    }}>
       <input
-        autoFocus
+        autoFocus={!mobile}
+        aria-label="Search fields"
         type="text"
         className="qt-picker-input"
         placeholder="search fields…"
@@ -66,8 +72,6 @@ export function FieldPicker<Row>({
             setSearch("");
           }
         }}
-        // Defer so a mousedown on a list item lands before blur closes it.
-        onBlur={() => setTimeout(() => onClose?.(), 150)}
       />
       <div className="qt-picker-list">
         {matched.length === 0 ? (
@@ -87,10 +91,11 @@ export function FieldPicker<Row>({
                     disabled={!enabled}
                     className={enabled ? "qt-picker-item" : "qt-picker-item qt-picker-item--disabled"}
                     title={enabled ? f.name : "not useful as a filter (≤1 distinct value)"}
-                    // Pointer down fires before blur for mouse, pen, and touch.
-                    onPointerDown={(e) => {
+                    onPointerDown={(event) => {
+                      if (!mobile) event.preventDefault();
+                    }}
+                    onClick={() => {
                       if (!enabled) return;
-                      e.preventDefault();
                       onPick(f);
                       setSearch("");
                     }}
@@ -119,6 +124,7 @@ export function FieldPicker<Row>({
         )}
       </div>
     </div>
+    </AdaptiveOverlay>
   );
 }
 

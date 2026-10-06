@@ -61,11 +61,11 @@ function pressEnter(input: HTMLInputElement) {
 }
 
 function openNewTagFilter(method: "keyboard" | "pointer" = "keyboard") {
-  click("+ add filter");
+  click("Add filter");
   const search = container.querySelector<HTMLInputElement>(".qt-picker-input")!;
   inputValue(search, "tags");
   if (method === "keyboard") pressEnter(search);
-  else act(() => container.querySelector<HTMLButtonElement>(".qt-picker-item[title=tags]")!.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, cancelable: true })));
+  else act(() => container.querySelector<HTMLButtonElement>(".qt-picker-item[title=tags]")!.click());
 }
 
 describe("native tag set editing", () => {
@@ -129,7 +129,7 @@ describe("native tag set editing", () => {
 
   it.each(["keyboard", "pointer"] as const)("anchors new filters to the persistent add button and restores focus after %s selection", async (method) => {
     await mount(EMPTY_QUERY);
-    const trigger = [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "+ add filter")!;
+    const trigger = container.querySelector<HTMLButtonElement>('[aria-label="Add filter"]')!;
     vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue(new DOMRect(180, 88, 120, 24));
     openNewTagFilter(method);
     const dialog = container.querySelector<HTMLElement>("[role=dialog]")!;
@@ -148,7 +148,7 @@ describe("native tag set editing", () => {
     await mount({ ...EMPTY_QUERY, where: createSetFilter("tags", "any", ["a"], "editor") });
     const trigger = container.querySelector<HTMLButtonElement>("[aria-label='Edit Tags tag filter']")!;
     vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue(new DOMRect(240, 64, 100, 24));
-    const unrelated = [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "+ add filter")!;
+    const unrelated = container.querySelector<HTMLButtonElement>('[aria-label="Add filter"]')!;
     unrelated.focus();
     click("Edit Tags tag filter");
     const dialog = container.querySelector<HTMLElement>("[role=dialog]")!;
@@ -173,7 +173,7 @@ describe("native tag set editing", () => {
 
   it("adds a multi-select from the field picker, searching display names and stable keys", async () => {
     await mount(EMPTY_QUERY);
-    click("+ add filter");
+    click("Add filter");
     const fieldSearch = container.querySelector<HTMLInputElement>(".qt-picker-input")!;
     inputValue(fieldSearch, "tags");
     act(() => fieldSearch.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));

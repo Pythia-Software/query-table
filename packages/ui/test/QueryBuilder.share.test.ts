@@ -76,6 +76,7 @@ afterEach(() => {
   root = null;
   container = null;
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe("QueryBuilder sharing", () => {
@@ -127,6 +128,7 @@ describe("QueryBuilder sharing", () => {
   });
 
   it("edits regex filters and regex-extract sort terms", async () => {
+    vi.useFakeTimers();
     let currentQuery: ReturnType<typeof useQueryTable<Row>>["query"] | undefined;
 
     function TestTable() {
@@ -165,14 +167,12 @@ describe("QueryBuilder sharing", () => {
     );
 
     const addExtract = Array.from(container!.querySelectorAll("button")).find(
-      (button) => button.textContent?.trim() === "+ regex extract",
+      (button) => button.textContent?.trim() === "regex extract",
     );
     expect(addExtract).toBeDefined();
     await act(async () => addExtract!.click());
-    expect(currentQuery!.orderBy[0]!.extract).toEqual({ regex: "" });
-    expect(Array.from(container!.querySelectorAll("button")).some((button) => button.textContent?.trim() === "nulls last")).toBe(
-      true,
-    );
+    expect(currentQuery!.orderBy[0]!.extract).toBeUndefined();
+    expect(container!.querySelector('[aria-modal="true"]')).not.toBeNull();
 
     const extractInput = container!.querySelector<HTMLInputElement>('input[aria-label="Regex extract for Name"]');
     expect(extractInput).not.toBeNull();
@@ -181,7 +181,14 @@ describe("QueryBuilder sharing", () => {
       setValue.call(extractInput, "item-(\\d+)");
       extractInput!.dispatchEvent(new Event("input", { bubbles: true }));
     });
+    expect(currentQuery!.orderBy[0]!.extract).toBeUndefined();
+    await act(async () => vi.advanceTimersByTimeAsync(201));
+    const applyExtract = Array.from(container!.querySelectorAll("button")).find((button) => button.textContent === "Apply extraction")!;
+    expect(applyExtract.disabled).toBe(false);
+    await act(async () => applyExtract.click());
     expect(currentQuery!.orderBy[0]!.extract).toEqual({ regex: "item-(\\d+)" });
+    expect(container!.querySelector(".qt-chip--sort input")).toBeNull();
+    await act(async () => container!.querySelector<HTMLButtonElement>('[aria-label="Configure regex extract for Name"]')!.click());
 
     const removeExtract = container!.querySelector<HTMLButtonElement>('button[aria-label="Remove regex extract for Name"]');
     await act(async () => removeExtract!.click());
@@ -189,5 +196,49 @@ describe("QueryBuilder sharing", () => {
     expect(Array.from(container!.querySelectorAll("button")).some((button) => button.textContent?.trim() === "nulls last")).toBe(
       false,
     );
+  });
+
+  it("adds a regex-extract sort from the add-sort split button", async () => {
+    vi.useFakeTimers();
+    let currentQuery: ReturnType<typeof useQueryTable<Row>>["query"] | undefined;
+
+    function TestTable() {
+      const api = useQueryTable<Row>({
+        schema,
+        clientRows: [],
+        debounceMs: 0,
+        initialQuery: { select: [{ field: "name" }], where: [], orderBy: [], limit: 25, offset: 0 },
+      });
+      currentQuery = api.query;
+      return createElement(QueryBuilder<Row>, { api, fields: schema.fields, total: api.total });
+    }
+
+    await act(async () => {
+      root = createRoot(container!);
+      root.render(createElement(TestTable));
+      await Promise.resolve();
+    });
+
+    const split = container!.querySelector('[aria-label="Sort actions"]')!;
+    expect(split.className).toBe("qt-split-btn");
+    expect(split.querySelector('[aria-label="Add sort"]')!.textContent).toBe("add sort");
+    await act(async () => split.querySelector<HTMLButtonElement>('[aria-label="Sort with regex extraction"]')!.click());
+
+    const modal = container!.querySelector('[aria-modal="true"]')!;
+    expect(modal.querySelector("h2")!.textContent).toBe("Sort with regex extraction");
+    const fieldSelect = modal.querySelector<HTMLSelectElement>("select.qt-sort-extract-field")!;
+    expect(Array.from(fieldSelect.options, (option) => option.textContent)).toEqual(["Id", "Name"]);
+    expect(fieldSelect.value).toBe("name");
+
+    const extractInput = modal.querySelector<HTMLInputElement>('input[aria-label="Regex extract for Name"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(extractInput, "item-(\\d+)");
+      extractInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(201));
+    expect(currentQuery!.orderBy).toEqual([]);
+    await act(async () => Array.from(modal.querySelectorAll("button")).find((button) => button.textContent === "Add sort")!.click());
+    expect(currentQuery!.orderBy).toEqual([{ field: "name", dir: "desc", extract: { regex: "item-(\\d+)" } }]);
+    expect(container!.querySelector('[aria-modal="true"]')).toBeNull();
   });
 });

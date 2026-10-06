@@ -1,3 +1,4 @@
+import { Icon } from "@pythia-software/query-table-ui";
 import { useId, type ReactNode } from "react";
 
 export interface CollapsibleSectionProps {
@@ -32,12 +33,7 @@ export function CollapsibleSection({
         aria-controls={bodyId}
         title={collapsed ? `Expand ${title}` : `Collapse ${title}`}
       >
-        <span
-          className={collapsed ? "qt-qt-section-toggle-caret qt-qt-section-toggle-caret--collapsed" : "qt-qt-section-toggle-caret"}
-          aria-hidden="true"
-        >
-          ▾
-        </span>
+        <Icon name="chevronDown" size={18} className={collapsed ? "qt-qt-section-toggle-caret qt-qt-section-toggle-caret--collapsed" : "qt-qt-section-toggle-caret"} />
         <span className="qt-sr-only">{collapsed ? `Expand ${title}` : `Collapse ${title}`}</span>
       </button>
       <div className="qt-qt-section-head">

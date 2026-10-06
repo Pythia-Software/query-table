@@ -3,6 +3,8 @@
 // `classNames` slots (Mode B).
 
 export type { CellContext, CellRenderer, RenderRegistry } from "./renderers";
+export { Icon } from "./Icon";
+export type { IconName, IconProps } from "./Icon";
 export { defaultRenderers, resolveRenderer, safeLinkHref } from "./renderers";
 
 export type { TableClassNames, QueryBuilderClassNames, MenuClassNames } from "./classNames";

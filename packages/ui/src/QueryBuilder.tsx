@@ -1,4 +1,4 @@
-import { PresentedValueInput, useFilterValuePresentation } from "./FilterValuePresentation";
+import { PresentedFilterValue, PresentedValueInput, useFilterValuePresentation } from "./FilterValuePresentation";
 // QueryBuilder — the chip toolbar: WHERE filters, SELECT columns, ORDER BY
 // (multi-sort, reorderable), and LIMIT/OFFSET paging. Type-aware filter inputs
 // (enum/static <select>, value autocomplete via Transport.fetchDistinctValues).
@@ -8,8 +8,8 @@ import { PresentedValueInput, useFilterValuePresentation } from "./FilterValuePr
 // picker, per-clause operators, and multi-sort.
 
 import { SelectColumnEditor } from "./SelectColumnEditor";
+import { SortExtractionEditor } from "./SortExtractionEditor";
 import { SetFilterEditor } from "./SetFilterEditor";
-import { PresentedFilterValue } from "./FilterValuePresentation";
 import { Fragment, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
   AggOp,
@@ -49,6 +49,9 @@ import type { QueryBuilderClassNames } from "./classNames";
 import { FieldPicker } from "./FieldPicker";
 import { SavedQueriesModal } from "./SavedQueriesModal";
 import { formatRowCount, rowCountTitle } from "./formatRowCount";
+import { AdaptiveOverlay, ModalSurface, useMobileLayout } from "./AdaptiveOverlay";
+import { ReorderList } from "./ReorderList";
+import { Icon } from "./Icon";
 
 export interface QueryBuilderProps<Row> {
   /** The controller; QueryBuilder drives it through the intent helpers. */
@@ -224,6 +227,7 @@ export function QueryBuilder<Row>({
   onCollapsedChange,
   defaultCollapsed = false,
 }: QueryBuilderProps<Row>): ReactNode {
+  const mobile = useMobileLayout();
   const UNSAVED_QUERY_EDIT_ID = "__qt-unsaved-query__";
   const [showSaved, setShowSaved] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
@@ -275,8 +279,8 @@ export function QueryBuilder<Row>({
   const selectedAutoRefreshPolls = autoRefreshPolls(autoRefreshFrequencyMs, autoRefreshTurnOffAfterMs);
   const canSubmitAutoRefresh = selectedAutoRefreshPolls >= 1 && selectedAutoRefreshPolls <= MAX_AUTO_REFRESH_POLLS;
   const autoRefreshButtonText = autoRefreshStatus
-    ? `⟳ Auto-Update ${formatDuration(autoRefreshStatus.frequencyMs)}`
-    : "⟳ Auto-Update";
+    ? `Auto-Update ${formatDuration(autoRefreshStatus.frequencyMs)}`
+    : "Auto-Update";
   const rowSummary = `${formatRowCount(api.rows.length)} of ${total == null ? "?" : formatRowCount(total)}`;
   const rowSummaryTitle = [api.rows.length, ...(total == null ? [] : [total])]
     .map((count) => rowCountTitle(count))
@@ -458,7 +462,7 @@ export function QueryBuilder<Row>({
   }, [showAutoRefresh, autoRefreshStatus]);
 
   useEffect(() => {
-    if (!showAutoRefresh) return;
+    if (!showAutoRefresh || mobile) return;
 
     function onDocumentClick(event: MouseEvent) {
       const wrapper = autoRefreshRef.current;
@@ -491,7 +495,7 @@ export function QueryBuilder<Row>({
       window.removeEventListener("keydown", onDocumentKeyDown);
       window.removeEventListener("resize", calculateAutoRefreshPosition);
     };
-  }, [showAutoRefresh]);
+  }, [showAutoRefresh, mobile]);
 
   function submitAutoRefresh() {
     if (!canSubmitAutoRefresh) return;
@@ -515,6 +519,15 @@ export function QueryBuilder<Row>({
     // sender's StorageAdapter contents.
     url.searchParams.set("q", encodeQuery(api.query));
 
+    if (mobile && navigator.share) {
+      try {
+        await navigator.share({ title: "Query table", url: url.toString() });
+        return;
+      } catch (error) {
+        if (error && typeof error === "object" && "name" in error && error.name === "AbortError") return;
+      }
+    }
+
     try {
       await navigator.clipboard.writeText(url.toString());
       setShareCopied(true);
@@ -537,10 +550,11 @@ export function QueryBuilder<Row>({
               type="button"
               className={cx("qt-qb-saved-star", isSavedQuery ? "qt-qb-saved-star--saved" : "qt-qb-saved-star--unsaved")}
               title={isSavedQuery ? "Rename saved query" : "Save query"}
+              aria-label={isSavedQuery ? "Rename saved query" : "Save query"}
               disabled={isBusy}
               onClick={beginEditSavedName}
             >
-              {isSavedQuery ? "★" : "☆"}
+              <Icon name="star" size={16} filled={isSavedQuery} />
             </button>
             {isEditingSaved || isEditingUnsaved ? (
               <span className="qt-qb-saved-input-wrap">
@@ -568,13 +582,14 @@ export function QueryBuilder<Row>({
                   type="button"
                   className="qt-qb-saved-cancel"
                   title="Do not save"
+                  aria-label="Do not save"
                   onMouseDown={(e) => {
                     e.preventDefault();
                     cancelNameEdit();
                   }}
                   onClick={(e) => e.stopPropagation()}
                 >
-                  ✕
+                  <Icon name="close" />
                 </button>
               </span>
             ) : (
@@ -613,10 +628,10 @@ export function QueryBuilder<Row>({
           title="Copy a URL for this query"
           aria-live="polite"
         >
-          {shareCopied ? "Copied!" : "Share"}
+          <Icon name={shareCopied ? "check" : "share"} />{shareCopied ? "Copied!" : "Share"}
         </button>
         <button type="button" className={cx("qt-btn", classNames?.button)} onClick={() => setShowSaved(true)}>
-          Saved{api.saved.items.length > 0 ? ` (${api.saved.items.length})` : ""}
+          <Icon name="bookmark" />Saved{api.saved.items.length > 0 ? ` (${api.saved.items.length})` : ""}
         </button>
         <button
           type="button"
@@ -626,12 +641,7 @@ export function QueryBuilder<Row>({
           aria-controls={bodyId}
           title={isCollapsed ? "Expand query builder" : "Collapse query builder"}
         >
-          <span
-            className={cx("qt-qb-collapse-caret", isCollapsed && "qt-qb-collapse-caret--collapsed")}
-            aria-hidden="true"
-          >
-            ▾
-          </span>
+          <Icon name="chevronDown" size={18} className={cx("qt-qb-collapse-caret", isCollapsed && "qt-qb-collapse-caret--collapsed")} />
           <span className="qt-sr-only">{isCollapsed ? "Expand query builder" : "Collapse query builder"}</span>
         </button>
       </div>
@@ -642,18 +652,18 @@ export function QueryBuilder<Row>({
             <SelectRow api={api} fields={fields} classNames={classNames} disabled={isBusy} />
             <WhereRow api={api} byName={byName} fields={fields} classNames={classNames} disabled={isBusy} />
             <OrderRow api={api} fields={fields} classNames={classNames} disabled={isBusy} />
-            <WindowRow api={api} classNames={classNames} disabled={isBusy} />
+            <WindowRow api={api} total={total} classNames={classNames} disabled={isBusy} />
             <MetricsRow api={api} fields={fields} classNames={classNames} disabled={isBusy} />
           </div>
           <div className="qt-qb-editor-stack">
             <button type="button" className={cx("qt-btn", classNames?.button)} onClick={api.undo} disabled={!api.canUndo || isBusy}>
-              ↶ Undo
+              <Icon name="undo" />Undo
             </button>
             <button type="button" className={cx("qt-btn", classNames?.button)} onClick={api.redo} disabled={!api.canRedo || isBusy}>
-              ↷ Redo
+              <Icon name="redo" />Redo
             </button>
             <button type="button" className={cx("qt-btn", classNames?.button)} onClick={api.resetAll} disabled={isBusy}>
-              Reset All
+              <Icon name="reset" />Reset
             </button>
           </div>
         </div>
@@ -679,13 +689,14 @@ export function QueryBuilder<Row>({
               aria-expanded={showAutoRefresh}
               title={autoRefreshStatus ? "View or clear auto-update" : "Configure auto-update"}
             >
-              {autoRefreshButtonText}
+              <Icon name="clock" />{autoRefreshButtonText}
             </button>
             {showAutoRefresh ? (
+              <AdaptiveOverlay title="Auto-update" onClose={() => setShowAutoRefresh(false)}>
               <span
                 ref={autoRefreshPopoverRef}
                 className={cx("qt-auto-refresh-popover", autoRefreshPopoverAlignRight && "qt-auto-refresh-popover--align-right")}
-                role="dialog"
+                role={mobile ? undefined : "dialog"}
                 aria-label="Auto-refresh settings"
               >
                 <label className="qt-auto-refresh-field">
@@ -757,6 +768,7 @@ export function QueryBuilder<Row>({
                   ) : null}
                 </span>
               </span>
+              </AdaptiveOverlay>
             ) : null}
           </span>
           <button
@@ -765,7 +777,7 @@ export function QueryBuilder<Row>({
             onClick={api.refresh}
             disabled={isBusy}
           >
-            Run Now
+            <Icon name="refresh" />Run Now
           </button>
         </span>
       </div>
@@ -774,46 +786,6 @@ export function QueryBuilder<Row>({
         <SavedQueriesModal saved={api.saved} onClose={() => setShowSaved(false)} onLoad={setLastSavedId} />
       ) : null}
     </div>
-  );
-}
-
-function MoveButtons({
-  label,
-  position,
-  count,
-  disabled,
-  onMove,
-}: {
-  label: string;
-  position: number;
-  count: number;
-  disabled: boolean | undefined;
-  onMove: (position: number) => void;
-}): ReactNode {
-  if (count < 2) return null;
-  return (
-    <span className="qt-chip-move-buttons">
-      <button
-        type="button"
-        className="qt-chip-move"
-        disabled={disabled || position === 0}
-        onClick={() => onMove(position - 1)}
-        aria-label={`Move ${label} earlier`}
-        title="Move earlier"
-      >
-        ←
-      </button>
-      <button
-        type="button"
-        className="qt-chip-move"
-        disabled={disabled || position === count - 1}
-        onClick={() => onMove(position + 1)}
-        aria-label={`Move ${label} later`}
-        title="Move later"
-      >
-        →
-      </button>
-    </span>
   );
 }
 
@@ -831,6 +803,7 @@ function SelectRow<Row>({
   disabled: boolean | undefined;
 }) {
   const { select, columnDrag } = api;
+  const mobile = useMobileLayout();
   const [editingColumns, setEditingColumns] = useState(false);
   const [adding, setAdding] = useState(false);
   const fieldLabelByName = useMemo(() => new Map(select.fields.map((f) => [f.name, f.label])), [select.fields]);
@@ -851,12 +824,31 @@ function SelectRow<Row>({
   // drag) and slides to the hovered slot, dimmed. Rendered order == drop result.
   const rendered = columnDrag.preview(fieldNames);
 
+  const actions = (
+    <>
+      <span className="qt-split-btn" role="group" aria-label="Column actions">
+        <button type="button" className="qt-add" aria-label="Add column" onClick={() => setAdding(true)} disabled={disabled || adding || select.hidden.length === 0}><Icon name="add" />{mobile ? "Add" : "add column"}</button>
+        <button type="button" className="qt-add qt-split-btn-caret" aria-label="Customize columns" title="Customize columns" aria-haspopup="dialog" aria-expanded={editingColumns} disabled={disabled} onClick={() => setEditingColumns(true)}><Icon name="chevronRight" size={18} /></button>
+      </span>
+      <button type="button" className="qt-link-btn" aria-label="Reset columns" onClick={select.reset} disabled={disabled} title="Reset to default columns">{mobile ? "Reset" : "reset"}</button>
+    </>
+  );
+
   return (
-    <div className="qt-qb-row">
-      <span className="qt-qb-kw">select</span>
-      <button type="button" className="qt-btn" disabled={disabled} onClick={() => setEditingColumns(true)}>Edit columns</button>
+    <div className="qt-qb-row qt-qb-row--select">
+      <div className="qt-qb-section-header">
+        <span className="qt-qb-kw" data-mobile-label="Columns">select</span>
+        {mobile && actions}
+      </div>
       {editingColumns && <SelectColumnEditor api={api} onClose={() => setEditingColumns(false)} />}
-      {rendered.map((name, position) => {
+      {mobile ? (
+        <ReorderList className="qt-query-reorder-list qt-query-reorder-list--columns" layout="wrap" showHint={false} items={fieldNames.map((name) => ({ id: name, label: fieldLabelByName.get(name) ?? name }))} onMove={select.move} disabled={disabled} renderItem={(item) => (
+          <>
+            <span className="qt-chip-field">{item.label}</span>
+            <button type="button" className="qt-chip-x" onClick={() => select.hide(item.id)} disabled={disabled} aria-label={`Remove ${item.label} column`}><Icon name="close" /></button>
+          </>
+        )} />
+      ) : rendered.map((name) => {
         const label = fieldLabelByName.get(name) ?? name;
         return (
         <span
@@ -904,22 +896,16 @@ function SelectRow<Row>({
           title="drag to reorder"
         >
           <span aria-hidden className="qt-chip-grip">
-            ⋮⋮
+            <Icon name="grip" />
           </span>
           <span className="qt-chip-field">{label}</span>
-          <MoveButtons
-            label={label}
-            position={position}
-            count={rendered.length}
-            disabled={disabled}
-            onMove={(nextPosition) => select.move(name, nextPosition)}
-          />
-          <button type="button" className="qt-chip-x" onClick={() => select.hide(name)} disabled={disabled}>
-            ✕
+          <button type="button" className="qt-chip-x" onClick={() => select.hide(name)} disabled={disabled} aria-label={`Remove ${label} column`}>
+            <Icon name="close" />
           </button>
         </span>
         );
       })}
+      {!mobile && actions}
       {adding ? (
         <FieldPicker
           fields={select.hidden.filter(isSelectable)}
@@ -929,21 +915,7 @@ function SelectRow<Row>({
           }}
           onClose={() => setAdding(false)}
         />
-      ) : (
-        <button
-          type="button"
-          className="qt-add"
-          onClick={() => setAdding(true)}
-          disabled={disabled || select.hidden.length === 0}
-        >
-          + add column
-        </button>
-      )}
-      {api.query.select.length > 0 && (
-        <button type="button" className="qt-link-btn" onClick={select.reset} disabled={disabled} title="Reset to default columns">
-          reset
-        </button>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -985,6 +957,7 @@ function WhereRow<Row>({
   disabled: boolean | undefined;
 }) {
   const [adding, setAdding] = useState(false);
+  const mobile = useMobileLayout();
   const editorId = useId();
   const nextSetId = useRef(0);
   const addFilterButton = useRef<HTMLButtonElement>(null);
@@ -993,6 +966,7 @@ function WhereRow<Row>({
   // via api.columnDrag). Order is committed only on drop, so the DOM order stays
   // put during the drag and index keys never remount the dragged node.
   const [drag, setDrag] = useState<WhereDrag | null>(null);
+  const [editingFilter, setEditingFilter] = useState<number | null>(null);
   const where = api.query.where;
   const whereSignature = JSON.stringify(where);
   const setEditors = new Map<number, { field: FieldDef<Row>; metadata: SetFilterMetadata; count: number }>();
@@ -1029,6 +1003,7 @@ function WhereRow<Row>({
       setAdding(false);
       return;
     }
+    setEditingFilter(where.length);
     const op = positiveOpsForField(f)[0] ?? opsForField(f)[0] ?? "=";
     api.addFilter({ field: f.name, op, value: "" });
     setAdding(false);
@@ -1061,10 +1036,20 @@ function WhereRow<Row>({
     setDrag(null);
   }
 
+  const actions = (
+    <>
+      <button ref={addFilterButton} type="button" className="qt-add" aria-label="Add filter" aria-expanded={adding} onClick={() => setAdding(true)} disabled={disabled || adding}><Icon name="add" />add filter</button>
+      {adding && <FieldPicker fields={fields.filter(isFilterable)} gateOnDistinct onPick={addClause} onClose={() => setAdding(false)} />}
+      {where.length > 0 && <button type="button" className="qt-link-btn" onClick={api.clearFilters} disabled={disabled} title="Reset filters">reset</button>}
+    </>
+  );
+
   return (
-    <div className="qt-qb-row">
-      <span className="qt-qb-kw">where</span>
-      {where.length === 0 && !adding && <span className="qt-qb-hint">all rows</span>}
+    <div className="qt-qb-row qt-qb-row--filters">
+      <div className="qt-qb-section-header">
+        <span className="qt-qb-kw" data-mobile-label="Filters">where</span>
+        {mobile && actions}
+      </div>
       {where.map((term, index) => {
         if (hiddenSetTerms.has(index)) return null;
         const set = setEditors.get(index);
@@ -1091,6 +1076,8 @@ function WhereRow<Row>({
             onDragOver={(e) => handleOver(e, index)}
             onDrop={handleDrop}
             onDragEnd={() => setDrag(null)}
+            editorOpen={editingFilter === index}
+            onEditorChange={(open) => setEditingFilter(open ? index : null)}
           />}
         </span>
       ); })}
@@ -1100,22 +1087,7 @@ function WhereRow<Row>({
         else api.setQuery((query) => ({ ...query, offset: 0, where: [...query.where, ...terms] }));
         setEditingSet(null);
       }} />}
-      <button ref={addFilterButton} type="button" className="qt-add" aria-expanded={adding} onClick={() => setAdding(true)} disabled={disabled || adding}>
-        + add filter
-      </button>
-      {adding && (
-        <FieldPicker
-          fields={fields.filter(isFilterable)}
-          gateOnDistinct
-          onPick={addClause}
-          onClose={() => setAdding(false)}
-        />
-      )}
-      {where.length > 0 && (
-        <button type="button" className="qt-link-btn" onClick={api.clearFilters} disabled={disabled} title="Reset filters">
-          reset
-        </button>
-      )}
+      {!mobile && actions}
     </div>
   );
 }
@@ -1143,6 +1115,8 @@ function TermChip<Row>({
   onDragOver,
   onDrop,
   onDragEnd,
+  editorOpen,
+  onEditorChange,
 }: {
   api: QueryTableApi<Row>;
   term: WhereTerm;
@@ -1156,9 +1130,14 @@ function TermChip<Row>({
   onDragOver: (e: React.DragEvent) => void;
   onDrop: () => void;
   onDragEnd: () => void;
+  editorOpen: boolean;
+  onEditorChange: (open: boolean) => void;
 }) {
+  const mobile = useMobileLayout();
   const group = isOrGroup(term);
   const predicates = predicatesOf(term);
+
+  if (mobile) return <MobileFilter api={api} term={term} index={index} byName={byName} classNames={classNames} disabled={disabled} open={editorOpen} onOpenChange={onEditorChange} />;
 
   const grip = (
     <span
@@ -1173,7 +1152,7 @@ function TermChip<Row>({
       onDragEnd={onDragEnd}
       title="drag to reorder, or drop onto another filter to make an OR"
     >
-      ⋮⋮
+      <Icon name="grip" />
     </span>
   );
 
@@ -1226,6 +1205,71 @@ function TermChip<Row>({
   );
 }
 
+function MobileFilter<Row>({ api, term, index, byName, classNames, disabled, open, onOpenChange }: {
+  api: QueryTableApi<Row>;
+  term: WhereTerm;
+  index: number;
+  byName: Map<string, FieldDef<Row>>;
+  classNames: QueryBuilderClassNames | undefined;
+  disabled: boolean | undefined;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const predicates = predicatesOf(term);
+  return (
+    <>
+      <MobileClauseSummary editLabel={`Edit filter: ${whereTermAsText(term, byName)}`} disabled={disabled} className={classNames?.chip} filter onEdit={() => onOpenChange(true)}>
+        <span>
+          {predicates.map((clause, position) => {
+            const strategy = byName.get(clause.field)?.filter?.values;
+            const option = strategy?.source === "static" ? strategy.options.find((choice) => typeof choice !== "string" && choice.value === clause.value) : undefined;
+            const label = typeof option === "object" ? option.label : clause.value === "" ? '""' : clause.value;
+            const emptyStringCondition = clause.value === "0" && (clause.op === "length_eq" || clause.op === "length_gt");
+            return (
+            <span key={position} className="qt-mobile-filter-summary">
+              {position > 0 && <small>OR</small>}
+              <strong>{byName.get(clause.field)?.label ?? clause.field}</strong>
+              <span>{choiceLabel(clause.op, Boolean(clause.negated), clause.value)} {!NULLARY_OPS.has(clause.op) && !emptyStringCondition && <PresentedFilterValue field={clause.field} value={clause.value} label={label} />}</span>
+            </span>
+            );
+          })}
+        </span>
+      </MobileClauseSummary>
+      {open && (
+        <ModalSurface title={predicates.length > 1 ? "Edit filter group" : `Filter by ${byName.get(predicates[0]!.field)?.label ?? predicates[0]!.field}`} onClose={() => onOpenChange(false)}>
+          <div className="qt-overlay-body qt-filter-editor">
+            {predicates.map((clause, position) => (
+              <Fragment key={position}>
+                {position > 0 && <p className="qt-muted">OR</p>}
+                <PredicateEditor api={api} clause={clause} field={byName.get(clause.field)} showField={predicates.length > 1} classNames={classNames} disabled={disabled} onChange={(next) => api.updatePredicate(index, position, next)} onRemove={() => {
+                  if (predicates.length === 1) onOpenChange(false);
+                  api.removePredicate(index, position);
+                }} />
+              </Fragment>
+            ))}
+            {predicates.length > 1 && <button type="button" className="qt-mobile-form-remove" aria-label="Remove filter group" disabled={disabled} onClick={() => {
+              onOpenChange(false);
+              api.removeFilter(index);
+            }}>Remove filter group</button>}
+            {api.query.where.length > 1 && (
+              <label className="qt-filter-combine">Match either filter (OR)
+                <select className="qt-input" value="" disabled={disabled} onChange={(event) => {
+                  if (!event.target.value) return;
+                  onOpenChange(false);
+                  api.mergeFilters(index, Number(event.target.value));
+                }}>
+                  <option value="">Combine with another filter…</option>
+                  {api.query.where.map((candidate, position) => position !== index && <option key={position} value={position}>{whereTermAsText(candidate, byName)}</option>)}
+                </select>
+              </label>
+            )}
+          </div>
+        </ModalSurface>
+      )}
+    </>
+  );
+}
+
 /** Human-readable operator labels for the WHERE chips + op picker. */
 const OP_LABEL: Record<FilterOp, string> = {
   "=": "=",
@@ -1271,9 +1315,10 @@ function OpPicker<Row>({
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLSpanElement>(null);
+  const mobile = useMobileLayout();
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || mobile) return;
     function onDocClick(e: MouseEvent) {
       if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
     }
@@ -1288,7 +1333,7 @@ function OpPicker<Row>({
       window.removeEventListener("click", onDocClick);
       window.removeEventListener("keydown", onKey);
     };
-  }, [open]);
+  }, [open, mobile]);
 
   const pairs = useMemo(() => (field ? opPairsForField(field) : []), [field]);
   const visiblePairs = clause.value === "0" && pairs.some((pair) => pair.keep.op === "length_gt")
@@ -1312,12 +1357,11 @@ function OpPicker<Row>({
         onClick={() => setOpen((o) => !o)}
       >
         {choiceLabel(clause.op, Boolean(clause.negated), clause.value)}
-        <span className="qt-op-caret" aria-hidden>
-          ▾
-        </span>
+        <Icon name="chevronDown" size={12} className="qt-op-caret" />
       </button>
       {open && visiblePairs.length > 0 && (
-        <span className="qt-op-pop" role="dialog" aria-label="Choose condition">
+        <AdaptiveOverlay title={`Condition for ${field?.label ?? clause.field}`} onClose={() => setOpen(false)}>
+        <span className="qt-op-pop" role={mobile ? undefined : "dialog"} aria-label="Choose condition">
           <span className="qt-cm-col-head">keep</span>
           <span className="qt-cm-col-head qt-cm-col-head--neg">exclude</span>
           {visiblePairs.map((pair, i) => (
@@ -1345,6 +1389,7 @@ function OpPicker<Row>({
             </Fragment>
           ))}
         </span>
+        </AdaptiveOverlay>
       )}
     </span>
   );
@@ -1361,6 +1406,7 @@ function PredicateEditor<Row>({
   disabled,
   onChange,
   onRemove,
+  showField = true,
 }: {
   api: QueryTableApi<Row>;
   field: FieldDef<Row> | undefined;
@@ -1369,7 +1415,9 @@ function PredicateEditor<Row>({
   disabled: boolean | undefined;
   onChange: (next: WhereClause) => void;
   onRemove: () => void;
+  showField?: boolean;
 }) {
+  const mobile = useMobileLayout();
   const needsValue = !NULLARY_OPS.has(clause.op);
   const isRegex = clause.op === "matches_regex" || clause.op === "not_matches_regex";
   const isLength = clause.op === "length_gt" || clause.op === "length_lt" || clause.op === "length_eq";
@@ -1381,25 +1429,38 @@ function PredicateEditor<Row>({
     onChange(choice.negated ? negateClause(next, field ? opsForField(field) : undefined) : next);
   }
 
+  const conditionControl = <OpPicker field={field} clause={clause} disabled={disabled} classNames={classNames} onPick={pickOp} />;
+  const valueControl = needsValue ? (
+    <ValueInput
+      api={api}
+      field={field}
+      value={clause.value}
+      forceFreeform={isRegex || isLength}
+      numeric={isLength}
+      placeholder={isRegex ? "regex" : isLength ? "length" : "value"}
+      classNames={classNames}
+      onChange={(value) => onChange({ ...clause, value })}
+    />
+  ) : null;
+  const removeControl = <button type="button" className={mobile ? "qt-mobile-form-remove" : "qt-chip-x"} onClick={onRemove} disabled={disabled} aria-label={`Remove ${field?.label ?? clause.field} filter`}>
+    {mobile ? "Remove filter" : <Icon name="close" />}
+  </button>;
+
+  if (mobile) return (
+    <div className="qt-mobile-predicate qt-mobile-form">
+      {showField && <strong className="qt-mobile-form-field--wide">{field?.label ?? clause.field}</strong>}
+      <label className={cx("qt-mobile-form-field", !needsValue && "qt-mobile-form-field--wide")}><span>Condition</span>{conditionControl}</label>
+      {valueControl && <label className="qt-mobile-form-field"><span>Value</span>{valueControl}</label>}
+      {removeControl}
+    </div>
+  );
+
   return (
     <span className="qt-pred">
       <span className="qt-chip-field">{field?.label ?? clause.field}</span>
-      <OpPicker field={field} clause={clause} disabled={disabled} classNames={classNames} onPick={pickOp} />
-      {needsValue && (
-        <ValueInput
-          api={api}
-          field={field}
-          value={clause.value}
-          forceFreeform={isRegex || isLength}
-          numeric={isLength}
-          placeholder={isRegex ? "regex" : isLength ? "length" : "value"}
-          classNames={classNames}
-          onChange={(v) => onChange({ ...clause, value: v })}
-        />
-      )}
-      <button type="button" className="qt-chip-x" onClick={onRemove} disabled={disabled}>
-        ✕
-      </button>
+      {conditionControl}
+      {valueControl}
+      {removeControl}
     </span>
   );
 }
@@ -1433,7 +1494,7 @@ function ValueInput<Row>({
     if (presentation.render || presentation.label || strategy.options.some(o => typeof o !== 'string')) {
       return <PresentedValueInput field={field?.name ?? ''} value={value} options={strategy.options} onChange={onChange}/>;
     }
-    return <select className={cx('qt-chip-val',classNames?.select)} value={value} onChange={e=>onChange(e.target.value)}><option value="">—</option>{strategy.options.map(o=>{const option=typeof o==='string'?{value:o,label:o}:o;return <option key={option.value} value={option.value}>{option.label}</option>})}</select>;
+    return <select className={cx('qt-chip-val',classNames?.select)} aria-label={`Value for ${field?.label ?? "filter"}`} value={value} onChange={e=>onChange(e.target.value)}><option value="">—</option>{strategy.options.map(o=>{const option=typeof o==='string'?{value:o,label:o}:o;return <option key={option.value} value={option.value}>{option.label}</option>})}</select>;
   }
 
   // Freeform → a plain input, no suggestions.
@@ -1444,6 +1505,7 @@ function ValueInput<Row>({
         className={cx("qt-chip-val", classNames?.input)}
         value={value}
         placeholder={placeholder}
+        aria-label={`${placeholder} for ${field?.label ?? "filter"}`}
         inputMode={numeric ? "numeric" : undefined}
         pattern={numeric ? "[0-9]*" : undefined}
         size={widthChars}
@@ -1497,6 +1559,7 @@ function AutocompleteInput<Row>({
         className={cx("qt-chip-val", classNames?.input)}
         value={value}
         placeholder="value"
+        aria-label={`Value for ${field.label}`}
         list={listId}
         size={chipFieldWidthForInput(value || "value", field.type, 5, 4)}
         style={{ width: `${chipFieldWidthForInput(value || "value", field.type, 5, 4)}ch` }}
@@ -1514,6 +1577,37 @@ function AutocompleteInput<Row>({
 
 // ---- ORDER BY (multi-sort, reorderable) -----------------------------------
 
+function MobileClauseSummary({ editLabel, disabled, className, filter, onEdit, children }: {
+  editLabel: string;
+  disabled: boolean | undefined;
+  className?: string | undefined;
+  filter?: boolean;
+  onEdit: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className={cx("qt-mobile-clause", className)}>
+      <button type="button" className="qt-mobile-filter" data-qt-filter={filter || undefined} disabled={disabled} aria-label={editLabel} title={editLabel} aria-haspopup="dialog" onClick={onEdit}>
+        {children}
+        <span className="qt-mobile-filter-edit"><Icon name="pencil" /></span>
+      </button>
+    </div>
+  );
+}
+
+function MobileChipEditor({ title, summaryTitle = title, summary, disabled, open, onOpenChange, children }: { title: string; summaryTitle?: string; summary: string; disabled: boolean | undefined; open: boolean; onOpenChange: (open: boolean) => void; children: ReactNode }) {
+  const mobile = useMobileLayout();
+  if (!mobile) return children;
+  return (
+    <>
+      <MobileClauseSummary editLabel={`Edit ${title}: ${summary}`} disabled={disabled} onEdit={() => onOpenChange(true)}>
+        <span className="qt-mobile-filter-summary"><strong>{summaryTitle}</strong><span>{summary}</span></span>
+      </MobileClauseSummary>
+      {open && <ModalSurface title={title} onClose={() => onOpenChange(false)}><div className="qt-overlay-body qt-mobile-chip-editor">{children}</div></ModalSurface>}
+    </>
+  );
+}
+
 function OrderTermChip<Row>({
   api,
   field,
@@ -1530,11 +1624,10 @@ function OrderTermChip<Row>({
   updateTerm,
   clearExtract,
   removeTerm,
-  position,
-  count,
-  moveTerm,
   classNames,
   label,
+  editorOpen,
+  onEditorChange,
 }: {
   api: QueryTableApi<Row>;
   field: FieldDef<Row> | undefined;
@@ -1553,15 +1646,53 @@ function OrderTermChip<Row>({
   updateTerm: (i: number, patch: Partial<OrderByClause>) => void;
   clearExtract: (i: number) => void;
   removeTerm: (i: number) => void;
-  position: number;
-  count: number;
-  moveTerm: (toIndex: number) => void;
   classNames: QueryBuilderClassNames | undefined;
   label: string;
+  editorOpen: boolean;
+  onEditorChange: (open: boolean) => void;
 }) {
   const fieldHasNull = useFieldHasNull(api, field?.name);
+  const mobile = useMobileLayout();
+  const [extractOpen, setExtractOpen] = useState(false);
+  const title = `Sort by ${label}`;
+  const summary = `${term.dir === "asc" ? "Ascending" : "Descending"}${showPriority ? ` · Priority ${priority}` : ""}${term.extract ? " · Regex extraction" : ""}`;
+  const extractionEditor = extractOpen && <SortExtractionEditor api={api} field={term.field} label={label} initialPattern={term.extract?.regex} disabled={disabled} onApply={(regex) => { updateTerm(dataIndex, { extract: { regex } }); setExtractOpen(false); }} onRemove={() => { clearExtract(dataIndex); setExtractOpen(false); }} onClose={() => setExtractOpen(false)} />;
+
+  if (mobile) return (
+    <>
+    <MobileChipEditor title={title} summaryTitle={label} summary={summary} disabled={disabled} open={editorOpen} onOpenChange={onEditorChange}>
+      <div className="qt-mobile-form">
+        <label className="qt-mobile-form-field">
+          <span>Direction</span>
+          <select className={cx("qt-input", classNames?.select)} value={term.dir} disabled={disabled} onChange={(event) => updateTerm(dataIndex, { dir: event.target.value as OrderByClause["dir"] })}>
+            <option value="asc">Ascending</option>
+            <option value="desc">Descending</option>
+          </select>
+        </label>
+        {(term.extract != null || fieldHasNull !== false) && (
+          <label className="qt-mobile-form-field">
+            <span>Null values</span>
+            <select className={cx("qt-input", classNames?.select)} value={term.nulls ?? "last"} disabled={disabled} onChange={(event) => updateTerm(dataIndex, { nulls: event.target.value as "first" | "last" })}>
+              <option value="last">Last</option>
+              <option value="first">First</option>
+            </select>
+          </label>
+        )}
+        <div className="qt-mobile-form-field qt-mobile-form-field--wide">
+          <span>Extraction</span>
+          <button type="button" className="qt-btn" disabled={disabled} onClick={() => setExtractOpen(true)} aria-label={`Configure regex extract for ${label}`}><Icon name={term.extract ? "pencil" : "add"} />{term.extract ? "Edit regex extraction" : "regex extract"}</button>
+        </div>
+        <div className="qt-mobile-form-actions">
+          <button type="button" className="qt-mobile-form-remove" disabled={disabled} onClick={() => removeTerm(dataIndex)} aria-label={`Remove ${label} sort`}>Remove sort</button>
+        </div>
+      </div>
+    </MobileChipEditor>
+    {extractionEditor}
+    </>
+  );
 
   return (
+    <>
     <span
       className={cx("qt-chip", "qt-chip--col", "qt-chip--sort", isDragSource && "qt-chip--dragging", classNames?.chip)}
       draggable={!disabled}
@@ -1580,7 +1711,7 @@ function OrderTermChip<Row>({
       title="drag to reorder sort priority"
     >
       <span aria-hidden className="qt-chip-grip">
-        ⋮⋮
+        <Icon name="grip" />
       </span>
       {showPriority && <span className="qt-chip-priority">{priority}</span>}
       <span className="qt-chip-field">{label}</span>
@@ -1590,43 +1721,11 @@ function OrderTermChip<Row>({
         disabled={disabled}
         onClick={() => updateTerm(dataIndex, { dir: term.dir === "asc" ? "desc" : "asc" })}
       >
-        {term.dir === "asc" ? "↑ asc" : "↓ desc"}
+        <Icon name={term.dir === "asc" ? "arrowUp" : "arrowDown"} />{term.dir === "asc" ? "asc" : "desc"}
       </button>
-      {term.extract ? (
-        <span className="qt-sort-extract">
-          <span className="qt-chip-and">extract</span>
-          <input
-            className={cx("qt-chip-val", classNames?.input)}
-            value={term.extract.regex}
-            placeholder="regex"
-            aria-label={`Regex extract for ${label}`}
-            size={chipFieldWidthForInput(term.extract.regex || "regex", "text", 5, 4)}
-            style={{ width: `${chipFieldWidthForInput(term.extract.regex || "regex", "text", 5, 4)}ch` }}
-            disabled={disabled}
-            onChange={(e) => updateTerm(dataIndex, { extract: { regex: e.target.value } })}
-          />
-          <button
-            type="button"
-            className="qt-chip-x"
-            title="Remove regex extraction"
-            aria-label={`Remove regex extract for ${label}`}
-            disabled={disabled}
-            onClick={() => clearExtract(dataIndex)}
-          >
-            ✕
-          </button>
-        </span>
-      ) : (
-        <button
-          type="button"
-          className="qt-chip-op-btn"
-          title="Sort by text extracted with a regular expression"
-          disabled={disabled}
-          onClick={() => updateTerm(dataIndex, { extract: { regex: "" } })}
-        >
-          + regex extract
-        </button>
-      )}
+      <button type="button" className="qt-chip-op-btn" title={term.extract ? `Regex: ${term.extract.regex}` : "Sort by text extracted with a regular expression"} aria-label={`Configure regex extract for ${label}`} disabled={disabled} onClick={() => setExtractOpen(true)}>
+        <Icon name={term.extract ? "pencil" : "add"} />{term.extract ? "regex extraction" : "regex extract"}
+      </button>
       {(term.extract != null || fieldHasNull !== false) && (
         <button
           type="button"
@@ -1638,17 +1737,12 @@ function OrderTermChip<Row>({
           nulls {term.nulls ?? "last"}
         </button>
       )}
-      <MoveButtons
-        label={label}
-        position={position}
-        count={count}
-        disabled={disabled}
-        onMove={moveTerm}
-      />
-      <button type="button" className="qt-chip-x" onClick={() => removeTerm(dataIndex)} disabled={disabled}>
-        ✕
+      <button type="button" className="qt-chip-x" onClick={() => removeTerm(dataIndex)} disabled={disabled} aria-label={`Remove ${label} sort`}>
+        <Icon name="close" />
       </button>
     </span>
+    {extractionEditor}
+    </>
   );
 }
 
@@ -1664,11 +1758,16 @@ function OrderRow<Row>({
   disabled: boolean | undefined;
 }) {
   const orderBy = api.query.orderBy;
+  const mobile = useMobileLayout();
   const byName = useMemo(() => new Map(fields.map((f) => [f.name, f])), [fields]);
   // Local live-reorder drag state (sort terms are their own list, distinct from
   // the columns shared via api.columnDrag) — same dimmed-source + slide preview.
   const [drag, setDrag] = useState<{ source: string; overIndex: number } | null>(null);
   const [adding, setAdding] = useState(false);
+  // Field chosen in the "sort with regex extraction" configurator (split-button caret).
+  const [regexField, setRegexField] = useState<FieldDef<Row> | null>(null);
+
+  const [editingSort, setEditingSort] = useState<string | null>(null);
 
   function setOrderBy(next: OrderByClause[]) {
     api.setSort(next);
@@ -1686,16 +1785,21 @@ function OrderRow<Row>({
     );
   }
   function removeTerm(i: number) {
+    setEditingSort(null);
     setOrderBy(orderBy.filter((_, k) => k !== i));
   }
-  function addTerm(f: FieldDef<Row>) {
+  function addTerm(f: FieldDef<Row>, extract?: OrderByClause["extract"]) {
     const field = f.sort?.field ?? f.name;
-    const nextOrderBy: OrderByClause[] = [...orderBy, { field, dir: "desc" }];
+    const nextOrderBy: OrderByClause[] = [...orderBy, { field, dir: "desc", ...(extract ? { extract } : {}) }];
 
-    if (orderBy.some((o) => o.field === field)) {
+    const existing = orderBy.findIndex((o) => o.field === field);
+    if (existing >= 0) {
+      if (extract) updateTerm(existing, { extract });
       setAdding(false);
       return;
     }
+
+    if (!extract) setEditingSort(field);
 
     const hasSelectColumn = api.select.visible.some((c) => c.field === field);
     if (hasSelectColumn) {
@@ -1745,6 +1849,38 @@ function OrderRow<Row>({
 
   const rendered = previewFields();
   const sortable = fields.filter(isSortable);
+  const sortKey = (f: FieldDef<Row>) => f.sort?.field ?? f.name;
+  function openRegexConfigurator() {
+    const unsorted = sortable.filter((f) => !termFields.includes(sortKey(f)));
+    setRegexField(unsorted.find((f) => f.type === "text") ?? unsorted[0] ?? sortable[0] ?? null);
+  }
+  const renderTerm = (name: string, position: number) => {
+    const term = termByField.get(name)!;
+    return (
+      <OrderTermChip
+        key={name}
+        api={api}
+        field={byName.get(name)}
+        term={term}
+        dataIndex={orderBy.findIndex((candidate) => candidate.field === name)}
+        priority={position + 1}
+        showPriority={orderBy.length > 1}
+        isDragSource={drag?.source === name}
+        onDragStart={() => setDrag({ source: name, overIndex: termFields.indexOf(name) })}
+        onDragOver={(event) => handleSortOver(event, name)}
+        onDrop={commitSortDrop}
+        onDragEnd={() => setDrag(null)}
+        disabled={disabled}
+        updateTerm={updateTerm}
+        clearExtract={clearExtract}
+        removeTerm={removeTerm}
+        classNames={classNames}
+        label={byName.get(name)?.label ?? name}
+        editorOpen={editingSort === name}
+        onEditorChange={(open) => setEditingSort(open ? name : null)}
+      />
+    );
+  };
   const isDefaultOrderBy =
     orderBy.length === api.defaults.orderBy.length &&
     orderBy.every((term, i) => {
@@ -1757,57 +1893,50 @@ function OrderRow<Row>({
       );
     });
 
+  const actions = (
+    <>
+      <span className="qt-split-btn" role="group" aria-label="Sort actions">
+        <button type="button" className="qt-add" aria-label="Add sort" onClick={() => setAdding(true)} disabled={disabled || adding || sortable.length === 0}><Icon name="add" />{mobile ? "Add" : "add sort"}</button>
+        <button type="button" className="qt-add qt-split-btn-caret" aria-label="Sort with regex extraction" title="Sort with regex extraction" aria-haspopup="dialog" aria-expanded={regexField != null} disabled={disabled || sortable.length === 0} onClick={openRegexConfigurator}><Icon name="chevronRight" size={18} /></button>
+      </span>
+      {!isDefaultOrderBy && <button type="button" className="qt-link-btn" onClick={() => api.setSort(api.defaults.orderBy)} disabled={disabled}>{mobile ? "Reset" : "reset"}</button>}
+    </>
+  );
+
   return (
-    <div className="qt-qb-row">
-      <span className="qt-qb-kw">order by</span>
+    <div className="qt-qb-row qt-qb-row--sort">
+      <div className="qt-qb-section-header">
+        <span className="qt-qb-kw" data-mobile-label="Sort">order by</span>
+        {mobile && actions}
+      </div>
       {orderBy.length === 0 && !adding && <span className="qt-qb-hint">(default)</span>}
-      {rendered.map((f, pos) => {
-        const term = termByField.get(f)!;
-        return (
-          <OrderTermChip
-            // Stable key (term field) so React MOVES the dragged chip, not remounts it.
-            key={f}
-            api={api}
-            field={byName.get(f)}
-            term={term}
-            dataIndex={orderBy.findIndex((o) => o.field === f)}
-            priority={pos + 1}
-            showPriority={orderBy.length > 1}
-            isDragSource={drag?.source === f}
-            onDragStart={() => setDrag({ source: f, overIndex: termFields.indexOf(f) })}
-            onDragOver={(e) => handleSortOver(e, f)}
-            onDrop={commitSortDrop}
-            onDragEnd={() => setDrag(null)}
-            disabled={disabled}
-            updateTerm={updateTerm}
-            clearExtract={clearExtract}
-            removeTerm={removeTerm}
-            position={pos}
-            count={rendered.length}
-            moveTerm={(toIndex) => {
-              const next = [...orderBy];
-              const fromIndex = next.findIndex((candidate) => candidate.field === f);
-              if (fromIndex === -1) return;
-              const [moved] = next.splice(fromIndex, 1);
-              next.splice(toIndex, 0, moved!);
-              setOrderBy(next);
-            }}
-            classNames={classNames}
-            label={byName.get(f)?.label ?? f}
-          />
-        );
-      })}
-      {adding ? (
-        <FieldPicker fields={sortable} onPick={addTerm} onClose={() => setAdding(false)} />
-      ) : (
-        <button type="button" className="qt-add" onClick={() => setAdding(true)} disabled={disabled}>
-          + add sort
-        </button>
-      )}
-      {!isDefaultOrderBy && (
-        <button type="button" className="qt-link-btn" onClick={() => api.setSort(api.defaults.orderBy)} disabled={disabled}>
-          reset
-        </button>
+      {mobile && orderBy.length > 0 ? <ReorderList className="qt-query-reorder-list" showHint={false} items={orderBy.map((term) => ({ id: term.field, label: orderByAsText(term, byName) }))} disabled={disabled} renderItem={(item, position) => renderTerm(item.id, position)} onMove={(id, position) => {
+        const next = [...orderBy];
+        const source = next.findIndex((term) => term.field === id);
+        if (source < 0) return;
+        const [term] = next.splice(source, 1);
+        next.splice(position, 0, term!);
+        setOrderBy(next);
+      }} /> : rendered.map(renderTerm)}
+      {!mobile && actions}
+      {adding && <FieldPicker fields={sortable} onPick={(field) => addTerm(field)} onClose={() => setAdding(false)} />}
+      {regexField && (
+        <SortExtractionEditor
+          api={api}
+          field={sortKey(regexField)}
+          label={regexField.label}
+          fieldOptions={sortable.map((f) => ({ name: sortKey(f), label: f.label }))}
+          onFieldChange={(name) => setRegexField(sortable.find((f) => sortKey(f) === name) ?? null)}
+          title="Sort with regex extraction"
+          applyLabel={termFields.includes(sortKey(regexField)) ? "Update sort" : "Add sort"}
+          disabled={disabled}
+          onApply={(regex) => {
+            addTerm(regexField, { regex });
+            setRegexField(null);
+          }}
+          onRemove={() => setRegexField(null)}
+          onClose={() => setRegexField(null)}
+        />
       )}
     </div>
   );
@@ -1817,14 +1946,17 @@ function OrderRow<Row>({
 
 function WindowRow<Row>({
   api,
+  total,
   classNames,
   disabled,
 }: {
   api: QueryTableApi<Row>;
+  total: number | null;
   classNames: QueryBuilderClassNames | undefined;
   disabled: boolean | undefined;
 }) {
   const { query } = api;
+  const offsetId = useId();
   const [limitDraft, setLimitDraft] = useState(String(query.limit));
   const [offsetDraft, setOffsetDraft] = useState(String(query.offset));
   useEffect(() => setLimitDraft(String(query.limit)), [query.limit]);
@@ -1843,7 +1975,7 @@ function WindowRow<Row>({
   return (
     <div className="qt-qb-row qt-qb-pagination">
       <label className="qt-qb-window-field">
-        <span className="qt-qb-kw">limit</span>
+        <span className="qt-qb-kw" data-mobile-label="Limit">limit</span>
         <input
           className={cx("qt-qb-num", classNames?.input)}
           type="number"
@@ -1855,19 +1987,44 @@ function WindowRow<Row>({
           onKeyDown={(e) => e.key === "Enter" && commitLimit()}
         />
       </label>
-      <label className="qt-qb-window-field">
-        <span className="qt-qb-kw">offset</span>
-        <input
-          className={cx("qt-qb-num", classNames?.input)}
-          type="number"
-          min={0}
-          value={offsetDraft}
-          disabled={disabled}
-          onChange={(e) => setOffsetDraft(e.target.value)}
-          onBlur={commitOffset}
-          onKeyDown={(e) => e.key === "Enter" && commitOffset()}
-        />
-      </label>
+      <div className="qt-qb-window-field">
+        <label className="qt-qb-kw" htmlFor={offsetId} data-mobile-label="Offset">offset</label>
+        <span className="qt-qb-num-combo">
+          <input
+            id={offsetId}
+            className={cx("qt-qb-num", classNames?.input)}
+            type="number"
+            min={0}
+            value={offsetDraft}
+            disabled={disabled}
+            onChange={(e) => setOffsetDraft(e.target.value)}
+            onBlur={commitOffset}
+            onKeyDown={(e) => e.key === "Enter" && commitOffset()}
+          />
+          {query.offset >= query.limit && (
+            <button
+              type="button"
+              className="qt-qb-num-step"
+              onClick={() => api.setOffset(query.offset - query.limit)}
+              disabled={disabled}
+              title={`Previous ${query.limit} rows`}
+              aria-label={`Previous ${query.limit} rows`}
+            >
+              −{query.limit}
+            </button>
+          )}
+          <button
+            type="button"
+            className="qt-qb-num-step"
+            onClick={() => api.setOffset(query.offset + query.limit)}
+            disabled={disabled || (total != null && query.offset + query.limit >= total)}
+            title={`Next ${query.limit} rows`}
+            aria-label={`Next ${query.limit} rows`}
+          >
+            +{query.limit}
+          </button>
+        </span>
+      </div>
       {!hasWindowDefault && (
         <button
           type="button"
@@ -1910,7 +2067,9 @@ function MetricsRow<Row>({
   disabled: boolean | undefined;
 }) {
   const { aggregations } = api;
+  const mobile = useMobileLayout();
   const clauses = aggregations.clauses;
+  const [editingMetric, setEditingMetric] = useState<string | null>(null);
   const measurable = useMemo(() => fields.filter(isMeasurable), [fields]);
   const groupable = useMemo(() => fields.filter(isGroupable), [fields]);
 
@@ -1950,48 +2109,50 @@ function MetricsRow<Row>({
   }
 
   const rendered = previewIds();
+  const renderMetric = (id: string) => {
+    const clause = byId.get(id)!;
+    return (
+      <MetricChip
+        key={id}
+        clause={clause}
+        measurable={measurable}
+        groupable={groupable}
+        classNames={classNames}
+        disabled={disabled}
+        editorOpen={editingMetric === id}
+        onEditorChange={(open) => setEditingMetric(open ? id : null)}
+        isDragSource={drag?.source === id}
+        onDragStart={() => setDrag({ source: id, overIndex: ids.indexOf(id) })}
+        onDragOver={(event) => handleOver(event, id)}
+        onDrop={commitDrop}
+        onDragEnd={() => setDrag(null)}
+        onChangeOp={(op) => changeMetricOp(aggregations, clause, measurable, op)}
+        onChangeField={(field) => aggregations.update(id, { field })}
+        onAddGroup={(field) => aggregations.update(id, { groupBy: [...clause.groupBy, field] })}
+        onRemoveGroup={(field) => aggregations.update(id, { groupBy: clause.groupBy.filter((group) => group !== field) })}
+        onRemove={() => {
+          setEditingMetric(null);
+          aggregations.remove(id);
+        }}
+      />
+    );
+  };
+
+  const actions = (
+    <>
+      <button type="button" className="qt-add" aria-label="Add metric" onClick={() => setEditingMetric(aggregations.add())} disabled={disabled}><Icon name="add" />add metric</button>
+      {clauses.length > 0 && <button type="button" className="qt-link-btn" onClick={aggregations.clear} disabled={disabled} title="Remove all metrics">reset</button>}
+    </>
+  );
 
   return (
     <div className="qt-qb-row qt-qb-row--metrics">
-      <span className="qt-qb-kw">metrics</span>
-      {clauses.length === 0 && <span className="qt-qb-hint">none</span>}
-      {rendered.map((id, position) => {
-        const clause = byId.get(id)!;
-        return (
-          <MetricChip
-            // Stable key (clause id) so React MOVES the dragged chip, not remounts it.
-            key={id}
-            clause={clause}
-            measurable={measurable}
-            groupable={groupable}
-            classNames={classNames}
-            disabled={disabled}
-            isDragSource={drag?.source === id}
-            onDragStart={() => setDrag({ source: id, overIndex: ids.indexOf(id) })}
-            onDragOver={(e) => handleOver(e, id)}
-            onDrop={commitDrop}
-            onDragEnd={() => setDrag(null)}
-            onChangeOp={(op) => changeMetricOp(aggregations, clause, measurable, op)}
-            onChangeField={(field) => aggregations.update(id, { field })}
-            onAddGroup={(field) => aggregations.update(id, { groupBy: [...clause.groupBy, field] })}
-            onRemoveGroup={(field) =>
-              aggregations.update(id, { groupBy: clause.groupBy.filter((g) => g !== field) })
-            }
-            onRemove={() => aggregations.remove(id)}
-            position={position}
-            count={rendered.length}
-            onMove={(toIndex) => aggregations.move(id, toIndex)}
-          />
-        );
-      })}
-      <button type="button" className="qt-add" onClick={() => aggregations.add()} disabled={disabled}>
-        + add metric
-      </button>
-      {clauses.length > 0 && (
-        <button type="button" className="qt-link-btn" onClick={aggregations.clear} disabled={disabled} title="Remove all metrics">
-          reset
-        </button>
-      )}
+      <div className="qt-qb-section-header">
+        <span className="qt-qb-kw" data-mobile-label="Metrics">metrics</span>
+        {mobile && actions}
+      </div>
+      {mobile && clauses.length > 0 ? <ReorderList className="qt-query-reorder-list" showHint={false} items={clauses.map((clause) => ({ id: clause.id, label: clause.label ?? `${AGG_OP_LABELS[clause.op]} ${clause.field ?? "all rows"}` }))} onMove={aggregations.move} disabled={disabled} renderItem={(item) => renderMetric(item.id)} /> : rendered.map(renderMetric)}
+      {!mobile && actions}
     </div>
   );
 }
@@ -2028,9 +2189,8 @@ function MetricChip<Row>({
   onAddGroup,
   onRemoveGroup,
   onRemove,
-  position,
-  count,
-  onMove,
+  editorOpen,
+  onEditorChange,
 }: {
   clause: AggregationClause;
   measurable: FieldDef<Row>[];
@@ -2047,11 +2207,11 @@ function MetricChip<Row>({
   onAddGroup: (field: string) => void;
   onRemoveGroup: (field: string) => void;
   onRemove: () => void;
-  position: number;
-  count: number;
-  onMove: (toIndex: number) => void;
+  editorOpen: boolean;
+  onEditorChange: (open: boolean) => void;
 }) {
   const [addingGroup, setAddingGroup] = useState(false);
+  const mobile = useMobileLayout();
   const byName = useMemo(() => new Map(groupable.map((f) => [f.name, f])), [groupable]);
 
   // Measures valid for the current op (a measurable field whose effective ops
@@ -2059,92 +2219,109 @@ function MetricChip<Row>({
   const needsField = aggOpNeedsField(clause.op);
   const measureOptions = measurable.filter((f) => aggOpsForField(f).includes(clause.op));
 
+  const operationControl = (
+    <select
+      className={cx("qt-chip-op", classNames?.select)}
+      value={clause.op}
+      aria-label="Aggregation function"
+      disabled={disabled}
+      onChange={(event) => onChangeOp(event.target.value as AggOp)}
+    >
+      {AGG_OPS.map((op) => (
+        <option key={op} value={op}>
+          {AGG_OP_LABELS[op]}
+        </option>
+      ))}
+    </select>
+  );
+  const measureControl = (
+    <select
+      className={cx("qt-chip-val", classNames?.select)}
+      value={clause.field ?? ""}
+      aria-label="Metric measure"
+      disabled={disabled}
+      onChange={(event) => onChangeField(event.target.value || undefined)}
+    >
+      {!needsField && <option value="">(all rows)</option>}
+      {needsField && clause.field == null && <option value="">measure…</option>}
+      {measureOptions.map((field) => (
+        <option key={field.name} value={field.name}>
+          {field.label}
+        </option>
+      ))}
+    </select>
+  );
+  const groupControl = (
+    <span className="qt-chip-agg-by">
+      {clause.groupBy.map((field) => (
+        <span className="qt-chip-agg-group" key={field}>
+          <span className="qt-chip-agg-group-label">{byName.get(field)?.label ?? field}</span>
+          <button type="button" className="qt-chip-x" onClick={() => onRemoveGroup(field)} disabled={disabled} aria-label={`Remove ${byName.get(field)?.label ?? field} grouping`}>
+            <Icon name="close" />
+          </button>
+        </span>
+      ))}
+      {addingGroup ? (
+        <FieldPicker
+          fields={groupable}
+          excluded={clause.groupBy}
+          onPick={(field) => {
+            onAddGroup(field.name);
+            setAddingGroup(false);
+          }}
+          onClose={() => setAddingGroup(false)}
+        />
+      ) : (
+        <button
+          type="button"
+          className="qt-add qt-chip-agg-add"
+          onClick={() => setAddingGroup(true)}
+          disabled={disabled}
+          title="Group by a field"
+          aria-label="Add grouping field"
+        >
+          <Icon name="add" />{mobile ? "group" : clause.groupBy.length === 0 ? "by" : null}
+        </button>
+      )}
+    </span>
+  );
+
+  if (mobile) return (
+    <MobileChipEditor title={clause.label ?? `${AGG_OP_LABELS[clause.op]} ${measurable.find((field) => field.name === clause.field)?.label ?? "all rows"}`} summary={clause.groupBy.length ? `By ${clause.groupBy.map((name) => byName.get(name)?.label ?? name).join(", ")}` : "All matching rows"} disabled={disabled} open={editorOpen} onOpenChange={onEditorChange}>
+      <div className="qt-mobile-form">
+        <label className="qt-mobile-form-field"><span>Function</span>{operationControl}</label>
+        <label className="qt-mobile-form-field"><span>Measure</span>{measureControl}</label>
+        <div className="qt-mobile-form-field qt-mobile-form-field--wide"><span>Group by</span>{groupControl}</div>
+        <p className="qt-mobile-form-hint">Uses all filtered rows, not just this page.</p>
+        <button type="button" className="qt-mobile-form-remove" onClick={onRemove} disabled={disabled}>Remove metric</button>
+      </div>
+    </MobileChipEditor>
+  );
+
   return (
     <span
       className={cx("qt-chip", "qt-chip--agg", isDragSource && "qt-chip--dragging", classNames?.chip)}
       draggable={!disabled}
-      onDragStart={(e) => {
+      onDragStart={(event) => {
         onDragStart();
-        e.dataTransfer.effectAllowed = "move";
-        e.dataTransfer.setData("text/plain", clause.id);
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", clause.id);
       }}
       onDragOver={onDragOver}
-      onDrop={(e) => {
-        e.preventDefault();
+      onDrop={(event) => {
+        event.preventDefault();
         onDrop();
       }}
       onDragEnd={onDragEnd}
       title="drag to reorder metrics"
     >
-      <span aria-hidden className="qt-chip-grip">
-        ⋮⋮
-      </span>
-      <select
-        className={cx("qt-chip-op", classNames?.select)}
-        value={clause.op}
-        disabled={disabled}
-        onChange={(e) => onChangeOp(e.target.value as AggOp)}
-      >
-        {AGG_OPS.map((op) => (
-          <option key={op} value={op}>
-            {AGG_OP_LABELS[op]}
-          </option>
-        ))}
-      </select>
-      <select
-        className={cx("qt-chip-val", classNames?.select)}
-        value={clause.field ?? ""}
-        disabled={disabled}
-        onChange={(e) => onChangeField(e.target.value || undefined)}
-      >
-        {!needsField && <option value="">(all rows)</option>}
-        {needsField && clause.field == null && <option value="">measure…</option>}
-        {measureOptions.map((f) => (
-          <option key={f.name} value={f.name}>
-            {f.label}
-          </option>
-        ))}
-      </select>
-      <span className="qt-chip-agg-by">
-        {clause.groupBy.map((g) => (
-          <span className="qt-chip-agg-group" key={g}>
-            <span className="qt-chip-agg-group-label">{byName.get(g)?.label ?? g}</span>
-            <button type="button" className="qt-chip-x" onClick={() => onRemoveGroup(g)} disabled={disabled}>
-              ✕
-            </button>
-          </span>
-        ))}
-        {addingGroup ? (
-          <FieldPicker
-            fields={groupable}
-            excluded={clause.groupBy}
-            onPick={(f) => {
-              onAddGroup(f.name);
-              setAddingGroup(false);
-            }}
-            onClose={() => setAddingGroup(false)}
-          />
-        ) : (
-          <button
-            type="button"
-            className="qt-add qt-chip-agg-add"
-            onClick={() => setAddingGroup(true)}
-            disabled={disabled}
-            title="Group by a field"
-          >
-            {clause.groupBy.length === 0 ? "+ by" : "+"}
-          </button>
-        )}
-      </span>
-      <MoveButtons
-        label={clause.label ?? `${AGG_OP_LABELS[clause.op]} metric`}
-        position={position}
-        count={count}
-        disabled={disabled}
-        onMove={onMove}
-      />
-      <button type="button" className="qt-chip-x" onClick={onRemove} disabled={disabled} title="Remove metric">
-        ✕
+      <span aria-hidden className="qt-chip-grip"><Icon name="grip" /></span>
+      {operationControl}
+      {measureControl}
+      {clause.groupBy.length > 0 && <span className="qt-chip-agg-kw">by</span>}
+      {groupControl}
+      <button type="button" className="qt-chip-x" onClick={onRemove} disabled={disabled} title="Remove metric" aria-label="Remove metric">
+        <Icon name="close" />
       </button>
     </span>
   );

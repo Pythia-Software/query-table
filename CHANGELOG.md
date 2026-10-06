@@ -28,6 +28,12 @@ contain intentional API changes described in their release notes.
 
 ### Fixed
 
+- Preserve desktop field-picker focus until click selection, including browsers
+  that do not focus pressed buttons, without selecting fields during touch scrolling.
+- Allow syntactically valid regex sort extraction when sampling or preview workers
+  are unavailable, and present preview failures as non-blocking warnings.
+- Keep development feedback inputs inside nested desktop dialogs as well as mobile sheets.
+
 - Align PostgreSQL textarray nullity and negated membership with local execution:
   empty arrays count as empty, and bare NOT membership excludes empty arrays.
 

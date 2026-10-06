@@ -7,9 +7,11 @@ import { PresentedFilterValue } from "./FilterValuePresentation";
 // Anchors just off the click point and clamps to the viewport.
 
 import { useEffect, useState, type ReactNode } from "react";
+import { Icon } from "./Icon";
 import type { FieldDef, FilterOp, WhereClause } from "@pythia-software/query-table-core";
 import { NULLARY_OPS, negateClause, opsForField, opPairsForField, isFilterable } from "@pythia-software/query-table-core";
 import type { MenuClassNames } from "./classNames";
+import { AdaptiveOverlay, useMobileLayout } from "./AdaptiveOverlay";
 
 export interface CellMenuProps<Row> {
   field: FieldDef<Row>;
@@ -35,9 +37,11 @@ interface FilterRow {
 }
 
 export function CellMenu<Row>({ field, value, x, y, onAddFilter, onClose, classNames }: CellMenuProps<Row>): ReactNode {
+  const mobile = useMobileLayout();
   // Dismiss on Escape or an outside click. The opening click is deferred a tick
   // so it doesn't immediately re-close the freshly-opened menu.
   useEffect(() => {
+    if (mobile) return;
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
     }
@@ -51,7 +55,7 @@ export function CellMenu<Row>({ field, value, x, y, onAddFilter, onClose, classN
       window.removeEventListener("click", onDocClick);
       clearTimeout(t);
     };
-  }, [onClose]);
+  }, [onClose, mobile]);
 
   // A non-filterable field (e.g. a computed column that opted out) offers no
   // filter rows; only the header + copy remain. `pairs` is the shared keep/
@@ -111,6 +115,7 @@ export function CellMenu<Row>({ field, value, x, y, onAddFilter, onClose, classN
   const top = Math.max(8, Math.min(y + POINTER_OFFSET, vh - ROW_HEIGHT * approxRows - 8));
 
   return (
+    <AdaptiveOverlay title={field.label} onClose={onClose}>
     <div
       className={cx("qt-cell-menu", classNames?.popover)}
       style={{ left, top, width: MENU_WIDTH }}
@@ -133,7 +138,7 @@ export function CellMenu<Row>({ field, value, x, y, onAddFilter, onClose, classN
           onClose();
         }}
       >
-        copy value
+        <Icon name="copy" /> copy value
       </MenuItem>
       <div className={cx("qt-cm-sep", classNames?.separator)} />
       {rows.length > 0 && (
@@ -146,6 +151,7 @@ export function CellMenu<Row>({ field, value, x, y, onAddFilter, onClose, classN
         </div>
       )}
     </div>
+    </AdaptiveOverlay>
   );
 }
 
