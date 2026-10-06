@@ -16,7 +16,7 @@ try {
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(process.env.QT_DEMO_URL ?? "http://localhost:5179/");
   const open = () =>
-    page.getByRole("button", { name: "Edit columns", exact: true }).click();
+    page.getByRole("button", { name: "Customize columns", exact: true }).click();
   const preview = () => page.locator(".qt-preview-summary").waitFor();
   await open();
   await preview();
@@ -44,7 +44,7 @@ try {
     false,
   );
   await page
-    .getByRole("button", { name: "＋ Computed column", exact: true })
+    .getByRole("button", { name: "Computed column", exact: true })
     .click();
   await page.getByLabel("Column name", { exact: true }).fill("Job prefix");
   const editor = page.getByRole("textbox", {
@@ -107,7 +107,7 @@ try {
   // A catastrophic native regex is killed by the owning thread; the editor stays responsive.
   await open();
   await page
-    .getByRole("button", { name: "＋ Computed column", exact: true })
+    .getByRole("button", { name: "Computed column", exact: true })
     .click();
   await editor.fill('REGEX_TEST(CONCAT(RPAD("a", 30000, "a"), "!"), "(a+)+$")');
   await page

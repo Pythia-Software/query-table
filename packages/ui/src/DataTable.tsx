@@ -1,3 +1,4 @@
+import { Icon } from "./Icon";
 // DataTable — the table renderer.
 //
 // Presentation only: it draws headers (sort affordances), the checkbox column,
@@ -17,6 +18,7 @@ import { resolveRenderer, type RenderRegistry } from "./renderers";
 import type { TableClassNames } from "./classNames";
 import { CellMenu } from "./CellMenu";
 import { formatRowCount, rowCountTitle } from "./formatRowCount";
+import { AdaptiveOverlay, useMobileLayout } from "./AdaptiveOverlay";
 
 export interface DataTableProps<Row> {
   /** Ordered visible fields (widths already resolved), from `api.visibleFields`. */
@@ -563,7 +565,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     <>
       {showHorizontalCue ? (
         <div className="qt-table-scroll-cue" aria-hidden="true">
-          Swipe to see more <span>→</span>
+          Swipe to see more <Icon name="arrowRight" />
         </div>
       ) : null}
       <div
@@ -728,7 +730,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                       {f.label}
                       {info && (
                         <span className="qt-sort-indicator">
-                          {info.dir === "asc" ? " ↑" : " ↓"}
+                          <Icon name={info.dir === "asc" ? "arrowUp" : "arrowDown"} />
                           {info.priority != null && <sup className="qt-sort-priority">{info.priority}</sup>}
                         </span>
                       )}
@@ -809,7 +811,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                         onContextMenu={(e) => openMenu(e, f, row)}
                         onDoubleClick={(e) => copyCellToClipboard(e, f, id, i, value)}
                       >
-                        {copiedCellKey === key ? <span className="qt-cell-copy-chip">✓ copied</span> : isComputedCellError(value) ? <span className="qt-formula-error" title={value.computedError}>{value.computedError === "Calculating…" ? "Calculating…" : "Error"}</span> : render({ value, row, field: f, query })}
+                        {copiedCellKey === key ? <span className="qt-cell-copy-chip"><Icon name="check" />copied</span> : isComputedCellError(value) ? <span className="qt-formula-error" title={value.computedError}>{value.computedError === "Calculating…" ? "Calculating…" : "Error"}</span> : render({ value, row, field: f, query })}
                       </td>
                     );
                   })}
@@ -833,7 +835,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                     disabled={loading || !canPrev}
                     onClick={prevPage}
                   >
-                    ← prev
+                    <Icon name="arrowLeft" />prev
                   </button>
                   <span className={cx("qt-table-summary-hint", classNames?.summaryHint)} title={summaryTitle}>{summaryText}</span>
                   <button
@@ -842,7 +844,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                     disabled={loading || !canNext}
                     onClick={nextPage}
                   >
-                    next →
+                    next<Icon name="arrowRight" />
                   </button>
                 </div>
               </td>
@@ -898,7 +900,9 @@ function HeaderMenu<Row>({
   onRemove: () => void;
   onClose: () => void;
 }) {
+  const mobile = useMobileLayout();
   useEffect(() => {
+    if (mobile) return;
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
     }
@@ -912,7 +916,7 @@ function HeaderMenu<Row>({
       window.removeEventListener("click", onDocClick);
       clearTimeout(t);
     };
-  }, [onClose]);
+  }, [onClose, mobile]);
 
   const items: ReactNode[] = [];
   const addSortItem = (placement: HeaderSortPlacement, dir: "asc" | "desc", label: string) =>
@@ -942,6 +946,7 @@ function HeaderMenu<Row>({
   const top = Math.max(8, Math.min(y, vh - MENU_ROW_HEIGHT * items.length - 8));
 
   return (
+    <AdaptiveOverlay title={`${field.label} column`} onClose={onClose}>
     <div
       className="qt-cell-menu"
       style={{ left, top, width: MENU_WIDTH }}
@@ -954,6 +959,7 @@ function HeaderMenu<Row>({
       </div>
       {items}
     </div>
+    </AdaptiveOverlay>
   );
 }
 

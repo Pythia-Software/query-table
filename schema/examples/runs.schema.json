@@ -78,12 +78,12 @@
     },
     {
       "name": "is_starred",
-      "label": "★",
+      "label": "Priority",
       "type": "bool",
       "group": "tagging",
       "alias": "star",
       "render": "tag_marker",
-      "select": { "width": 40 },
+      "select": { "width": 80 },
       "sort": { "field": "is_starred" },
       "source": { "kind": "backend", "synthetic": true },
       "bindings": { "postgres": { "expr": "(r.labels ? 'priority')", "synthetic": true } }

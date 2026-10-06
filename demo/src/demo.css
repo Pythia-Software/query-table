@@ -12,6 +12,11 @@ body {
   color: var(--qt-text);
 }
 
+.qt-modal-surface:has(.qt-demo-feedback) {
+  box-sizing: border-box;
+  padding-bottom: calc(72px + env(safe-area-inset-bottom));
+}
+
 button,
 input,
 select {
@@ -58,14 +63,14 @@ select {
 
 .qt-demo-mobile-copy { display: none; }
 
-@media (max-width: 640px) {
+@media (max-width: 760px), (pointer: coarse) and (max-height: 500px) {
   .qt-demo {
     width: auto;
     margin: 0;
     padding:
-      max(20px, env(safe-area-inset-top))
+      max(12px, env(safe-area-inset-top))
       max(12px, env(safe-area-inset-right))
-      max(40px, env(safe-area-inset-bottom))
+      max(20px, env(safe-area-inset-bottom))
       max(12px, env(safe-area-inset-left));
   }
 
@@ -83,7 +88,7 @@ select {
   }
 
   .qt-demo-intro {
-    margin-bottom: 18px;
+    margin-bottom: 10px;
     font-size: 14px;
   }
 

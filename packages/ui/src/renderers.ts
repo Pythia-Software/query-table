@@ -1,3 +1,4 @@
+import { Icon } from "./Icon";
 // renderers.ts — the cell render registry.
 //
 // This is how the table stays "gold standard but customizable" (the core ask).
@@ -72,10 +73,9 @@ export const defaultRenderers: RenderRegistry = {
     return n.toLocaleString();
   },
 
-  // ✓ / —
   bool_check({ value }) {
     if (value == null) return muted(EMPTY);
-    return value ? "✓" : muted(EMPTY);
+    return value ? createElement("span", { role: "img", "aria-label": "True" }, createElement(Icon, { name: "check" })) : muted(EMPTY);
   },
 
   // ISO clamped to seconds

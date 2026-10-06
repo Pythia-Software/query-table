@@ -1,8 +1,9 @@
 // SavedQueriesModal — list / load / delete named saved queries. Thin view over
 // api.saved; loading one pushes its QueryState into the controller (and the URL).
 
-import { useEffect, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import type { SavedQueriesApi } from "@pythia-software/query-table-react";
+import { ModalSurface } from "./AdaptiveOverlay";
 
 export interface SavedQueriesModalProps {
   saved: SavedQueriesApi;
@@ -11,24 +12,9 @@ export interface SavedQueriesModalProps {
 }
 
 export function SavedQueriesModal({ saved, onClose, onLoad }: SavedQueriesModalProps): ReactNode {
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   return (
-    <div className="qt-modal-backdrop" onClick={onClose}>
-      <div
-        className="qt-modal"
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Saved queries"
-      >
-        <h3 className="qt-modal-title">Saved queries</h3>
+    <ModalSurface title="Saved queries" onClose={onClose}>
+      <div className="qt-overlay-body">
         {saved.loading ? (
           <p className="qt-muted">Loading…</p>
         ) : saved.items.length === 0 ? (
@@ -87,12 +73,7 @@ export function SavedQueriesModal({ saved, onClose, onLoad }: SavedQueriesModalP
             })}
           </ul>
         )}
-        <div className="qt-modal-footer">
-          <button type="button" className="qt-btn" onClick={onClose}>
-            close
-          </button>
-        </div>
       </div>
-    </div>
+    </ModalSurface>
   );
 }
