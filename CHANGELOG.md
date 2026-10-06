@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.5.0 — 2026-10-06
+
+### Added
+
+- Add schema-opted-in native textarray set filters with searchable badge choices,
+  removable chips, ANY/ALL/NONE/EMPTY modes, keyboard controls, and mobile sheets.
+  Explicit editor metadata round-trips through URLs, storage, and query history
+  while server requests retain existing CNF predicates without new operators.
+  Add `mapSetFilterValues` for consumer-owned alias canonicalization.
+- Add responsive query-builder sheets, touch and keyboard ordering, compact clause
+  editors, a focused column workbench, and native sharing with clipboard fallback.
+- Add worker-isolated regex extraction previews and export the shared SVG `Icon`
+  component and its types from the UI package.
+- Add text length filters (`length_gt`, `length_lt`, and `length_eq`) across the
+  query builder, local and PostgreSQL execution, and native macOS. Zero-length
+  filters distinguish empty strings from NULL and offer direct cell-menu actions.
+- Add development-only Agentation feedback with source references and local notes.
+
+### Changed
+
+- Format large row totals with grouped or compact counts and reveal exact totals on hover.
+
+### Fixed
+
+- Preserve desktop field-picker focus until click selection, including browsers
+  that do not focus pressed buttons, without selecting fields during touch scrolling.
+- Allow syntactically valid regex sort extraction when sampling or preview workers
+  are unavailable, and present preview failures as non-blocking warnings.
+- Keep development feedback inputs inside nested desktop dialogs as well as mobile sheets.
+- Avoid synchronous React updates during virtual table row measurement.
+- Update locked transitive dependencies to resolve npm audit advisories.
+
 ## 0.4.2 — 2026-09-20
 
 - Add opt-in `filter.arrayCaseSensitive` for exact text-array keys in local queries, metrics, PostgreSQL compilation, native macOS queries, and generated schemas. Existing fields remain case-insensitive.
@@ -28,12 +60,6 @@ contain intentional API changes described in their release notes.
 
 ### Fixed
 
-- Preserve desktop field-picker focus until click selection, including browsers
-  that do not focus pressed buttons, without selecting fields during touch scrolling.
-- Allow syntactically valid regex sort extraction when sampling or preview workers
-  are unavailable, and present preview failures as non-blocking warnings.
-- Keep development feedback inputs inside nested desktop dialogs as well as mobile sheets.
-
 - Align PostgreSQL textarray nullity and negated membership with local execution:
   empty arrays count as empty, and bare NOT membership excludes empty arrays.
 
@@ -44,16 +70,6 @@ contain intentional API changes described in their release notes.
 
 ### Added
 
-- Add schema-opted-in native textarray set filters with searchable badge choices,
-  removable chips, ANY/ALL/NONE/EMPTY modes, keyboard controls, and mobile sheets.
-  Explicit editor metadata round-trips through URLs, storage, and query history
-  while server requests retain existing CNF predicates without new operators.
-  Add `mapSetFilterValues` for consumer-owned alias canonicalization.
-
-- Add text length filters (`length_gt`, `length_lt`, and `length_eq`) across the
-  query builder, local and PostgreSQL execution, and native macOS. Zero-length
-  filters distinguish empty strings from NULL and offer direct cell-menu actions.
-- Format large row totals with grouped or compact counts and reveal exact totals on hover.
 - Native macOS Swift packages with an AppKit table, SwiftUI query builder,
   column layout, multi-sort, selection, saved queries, metrics, and query history.
 - Shared schema/query JSON contracts, compact query tokens, pluggable asynchronous
