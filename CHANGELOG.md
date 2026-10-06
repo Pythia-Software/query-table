@@ -28,12 +28,21 @@ contain intentional API changes described in their release notes.
 
 ### Fixed
 
+- Align PostgreSQL textarray nullity and negated membership with local execution:
+  empty arrays count as empty, and bare NOT membership excludes empty arrays.
+
 - Native compact query imports preserve valid WHERE predicates when neighboring
   members are malformed, matching React's member-by-member normalization.
 - Native column display honors an explicitly empty `defaultSelect`, keeping
   visible columns consistent with backend projections.
 
 ### Added
+
+- Add schema-opted-in native textarray set filters with searchable badge choices,
+  removable chips, ANY/ALL/NONE/EMPTY modes, keyboard controls, and mobile sheets.
+  Explicit editor metadata round-trips through URLs, storage, and query history
+  while server requests retain existing CNF predicates without new operators.
+  Add `mapSetFilterValues` for consumer-owned alias canonicalization.
 
 - Add text length filters (`length_gt`, `length_lt`, and `length_eq`) across the
   query builder, local and PostgreSQL execution, and native macOS. Zero-length

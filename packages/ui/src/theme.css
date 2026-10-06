@@ -1432,3 +1432,14 @@
 
   .qt-select-editor .qt-editor-notice { color: #3fb950; }
 }
+.qt-set-backdrop { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.25); }
+.qt-set-editor { position: fixed; box-sizing: border-box; width: min(440px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; background: var(--qt-header-bg); color: var(--qt-text); border: 1px solid var(--qt-border); border-radius: var(--qt-radius); padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.qt-set-editor h3 { margin: 0; }
+.qt-set-editor select, .qt-set-editor > input { width: 100%; box-sizing: border-box; }
+.qt-set-selected, .qt-set-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.qt-set-actions { justify-content: flex-end; }
+.qt-set-options { overflow: auto; max-height: 240px; }
+.qt-set-option { display: flex; align-items: center; gap: 8px; padding: 6px; }
+.qt-set-option small { color: var(--qt-muted); }
+.qt-set-tag { display: inline-flex; align-items: center; gap: 4px; }
+@media (max-width: 600px) { .qt-set-editor { top: auto !important; left: 0 !important; bottom: 0; width: 100%; max-height: 85dvh; border-radius: var(--qt-radius) var(--qt-radius) 0 0; } }

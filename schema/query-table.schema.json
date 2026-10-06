@@ -94,6 +94,7 @@
           "additionalProperties": false,
           "properties": {
             "enabled": { "type": "boolean", "description": "Default: backend ⇒ true, derived ⇒ false." },
+            "editor": { "enum": ["set"], "description": "Native ANY/ALL/NONE/EMPTY editor for textarray fields." },
             "arrayCaseSensitive": { "type": "boolean", "description": "Preserve case when matching textarray values. Default false." },
             "pushdown": { "type": "boolean", "description": "Evaluate on the backend? Default backend ⇒ true. false ⇒ applied client-side by applyQuery." },
             "ops": { "type": "array", "items": { "$ref": "#/$defs/filterOp" } },

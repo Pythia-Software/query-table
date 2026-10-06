@@ -38,6 +38,8 @@ export interface QueryBuilderClassNames {
   button?: string;
   input?: string;
   select?: string;
+  setEditor?: string;
+  setBackdrop?: string;
 }
 
 export interface MenuClassNames {

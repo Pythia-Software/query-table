@@ -18,6 +18,15 @@ import { CollapsibleSection } from "./CollapsibleSection";
 import "./demo.css";
 
 const schema = loadSchema<Run>(runsDoc);
+const errorCodesField = schema.fields.find((field) => field.name === "error_codes");
+if (errorCodesField) {
+  errorCodesField.filter = {
+    ...errorCodesField.filter,
+    editor: "set",
+    arrayCaseSensitive: true,
+    values: { source: "static", options: [{ value: "timeout", label: "Timeout" }, { value: "validation", label: "Validation" }] },
+  };
+}
 
 const renderers: RenderRegistry<Run> = {
   ...defaultRenderers,

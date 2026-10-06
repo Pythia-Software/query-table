@@ -288,7 +288,11 @@ func compileLiteral(c WhereClause, schema Schema, idx int) (string, []any, int, 
 		return "", nil, idx, nil // skipped (empty value)
 	}
 	if c.Negated {
-		sql = fmt.Sprintf("NOT (%s) AND %s IS NOT NULL", sql, spec.Expr)
+		if spec.Kind == FieldTextArray {
+			sql = fmt.Sprintf("NOT (%s) AND COALESCE(cardinality(%s), 0) > 0", sql, spec.Expr)
+		} else {
+			sql = fmt.Sprintf("NOT (%s) AND %s IS NOT NULL", sql, spec.Expr)
+		}
 	}
 	return sql, args, next, nil
 }
@@ -325,8 +329,14 @@ func compileOrGroup(lits []WhereClause, schema Schema, idx int) (string, []any, 
 func compileWhere(spec FieldSpec, op, value string, idx int) (string, []any, int, error) {
 	switch op {
 	case "is_null":
+		if spec.Kind == FieldTextArray {
+			return fmt.Sprintf("COALESCE(cardinality(%s), 0) = 0", spec.Expr), nil, idx, nil
+		}
 		return spec.Expr + " IS NULL", nil, idx, nil
 	case "is_not_null":
+		if spec.Kind == FieldTextArray {
+			return fmt.Sprintf("COALESCE(cardinality(%s), 0) > 0", spec.Expr), nil, idx, nil
+		}
 		return spec.Expr + " IS NOT NULL", nil, idx, nil
 	}
 	if !opAllowed(spec.Kind, op) {
