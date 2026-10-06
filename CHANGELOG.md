@@ -2,7 +2,17 @@
 
 ## Unreleased
 
+### Added
+
+- Add a **Column Widths** submenu to the `DataTable` header menu: fit the
+  clicked column, fit all to content, fit all to screen, equal widths, or reset.
+  Presets write every width in one query update, so they share, undo, and
+  persist like manual resizes.
+
 ### Changed
+
+- Measure intrinsic content for header-handle auto-fit (Enter), so auto-fit can
+  shrink a column as well as grow it.
 
 - Tag each release for the Go module as `backends/go/v<version>` so `go get`
   and pkg.go.dev resolve semantic versions instead of pseudo-versions.

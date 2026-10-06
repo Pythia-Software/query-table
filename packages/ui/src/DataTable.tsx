@@ -3,7 +3,7 @@ import { Icon } from "./Icon";
 //
 // Presentation only: it draws headers (sort affordances), the checkbox column,
 // cells (via the render registry), the right-click CellMenu, column resize
-// handles, and the loading bar. All state
+// handles, the loading bar, and the header menu (sort, column widths). All state
 // lives in the @pythia-software/query-table-react hook; DataTable receives the resolved view
 // and emits intents through onQueryChange. Its props mirror a conventional
 // schema-driven table so adoption is mechanical.
@@ -19,6 +19,7 @@ import type { TableClassNames } from "./classNames";
 import { CellMenu } from "./CellMenu";
 import { formatRowCount, rowCountTitle } from "./formatRowCount";
 import { AdaptiveOverlay, useMobileLayout } from "./AdaptiveOverlay";
+import { equalWidths, fitContentWidths, fitScreenWidths, type ColumnWidthPreset } from "./columnWidths";
 
 export interface DataTableProps<Row> {
   /** Ordered visible fields (widths already resolved), from `api.visibleFields`. */
@@ -67,9 +68,16 @@ const MIN_SELECTION_WIDTH = 1;
 const MAX_WIDTH = 800;
 const DEFAULT_WIDTH = 120;
 const DEFAULT_SELECTION_WIDTH = 36;
-const AUTOFIT_EXTRA_PX = 16;
+// Covers collapsed borders and sub-pixel text so measured content never ellipsizes.
+const AUTOFIT_EXTRA_PX = 4;
+// Collapsed outer table border; keeps "fit to screen" from adding a scrollbar.
+const TABLE_BORDER_PX = 2;
+const TRAILING_WIDTH = 40;
 const MENU_WIDTH = 240;
 const MENU_ROW_HEIGHT = 32;
+const SUBMENU_WIDTH = 200;
+const WIDTH_SUBMENU_OVERHANG_ROWS = 5;
+const SUBMENU_CLOSE_DELAY_MS = 300;
 const COPY_FEEDBACK_MS = 900;
 const DEFAULT_MAX_HEIGHT = 600;
 const DEFAULT_ROW_HEIGHT = 37;
@@ -295,8 +303,11 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     setWidth(name, width);
   }
   function setWidth(name: string, width: number) {
-    const px = clampWidth(width);
-    onQueryChange((prev) => ({ ...prev, select: writeWidth(prev.select, fields, name, px) }));
+    setWidths(new Map([[name, width]]));
+  }
+  function setWidths(widths: Map<string, number>) {
+    const px = new Map(Array.from(widths, ([name, width]) => [name, clampWidth(width)]));
+    onQueryChange((prev) => ({ ...prev, select: writeWidths(prev.select, fields, px) }));
   }
   function applyResizeGuide() {
     const preview = resizePreviewRef.current;
@@ -390,15 +401,42 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     window.addEventListener("pointerup", finish);
     window.addEventListener("pointercancel", finish);
   }
-  function autofitColumn(name: string) {
+  /** Widest rendered header/cell content per column (0 when nothing measured). */
+  function measureContentWidths(names: string[]): number[] {
     const wrap = tableWrapRef.current;
-    if (!wrap) return;
-    const selector = `[data-qt-field="${cssAttributeValue(name)}"]`;
-    let width = 0;
-    wrap.querySelectorAll<HTMLElement>(selector).forEach((el) => {
-      width = Math.max(width, el.scrollWidth);
+    if (!wrap) return names.map(() => 0);
+    return names.map((name) => {
+      const cells = wrap.querySelectorAll<HTMLElement>(`[data-qt-field="${cssAttributeValue(name)}"]`);
+      const width = measureIntrinsicWidth(Array.from(cells));
+      return width > 0 ? width + AUTOFIT_EXTRA_PX : 0;
     });
-    if (width > 0) setWidth(name, width + AUTOFIT_EXTRA_PX);
+  }
+  function autofitColumn(name: string) {
+    const [width = 0] = measureContentWidths([name]);
+    if (width > 0) setWidth(name, width);
+  }
+  function applyWidthPreset(preset: ColumnWidthPreset) {
+    setMenu(null);
+    const names = renderedColumnNames.filter((name) => fieldByName.has(name));
+    if (names.length === 0) return;
+    const content = measureContentWidths(names).map((w, i) => w || displayColumnWidthFor(names[i]!, fieldByName.get(names[i]!)));
+    const wrap = tableWrapRef.current;
+    const available = (wrap?.clientWidth ?? 0)
+      - (showSel ? selectionColumnWidth : 0)
+      - (trailing ? TRAILING_WIDTH : 0)
+      - TABLE_BORDER_PX;
+    const widths = preset === "content"
+      ? fitContentWidths(content)
+      : preset === "equal"
+        ? equalWidths(names.length, available)
+        : fitScreenWidths(content, available);
+    setWidths(new Map(names.map((name, i) => [name, widths[i]!])));
+  }
+  const hasCustomWidths = selectionColumnWidth !== DEFAULT_SELECTION_WIDTH || query.select.some((c) => c.width != null);
+  function resetWidths() {
+    setMenu(null);
+    setSelectionColumnWidth(DEFAULT_SELECTION_WIDTH);
+    onQueryChange((prev) => ({ ...prev, select: prev.select.map((c) => ({ field: c.field })) }));
   }
   function resizeWithKeyboard(name: string, startWidth: number | undefined, e: React.KeyboardEvent<HTMLSpanElement>) {
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight" && e.key !== "Enter") return;
@@ -514,7 +552,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
   const tableWidth = renderedColumnNames.reduce((sum, name) => {
     const f = fieldByName.get(name);
     return sum + displayColumnWidthFor(name, f);
-  }, trailing ? 40 : 0);
+  }, trailing ? TRAILING_WIDTH : 0);
   // A horizontal data grid is more useful than a card stack on small screens,
   // but overflow should be discoverable. Keep a lightweight cue visible only
   // while there is more content to the right.
@@ -603,7 +641,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
               if (!f) return null;
               return <col key={f.name} data-qt-column={f.name} style={{ width: w }} />;
             })}
-            {trailing && <col style={{ width: 40 }} />}
+            {trailing && <col style={{ width: TRAILING_WIDTH }} />}
           </colgroup>
           <thead ref={tableHeadRef} className={classNames?.thead}>
             <tr className={classNames?.headerRow}>
@@ -873,6 +911,13 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
             canRemoveColumn={fields.length > 1}
             onSetSort={(placement, dir) => applyHeaderSort(menu.field, dir, placement)}
             onRemove={() => removeColumn(menu.field)}
+            canResetWidths={hasCustomWidths}
+            onFitColumn={() => {
+              setMenu(null);
+              autofitColumn(menu.field.name);
+            }}
+            onWidthPreset={applyWidthPreset}
+            onResetWidths={resetWidths}
             onClose={() => setMenu(null)}
           />
         )
@@ -887,8 +932,12 @@ function HeaderMenu<Row>({
   y,
   sortable,
   canRemoveColumn,
+  canResetWidths,
   onSetSort,
   onRemove,
+  onFitColumn,
+  onWidthPreset,
+  onResetWidths,
   onClose,
 }: {
   field: FieldDef<Row>;
@@ -896,11 +945,32 @@ function HeaderMenu<Row>({
   y: number;
   sortable: boolean;
   canRemoveColumn: boolean;
+  canResetWidths: boolean;
   onSetSort: (placement: HeaderSortPlacement, dir: "asc" | "desc") => void;
   onRemove: () => void;
+  onFitColumn: () => void;
+  onWidthPreset: (preset: ColumnWidthPreset) => void;
+  onResetWidths: () => void;
   onClose: () => void;
 }) {
   const mobile = useMobileLayout();
+  const [widthsOpen, setWidthsOpen] = useState(false);
+  const widthsTriggerRef = useRef<HTMLButtonElement>(null);
+  const widthsMenuRef = useRef<HTMLDivElement>(null);
+  const focusWidthsOnOpen = useRef(false);
+  // Closing on a short delay lets the pointer cut diagonally across sibling
+  // items on its way into the submenu without dismissing it.
+  const widthsCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelWidthsClose = () => {
+    if (widthsCloseTimer.current) clearTimeout(widthsCloseTimer.current);
+    widthsCloseTimer.current = null;
+  };
+  useEffect(() => cancelWidthsClose, []);
+  useEffect(() => {
+    if (!widthsOpen || !focusWidthsOnOpen.current) return;
+    focusWidthsOnOpen.current = false;
+    widthsMenuRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+  }, [widthsOpen]);
   useEffect(() => {
     if (mobile) return;
     function onKey(e: KeyboardEvent) {
@@ -933,17 +1003,85 @@ function HeaderMenu<Row>({
   addSortItem("prepend", "asc", "Prepend Sort (Asc)");
   addSortItem("prepend", "desc", "Prepend Sort (Desc)");
 
+  const vw = typeof window !== "undefined" ? window.innerWidth : 9999;
+  const vh = typeof window !== "undefined" ? window.innerHeight : 9999;
+  const left = Math.max(8, Math.min(x, vw - MENU_WIDTH - 8));
+  // Desktop submenu flies out to the right, or to the left near the edge.
+  const flipWidths = left + MENU_WIDTH + SUBMENU_WIDTH + 12 > vw;
+
   items.push(<div key="sep" className="qt-cm-sep" />);
+  items.push(
+    <div
+      key="widths"
+      className="qt-cm-submenu-wrap"
+      onMouseEnter={mobile ? undefined : () => {
+        cancelWidthsClose();
+        setWidthsOpen(true);
+      }}
+      onMouseLeave={mobile ? undefined : () => {
+        cancelWidthsClose();
+        widthsCloseTimer.current = setTimeout(() => setWidthsOpen(false), SUBMENU_CLOSE_DELAY_MS);
+      }}
+    >
+      <button
+        ref={widthsTriggerRef}
+        type="button"
+        className={cx("qt-cm-item", "qt-cm-submenu-trigger", widthsOpen && "qt-cm-item--open")}
+        role="menuitem"
+        aria-haspopup="menu"
+        aria-expanded={widthsOpen}
+        // Desktop hover has already opened it, so a click must not toggle it
+        // shut under the pointer; the inline mobile sheet section toggles.
+        onClick={() => setWidthsOpen((open) => (mobile ? !open : true))}
+        onKeyDown={(e) => {
+          if (e.key !== "ArrowRight") return;
+          e.preventDefault();
+          focusWidthsOnOpen.current = true;
+          setWidthsOpen(true);
+        }}
+      >
+        Column Widths
+        <Icon name={mobile && widthsOpen ? "chevronDown" : "chevronRight"} />
+      </button>
+      {widthsOpen && (
+        <div
+          ref={widthsMenuRef}
+          className={cx("qt-cm-submenu", flipWidths && "qt-cm-submenu--left")}
+          style={mobile ? undefined : { width: SUBMENU_WIDTH }}
+          role="menu"
+          aria-label="Column widths"
+          onKeyDown={(e) => {
+            if (e.key !== "ArrowLeft") return;
+            e.preventDefault();
+            setWidthsOpen(false);
+            widthsTriggerRef.current?.focus();
+          }}
+        >
+          <MenuItem onClick={onFitColumn} title={`Size ${field.label} to its widest visible value`}>
+            Fit This Column
+          </MenuItem>
+          <div className="qt-cm-sep" />
+          {WIDTH_PRESETS.map(({ preset, label, hint }) => (
+            <MenuItem key={preset} onClick={() => onWidthPreset(preset)} title={hint}>
+              {label}
+            </MenuItem>
+          ))}
+          <div className="qt-cm-sep" />
+          <MenuItem disabled={!canResetWidths} onClick={onResetWidths} title="Back to the default column widths">
+            Reset Widths
+          </MenuItem>
+        </div>
+      )}
+    </div>,
+  );
   items.push(
     <MenuItem key="remove" disabled={!canRemoveColumn} onClick={onRemove}>
       Remove Column
     </MenuItem>,
   );
 
-  const vw = typeof window !== "undefined" ? window.innerWidth : 9999;
-  const vh = typeof window !== "undefined" ? window.innerHeight : 9999;
-  const left = Math.max(8, Math.min(x, vw - MENU_WIDTH - 8));
-  const top = Math.max(8, Math.min(y, vh - MENU_ROW_HEIGHT * items.length - 8));
+  // Leave room below for the widths submenu, which hangs past the last item.
+  const top = Math.max(8, Math.min(y, vh - MENU_ROW_HEIGHT * (items.length + WIDTH_SUBMENU_OVERHANG_ROWS) - 8));
 
   return (
     <AdaptiveOverlay title={`${field.label} column`} onClose={onClose}>
@@ -963,14 +1101,22 @@ function HeaderMenu<Row>({
   );
 }
 
+const WIDTH_PRESETS: Array<{ preset: ColumnWidthPreset; label: string; hint: string }> = [
+  { preset: "content", label: "Fit All to Content", hint: "Size every column to its widest visible value" },
+  { preset: "screen", label: "Fit All to Screen", hint: "Fill the table width, trimming the widest columns first" },
+  { preset: "equal", label: "Equal Widths", hint: "Split the table width evenly across columns" },
+];
+
 function MenuItem({
   children,
   onClick,
   disabled,
+  title,
 }: {
   children: ReactNode;
   onClick: () => void;
   disabled?: boolean;
+  title?: string;
 }) {
   return (
     <button
@@ -979,6 +1125,7 @@ function MenuItem({
       onClick={onClick}
       role="menuitem"
       disabled={disabled}
+      title={title}
     >
       {children}
     </button>
@@ -1005,16 +1152,42 @@ function materialize<Row>(select: SelectColumn[], fields: FieldDef<Row>[]): Sele
   return fields.map((f) => ({ field: f.name }));
 }
 
-function writeWidth<Row>(select: SelectColumn[], fields: FieldDef<Row>[], name: string, width: number): SelectColumn[] {
+function writeWidths<Row>(select: SelectColumn[], fields: FieldDef<Row>[], widths: Map<string, number>): SelectColumn[] {
   const cols = materialize(select, fields);
-  let found = false;
   const next = cols.map((c) => {
-    if (c.field !== name) return c;
-    found = true;
-    return { ...c, width };
+    const width = widths.get(c.field);
+    return width == null ? c : { ...c, width };
   });
-  if (!found) next.push({ field: name, width });
+  const present = new Set(cols.map((c) => c.field));
+  for (const [field, width] of widths) {
+    if (!present.has(field)) next.push({ field, width });
+  }
   return next;
+}
+
+/** Max-content width (plus horizontal padding) across the given cells. Each
+ *  cell's content is cloned into an unconstrained probe so the measurement is
+ *  independent of the column's current width; all probes are inserted before
+ *  any is read so the whole pass costs a single layout. */
+function measureIntrinsicWidth(cells: HTMLElement[]): number {
+  const probes = cells.map((cell) => {
+    // Headers: measure the label (+ sort indicator), not the resize handle.
+    const source = cell.querySelector<HTMLElement>(":scope > .qt-th-label") ?? cell;
+    const probe = document.createElement("span");
+    probe.setAttribute("aria-hidden", "true");
+    probe.style.cssText = "position:absolute;left:0;top:0;width:max-content;white-space:nowrap;visibility:hidden;pointer-events:none;";
+    source.childNodes.forEach((node) => probe.appendChild(node.cloneNode(true)));
+    cell.appendChild(probe);
+    return probe;
+  });
+  let width = 0;
+  probes.forEach((probe, i) => {
+    const style = getComputedStyle(cells[i]!);
+    const padding = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
+    width = Math.max(width, probe.getBoundingClientRect().width + padding);
+  });
+  probes.forEach((probe) => probe.remove());
+  return Math.ceil(width);
 }
 
 function reorderSelect<Row>(select: SelectColumn[], fields: FieldDef<Row>[], order: string[]): SelectColumn[] {
