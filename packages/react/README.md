@@ -25,6 +25,11 @@ the complete selection, including IDs outside the displayed page.
 `table.selection.retain(ids)` atomically intersects the current selection with
 an iterable. Both operations reset the Shift-click range anchor.
 
+Without `transport.fetchDistinctValues`, `table.filterValues(field, search)`
+uses `clientRows` for autocomplete. For `textarray` fields it suggests individual
+array elements, deduplicated and matched case-insensitively by substring. Local
+suggestions are capped at 50 values, with `hasMore` indicating additional matches.
+
 ## Privacy defaults
 
 URL synchronization and durable browser storage are disabled by default. Set

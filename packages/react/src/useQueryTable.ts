@@ -288,19 +288,23 @@ function distinctValuesFromRows<Row>(field: FieldDef<Row>, rows: Row[], search: 
   const seen = new Set<string>();
   let hasMore = false;
 
-  for (const row of rows) {
-    const raw = asDistinctValue(readFieldValue(field, row));
-    if (raw == null || seen.has(raw)) continue;
-    if (target && !raw.toLowerCase().includes(target)) continue;
+  rowsLoop: for (const row of rows) {
+    const value = readFieldValue(field, row);
+    const candidates = field.type === "textarray" && Array.isArray(value) ? value : [value];
+    for (const candidate of candidates) {
+      const raw = asDistinctValue(candidate);
+      if (raw == null || seen.has(raw)) continue;
+      if (target && !raw.toLowerCase().includes(target)) continue;
 
-    if (values.length < AUTOCOMPLETE_LIMIT) {
-      seen.add(raw);
-      values.push(raw);
-      continue;
+      if (values.length < AUTOCOMPLETE_LIMIT) {
+        seen.add(raw);
+        values.push(raw);
+        continue;
+      }
+
+      hasMore = true;
+      break rowsLoop;
     }
-
-    hasMore = true;
-    break;
   }
 
   return { values: values.sort((a, b) => a.localeCompare(b)), hasMore };
