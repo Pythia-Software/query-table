@@ -80,6 +80,8 @@ export type FilterValues =
   | { source: "freeform" };
 
 export interface FilterConfig {
+  /** Opt into the native multi-value editor for textarray fields. */
+  editor?: "set";
   /** Preserve case when matching textarray values. Default false. */
   arrayCaseSensitive?: boolean;
   /** Whether this field is filterable. Default: backend ⇒ true, derived ⇒ false. */

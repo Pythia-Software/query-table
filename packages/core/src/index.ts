@@ -93,3 +93,5 @@ export { localStorageAdapter, memoryStorageAdapter } from "./adapters";
 
 export * from "./formula";
 export * from "./computed";
+export * from "./setFilter";
+export type { SetFilterMetadata, SetFilterMode } from "./query";

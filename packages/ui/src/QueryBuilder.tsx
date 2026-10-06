@@ -9,6 +9,7 @@ import { PresentedFilterValue, PresentedValueInput, useFilterValuePresentation }
 
 import { SelectColumnEditor } from "./SelectColumnEditor";
 import { SortExtractionEditor } from "./SortExtractionEditor";
+import { SetFilterEditor } from "./SetFilterEditor";
 import { Fragment, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
   AggOp,
@@ -20,9 +21,11 @@ import type {
   OrderByClause,
   WhereClause,
   WhereTerm,
+  SetFilterMetadata,
 } from "@pythia-software/query-table-core";
 import {
   NULLARY_OPS,
+  MAX_WHERE_CLAUSES,
   aggOpNeedsField,
   aggOpsForField,
   encodeQuery,
@@ -38,6 +41,8 @@ import {
   isSelectable,
   isSortable,
   opsForField,
+  createSetFilter,
+  readSetFilter,
 } from "@pythia-software/query-table-core";
 import type { QueryTableApi } from "@pythia-software/query-table-react";
 import type { QueryBuilderClassNames } from "./classNames";
@@ -953,17 +958,51 @@ function WhereRow<Row>({
 }) {
   const [adding, setAdding] = useState(false);
   const mobile = useMobileLayout();
+  const editorId = useId();
+  const nextSetId = useRef(0);
+  const addFilterButton = useRef<HTMLButtonElement>(null);
+  const [editingSet, setEditingSet] = useState<{ field: FieldDef<Row>; anchor: HTMLElement; returnFocus: HTMLElement; index: number; count: number; metadata: SetFilterMetadata; signature: string } | null>(null);
   // Local drag state (WHERE terms are their own list, unlike the columns shared
   // via api.columnDrag). Order is committed only on drop, so the DOM order stays
   // put during the drag and index keys never remount the dragged node.
   const [drag, setDrag] = useState<WhereDrag | null>(null);
   const [editingFilter, setEditingFilter] = useState<number | null>(null);
   const where = api.query.where;
+  const whereSignature = JSON.stringify(where);
+  const setEditors = new Map<number, { field: FieldDef<Row>; metadata: SetFilterMetadata; count: number }>();
+  const hiddenSetTerms = new Set<number>();
+  for (let index = 0; index < where.length; index++) {
+    const set = readSetFilter(where, index);
+    const field = set && byName.get(set.field);
+    if (!set || field?.type !== "textarray" || field.filter?.editor !== "set") continue;
+    setEditors.set(index, { field, metadata: set.metadata, count: set.count });
+    for (let offset = 1; offset < set.count; offset++) hiddenSetTerms.add(index + offset);
+    index += set.count - 1;
+  }
+  useEffect(() => {
+    if (editingSet && editingSet.signature !== whereSignature) setEditingSet(null);
+  }, [editingSet, whereSignature]);
   // Only make the top-level conjunction explicit ("AND" between terms) once an
   // OR group is present — otherwise a plain AND-list reads fine unadorned.
   const hasOr = where.some(isOrGroup);
 
+  function replaceSet(id: string, terms: WhereTerm[]) {
+    api.setQuery((query) => {
+      const index = query.where.findIndex((term) => term.setFilter?.id === id);
+      const current = readSetFilter(query.where, index);
+      if (!current) return query;
+      return { ...query, offset: 0, where: [...query.where.slice(0, index), ...terms, ...query.where.slice(index + current.count)] };
+    });
+  }
+
   function addClause(f: FieldDef<Row>) {
+    if (f.type === "textarray" && f.filter?.editor === "set") {
+      const anchor = addFilterButton.current;
+      if (!anchor) return;
+      setEditingSet({ field: f, anchor, returnFocus: anchor, index: where.length, count: 0, metadata: { id: `${editorId}-${Date.now()}-${nextSetId.current++}`, mode: "any", values: [] }, signature: whereSignature });
+      setAdding(false);
+      return;
+    }
     setEditingFilter(where.length);
     const op = positiveOpsForField(f)[0] ?? opsForField(f)[0] ?? "=";
     api.addFilter({ field: f.name, op, value: "" });
@@ -999,11 +1038,8 @@ function WhereRow<Row>({
 
   const actions = (
     <>
-      {adding ? (
-        <FieldPicker fields={fields.filter(isFilterable)} gateOnDistinct onPick={addClause} onClose={() => setAdding(false)} />
-      ) : (
-        <button type="button" className="qt-add" aria-label="Add filter" onClick={() => setAdding(true)} disabled={disabled}><Icon name="add" />add filter</button>
-      )}
+      <button ref={addFilterButton} type="button" className="qt-add" aria-label="Add filter" aria-expanded={adding} onClick={() => setAdding(true)} disabled={disabled || adding}><Icon name="add" />add filter</button>
+      {adding && <FieldPicker fields={fields.filter(isFilterable)} gateOnDistinct onPick={addClause} onClose={() => setAdding(false)} />}
       {where.length > 0 && <button type="button" className="qt-link-btn" onClick={api.clearFilters} disabled={disabled} title="Reset filters">reset</button>}
     </>
   );
@@ -1014,10 +1050,20 @@ function WhereRow<Row>({
         <span className="qt-qb-kw" data-mobile-label="Filters">where</span>
         {mobile && actions}
       </div>
-      {where.map((term, index) => (
+      {where.map((term, index) => {
+        if (hiddenSetTerms.has(index)) return null;
+        const set = setEditors.get(index);
+        return (
         <span className="qt-where-term-wrap" key={index}>
           {index > 0 && hasOr && <span className="qt-where-and">AND</span>}
-          <TermChip
+          {set ? <span className={cx("qt-chip", classNames?.chip)}>
+            <button type="button" className="qt-link-btn" disabled={disabled} aria-label={`Edit ${set.field.label} tag filter`} onClick={(event) => setEditingSet({ field: set.field, anchor: event.currentTarget, returnFocus: event.currentTarget, index, count: set.count, metadata: set.metadata, signature: whereSignature })}>{set.field.label} {set.metadata.mode.toUpperCase()}</button>
+            {set.metadata.values.map((value) => <span key={value} className="qt-set-tag">
+              <PresentedFilterValue field={set.field.name} value={value} label={setFilterValueLabel(set.field, value)} />
+              <button type="button" className="qt-chip-x" aria-label={`Remove tag ${value}`} disabled={disabled} onClick={() => replaceSet(set.metadata.id, createSetFilter(set.field.name, set.metadata.mode, set.metadata.values.filter((key) => key !== value), set.metadata.id))}>✕</button>
+            </span>)}
+            <button type="button" className="qt-chip-x" aria-label={`Remove ${set.field.label} tag filter`} disabled={disabled} onClick={() => replaceSet(set.metadata.id, [])}>✕</button>
+          </span> : <TermChip
             api={api}
             term={term}
             index={index}
@@ -1032,12 +1078,25 @@ function WhereRow<Row>({
             onDragEnd={() => setDrag(null)}
             editorOpen={editingFilter === index}
             onEditorChange={(open) => setEditingFilter(open ? index : null)}
-          />
+          />}
         </span>
-      ))}
+      ); })}
+      {editingSet && <SetFilterEditor api={api} field={editingSet.field} anchor={editingSet.anchor} returnFocus={editingSet.returnFocus} classNames={classNames} mode={editingSet.metadata.mode} values={editingSet.metadata.values} maxPredicates={MAX_WHERE_CLAUSES - where.reduce((count, term, index) => index >= editingSet.index && index < editingSet.index + editingSet.count ? count : count + predicatesOf(term).length, 0)} disabled={disabled} onClose={() => setEditingSet(null)} onApply={(mode, values) => {
+        const terms = createSetFilter(editingSet.field.name, mode, values, editingSet.metadata.id);
+        if (editingSet.count > 0) replaceSet(editingSet.metadata.id, terms);
+        else api.setQuery((query) => ({ ...query, offset: 0, where: [...query.where, ...terms] }));
+        setEditingSet(null);
+      }} />}
       {!mobile && actions}
     </div>
   );
+}
+
+function setFilterValueLabel(field: FieldDef, value: string): string {
+  const strategy = filterValuesFor(field);
+  if (strategy.source !== "static") return value;
+  const option = strategy.options.find((option) => (typeof option === "string" ? option : option.value) === value);
+  return typeof option === "string" ? option : option?.label ?? value;
 }
 
 /** One top-level WHERE term: a single predicate, or a bordered OR group holding

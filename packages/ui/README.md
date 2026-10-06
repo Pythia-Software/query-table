@@ -10,6 +10,34 @@ and selection toolbar.
 npm install @pythia-software/query-table-core @pythia-software/query-table-react @pythia-software/query-table-ui react react-dom
 ```
 
+## Tag/set filters
+
+Set `filter.editor: "set"` on a `textarray` field to use the native WHERE
+multi-select editor, with ANY / ALL / NONE / EMPTY modes, badge presentation,
+removable tags, keyboard controls, and a mobile bottom sheet. For stable tag
+keys, also set `arrayCaseSensitive: true` and provide static `{ value, label }`
+options. NONE includes empty/missing arrays while excluding every selected key.
+Other fields and existing predicates keep their current editors.
+
+```ts
+filter: {
+  editor: "set",
+  arrayCaseSensitive: true,
+  values: {
+    source: "static",
+    options: [{ value: "bug", label: "Bug" }, { value: "feature", label: "Feature" }],
+  },
+}
+```
+
+`FilterValueProvider` renders both selected chips and choices. Unknown selected
+keys remain removable rather than being silently discarded. The editor honors
+`filter.ops` and the query's predicate budget; a restrictive operator allowlist
+can disable modes. `classNames.setEditor` and `classNames.setBackdrop` customize
+the overlay alongside the existing input/select/button slots. See
+[`docs/set-filters.md`](../../docs/set-filters.md) for serialization, alias
+canonicalization, backend requirements, and compatibility details.
+
 ## Use
 
 ```tsx

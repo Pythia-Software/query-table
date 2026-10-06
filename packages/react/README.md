@@ -54,3 +54,8 @@ Pass a stable `computedColumnStore` (for example, `httpComputedColumnStore("/api
 Memoize these callbacks and change their identity when external validation metadata
 changes. Return immutable query values from the canonicalizer. No callback is required
 for ordinary tables; the existing execution behavior remains the default.
+
+For native set editors, use core's `mapSetFilterValues(query.where, (field, key) =>
+canonicalKey)` inside `canonicalizeQuery` to update aliases in both the existing
+predicates and their editor identity. Leave unrecognized/deleted keys unchanged
+and reject them through `validateQuery` so users can repair the selected tags.
