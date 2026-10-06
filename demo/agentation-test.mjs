@@ -40,6 +40,29 @@ try {
   await page.getByRole("button", { name: "Start feedback mode", exact: true }).click();
   assert((await copy()).includes(comment), "Saved notes survive reloads");
   await page.getByRole("button", { name: "Exit", exact: true }).click();
+  for (const [openLabel, closeLabel] of [
+    ["Customize columns", "Close column editor"],
+    ["Saved", "Close Saved queries"],
+    ["Sort with regex extraction", "Close sort with regex extraction"],
+  ]) {
+    await page.getByRole("button", { name: openLabel, exact: true }).click();
+    const dialog = page.locator('.qt-modal-surface[aria-modal="true"]');
+    assert(await dialog.evaluate((element) => Boolean(element.closest(".qt-demo"))), "Desktop dialogs render in place");
+    await dialog.locator("[data-agentation-root]").waitFor();
+    await page.getByRole("button", { name: "Start feedback mode", exact: true }).click();
+    await dialog.locator("h2").click();
+    const dialogComment = `Example feedback: clarify the ${openLabel} dialog.`;
+    const dialogInput = page.getByPlaceholder("What should change?", { exact: true });
+    await dialogInput.fill(dialogComment);
+    assert(await dialogInput.evaluate((element) => element.getRootNode().activeElement === element), `${openLabel} annotations retain focus`);
+    await page.getByRole("button", { name: "Add", exact: true }).click();
+    assert((await copy()).includes(dialogComment), `${openLabel} annotations can be exported`);
+    assert.equal(await dialog.count(), 1, "Annotating does not close a desktop dialog");
+    await page.getByRole("button", { name: "Exit", exact: true }).click();
+    await page.getByRole("button", { name: closeLabel, exact: true }).click();
+    await page.getByRole("button", { name: "Start feedback mode", exact: true }).waitFor();
+    assert.equal(await dialog.count(), 0, "Toolbar recovers after closing desktop dialogs");
+  }
   await page.setViewportSize({ width: 390, height: 844 });
   await page.locator(".qt-qb-row--filters .qt-mobile-filter").click();
   const sheet = page.locator('.qt-modal-surface[aria-modal="true"]');
@@ -53,15 +76,16 @@ try {
   await page.getByRole("button", { name: "Add", exact: true }).click();
   const sheetFeedback = await copy();
   assert(sheetFeedback.includes(sheetComment));
-  assert.match(sheetFeedback, /PredicateEditor/);
-  assert.match(sheetFeedback, /qt-mobile-form-field/);
+  const sheetAnnotation = sheetFeedback.slice(sheetFeedback.lastIndexOf("### "));
+  assert.match(sheetAnnotation, /\*\*Source:\*\* .*QueryBuilder\.tsx/);
+  assert.match(sheetAnnotation, /qt-mobile-form-field/);
   assert.equal(await sheet.count(), 1, "Annotating does not close the sheet");
   await page.getByRole("button", { name: "Exit", exact: true }).click();
   await page.getByRole("button", { name: "Close Filter by Job", exact: true }).click();
   await page.getByRole("button", { name: "Start feedback mode", exact: true }).waitFor();
   assert.equal(await sheet.count(), 0);
   assert.deepEqual(errors, []);
-  console.log("PASS Agentation: component/source targeting, clipboard export, persistence, sheet focus, and toolbar recovery");
+  console.log("PASS Agentation: component/source targeting, clipboard export, persistence, desktop dialog and mobile sheet focus, and toolbar recovery");
 } finally {
   await browser.close();
 }

@@ -10,7 +10,7 @@ export function PlaygroundFeedback() {
       setPortalContainer(dialogs.item(dialogs.length - 1));
     };
     const observer = new MutationObserver(updateContainer);
-    observer.observe(document.body, { childList: true });
+    observer.observe(document.body, { childList: true, subtree: true });
     updateContainer();
     return () => observer.disconnect();
   }, []);

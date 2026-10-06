@@ -285,7 +285,22 @@ for (const [name, engine] of [["Chromium", chromium], ["WebKit", webkit]]) {
     assert(await regexDialog.getByRole("button", { name: "Apply extraction", exact: true }).isDisabled(), "Invalid regexes cannot be committed");
     await regexDialog.getByRole("button", { name: "Cancel", exact: true }).click();
     assert.equal(await desktop.locator(".qt-chip--sort input").count(), 0, "Regex configuration no longer occupies inline sort chips");
-    console.log(`PASS ${name} desktop: inline filters, sorts, and metric editors`);
+    for (const [trigger, field, result] of [
+      [desktop.getByRole("button", { name: "Add column", exact: true }), "is_starred", desktop.locator(".qt-chip--col")],
+      [desktop.getByRole("button", { name: "Add filter", exact: true }), "job_name", desktop.locator(".qt-chip--where")],
+      [desktop.getByRole("button", { name: "Add sort", exact: true }), "platform", desktop.locator(".qt-chip--sort")],
+      [desktop.locator(".qt-chip--agg").first().getByRole("button", { name: "Add grouping field", exact: true }), "platform", desktop.locator(".qt-chip--agg").first().locator(".qt-chip-agg-group")],
+    ]) {
+      const before = await result.count();
+      await trigger.click();
+      const search = desktop.getByRole("textbox", { name: "Search fields", exact: true });
+      await search.fill(field);
+      assert(await search.evaluate((element) => element === document.activeElement), "Desktop picker search has focus before selecting");
+      await desktop.locator(`.qt-picker-item[title="${field}"]`).click();
+      assert.equal(await result.count(), before + 1, `${field} selection commits before the picker closes`);
+      assert.equal(await desktop.locator(".qt-picker").count(), 0);
+    }
+    console.log(`PASS ${name} desktop: inline filters, sorts, metric editors, and click-based field picking`);
     await desktop.close();
   } finally {
     await browser.close();

@@ -67,8 +67,7 @@ export function SortExtractionEditor<Row>({ api, field, label, fieldOptions, onF
   }, [pattern, patternError, sample]);
 
   const currentPreview = preview?.pattern === pattern && preview.sample === sample ? preview : null;
-  const error = patternError ?? sampleError ?? currentPreview?.error;
-  const ready = Boolean(sample && currentPreview && !error && !sample.errors);
+  const previewWarning = sampleError ?? currentPreview?.error;
   const heading = title ?? `Regex extraction for ${label}`;
   const textValue = (value: unknown) => value == null ? "NULL" : String(value) === "" ? '""' : String(value);
 
@@ -90,9 +89,10 @@ export function SortExtractionEditor<Row>({ api, field, label, fieldOptions, onF
         <label className="qt-sort-extract-label" htmlFor={inputId}>Regular expression</label>
         <input id={inputId} className="qt-input qt-sort-extract-input" value={pattern} onChange={(event) => setPattern(event.target.value)} aria-label={`Regex extract for ${label}`} aria-describedby={helpId} aria-invalid={Boolean(patternError)} disabled={disabled} autoComplete="off" spellCheck={false} placeholder="e.g. (\d+)" />
         <p id={helpId} className="qt-sort-extract-help">Sort by the first capture group, or the whole match if there are no groups. Unmatched values become NULL; the sort’s null placement still applies.</p>
-        {error && <p className="qt-sort-extract-error" role="alert">{error}</p>}
-        {Boolean(sample?.errors) && <p className="qt-sort-extract-error" role="alert">Some sampled values could not be read. Resolve those errors before applying extraction.</p>}
-        <p className="qt-sort-extract-status" role="status">{!sample && !sampleError ? "Loading sample…" : !currentPreview && !error ? "Updating preview…" : sample ? `Preview of ${sample.processed} matching rows (${sample.groups.length} distinct values).` : "Sample unavailable."}</p>
+        {patternError && <p className="qt-sort-extract-error" role="alert">{patternError}</p>}
+        {previewWarning && <p className="qt-sort-extract-error" role="alert">Preview unavailable: {previewWarning}. You can still apply a valid pattern.</p>}
+        {Boolean(sample?.errors) && <p className="qt-sort-extract-error" role="alert">Some sampled values could not be read. The preview may be incomplete; you can still apply a valid pattern.</p>}
+        <p className="qt-sort-extract-status" role="status">{!sample && !sampleError ? "Loading sample…" : !currentPreview && !patternError && !previewWarning ? "Updating preview…" : sample ? `Preview of ${sample.processed} matching rows (${sample.groups.length} distinct values).` : "Sample unavailable."}</p>
         <div className="qt-sort-extract-table-wrap">
           <table className="qt-sort-extract-table">
             <caption>Extraction preview</caption>
@@ -108,7 +108,7 @@ export function SortExtractionEditor<Row>({ api, field, label, fieldOptions, onF
       <footer className="qt-sort-extract-footer">
         {initialPattern !== undefined && <button type="button" className="qt-link-btn" disabled={disabled} onClick={onRemove} aria-label={`Remove regex extract for ${label}`}>Remove extraction</button>}
         <button type="button" className="qt-btn" onClick={onClose}>Cancel</button>
-        <button type="button" className="qt-btn qt-btn--primary" disabled={disabled || !ready} onClick={() => onApply(pattern)}>{applyLabel}</button>
+        <button type="button" className="qt-btn qt-btn--primary" disabled={disabled || Boolean(patternError)} onClick={() => onApply(pattern)}>{applyLabel}</button>
       </footer>
     </ModalSurface>
   );

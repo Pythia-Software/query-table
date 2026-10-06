@@ -143,7 +143,7 @@ touch-based landscape viewports use a mobile interaction model:
   Summaries use one line when space allows and wrap without truncating values.
   Labeled condition/value and function/measure pairs replace wrapping desktop
   chips. Sort direction and null-value placement use native selects; regex
-  extraction stays optional. Its configuration opens a dialog (a bottom sheet on small screens) with a live, worker-isolated preview of up to 100 matching rows. The preview shows original values, extracted sort values, and no-match/null states; Apply commits the draft, while Cancel leaves the sort unchanged. Grouping uses removable tags and a field picker.
+  extraction stays optional. Its configuration opens a dialog (a bottom sheet on small screens) with a live, worker-isolated preview of up to 100 matching rows. The preview shows original values, extracted sort values, and no-match/null states; Apply commits any syntactically valid pattern even when the preview is unavailable or still loading, while Cancel leaves the sort unchanged. Grouping uses removable tags and a field picker.
   Simple metric results share two-column rows; grouped results use the full width.
 - **Touch-first controls:** dedicated drag handles, 16px text inputs,
   sticky bulk actions, a horizontal table scroll cue, and the device's native

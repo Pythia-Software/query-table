@@ -43,7 +43,7 @@ Agentation is loaded only by `npm run demo`. It is excluded from the production
 build and is not installed in the published query-table UI package.
 
 With the dev server running, `npm run test:feedback` verifies annotation,
-source/selector export, note persistence, and focus inside mobile sheets using
+source/selector export, note persistence, and focus inside desktop dialogs and mobile sheets using
 an isolated browser session. It writes a preview to
 `.context/query-agentation-playground.png` without changing your own notes.
 

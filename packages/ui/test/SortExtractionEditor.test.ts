@@ -3,8 +3,8 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { ColumnPreview } from "@pythia-software/query-table-core";
-import type { QueryTableApi } from "@pythia-software/query-table-react";
+import type { ColumnPreview, FieldDef, FieldSchema } from "@pythia-software/query-table-core";
+import { useQueryTable, type QueryTableApi } from "@pythia-software/query-table-react";
 import { SortExtractionEditor } from "../src/SortExtractionEditor";
 import { extractSortSamples, previewSortExtraction } from "../src/sortExtractionPreview";
 
@@ -122,15 +122,68 @@ it("allows valid configuration with an empty sample and exposes fetch or timeout
   sampleRequest.mockRejectedValueOnce(new Error("Sample fetch failed"));
   await act(async () => root.render(null));
   await render();
-  expect(container.querySelector('[role="alert"]')!.textContent).toBe("Sample fetch failed");
+  expect(container.querySelector('[role="alert"]')!.textContent).toContain("Sample fetch failed");
+  expect(button("Apply extraction").disabled).toBe(false);
+  await act(async () => button("Apply extraction").click());
+  expect(onApply).toHaveBeenCalledWith("");
+});
+
+it.each(["Regex preview timed out", "Regex preview worker unavailable. Check your browser’s worker permissions."])("allows applying a valid pattern when preview fails: %s", async (message) => {
+  vi.mocked(previewSortExtraction).mockRejectedValueOnce(new Error(message));
+  await render("(a+)+$");
+  expect(container.querySelector('[role="alert"]')!.textContent).toContain(message);
+  expect(container.querySelector('[role="alert"]')!.textContent).toContain("You can still apply a valid pattern");
+  expect(button("Apply extraction").disabled).toBe(false);
+  await act(async () => button("Apply extraction").click());
+  expect(onApply).toHaveBeenCalledWith("(a+)+$");
+});
+
+it("allows valid patterns while the sample or worker preview is pending", async () => {
+  let resolveSample!: (value: ColumnPreview) => void;
+  sampleRequest.mockReturnValueOnce(new Promise<ColumnPreview>((resolve) => { resolveSample = resolve; }));
+  vi.mocked(previewSortExtraction).mockImplementationOnce(() => new Promise(() => {}));
+  await render("\\d+");
+  expect(container.querySelector('[role="status"]')!.textContent).toBe("Loading sample…");
+  expect(button("Apply extraction").disabled).toBe(false);
+  await act(async () => resolveSample(sample));
+  await act(async () => vi.advanceTimersByTimeAsync(201));
+  expect(container.querySelector('[role="status"]')!.textContent).toBe("Updating preview…");
+  expect(button("Apply extraction").disabled).toBe(false);
+  await act(async () => button("Apply extraction").click());
+  expect(onApply).toHaveBeenCalledWith("\\d+");
+});
+
+it("warns about unreadable sampled values without blocking valid patterns", async () => {
+  sampleRequest.mockResolvedValueOnce({ ...sample, errors: 1 });
+  await render("\\d+");
+  expect(container.querySelector('[role="alert"]')!.textContent).toContain("preview may be incomplete");
+  expect(button("Apply extraction").disabled).toBe(false);
+  await changePattern("[");
   expect(button("Apply extraction").disabled).toBe(true);
 });
 
-it("blocks applying a pattern when its preview times out", async () => {
-  vi.mocked(previewSortExtraction).mockRejectedValueOnce(new Error("Regex preview timed out"));
-  await render("(a+)+$");
-  expect(container.querySelector('[role="alert"]')!.textContent).toContain("timed out");
-  expect(button("Apply extraction").disabled).toBe(true);
+const unavailableFields: Array<{ label: string; definition: FieldDef<{ job: string }>; sortField: string }> = [
+  { label: "Non-selectable", definition: { name: "hidden", label: "Non-selectable", type: "text", source: { kind: "backend" }, select: { enabled: false } }, sortField: "hidden" },
+  { label: "Derived without dependencies", definition: { name: "derived", label: "Derived without dependencies", type: "text", source: { kind: "derived", accessor: (row) => row.job } }, sortField: "derived" },
+  { label: "Remapped sort key", definition: { name: "display_job", label: "Remapped sort key", type: "text", source: { kind: "backend" }, sort: { field: "backend_job" } }, sortField: "backend_job" },
+];
+
+it.each(unavailableFields)("allows valid patterns for $label fields unavailable to computed previews", async ({ label, definition, sortField }) => {
+  const schema: FieldSchema<{ job: string }> = {
+    name: "sort-preview", idField: "job", fields: [
+      { name: "job", label: "Job", type: "text", source: { kind: "backend" } },
+      definition,
+    ],
+  };
+  function Fixture() {
+    const api = useQueryTable({ schema, clientRows: [{ job: "build-42" }], syncUrl: false, debounceMs: 0 });
+    return createElement(SortExtractionEditor<{ job: string }>, { api, field: sortField, label, initialPattern: "build-(\\d+)", onApply, onRemove, onClose });
+  }
+  await act(async () => root.render(createElement(Fixture)));
+  expect(container.querySelector('[role="alert"]')!.textContent).toContain("Unknown or unavailable field");
+  expect(button("Apply extraction").disabled).toBe(false);
+  await act(async () => button("Apply extraction").click());
+  expect(onApply).toHaveBeenCalledWith("build-(\\d+)");
 });
 
 it("re-samples when the configurator's field changes and never shows the previous field's preview", async () => {
@@ -155,10 +208,10 @@ it("re-samples when the configurator's field changes and never shows the previou
   await renderField("host", "Host");
   expect(sampleRequest).toHaveBeenLastCalledWith("[host]", 100, expect.any(AbortSignal));
   expect(container.querySelectorAll("tbody tr")).toHaveLength(0);
-  expect(button("Add sort").disabled).toBe(true);
+  expect(button("Add sort").disabled).toBe(false);
 
   await act(async () => resolveHost({ ...sample, groups: [{ inputs: ["db-1"], result: { value: "db-1" }, count: 5 }] }));
-  expect(button("Add sort").disabled).toBe(true);
+  expect(button("Add sort").disabled).toBe(false);
   await act(async () => vi.advanceTimersByTimeAsync(201));
   expect(container.querySelector("tbody tr")!.textContent).toBe("db-1db5");
   expect(button("Add sort").disabled).toBe(false);

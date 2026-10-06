@@ -91,6 +91,9 @@ export function FieldPicker<Row>({
                     disabled={!enabled}
                     className={enabled ? "qt-picker-item" : "qt-picker-item qt-picker-item--disabled"}
                     title={enabled ? f.name : "not useful as a filter (≤1 distinct value)"}
+                    onPointerDown={(event) => {
+                      if (!mobile) event.preventDefault();
+                    }}
                     onClick={() => {
                       if (!enabled) return;
                       onPick(f);

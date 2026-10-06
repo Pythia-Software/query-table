@@ -133,6 +133,29 @@ describe("adaptive mobile sheets", () => {
     expect(container.querySelector(".qt-picker")).not.toBeNull();
     expect(document.querySelector(".qt-sheet")).toBeNull();
   });
+
+  it("preserves desktop picker focus until click even when pointer presses do not focus buttons", () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    const pick = vi.fn();
+    const close = vi.fn();
+    const field = { name: "name", label: "Name", type: "text" as const, source: { kind: "backend" as const } };
+    act(() => root.render(createElement(FieldPicker, { fields: [field], onPick: pick, onClose: close })));
+    const input = container.querySelector<HTMLInputElement>(".qt-picker-input")!;
+    const item = container.querySelector<HTMLButtonElement>(".qt-picker-item")!;
+    expect(document.activeElement).toBe(input);
+    const press = new MouseEvent("pointerdown", { bubbles: true, cancelable: true });
+    act(() => {
+      if (item.dispatchEvent(press)) input.blur();
+    });
+    expect(press.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(input);
+    expect(close).not.toHaveBeenCalled();
+    expect(pick).not.toHaveBeenCalled();
+    act(() => item.click());
+    expect(pick).toHaveBeenCalledExactlyOnceWith(field);
+    act(() => input.blur());
+    expect(close).toHaveBeenCalledOnce();
+  });
 });
 
 describe("mobile list ordering", () => {
