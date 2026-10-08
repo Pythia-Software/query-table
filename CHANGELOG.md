@@ -4,12 +4,20 @@
 
 ### Added
 
+- Accept signed compound duration operands (`-1h`, `+8d2h10m`) in existing
+  datetime comparisons. Preserve operands in saved queries and URLs; resolve
+  them against one server clock during SQL compilation, with matching local
+  execution in TypeScript and Swift.
+
 - Add a **Column Widths** submenu to the `DataTable` header menu: fit the
   clicked column, fit all to content, fit all to screen, equal widths, or reset.
   Presets write every width in one query update, so they share, undo, and
   persist like manual resizes.
 
 ### Changed
+
+- Compare local datetime filters as instants, including timezone offsets, and
+  report invalid datetime filters instead of falling back to string comparison.
 
 - Measure intrinsic content for header-handle auto-fit (Enter), so auto-fit can
   shrink a column as well as grow it.

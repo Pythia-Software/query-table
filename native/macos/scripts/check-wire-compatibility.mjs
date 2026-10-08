@@ -35,6 +35,7 @@ try {
     tiebreakSort: [{ field: "id", dir: "asc" }],
     fields: [
       { name: "id", label: "ID", type: "number", source: "backend" },
+      { name: "at", label: "Time", type: "datetime", source: "backend" },
       { name: "name", label: "Name", type: "text", source: "backend", aliases: ["title"], select: { default: true } },
       { name: "amount", label: "Amount", type: "number", bindings: { postgres: { expr: "r.amount" } } },
       { name: "status", label: "Status", type: "enum", source: "backend", filter: { values: { source: "static", options: ["new", "done"] } } },
@@ -47,6 +48,7 @@ try {
   };
   const schema = loadSchema(document);
   const inputs = [
+    { name: "relative datetime predicates", query: { where: [{ any: [{ field: "at", op: ">=", value: "-7d", negated: true }, { field: "at", op: "<=", value: "+8d2h10m" }] }] } },
     {
       name: "malformed-top-level-predicate-keeps-valid-siblings",
       token: Buffer.from(JSON.stringify({ w: [
