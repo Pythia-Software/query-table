@@ -87,7 +87,7 @@ export function ModalSurface({
     });
     const onKey = (event: KeyboardEvent) => {
       if (!isTop()) return;
-      if (event.key === "Escape" && !element.querySelector(".cm-tooltip-autocomplete")) {
+      if (event.key === "Escape" && !element.querySelector("[data-qt-formula-suggestions]")) {
         event.preventDefault();
         event.stopPropagation();
         close.current();

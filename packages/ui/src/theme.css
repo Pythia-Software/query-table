@@ -1402,12 +1402,40 @@
 .qt-editor-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
 .qt-editor-label { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; font-weight: 600; }
 .qt-type-badge { border-radius: 20px; background: #eaf3ff; color: #275eb2; padding: 4px 10px; font-size: 11px; }
-.qt-function-library { margin: 10px 0; font-size: 12px; }
-.qt-function-library summary { cursor: pointer; margin-bottom: 8px; }
-.qt-function-list { max-height: 190px; overflow: auto; margin: 8px 0; }
-.qt-function-list button { display: flex; flex-direction: column; text-align: left; gap: 3px; padding: 8px; background: transparent; border: 0; border-bottom: 1px solid var(--qt-border, #dbe1e8); width: 100%; color: inherit; cursor: pointer; }
-.qt-function-list small { color: var(--qt-muted, #64748b); }
-.qt-function-help { padding: 10px; max-width: 400px; font: 12px/1.5 system-ui; }
+/* Formula entry and discoverable function library share the available width. */
+.qt-formula-layout { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px; margin-bottom: 16px; }
+.qt-formula-editor { flex: 1 1 320px; min-width: 0; }
+.qt-function-library { flex: 1 1 260px; min-width: 0; max-width: 330px; padding: 12px; border: 1px solid var(--qt-border, #dbe1e8); border-radius: 8px; background: var(--qt-bg-muted, #f8fafc); font-size: 12px; }
+.qt-function-library h4 { margin: 0 0 6px; font-size: 14px; }
+.qt-function-search, .qt-function-filters label { display: flex; flex-direction: column; gap: 4px; font-weight: 600; }
+.qt-function-search .qt-input { box-sizing: border-box; width: 100%; min-width: 0; margin-bottom: 10px; }
+.qt-function-filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.qt-function-filters label { flex: 1 1 110px; min-width: 0; }
+.qt-function-filters select { width: 100%; min-width: 0; padding: 6px; border: 1px solid var(--qt-border, #dbe1e8); border-radius: 5px; color: inherit; background: var(--qt-bg, #fff); font: inherit; }
+.qt-select-editor .qt-function-count, .qt-select-editor .qt-function-concept { margin: 10px 0 6px; color: var(--qt-muted, #64748b); }
+.qt-function-list { position: relative; max-height: 320px; overflow-y: auto; overscroll-behavior: contain; margin: 8px 0; }
+.qt-function-list button { display: flex; flex-direction: column; text-align: left; gap: 5px; padding: 10px 8px; border: 0; border-bottom: 1px solid var(--qt-border, #dbe1e8); width: 100%; color: inherit; background: transparent; cursor: pointer; border-radius: 4px; }
+.qt-function-list button:hover, .qt-function-list button[aria-selected="true"] { background: var(--qt-accent-bg, #edf3ff); }
+.qt-function-list button:focus-visible { outline: 2px solid var(--qt-accent, #285cc4); outline-offset: -2px; }
+.qt-function-card-title { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px; width: 100%; }
+.qt-function-card-title > span { font-size: 10px; color: var(--qt-muted, #64748b); }
+.qt-function-list code { font-size: 11px; overflow-wrap: anywhere; white-space: normal; }
+.qt-function-list small, .qt-function-card-concept { color: var(--qt-muted, #64748b); }
+.qt-function-card-concept { font-size: 10px; }
+.qt-select-editor .qt-function-insert-hint, .qt-select-editor .qt-function-empty { margin: 8px 0 0; color: var(--qt-muted, #64748b); font-size: 11px; }
+@media (max-width: 1100px) { .qt-function-library { max-width: none; } }
+@media (max-width: 760px) { .qt-formula-editor, .qt-function-library { flex-basis: 100%; max-width: none; } .qt-function-list { max-height: 240px; } }
+/* The textarea owns text input, selection, composition, and native undo. */
+.qt-formula-input { display: block; box-sizing: border-box; width: 100%; min-height: 130px; max-height: 260px; resize: vertical; padding: 12px; border: 1px solid var(--qt-border, #cbd5e1); border-radius: 6px; background: var(--qt-bg, #fff); color: var(--qt-text, inherit); font: 13px/1.6 ui-monospace, monospace; }
+.qt-formula-input:focus-visible { outline: 2px solid var(--qt-accent, #285cc4); outline-offset: 2px; }
+.qt-formula-tools { display: flex; justify-content: space-between; gap: 12px; margin-top: 6px; color: var(--qt-muted, #64748b); font-size: 11px; }
+.qt-formula-completions { margin-top: 8px; border: 1px solid var(--qt-border, #cbd5e1); border-radius: 6px; background: var(--qt-bg, #fff); font-size: 12px; }
+.qt-formula-completions ul { margin: 0; padding: 4px; list-style: none; max-height: 180px; overflow: auto; }
+.qt-formula-completions li { display: flex; flex-direction: column; gap: 3px; padding: 7px 8px; border-radius: 4px; cursor: pointer; overflow-wrap: anywhere; }
+.qt-formula-completions li:hover, .qt-formula-completions li[aria-selected="true"] { background: var(--qt-accent-bg, #edf3ff); }
+.qt-formula-completions small { color: var(--qt-muted, #64748b); }
+.qt-formula-completions p { margin: 0; padding: 8px; border-top: 1px solid var(--qt-border, #cbd5e1); color: var(--qt-muted, #64748b); overflow-wrap: anywhere; }
+.qt-formula-editor > .qt-formula-error { margin-bottom: 10px; font-size: 12px; }
 .qt-definition-actions { display: flex; gap: 10px; margin: 12px 0 8px; }
 .qt-preview-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; border-top: 1px solid var(--qt-border, #dbe1e8); padding-top: 18px; margin: 18px 0 10px; }
 .qt-preview-controls label { display: flex; align-items: center; gap: 6px; }
@@ -1462,8 +1490,7 @@
   .qt-select-editor .qt-input,
   .qt-select-editor textarea,
   .qt-select-editor .qt-preview-controls input,
-  .qt-select-editor .qt-preview-controls select,
-  .qt-select-editor .cm-editor {
+  .qt-select-editor .qt-preview-controls select {
     color: var(--qt-text);
     background: var(--qt-bg-muted);
     border-color: var(--qt-border);

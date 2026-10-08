@@ -4,6 +4,10 @@
 
 ### Added
 
+- Add a responsive formula function library with search by name or intent,
+  concept and return-type filters, and keyboard insertion at the cursor or
+  around selected formula text.
+- Document dependency removal options across the web, Go, and native libraries.
 - Accept signed compound duration operands (`-1h`, `+8d2h10m`) in existing
   datetime comparisons. Preserve operands in saved queries and URLs; resolve
   them against one server clock during SQL compilation, with matching local
@@ -16,6 +20,10 @@
 
 ### Changed
 
+- Replace CodeMirror with a native textarea formula editor, retaining suggestions,
+  signature help, diagnostics, paired insertion, and native undo while removing
+  syntax coloring, line-number gutters, and hover tooltips.
+- Pin `@tanstack/react-virtual` to `3.14.11` and remove the CodeMirror dependency graph.
 - Compare local datetime filters as instants, including timezone offsets, and
   report invalid datetime filters instead of falling back to string comparison.
 
