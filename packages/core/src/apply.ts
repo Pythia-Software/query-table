@@ -13,6 +13,7 @@
 //   - NULLs sort per OrderByClause.nulls (default "last")
 //   - multi-sort is a stable lexicographic fold over orderBy in priority order
 
+import { evaluationTime, type QueryEvaluationOptions } from "./relativeTime";
 import { isComputedField } from "./computed";
 import type { AggOp, AggregationClause, QueryState, WhereClause, WhereTerm } from "./query";
 import type { FieldSchema, FieldDef } from "./schema";
@@ -29,9 +30,11 @@ export interface ApplyResult<Row> {
 }
 
 /** Filter + multi-sort + paginate `rows` per `q`, resolving field types/paths
- *  from `schema`. Pure; never mutates `rows`. Clauses/sorts on unknown fields are
+ *  from `schema`. Never mutates `rows`. Relative predicates use options.now or
+ *  one captured Date.now(). Clauses/sorts on unknown fields are
  *  ignored (the backend already enforced its own allowlist). */
-export function applyQuery<Row>(rows: Row[], q: QueryState, schema: FieldSchema<Row>): ApplyResult<Row> {
+export function applyQuery<Row>(rows: Row[], q: QueryState, schema: FieldSchema<Row>, options: QueryEvaluationOptions = {}): ApplyResult<Row> {
+  const now = evaluationTime(options);
   const byName = indexFields(schema);
   const resolveField = (name: string) => resolveFieldName(schema, name) ?? name;
   // Terms touching a computed column are dropped here (the formula engine
@@ -39,7 +42,8 @@ export function applyQuery<Row>(rows: Row[], q: QueryState, schema: FieldSchema<
   // group is all-or-nothing, so a single computed member drops the whole term.
   const whereTerms = q.where
     .filter((term) => !predicatesOf(term).some((c) => isComputedField(c.field)))
-    .map((term) => prepareWhereTerm(term, resolveField));
+    .map((term) => prepareWhereTerm(term, resolveField, now));
+  prepareDatetimePredicates(whereTerms, byName);
   const orderBy = q.orderBy
     .filter((term) => !isComputedField(term.field))
     .map((term) => ({ ...term, field: resolveField(term.field) }));
@@ -82,8 +86,12 @@ export function applyQuery<Row>(rows: Row[], q: QueryState, schema: FieldSchema<
 }
 
 /** Does one row satisfy one clause? Exposed for the CellMenu preview + tests. */
-export function matchesClause<Row>(row: Row, clause: WhereClause, schema: FieldSchema<Row>): boolean {
-  return matchesWith(indexFields(schema), row, prepareWhereClause(clause));
+export function matchesClause<Row>(row: Row, clause: WhereClause, schema: FieldSchema<Row>, options: QueryEvaluationOptions = {}): boolean {
+  const field = resolveFieldName(schema, clause.field) ?? clause.field;
+  const byName = indexFields(schema);
+  const prepared = prepareWhereClause({ ...clause, field }, evaluationTime(options));
+  prepareDatetimePredicates([{ kind: "lit", predicate: prepared }], byName);
+  return matchesWith(byName, row, prepared);
 }
 
 /** Client-side mirror of the backend GROUP BY (the executor for `clientRows`
@@ -91,12 +99,14 @@ export function matchesClause<Row>(row: Row, clause: WhereClause, schema: FieldS
  *  only — ORDER BY / LIMIT / OFFSET are intentionally ignored, so a metric
  *  reflects every matching row, not the visible page. Must agree with
  *  backends/go's aggregate compile on op semantics. */
-export function applyAggregations<Row>(rows: Row[], q: QueryState, schema: FieldSchema<Row>): AggregationResult {
+export function applyAggregations<Row>(rows: Row[], q: QueryState, schema: FieldSchema<Row>, options: QueryEvaluationOptions = {}): AggregationResult {
+  const now = evaluationTime(options);
   const byName = indexFields(schema);
   const resolveField = (name: string) => resolveFieldName(schema, name) ?? name;
   const whereTerms = q.where
     .filter((term) => !predicatesOf(term).some((c) => isComputedField(c.field)))
-    .map((term) => prepareWhereTerm(term, resolveField));
+    .map((term) => prepareWhereTerm(term, resolveField, now));
+  prepareDatetimePredicates(whereTerms, byName);
   const filtered = rows.filter((row) => whereTerms.every((term) => matchesTerm(byName, row, term)));
   const metrics = (q.aggregations ?? [])
     .filter((a) => !isComputedField(a.field ?? "") && !a.groupBy.some(isComputedField))
@@ -203,6 +213,8 @@ function sortBuckets(buckets: AggregationBucket[]): AggregationBucket[] {
 
 interface PreparedWhereClause {
   clause: WhereClause;
+  now: number;
+  datetime?: number;
   regex: RegExp | null | undefined;
 }
 
@@ -210,16 +222,24 @@ type PreparedWhereTerm =
   | { kind: "lit"; predicate: PreparedWhereClause }
   | { kind: "or"; predicates: PreparedWhereClause[] };
 
-function prepareWhereClause(clause: WhereClause): PreparedWhereClause {
+function prepareWhereClause(clause: WhereClause, now: number): PreparedWhereClause {
   const usesRegex = clause.op === "matches_regex" || clause.op === "not_matches_regex";
-  return { clause, regex: usesRegex ? compileRegex(clause.value) : undefined };
+  return { clause, now, regex: usesRegex ? compileRegex(clause.value) : undefined };
 }
 
-function prepareWhereTerm(term: WhereTerm, resolveField: (name: string) => string): PreparedWhereTerm {
+function prepareWhereTerm(term: WhereTerm, resolveField: (name: string) => string, now: number): PreparedWhereTerm {
   if (isOrGroup(term)) {
-    return { kind: "or", predicates: term.any.map((c) => prepareWhereClause({ ...c, field: resolveField(c.field) })) };
+    return { kind: "or", predicates: term.any.map((c) => prepareWhereClause({ ...c, field: resolveField(c.field) }, now)) };
   }
-  return { kind: "lit", predicate: prepareWhereClause({ ...term, field: resolveField(term.field) }) };
+  return { kind: "lit", predicate: prepareWhereClause({ ...term, field: resolveField(term.field) }, now) };
+}
+
+function prepareDatetimePredicates<Row>(terms: PreparedWhereTerm[], fields: Map<string, FieldDef<Row>>): void {
+  for (const term of terms) for (const p of term.kind === "lit" ? [term.predicate] : term.predicates) {
+    const field = fields.get(p.clause.field);
+    if (field?.type !== "datetime" || p.clause.value === "" || p.clause.op === "is_null" || p.clause.op === "is_not_null") continue;
+    p.datetime = coerceValue("datetime", p.clause.value, p.now) as number;
+  }
 }
 
 /** A row satisfies the WHERE when every term matches (AND); a term matches when
@@ -254,13 +274,33 @@ function matchesWith<Row>(byName: Map<string, FieldDef<Row>>, row: Row, prepared
     if (!/^(0|[1-9]\d*)$/.test(clause.value) || !Number.isSafeInteger(Number(clause.value))) return false;
   }
 
-  const base = matchesBase(field, v, prepared);
+  let base: boolean;
+  if (prepared.datetime !== undefined) {
+    const timestamp = v instanceof Date ? v.getTime()
+      : typeof v === "number" ? v : typeof v === "string" ? Date.parse(v) : NaN;
+    if (v === "" || !Number.isFinite(timestamp)) return false;
+    base = matchesDatetime(timestamp, prepared.datetime, clause.op);
+  } else {
+    base = matchesBase(field, v, prepared);
+  }
   if (!clause.negated) return base;
   // Null-exclusive NOT: a NULL/empty value satisfies neither the predicate nor
   // its negation (mirrors `not_matches_regex` and the server's trailing
   // `AND <expr> IS NOT NULL`).
   const isNull = Array.isArray(v) ? v.length === 0 : v == null || v === "";
   return !isNull && !base;
+}
+
+function matchesDatetime(timestamp: number, rhs: number, op: WhereClause["op"]): boolean {
+  switch (op) {
+    case "=": return timestamp === rhs;
+    case "!=": return timestamp !== rhs;
+    case ">": return timestamp > rhs;
+    case ">=": return timestamp >= rhs;
+    case "<": return timestamp < rhs;
+    case "<=": return timestamp <= rhs;
+    default: return false;
+  }
 }
 
 /** The bare predicate result, ignoring `negated` and the empty-value skip

@@ -1437,7 +1437,7 @@ function PredicateEditor<Row>({
       value={clause.value}
       forceFreeform={isRegex || isLength}
       numeric={isLength}
-      placeholder={isRegex ? "regex" : isLength ? "length" : "value"}
+      placeholder={isRegex ? "regex" : isLength ? "length" : field?.type === "datetime" ? "ISO date or signed duration" : "value"}
       classNames={classNames}
       onChange={(value) => onChange({ ...clause, value })}
     />

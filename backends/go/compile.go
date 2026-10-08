@@ -37,6 +37,13 @@ type CompileResult struct {
 // non-server-filterable field, a sort on a non-sortable field, an unknown
 // select field, or a value that fails coercion.
 func Compile(q WireQuery, schema Schema, startIdx int) (CompileResult, int, error) {
+	return CompileAt(q, schema, startIdx, time.Now())
+}
+
+// CompileAt captures relative datetime values using one explicit reference time.
+// Share now across row/count/metric compilations for a consistent snapshot.
+// Relative values are resolved to bound UTC timestamps, never interpolated SQL.
+func CompileAt(q WireQuery, schema Schema, startIdx int, now time.Time) (CompileResult, int, error) {
 	var res CompileResult
 	idx := startIdx
 	if err := q.Validate(); err != nil {
@@ -54,9 +61,9 @@ func Compile(q WireQuery, schema Schema, startIdx int) (CompileResult, int, erro
 			err  error
 		)
 		if term.IsGroup() {
-			sql, args, next, err = compileOrGroup(term.Any, schema, idx)
+			sql, args, next, err = compileOrGroup(term.Any, schema, idx, now)
 		} else {
-			sql, args, next, err = compileLiteral(term.Literal(), schema, idx)
+			sql, args, next, err = compileLiteral(term.Literal(), schema, idx, now)
 		}
 		if err != nil {
 			return res, idx, err
@@ -117,11 +124,12 @@ func Compile(q WireQuery, schema Schema, startIdx int) (CompileResult, int, erro
 
 // AggCompileResult holds the SQL fragments for one metric's GROUP BY query. The
 // caller splices them into its own FROM/JOIN, sharing the rows query's WHERE so
-// the metric covers the same filtered set (scope = whole set, no paging):
+// the metric covers the same filtered set (scope = whole set, no paging). Use
+// the same now passed to CompileAt for the rows query when compiling this WHERE:
 //
 //	SELECT <SelectExprs joined by ", ">
 //	FROM   <caller FROM/JOIN>
-//	[WHERE <Compile(WireQuery{Where: req.Where}, …).WhereSQL>]
+//	[WHERE <CompileAt(WireQuery{Where: req.Where}, …, now).WhereSQL>]
 //	[GROUP BY <GroupBySQL>]
 //
 // SelectExprs is, in order: one `expr AS "g0"/"g1"/…` per group field, then the
@@ -136,7 +144,8 @@ type AggCompileResult struct {
 // its SELECT + GROUP BY fragments. Like Compile, the only request-influenced
 // tokens that reach SQL are the validated op and the schema-defined field
 // expressions — never request input. No bound args are produced (aggregations
-// carry no values; the shared WHERE is compiled separately via Compile).
+// carry no values; the shared WHERE is compiled separately via CompileAt using
+// the rows query's clock).
 //
 // Errors on: unknown op, unknown measure/group field, a missing measure for an
 // op that needs one, or an op not allowed for the measure field's kind.
@@ -269,7 +278,7 @@ func compileOrderTerm(expr string, term OrderBy, idx int) (string, []any, int, e
 // predicate nor its negation — matching applyQuery and the not_matches_regex
 // convention. Returns "" (no SQL) for an empty-value no-op, exactly like the
 // positive form.
-func compileLiteral(c WhereClause, schema Schema, idx int) (string, []any, int, error) {
+func compileLiteral(c WhereClause, schema Schema, idx int, reference ...time.Time) (string, []any, int, error) {
 	spec, ok := schema.Fields[c.Field]
 	if !ok {
 		return "", nil, idx, fmt.Errorf("unknown filter field %q", c.Field)
@@ -280,7 +289,7 @@ func compileLiteral(c WhereClause, schema Schema, idx int) (string, []any, int, 
 	if !fieldOpEnabled(spec, c.Op) {
 		return "", nil, idx, fmt.Errorf("field %q: op %q is not enabled", c.Field, c.Op)
 	}
-	sql, args, next, err := compileWhere(spec, c.Op, c.Value, idx)
+	sql, args, next, err := compileWhere(spec, c.Op, c.Value, idx, reference...)
 	if err != nil {
 		return "", nil, idx, fmt.Errorf("field %q: %w", c.Field, err)
 	}
@@ -302,13 +311,13 @@ func compileLiteral(c WhereClause, schema Schema, idx int) (string, []any, int, 
 // is dropped. If any disjunct is an always-true no-op (empty value), the whole
 // group is always true and is dropped — mirroring applyQuery, where an
 // always-true member short-circuits the OR to "match everything".
-func compileOrGroup(lits []WhereClause, schema Schema, idx int) (string, []any, int, error) {
+func compileOrGroup(lits []WhereClause, schema Schema, idx int, reference ...time.Time) (string, []any, int, error) {
 	start := idx
 	parts := make([]string, 0, len(lits))
 	var args []any
 	alwaysTrue := false
 	for _, c := range lits {
-		sql, a, next, err := compileLiteral(c, schema, idx)
+		sql, a, next, err := compileLiteral(c, schema, idx, reference...)
 		if err != nil {
 			return "", nil, start, err
 		}
@@ -326,7 +335,7 @@ func compileOrGroup(lits []WhereClause, schema Schema, idx int) (string, []any, 
 	return strings.Join(parts, " OR "), args, idx, nil
 }
 
-func compileWhere(spec FieldSpec, op, value string, idx int) (string, []any, int, error) {
+func compileWhere(spec FieldSpec, op, value string, idx int, reference ...time.Time) (string, []any, int, error) {
 	switch op {
 	case "is_null":
 		if spec.Kind == FieldTextArray {
@@ -361,7 +370,23 @@ func compileWhere(spec FieldSpec, op, value string, idx int) (string, []any, int
 		if op == "!=" {
 			sqlOp = "<>"
 		}
-		v, err := coerce(spec.Kind, value)
+		var v any
+		var err error
+		if spec.Kind == FieldDatetime && (strings.HasPrefix(value, "+") || strings.HasPrefix(value, "-")) {
+			offset, parseErr := parseRelativeDuration(value)
+			if parseErr != nil {
+				return "", nil, idx, parseErr
+			}
+			var now time.Time
+			if len(reference) > 0 {
+				now = reference[0]
+			} else {
+				now = time.Now()
+			}
+			v, err = relativeTimestamp(now, offset)
+		} else {
+			v, err = coerce(spec.Kind, value)
+		}
 		if err != nil {
 			return "", nil, idx, err
 		}

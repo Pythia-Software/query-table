@@ -59,3 +59,9 @@ Exports include `ComputedColumnStore`, `httpComputedColumnStore`, `memoryCompute
 For case-sensitive array keys, set `filter: { arrayCaseSensitive: true }` on the
 `textarray` field. The default remains case-insensitive. This setting applies to
 local filtering and metrics and to PostgreSQL array membership.
+
+Datetime comparisons accept signed elapsed offsets such as `-1h`, `+8d2h10m`,
+and `+0s`. Operators and the wire shape are unchanged: values remain relative in
+saved queries and requests, and the server resolves them when compiling. Local
+executors mirror this behavior and accept an optional clock for deterministic
+execution. See [relative datetime operands](https://github.com/Pythia-Software/query-table/blob/main/docs/relative-time.md).

@@ -95,3 +95,6 @@ export * from "./formula";
 export * from "./computed";
 export * from "./setFilter";
 export type { SetFilterMetadata, SetFilterMode } from "./query";
+
+export { parseRelativeDuration, MAX_RELATIVE_TIME_MS } from "./relativeTime";
+export type { QueryEvaluationOptions } from "./relativeTime";

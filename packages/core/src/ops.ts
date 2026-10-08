@@ -8,6 +8,7 @@
 // Every value can be NULL, so `is_null`/`is_not_null` are available on EVERY
 // type, including bool (design feedback).
 
+import { parseRelativeDuration, relativeTimestamp } from "./relativeTime";
 import type { FilterOp, FieldType, FieldDef, WhereClause } from "./index";
 
 const NULLITY: FilterOp[] = ["is_null", "is_not_null"];
@@ -138,7 +139,7 @@ export function opAllowedForType(type: FieldType, op: FilterOp): boolean {
 /** Coerce a raw string value to the type the field expects, for client-side
  *  comparison. Throws on invalid input (e.g. a non-numeric value on a number
  *  field) so callers can surface it rather than silently mis-filtering. */
-export function coerceValue(type: FieldType, raw: string): string | number | boolean {
+export function coerceValue(type: FieldType, raw: string, now?: number): string | number | boolean {
   switch (type) {
     case "number": {
       const n = Number(raw);
@@ -152,6 +153,11 @@ export function coerceValue(type: FieldType, raw: string): string | number | boo
       throw new Error(`not a bool: ${JSON.stringify(raw)}`);
     }
     case "datetime": {
+      if (raw.startsWith("+") || raw.startsWith("-")) {
+        const offset = parseRelativeDuration(raw);
+        if (offset === null) throw new Error(`not a signed duration: ${JSON.stringify(raw)}`);
+        return relativeTimestamp(now ?? Date.now(), offset);
+      }
       const ms = Date.parse(raw);
       if (Number.isNaN(ms)) throw new Error(`not a datetime: ${JSON.stringify(raw)}`);
       return ms;
