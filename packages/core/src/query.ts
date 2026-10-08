@@ -38,7 +38,9 @@ export type FilterOp =
 /** A single filter predicate (a "literal" in CNF terms). `value` is always the
  *  raw string the UI captured; coercion to number/bool/date happens at
  *  apply/compile time based on the field's declared type (never on the value's
- *  runtime shape). Unused for the nullary ops (`is_null`/`is_not_null`).
+ *  runtime shape). Datetime comparisons also accept signed duration offsets
+ *  such as "-1h" or "+8d2h10m", resolved relative to execution time.
+ *  Unused for the nullary ops (`is_null`/`is_not_null`).
  *
  *  `negated` wraps the predicate in a logical NOT. It is only ever set for ops
  *  that have no complementary operator (`contains`/`starts_with`/`ends_with`/

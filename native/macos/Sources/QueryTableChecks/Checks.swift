@@ -23,6 +23,7 @@ struct QueryTableChecks {
       count += 1
       print("PASS \(message)")
     }
+    try await RelativeTimeCheck.run(check: check)
     let schema = FieldSchema(
       name: "checks", idField: "id",
       fields: [

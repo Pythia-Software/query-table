@@ -8,6 +8,10 @@
   concept and return-type filters, and keyboard insertion at the cursor or
   around selected formula text.
 - Document dependency removal options across the web, Go, and native libraries.
+- Accept signed compound duration operands (`-1h`, `+8d2h10m`) in existing
+  datetime comparisons. Preserve operands in saved queries and URLs; resolve
+  them against one server clock during SQL compilation, with matching local
+  execution in TypeScript and Swift.
 
 - Add a **Column Widths** submenu to the `DataTable` header menu: fit the
   clicked column, fit all to content, fit all to screen, equal widths, or reset.
@@ -20,6 +24,8 @@
   signature help, diagnostics, paired insertion, and native undo while removing
   syntax coloring, line-number gutters, and hover tooltips.
 - Pin `@tanstack/react-virtual` to `3.14.11` and remove the CodeMirror dependency graph.
+- Compare local datetime filters as instants, including timezone offsets, and
+  report invalid datetime filters instead of falling back to string comparison.
 
 - Measure intrinsic content for header-handle auto-fit (Enter), so auto-fit can
   shrink a column as well as grow it.

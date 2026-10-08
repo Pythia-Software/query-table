@@ -305,3 +305,7 @@ changes are recorded in [CHANGELOG.md](CHANGELOG.md).
 ### Reusable computed columns
 
 The SELECT editor supports column ordering, value-frequency browsing, and reusable browser-evaluated formulas. Definitions can be stored in your database and referenced by ID across saved queries. See the [computed columns guide](docs/computed-columns.md) for the formula language, preview behavior, persistence adapter, and optional PostgreSQL implementation.
+
+Datetime comparisons can store signed duration operands such as `-1h` or
+`+8d2h10m`. The server resolves these against its execution time and binds the
+resulting timestamp using the existing operator. See [relative datetime operands](docs/relative-time.md).

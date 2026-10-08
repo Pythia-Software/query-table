@@ -8,7 +8,9 @@ import Foundation
 public struct LocalQueryTransport: QueryTransport {
   public let schema: FieldSchema
   public let rows: [QueryRow]
-  public init(schema: FieldSchema, rows: [QueryRow]) {
+  private let now: @Sendable () -> Date
+  public init(schema: FieldSchema, rows: [QueryRow], now: @escaping @Sendable () -> Date = { Date() }) {
+    self.now = now
     self.schema = schema
     self.rows = rows
   }
@@ -106,20 +108,39 @@ public struct LocalQueryTransport: QueryTransport {
     }
     return AggregationResult(metrics: metrics)
   }
+  private struct TimeKey: Hashable { let field, op, value: String }
   private func filtered(_ terms: [WhereTerm]) throws -> [QueryRow] {
+    let reference = now()
+    // One prepared value per predicate; parse before reading rows so invalid
+    // filters also fail on an empty dataset and under negation/OR.
+    var times: [TimeKey: Date] = [:]
+    func key(_ p: WhereClause) -> TimeKey { TimeKey(field: p.field, op: p.op, value: p.value) }
     for p in terms.flatMap(\.predicates) {
       guard let f = schema.field(named: p.field), f.filterOperators.contains(p.op) else {
         throw QueryTableError.invalidQuery("Unsupported field or operator: \(p.field) \(p.op)")
+      }
+      if f.type == "datetime" && !p.value.isEmpty && !["is_null", "is_not_null"].contains(p.op) {
+        if p.value.hasPrefix("+") || p.value.hasPrefix("-") {
+          guard let offset = RelativeTime.parseDuration(p.value) else {
+            throw QueryTableError.invalidQuery("Invalid signed duration")
+          }
+          times[key(p)] = try RelativeTime.timestamp(reference, offset: offset)
+        } else {
+          guard let date = RelativeTime.absoluteDate(p.value) else {
+            throw QueryTableError.invalidQuery("Invalid datetime")
+          }
+          times[key(p)] = date
+        }
       }
       if p.op.contains("regex") {
         throw QueryTableError.unsupported("Regex matching requires a server transport")
       }
     }
     return rows.filter { row in
-      terms.allSatisfy { term in term.predicates.contains { matches($0, row: row) } }
+      terms.allSatisfy { term in term.predicates.contains { matches($0, row: row, time: times[key($0)]) } }
     }
   }
-  private func matches(_ clause: WhereClause, row: QueryRow) -> Bool {
+  private func matches(_ clause: WhereClause, row: QueryRow, time: Date?) -> Bool {
     guard let field = schema.field(named: clause.field) else { return false }
     let value = field.value(in: row)
     let empty = value == .null || value == .string("") || value == .array([])
@@ -141,6 +162,20 @@ public struct LocalQueryTransport: QueryTransport {
     if clause.op == "is_null" { return clause.negated == true ? false : empty }
     if clause.op == "is_not_null" { return clause.negated == true ? false : !empty }
     if value == .null || (clause.negated == true && empty) { return false }
+    if let time {
+      guard let date = RelativeTime.absoluteDate(value.displayString) else { return false }
+      let result: Bool
+      switch clause.op {
+      case "=": result = date == time
+      case "!=": result = date != time
+      case ">": result = date > time
+      case ">=": result = date >= time
+      case "<": result = date < time
+      case "<=": result = date <= time
+      default: result = false
+      }
+      return clause.negated == true ? !result : result
+    }
     let rhs: JSONValue
     if field.type == "number" {
       guard let n = Double(clause.value), n.isFinite else { return false }

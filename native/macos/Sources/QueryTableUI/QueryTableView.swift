@@ -746,7 +746,7 @@ private struct PredicateEditor: View {
         } else {
           TextField(
             field?.type == "datetime"
-              ? "ISO date or timestamp" : field?.type == "number" ? "Number" : "Value",
+              ? "ISO date or signed duration" : field?.type == "number" ? "Number" : "Value",
             text: binding(\.value)
           ).textFieldStyle(.roundedBorder)
           if !suggestions.isEmpty {
