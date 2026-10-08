@@ -66,7 +66,25 @@ The server stores source as text. It never interprets it, compiles it to SQL, or
 
 ## Editor and preview semantics
 
-The lazy-loaded CodeMirror editor provides highlighting, field/function completions, signature hints, inline diagnostics, and function documentation. The function browser wraps the current expression in a selected function for experimentation. Regex extraction results expose a match inspector with highlighted input and capture groups.
+The lazy-loaded native textarea editor provides field/function/keyword
+suggestions, signature hints, compiler diagnostics with an action to select the
+error location, and function documentation. Suggestions appear while typing,
+or through Ctrl+Space and the Suggestions button; use arrow keys and Enter to
+insert, or Escape to dismiss. Function suggestions insert parentheses with the
+caret inside. Ordinary typing uses native selection, copy/paste, composition,
+and undo; browsers control undo grouping.
+
+Syntax coloring, line-number gutters, hover tooltips, and CodeMirror-specific
+editing commands are no longer provided.
+
+A vertical Function library sits beside the editor and wraps underneath at narrow
+widths. Search by function name, description, or intent (for example, “minimum”
+or “uppercase”), and browse by concept or return type. Each result shows its
+signature and documentation. Click a result, or use arrow keys and Enter in
+search, to insert a function at the editor cursor; selected formula text is
+wrapped as its argument. The Numbers & statistics category covers numeric
+operations within a row. Regex extraction results expose a match inspector with
+highlighted input and capture groups.
 
 The row-count control accepts 1–10,000 rows. A preview starts at the first row matching the current filters in the current sort order, independently of table pagination. Server mode fetches batches of at most 500 through `Transport.fetchRows`, following offsets until the requested count or reported total is reached. Transports must honor the requested projection, sort, offset, and cancellation signal; ordinary server page-size caps are supported. Concurrent dataset mutations can change an offset-based sample; use snapshot-consistent transport requests if your application requires that guarantee.
 
@@ -125,4 +143,6 @@ The default worker needs `worker-src blob:` under CSP. If that is not appropriat
 
 `npm run check` covers core formulas, ID serialization, store conflicts, React invalidation/dependency fetching, worker cancellation, and Go HTTP authorization/conflicts alongside the existing suites. `npm run build:demo` builds the production browser bundle.
 
-With the demo running, `npm run test:computed` exercises catalogue counts, configurable samples, layout cancellation, regex inspection, shared edits, ID-only persistence, native regex timeout/recovery, and mobile layout in a real browser. Set `QT_BROWSER_CHANNEL=chrome` to use installed Chrome and `QT_DEMO_URL` to target a production preview.
+With the demo running, `npm run test:formula-editor` checks suggestions, native undo/redo, paired text insertion, error selection, and mobile interaction in Chromium and WebKit.
+
+`npm run test:computed` exercises catalogue counts, configurable samples, layout cancellation, regex inspection, shared edits, ID-only persistence, native regex timeout/recovery, and mobile layout in a real browser. Set `QT_BROWSER_CHANNEL=chrome` to use installed Chrome and `QT_DEMO_URL` to target a production preview.

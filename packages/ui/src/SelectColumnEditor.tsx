@@ -13,7 +13,6 @@ import { Icon } from "./Icon";
 import type { QueryTableApi } from "@pythia-software/query-table-react";
 import {
   computedFieldName,
-  FORMULA_FUNCTIONS,
   isComputedField,
   isSelectable,
   type ColumnPreview,
@@ -65,8 +64,7 @@ export function SelectColumnEditor<Row>({
     [saving, setSaving] = useState(false);
   const [filter, setFilter] = useState("all"),
     [page, setPage] = useState(0),
-    [retry, setRetry] = useState(0),
-    [functionSearch, setFunctionSearch] = useState("");
+    [retry, setRetry] = useState(0);
   const [previewSort, setPreviewSort] = useState<PreviewSort | null>(null);
   const [fieldStats, setFieldStats] = useState<Record<string, FieldStats>>({});
   const drag = useRef<string | null>(null);
@@ -503,38 +501,6 @@ export function SelectColumnEditor<Row>({
                     compile={(value) => api.computed.compile(value, id)}
                   />
                 </Suspense>
-                <details className="qt-function-library">
-                  <summary>Functions & examples</summary>
-                  <input
-                    className="qt-input"
-                    aria-label="Search functions"
-                    placeholder="Search functions…"
-                    value={functionSearch}
-                    onChange={(e) => setFunctionSearch(e.target.value)}
-                  />
-                  <div className="qt-function-list">
-                    {FORMULA_FUNCTIONS.filter((f) =>
-                      `${f.name} ${f.description}`
-                        .toLowerCase()
-                        .includes(functionSearch.toLowerCase()),
-                    ).map((f) => (
-                      <button
-                        type="button"
-                        key={f.name}
-                        title={f.description}
-                        onClick={() => setSource(`${f.name}(${source})`)}
-                      >
-                        <code>{f.signature}</code>
-                        <small>{f.description}</small>
-                      </button>
-                    ))}
-                  </div>
-                  <p>
-                    Examples: <code>LEFT([name], 3)</code> ·{" "}
-                    <code>IF([amount] &gt; 100, "High", "Low")</code> ·{" "}
-                    <code>REGEX_EXTRACT([email], "@(.+)$", 1)</code>
-                  </p>
-                </details>
                 <div className="qt-definition-actions">
                   <button
                     type="button"

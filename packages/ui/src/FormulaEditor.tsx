@@ -1,31 +1,18 @@
-import { useEffect, useRef, useState } from "react";
-import { EditorState } from "@codemirror/state";
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import {
-  EditorView,
-  keymap,
-  lineNumbers,
-  hoverTooltip,
-} from "@codemirror/view";
-import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
-import {
-  autocompletion,
-  completionKeymap,
-  closeBrackets,
-  closeBracketsKeymap,
-} from "@codemirror/autocomplete";
-import { linter } from "@codemirror/lint";
-import {
-  StreamLanguage,
-  syntaxHighlighting,
-  defaultHighlightStyle,
-  bracketMatching,
-} from "@codemirror/language";
-import {
-  FORMULA_FUNCTIONS,
   FormulaError,
   type FieldDef,
   type FormulaPlan,
 } from "@pythia-software/query-table-core";
+import {
+  formulaCompletions,
+  formulaContext,
+  signatureAt,
+  type FormulaCompletions,
+  type FormulaSuggestion,
+} from "./formulaEditorHelpers";
+
+import { FormulaFunctionBrowser } from "./FormulaFunctionBrowser";
 
 export interface FormulaEditorProps {
   value: string;
@@ -33,240 +20,387 @@ export interface FormulaEditorProps {
   fields: FieldDef[];
   compile: (value: string) => FormulaPlan;
 }
-const language = StreamLanguage.define({
-  token(stream) {
-    if (stream.eatSpace()) return null;
-    if (stream.match(/^"(?:[^"\\]|\\.)*"?/)) return "string";
-    if (stream.match(/^\[(?:[^\]]|\]\])*\]/)) return "variableName";
-    if (stream.match(/^(?:\d+(?:\.\d*)?|\.\d+)/)) return "number";
-    if (stream.match(/^(?:AND|OR|NOT|IN|BETWEEN|NULL|TRUE|FALSE)\b/i))
-      return "keyword";
-    if (stream.match(/^[a-zA-Z_][a-zA-Z_0-9]*/))
-      return "function(variableName)";
-    stream.next();
-    return "operator";
-  },
-});
-function signatureAt(text: string): string {
-  const stack: { name: string; argument: number }[] = [];
-  let quoted = false,
-    field = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (quoted) {
-      if (c === "\\") i++;
-      else if (c === '"') quoted = false;
-      continue;
-    }
-    if (field) {
-      if (c === "]") {
-        if (text[i + 1] === "]") i++;
-        else field = false;
-      }
-      continue;
-    }
-    if (c === '"') {
-      quoted = true;
-      continue;
-    }
-    if (c === "[") {
-      field = true;
-      continue;
-    }
-    if (c === "(")
-      stack.push({
-        name:
-          text
-            .slice(0, i)
-            .match(/([A-Za-z_]+)\s*$/)?.[1]
-            ?.toUpperCase() ?? "",
-        argument: 1,
-      });
-    else if (c === ")") stack.pop();
-    else if (c === "," && stack.length) stack[stack.length - 1]!.argument++;
-  }
-  const call = stack[stack.length - 1],
-    spec = FORMULA_FUNCTIONS.find((f) => f.name === call?.name);
-  return spec && call
-    ? `${spec.signature} · Argument ${call.argument} — ${spec.description}`
-    : "Use [field] references. Ctrl+Space opens suggestions.";
-}
+
 export default function FormulaEditor({
   value,
   onChange,
   fields,
   compile,
 }: FormulaEditorProps) {
-  const [hint, setHint] = useState(
-    "Use [field] references. Ctrl+Space opens suggestions.",
+  const id = useId();
+  const editor = useRef<HTMLTextAreaElement>(null);
+  const applyingEdit = useRef(false);
+  const composing = useRef(false);
+  // Track generated pairs through edits; existing closing characters stay editable.
+  const paired = useRef<{
+    value: string;
+    ranges: { open: number; close: number }[];
+  }>({ value, ranges: [] });
+  const trackEdit = (next: string) => {
+    const previous = paired.current.value;
+    if (previous === next) return;
+    let from = 0;
+    while (
+      from < previous.length &&
+      from < next.length &&
+      previous[from] === next[from]
+    )
+      from++;
+    let oldEnd = previous.length,
+      newEnd = next.length;
+    while (
+      oldEnd > from &&
+      newEnd > from &&
+      previous[oldEnd - 1] === next[newEnd - 1]
+    ) {
+      oldEnd--;
+      newEnd--;
+    }
+    const shift = newEnd - oldEnd;
+    paired.current.ranges = paired.current.ranges
+      .filter(
+        ({ open, close }) =>
+          !(open >= from && open < oldEnd) &&
+          !(close >= from && close < oldEnd),
+      )
+      .map(({ open, close }) => ({
+        open: open >= oldEnd ? open + shift : open,
+        close: close >= oldEnd ? close + shift : close,
+      }));
+    paired.current.value = next;
+  };
+  const selection = useRef({ start: 0, end: 0 });
+  const latestCompile = useRef(compile);
+  latestCompile.current = compile;
+  const [caret, setCaret] = useState(0);
+  const [completions, setCompletions] = useState<FormulaCompletions | null>(
+    null,
   );
-  const parent = useRef<HTMLDivElement>(null),
-    editor = useRef<EditorView>();
-  const latest = useRef({ onChange, fields, compile });
-  latest.current = { onChange, fields, compile };
+  const [active, setActive] = useState(0);
+  const [diagnostic, setDiagnostic] = useState<{
+    message: string;
+    from: number;
+    to: number;
+  } | null>(null);
+  const options = completions?.options.slice(0, 50) ?? [];
+  const hint = signatureAt(value.slice(0, caret));
+
   useEffect(() => {
-    if (!parent.current) return;
-    const view = new EditorView({
-      parent: parent.current,
-      state: EditorState.create({
-        doc: value,
-        extensions: [
-          lineNumbers(),
-          history(),
-          language,
-          syntaxHighlighting(defaultHighlightStyle),
-          bracketMatching(),
-          closeBrackets(),
-          EditorView.lineWrapping,
-          EditorView.contentAttributes.of({
-            "aria-label": "Computed column formula",
-            spellcheck: "false",
-          }),
-          keymap.of([
-            ...closeBracketsKeymap,
-            ...completionKeymap,
-            ...defaultKeymap,
-            ...historyKeymap,
-          ]),
-          autocompletion({
-            override: [
-              (context) => {
-                const word = context.matchBefore(
-                  /\[[^\]]*|[a-zA-Z_][a-zA-Z_0-9]*/,
-                );
-                if (!word && !context.explicit) return null;
-                return {
-                  from: word?.from ?? context.pos,
-                  options: [
-                    ...latest.current.fields.map((f) => ({
-                      label: `[${f.name.replace(/\]/g, "]]")}]`,
-                      displayLabel: f.label,
-                      detail: f.type,
-                      type: "variable",
-                      info: f.name,
-                    })),
-                    ...FORMULA_FUNCTIONS.map((f) => ({
-                      label: f.name,
-                      type: "function",
-                      detail: f.signature,
-                      info: f.description,
-                      apply: `${f.name}(`,
-                    })),
-                    ...[
-                      "TRUE",
-                      "FALSE",
-                      "NULL",
-                      "AND",
-                      "OR",
-                      "NOT",
-                      "IN",
-                      "BETWEEN",
-                    ].map((label) => ({ label, type: "keyword" })),
-                  ],
-                };
-              },
-            ],
-          }),
-          linter(
-            (view) => {
-              try {
-                latest.current.compile(view.state.doc.toString());
-                return [];
-              } catch (e) {
-                return [
-                  {
-                    from: Math.min(
-                      e instanceof FormulaError ? e.from : 0,
-                      view.state.doc.length,
-                    ),
-                    to: Math.min(
-                      e instanceof FormulaError ? e.to : view.state.doc.length,
-                      view.state.doc.length,
-                    ),
-                    severity: "error" as const,
-                    message: e instanceof Error ? e.message : String(e),
-                  },
-                ];
-              }
-            },
-            { delay: 250 },
-          ),
-          hoverTooltip((view, pos) => {
-            const line = view.state.doc.lineAt(pos);
-            const left =
-              line.text
-                .slice(0, pos - line.from)
-                .match(/[A-Za-z_0-9]*$/)?.[0] ?? "";
-            const right =
-              line.text.slice(pos - line.from).match(/^[A-Za-z_0-9]*/)?.[0] ??
-              "";
-            const spec = FORMULA_FUNCTIONS.find(
-              (f) => f.name === (left + right).toUpperCase(),
-            );
-            if (!spec) return null;
-            return {
-              pos: pos - left.length,
-              end: pos + right.length,
-              create() {
-                const dom = document.createElement("div");
-                dom.className = "qt-function-help";
-                dom.textContent = `${spec.signature} — ${spec.description}`;
-                return { dom };
-              },
-            };
-          }),
-          EditorView.updateListener.of((update) => {
-            if (update.docChanged)
-              latest.current.onChange(update.state.doc.toString());
-            if (update.docChanged || update.selectionSet)
-              setHint(
-                signatureAt(
-                  update.state.doc.sliceString(
-                    0,
-                    update.state.selection.main.head,
-                  ),
-                ),
-              );
-          }),
-          EditorView.theme({
-            "&": {
-              fontSize: "13px",
-              border: "1px solid var(--qt-border, #cbd5e1)",
-              borderRadius: "6px",
-            },
-            ".cm-scroller": {
-              minHeight: "130px",
-              maxHeight: "260px",
-              fontFamily: "ui-monospace, monospace",
-            },
-            ".cm-content": { padding: "12px 0" },
-            ".cm-gutters": {
-              background: "var(--qt-bg-muted, #f8fafc)",
-              color: "var(--qt-muted, #64748b)",
-            },
-          }),
-        ],
-      }),
-    });
-    editor.current = view;
-    return () => {
-      view.destroy();
-      editor.current = undefined;
-    };
-  }, []);
-  useEffect(() => {
-    const view = editor.current;
-    if (view && view.state.doc.toString() !== value)
-      view.dispatch({
-        changes: { from: 0, to: view.state.doc.length, insert: value },
-      });
+    // Native edits already updated the DOM; avoid resetting selection/undo on each keystroke.
+    const input = editor.current;
+    if (input && input.value !== value) {
+      input.value = value;
+      paired.current = { value, ranges: [] };
+      setCaret(input.selectionStart);
+      setCompletions(null);
+    }
+    setDiagnostic(null);
+    const timer = setTimeout(() => {
+      try {
+        latestCompile.current(value);
+        setDiagnostic(null);
+      } catch (error) {
+        const from = error instanceof FormulaError ? error.from : 0;
+        const to = error instanceof FormulaError ? error.to : value.length;
+        setDiagnostic({
+          message: error instanceof Error ? error.message : String(error),
+          from: Math.max(0, Math.min(from, value.length)),
+          to: Math.max(0, Math.min(to, value.length)),
+        });
+      }
+    }, 250);
+    return () => clearTimeout(timer);
   }, [value]);
+
+  useEffect(() => {
+    document
+      .getElementById(`${id}-option-${active}`)
+      ?.scrollIntoView?.({ block: "nearest" });
+  }, [active, id]);
+
+  const suggest = (explicit = false) => {
+    const input = editor.current;
+    if (!input || composing.current) return;
+    selection.current = {
+      start: input.selectionStart,
+      end: input.selectionEnd,
+    };
+    setCaret(input.selectionStart);
+    setActive(0);
+    setCompletions(
+      formulaCompletions(
+        input.value,
+        input.selectionStart,
+        input.selectionEnd,
+        fields,
+        explicit,
+      ),
+    );
+  };
+
+  const insert = (
+    from: number,
+    to: number,
+    text: string,
+    caretOffset = text.length,
+    pair?: { open: number; close: number },
+  ) => {
+    const input = editor.current;
+    if (!input) return;
+    input.focus();
+    input.setSelectionRange(from, to);
+    applyingEdit.current = true;
+    try {
+      // insertText preserves native textarea undo in Chromium/WebKit. Browsers
+      // without this editing command still have a plain-text insertion fallback.
+      const before = input.value;
+      try {
+        document.execCommand?.("insertText", false, text);
+      } catch {
+        /* use fallback */
+      }
+      if (input.value === before) input.setRangeText(text, from, to, "end");
+    } finally {
+      applyingEdit.current = false;
+    }
+    trackEdit(input.value);
+    if (pair)
+      paired.current.ranges.push({
+        open: from + pair.open,
+        close: from + pair.close,
+      });
+    input.setSelectionRange(from + caretOffset, from + caretOffset);
+    setCaret(input.selectionStart);
+    setCompletions(null);
+    onChange(input.value);
+  };
+
+  const accept = (option: FormulaSuggestion) => {
+    if (completions)
+      insert(
+        completions.from,
+        completions.to,
+        option.insert,
+        option.caretOffset,
+        option.insert.endsWith("()")
+          ? { open: option.insert.length - 2, close: option.insert.length - 1 }
+          : undefined,
+      );
+  };
+
+  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    const input = event.currentTarget;
+    if (composing.current || event.nativeEvent.isComposing) return;
+    if (event.ctrlKey && event.code === "Space") {
+      event.preventDefault();
+      suggest(true);
+      return;
+    }
+    if (options.length) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        setCompletions(null);
+        return;
+      }
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        setActive(
+          (index) =>
+            (index + (event.key === "ArrowDown" ? 1 : options.length - 1)) %
+            options.length,
+        );
+        return;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        const option = options[active];
+        if (option) accept(option);
+        return;
+      }
+    }
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    const start = input.selectionStart,
+      end = input.selectionEnd;
+    const context = formulaContext(input.value, start);
+    const close = event.key === "(" ? ")" : event.key === '"' ? '"' : undefined;
+    if (
+      close &&
+      !context.quoted &&
+      context.fieldStart < 0 &&
+      (start !== end ||
+        end === input.value.length ||
+        /[\s)\]}]/.test(input.value[end]!))
+    ) {
+      event.preventDefault();
+      const selection = input.value.slice(start, end);
+      insert(start, end, event.key + selection + close, selection.length + 1, {
+        open: 0,
+        close: selection.length + 1,
+      });
+    } else if (
+      start === end &&
+      input.value[start] === event.key &&
+      paired.current.ranges.some((pair) => pair.close === start) &&
+      ((event.key === ")" && !context.quoted && context.fieldStart < 0) ||
+        (event.key === '"' && context.quoted && !context.escaped))
+    ) {
+      event.preventDefault();
+      paired.current.ranges = paired.current.ranges.filter(
+        (pair) => pair.close !== start,
+      );
+      input.setSelectionRange(start + 1, start + 1);
+      setCaret(start + 1);
+      setCompletions(null);
+    } else if (
+      event.key === "Backspace" &&
+      start === end &&
+      start > 0 &&
+      ["()", "[]", '""'].includes(input.value.slice(start - 1, start + 1)) &&
+      (!context.quoted ||
+        (input.value.slice(start - 1, start + 1) === '""' && !context.escaped))
+    ) {
+      event.preventDefault();
+      insert(start - 1, start + 1, "");
+    }
+  };
+
   return (
-    <>
-      <div ref={parent} />
-      <p className="qt-formula-hint" aria-live="polite">
-        {hint}
-      </p>
-    </>
+    <div className="qt-formula-layout">
+      <div className="qt-formula-editor">
+        <textarea
+          ref={editor}
+          className="qt-formula-input"
+          aria-label="Computed column formula"
+          aria-describedby={`${id}-hint${diagnostic ? ` ${id}-error` : ""}`}
+          aria-invalid={diagnostic ? true : undefined}
+          aria-autocomplete="list"
+          aria-controls={options.length ? `${id}-suggestions` : undefined}
+          aria-activedescendant={
+            options.length ? `${id}-option-${active}` : undefined
+          }
+          defaultValue={value}
+          rows={6}
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+          onChange={(event) => {
+            if (applyingEdit.current) return;
+            trackEdit(event.currentTarget.value);
+            onChange(event.currentTarget.value);
+            if (!composing.current) suggest();
+          }}
+          onSelect={(event) => {
+            setCaret(event.currentTarget.selectionStart);
+            const input = event.currentTarget;
+            if (
+              !applyingEdit.current &&
+              (input.selectionStart !== selection.current.start ||
+                input.selectionEnd !== selection.current.end)
+            )
+              setCompletions(null);
+          }}
+          onKeyDown={onKeyDown}
+          onCompositionStart={() => {
+            composing.current = true;
+            setCompletions(null);
+          }}
+          onCompositionEnd={() => {
+            composing.current = false;
+            suggest();
+          }}
+          onBlur={() => setCompletions(null)}
+        />
+        <div className="qt-formula-tools">
+          <button
+            type="button"
+            className="qt-link-btn"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => {
+              editor.current?.focus();
+              suggest(true);
+            }}
+          >
+            Suggestions
+          </button>
+          <span>
+            Line {value.slice(0, caret).split("\n").length}, column{" "}
+            {caret - value.slice(0, caret).lastIndexOf("\n")}
+          </span>
+        </div>
+        {options.length > 0 && (
+          <div
+            className="qt-formula-completions"
+            data-qt-formula-suggestions=""
+          >
+            <ul
+              id={`${id}-suggestions`}
+              role="listbox"
+              aria-label="Formula suggestions"
+              onMouseDown={(event) => event.preventDefault()}
+            >
+              {options.map((option, index) => (
+                <li
+                  key={option.label}
+                  id={`${id}-option-${index}`}
+                  role="option"
+                  aria-selected={index === active}
+                  title={option.description}
+                  onClick={() => accept(option)}
+                >
+                  <strong>{option.label}</strong>
+                  <small>{option.detail}</small>
+                </li>
+              ))}
+            </ul>
+            <p>
+              {options[active]?.description} · ↑↓ choose, Enter inserts, Esc
+              closes
+            </p>
+            {completions && completions.options.length > options.length && (
+              <p>Type to narrow the first {options.length} suggestions.</p>
+            )}
+          </div>
+        )}
+        <p id={`${id}-hint`} className="qt-formula-hint" aria-live="polite">
+          {hint}
+        </p>
+        {diagnostic && (
+          <div id={`${id}-error`} className="qt-formula-error" role="status">
+            {diagnostic.message}{" "}
+            <button
+              type="button"
+              className="qt-link-btn"
+              onClick={() => {
+                editor.current?.focus();
+                editor.current?.setSelectionRange(
+                  diagnostic.from,
+                  diagnostic.to,
+                );
+                setCaret(diagnostic.from);
+              }}
+            >
+              Select error location
+            </button>
+          </div>
+        )}
+      </div>
+      <FormulaFunctionBrowser
+        onInsert={(name) => {
+          const input = editor.current;
+          if (!input) return;
+          const from = input.selectionStart;
+          const to = input.selectionEnd;
+          const selected = input.value.slice(from, to);
+          insert(
+            from,
+            to,
+            `${name}(${selected})`,
+            name.length + selected.length + 1,
+            { open: name.length, close: name.length + selected.length + 1 },
+          );
+        }}
+      />
+    </div>
   );
 }

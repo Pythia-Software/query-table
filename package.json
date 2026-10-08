@@ -42,6 +42,7 @@
     "test:mobile": "node demo/mobile-test.mjs",
     "test:feedback": "node demo/agentation-test.mjs",
     "test:computed": "node demo/computed-test.mjs",
+    "test:formula-editor": "node demo/formula-editor-test.mjs",
     "prepare": "husky"
   },
   "devDependencies": {

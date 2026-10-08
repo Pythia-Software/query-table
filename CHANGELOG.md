@@ -4,12 +4,22 @@
 
 ### Added
 
+- Add a responsive formula function library with search by name or intent,
+  concept and return-type filters, and keyboard insertion at the cursor or
+  around selected formula text.
+- Document dependency removal options across the web, Go, and native libraries.
+
 - Add a **Column Widths** submenu to the `DataTable` header menu: fit the
   clicked column, fit all to content, fit all to screen, equal widths, or reset.
   Presets write every width in one query update, so they share, undo, and
   persist like manual resizes.
 
 ### Changed
+
+- Replace CodeMirror with a native textarea formula editor, retaining suggestions,
+  signature help, diagnostics, paired insertion, and native undo while removing
+  syntax coloring, line-number gutters, and hover tooltips.
+- Pin `@tanstack/react-virtual` to `3.14.11` and remove the CodeMirror dependency graph.
 
 - Measure intrinsic content for header-handle auto-fit (Enter), so auto-fit can
   shrink a column as well as grow it.

@@ -187,7 +187,7 @@ for customization and backend integration details.
 
 ## SELECT editor
 
-`QueryBuilder` includes a split **Add** button and **Reset** action for Columns: Add opens the field picker, while its caret opens the column customizer. Actions follow the selected chips on desktop and sit in the section header on small screens. The exported `SelectColumnEditor` also accepts `{ api, onClose }` for standalone use. It supports draft column ordering, a searchable catalogue, sampled value frequencies, and a lazy-loaded CodeMirror formula editor with grouped live previews and regex inspection. Shared-definition saves and query-layout application are separate actions.
+`QueryBuilder` includes a split **Add** button and **Reset** action for Columns: Add opens the field picker, while its caret opens the column customizer. Actions follow the selected chips on desktop and sit in the section header on small screens. The exported `SelectColumnEditor` also accepts `{ api, onClose }` for standalone use. It supports draft column ordering, a searchable catalogue, sampled value frequencies, and a lazy-loaded, dependency-free textarea formula editor with field/function suggestions, signature help, and compiler diagnostics with grouped live previews and regex inspection. A Function library beside the editor supports search by name or intent, browsing by concept and return type, and insertion at the cursor or around selected text; it stacks below the editor on narrow screens. Shared-definition saves and query-layout application are separate actions.
 
 ### Filter value presentation
 
