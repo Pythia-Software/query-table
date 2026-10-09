@@ -52,9 +52,12 @@ type MetricBatchPlan struct {
 // is one statement; execute the batch in one repeatable-read snapshot. X/Y are
 // always reduced together using one grouped relation, never positionally joined.
 func CompileMetrics(ctx context.Context, q MetricQuery, s Schema, o PlanOptions) (MetricBatchPlan, error) {
+	return compileMetricsDialect(ctx, q, s, o, false)
+}
+func compileMetricsDialect(ctx context.Context, q MetricQuery, s Schema, o PlanOptions, sqlite bool) (MetricBatchPlan, error) {
 	result := MetricBatchPlan{RequiresSharedSnapshot: true}
 	var optionErr error
-	o, optionErr = requestOptions(ctx, q.Profile, q.PlanToken, q.Snapshot, q.ExpectedRevisions, o)
+	o, optionErr = requestOptionsDialect(ctx, sqlite, q.Profile, q.PlanToken, q.Snapshot, q.ExpectedRevisions, o)
 	if optionErr != nil {
 		return result, optionErr
 	}
@@ -76,7 +79,7 @@ func CompileMetrics(ctx context.Context, q MetricQuery, s Schema, o PlanOptions)
 			return result, diagnostic("duplicate_metric", "duplicate metric ID")
 		}
 		ids[spec.ID] = true
-		p, e := compileMetric(ctx, q, spec, s, o)
+		p, e := compileMetricDialect(ctx, q, spec, s, o, sqlite)
 		if e != nil {
 			return MetricBatchPlan{}, fmt.Errorf("metric %s: %w", spec.ID, e)
 		}
@@ -94,13 +97,16 @@ func MetricExpression(spec AggSpec) string {
 	return strings.ToUpper(spec.Op) + "([" + strings.ReplaceAll(spec.Field, "]", "]]") + "])"
 }
 func compileMetric(ctx context.Context, q MetricQuery, spec AggSpec, s Schema, o PlanOptions) (SQLPlan, error) {
+	return compileMetricDialect(ctx, q, spec, s, o, false)
+}
+func compileMetricDialect(ctx context.Context, q MetricQuery, spec AggSpec, s Schema, o PlanOptions, sqlite bool) (SQLPlan, error) {
 	if len(spec.Diagnostics) > 0 {
 		return SQLPlan{}, diagnostic("invalid_metric", "metric contains unresolved diagnostics")
 	}
 	if spec.Display != nil && spec.Display.Kind == "scatter" && spec.ExpressionY == "" {
 		return SQLPlan{}, diagnostic("paired_expression_required", "scatter requires both X and Y aggregate expressions")
 	}
-	b, e := newPlan(ctx, s, o)
+	b, e := newPlanDialect(ctx, s, o, sqlite)
 	if e != nil {
 		return SQLPlan{}, e
 	}
@@ -142,6 +148,9 @@ func compileMetric(ctx context.Context, q MetricQuery, spec AggSpec, s Schema, o
 		groups = append(groups, b.key(v))
 	}
 	if spec.Distribution != nil {
+		if b.sqlite {
+			return b.sqliteDistribution(spec, groups, scope)
+		}
 		return b.distribution(spec, groups, scope)
 	}
 	n, e := parseExpression(MetricExpression(spec))
@@ -171,7 +180,7 @@ func compileMetric(ctx context.Context, q MetricQuery, spec AggSpec, s Schema, o
 				return diagnostic("arity", "aggregate requires one row expression (COUNT also accepts none)")
 			}
 			raw := "*"
-			errSQL := "NULL::text"
+			errSQL := b.nullError()
 			typ := "number"
 			if len(n.args) == 1 {
 				v, err := b.row(n.args[0])
@@ -195,37 +204,46 @@ func compileMetric(ctx context.Context, q MetricQuery, spec AggSpec, s Schema, o
 				}
 			}
 			value := ""
-			switch op {
-			case "count":
-				value = "COUNT(" + raw + ")::double precision"
-				typ = "number"
-			case "count_distinct":
-				value = "COUNT(DISTINCT " + raw + ")::double precision"
-				typ = "number"
-			case "median":
-				value = "percentile_cont(0.5) WITHIN GROUP (ORDER BY " + raw + ")"
-				typ = "number"
-			case "sum", "avg":
-				value = strings.ToUpper(op) + "((" + raw + ")::text::numeric)"
-				typ = "number"
-			default:
-				value = strings.ToUpper(op) + "(" + raw + ")"
-			}
-			errorExpr := "MIN(" + errSQL + ")"
-			// A conservative absolute-sum bound declines populations whose
-			// intermediate browser accumulation could exceed safe precision.
-			if op == "sum" {
-				errorExpr = "COALESCE(" + errorExpr + ",CASE WHEN SUM(abs((" + raw + ")::text::numeric))>" + b.param("9007199254740991", "numeric") + " THEN 'unsafe_integer'::text END)"
-			}
+			errorExpr := ""
+			if !b.sqlite {
+				switch op {
+				case "count":
+					value = "COUNT(" + raw + ")::double precision"
+					typ = "number"
+				case "count_distinct":
+					value = "COUNT(DISTINCT " + raw + ")::double precision"
+					typ = "number"
+				case "median":
+					value = "percentile_cont(0.5) WITHIN GROUP (ORDER BY " + raw + ")"
+					typ = "number"
+				case "sum", "avg":
+					value = strings.ToUpper(op) + "((" + raw + ")::text::numeric)"
+					typ = "number"
+				default:
+					value = strings.ToUpper(op) + "(" + raw + ")"
+				}
+				errorExpr = "MIN(" + errSQL + ")"
+				// A conservative absolute-sum bound declines populations whose
+				// intermediate browser accumulation could exceed safe precision.
+				if op == "sum" {
+					errorExpr = "COALESCE(" + errorExpr + ",CASE WHEN SUM(abs((" + raw + ")::text::numeric))>" + b.param("9007199254740991", "numeric") + " THEN 'unsafe_integer'::text END)"
+				}
 
-			if typ == "number" {
-				errorExpr = "COALESCE(" + errorExpr + ",CASE WHEN abs(" + value + ") > 1e100::numeric OR (abs(" + value + ")>0 AND abs(" + value + ")<1e-300::numeric) THEN 'numeric_range'::text END)"
-				value = "CASE WHEN abs(" + value + ") <= 1e100::numeric AND ((" + value + ")=0 OR abs(" + value + ")>=1e-300::numeric) THEN (" + value + ")::double precision END"
-			}
-			if typ == "number" {
-				errorExpr = "COALESCE(" + errorExpr + ",CASE WHEN " + b.unsafeMetricNumber(value) + " THEN 'unsafe_integer'::text END)"
-			}
+				if typ == "number" {
+					errorExpr = "COALESCE(" + errorExpr + ",CASE WHEN abs(" + value + ") > 1e100::numeric OR (abs(" + value + ")>0 AND abs(" + value + ")<1e-300::numeric) THEN 'numeric_range'::text END)"
+					value = "CASE WHEN abs(" + value + ") <= 1e100::numeric AND ((" + value + ")=0 OR abs(" + value + ")>=1e-300::numeric) THEN (" + value + ")::double precision END"
+				}
+				if typ == "number" {
+					errorExpr = "COALESCE(" + errorExpr + ",CASE WHEN " + b.unsafeMetricNumber(value) + " THEN 'unsafe_integer'::text END)"
+				}
 
+			}
+			if b.sqlite {
+				if op == "count" || op == "count_distinct" {
+					typ = "number"
+				}
+				value, errorExpr = b.sqliteReduction(op, raw, errSQL, typ)
+			}
 			index := len(leaves)
 			a := fmt.Sprintf("a%d", index)
 			z := a + "_error"
@@ -304,7 +322,7 @@ func compileMetric(ctx context.Context, q MetricQuery, spec AggSpec, s Schema, o
 		groupErrors = append(groupErrors, fmt.Sprintf("group%d_error", i))
 	}
 	if len(groupErrors) > 0 {
-		ge := "COALESCE(" + strings.Join(append(groupErrors, "NULL::text"), ",") + ")"
+		ge := "COALESCE(" + strings.Join(append(groupErrors, b.nullError()), ",") + ")"
 		v = b.emit("CASE WHEN "+ge+" IS NULL THEN "+v.Value+" END", "COALESCE("+ge+","+v.Error+")", v.Type)
 		if y != nil {
 			yv = b.emit("CASE WHEN "+ge+" IS NULL THEN "+yv.Value+" END", "COALESCE("+ge+","+yv.Error+")", yv.Type)
@@ -324,7 +342,17 @@ func compileMetric(ctx context.Context, q MetricQuery, spec AggSpec, s Schema, o
 	if spec.GroupLimit > 0 {
 		sql += " LIMIT " + b.param(spec.GroupLimit, "integer")
 	}
-	return b.finish(sql, scope, nil), nil
+	cols := []OutputColumn{}
+	if b.sqlite {
+		for i, g := range groups {
+			cols = append(cols, OutputColumn{Field: spec.GroupBy[i], ValueAlias: fmt.Sprintf("group%d", i), Type: g.Type})
+		}
+		cols = append(cols, OutputColumn{ValueAlias: "value", Type: v.Type})
+		if y != nil {
+			cols = append(cols, OutputColumn{ValueAlias: "y", Type: yv.Type})
+		}
+	}
+	return b.finish(sql, scope, cols), nil
 }
 func groupSQL(groups []ValueSQL) ([]string, string) {
 	sels := []string{}
@@ -437,6 +465,9 @@ func fieldGroupable(f FieldSpec) bool {
 // decimal rendering (which can round near MAX_SAFE_INTEGER). Callers supply
 // values already bounded by the PostgreSQL arithmetic profile.
 func (b *planBuilder) unsafeMetricNumber(value string) string {
+	if b.sqlite {
+		return "qt_v2_unsafe(" + value + ")"
+	}
 	v := "(" + value + ")::double precision"
 	return "(trunc(" + v + ")=" + v + " AND abs(" + v + ")>" + b.param(float64(9007199254740991), "double precision") + ")"
 }
@@ -448,6 +479,6 @@ func (b *planBuilder) metricNumber(v ValueSQL) ValueSQL {
 	if v.Type != "number" {
 		return v
 	}
-	err := "COALESCE(" + v.Error + ",CASE WHEN " + b.unsafeMetricNumber(v.Value) + " THEN 'unsafe_integer'::text END)"
+	err := "COALESCE(" + v.Error + ",CASE WHEN " + b.unsafeMetricNumber(v.Value) + " THEN " + b.errorLiteral("unsafe_integer") + " END)"
 	return b.emit("CASE WHEN "+err+" IS NULL THEN "+v.Value+" END", err, v.Type)
 }

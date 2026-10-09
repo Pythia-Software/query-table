@@ -239,6 +239,8 @@ Existing simple `AggregationClause` definitions and v1 aggregation transports re
 
 See [the production metrics guide](docs/metrics.md) for definitions, React/UI usage, scopes, formatting, palette customization, and transports, and [the PostgreSQL compiler guide](docs/backend-metrics.md) for backend integration. The [approved playground](docs/mockups/metric-playground.html) and [design notes](docs/metric-playground-design.md) preserve the original design reference. The demo starts with a varied, persistent production dashboard.
 
+The Go module also supports SQLite row queries, Unicode/RE2 filters, JSON arrays, autocomplete, and revision-safe computed storage. Its distinct `qt-sqlite-v1` v2 profile adds composed formulas, paired metrics, shown-row scope, computed projection/sorting, exact median and box plots, shared-edge histograms, and transaction-based execution. See [the SQLite integration guide](docs/backend-sqlite.md) for registration, capabilities, numeric limits, and Pharos cutover guidance.
+
 ---
 
 ## Status

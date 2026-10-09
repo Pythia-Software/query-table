@@ -48,6 +48,10 @@ type FieldSpec struct {
 	// ExpressionNumeric certifies a SQL numeric binding eligible for the bounded
 	// v2 profile. Values outside +/-1e100 produce numeric_range, never DB overflow.
 	ExpressionNumeric bool
+	// SQLiteDatetimeFormat: rfc3339 (default), utc-millis, unix-seconds, or unix-millis.
+	SQLiteDatetimeFormat string
+	// SQLiteSortField preserves the target storage kind/format for sort.field.
+	SQLiteSortField string
 	// AggregateOps nil uses defaults; an empty slice disables aggregation.
 	AggregateOps []string
 	Groupable    *bool // nil defaults to text/enum/bool grouping in v2
@@ -81,6 +85,7 @@ type docSQLBinding struct {
 	Synthetic         bool   `json:"synthetic"`
 	Kind              string `json:"kind"`
 	ExpressionNumeric bool   `json:"expressionNumeric"`
+	DatetimeFormat    string `json:"datetimeFormat"`
 }
 
 type docField struct {
@@ -106,6 +111,7 @@ type docField struct {
 	} `json:"sort"`
 	Bindings *struct {
 		Postgres *docSQLBinding `json:"postgres"`
+		SQLite   *docSQLBinding `json:"sqlite"`
 	} `json:"bindings"`
 }
 
@@ -122,6 +128,15 @@ type schemaDoc struct {
 // each backend field. Fields without a postgres binding (derived / render-only)
 // are skipped — they're never filtered, sorted, or selected on the server.
 func LoadSchema(doc []byte) (Schema, error) {
+	return loadSQLSchema(doc, "postgres")
+}
+
+// LoadSQLiteSchema reads only bindings.sqlite; it never falls back to Postgres SQL.
+func LoadSQLiteSchema(doc []byte) (Schema, error) {
+	return loadSQLSchema(doc, "sqlite")
+}
+
+func loadSQLSchema(doc []byte, dialect string) (Schema, error) {
 	var d schemaDoc
 	if err := json.Unmarshal(doc, &d); err != nil {
 		return Schema{}, fmt.Errorf("schema json: %w", err)
@@ -141,22 +156,38 @@ func LoadSchema(doc []byte) (Schema, error) {
 		TiebreakSort: d.TiebreakSort,
 	}
 
+	binding := func(f docField) *docSQLBinding {
+		if f.Bindings == nil {
+			return nil
+		}
+		if dialect == "sqlite" {
+			return f.Bindings.SQLite
+		}
+		return f.Bindings.Postgres
+	}
+	seen := map[string]bool{}
 	// First pass: collect Expr per field so sort.field can reference another
 	// field's expression.
 	exprByName := map[string]string{}
 	for _, f := range d.Fields {
-		if f.Bindings != nil && f.Bindings.Postgres != nil {
-			exprByName[f.Name] = f.Bindings.Postgres.Expr
+		if dialect == "sqlite" {
+			if f.Name == "" || seen[f.Name] {
+				return Schema{}, fmt.Errorf("duplicate or empty SQLite field %q", f.Name)
+			}
+			seen[f.Name] = true
+		}
+		if b := binding(f); b != nil {
+			exprByName[f.Name] = b.Expr
 		}
 	}
 
 	for _, f := range d.Fields {
-		if f.Bindings == nil || f.Bindings.Postgres == nil {
+		if binding(f) == nil {
 			continue // derived / client-only field
 		}
-		pg := f.Bindings.Postgres
+		pg := binding(f)
 		if pg.Expr == "" {
-			return Schema{}, fmt.Errorf("field %q: empty postgres expr", f.Name)
+			return Schema{}, fmt.Errorf("field %q: empty %s expr", f.Name, dialect)
 		}
 
 		kindStr := pg.Kind
@@ -185,6 +216,7 @@ func LoadSchema(doc []byte) (Schema, error) {
 
 		sortable := true
 		sortExpr := pg.Expr
+		sqliteSortField := ""
 		if f.Sort != nil {
 			if f.Sort.Enabled != nil {
 				sortable = *f.Sort.Enabled
@@ -192,6 +224,11 @@ func LoadSchema(doc []byte) (Schema, error) {
 			if f.Sort.Field != "" {
 				if e, ok := exprByName[f.Sort.Field]; ok {
 					sortExpr = e
+					if dialect == "sqlite" {
+						sqliteSortField = f.Sort.Field
+					}
+				} else if dialect == "sqlite" {
+					return Schema{}, fmt.Errorf("field %q has unbound SQLite sort target %q", f.Name, f.Sort.Field)
 				}
 			}
 		}
@@ -206,18 +243,25 @@ func LoadSchema(doc []byte) (Schema, error) {
 			}
 		}
 		s.Fields[f.Name] = FieldSpec{
-			ExpressionNumeric:  pg.ExpressionNumeric,
-			Groupable:          groupable,
-			AggregateOps:       aggregateOps,
-			Name:               f.Name,
-			Kind:               kind,
-			Expr:               pg.Expr,
-			Synthetic:          pg.Synthetic,
-			ServerFilter:       serverFilter,
-			FilterOps:          filterOps,
-			ArrayCaseSensitive: f.Filter != nil && f.Filter.ArrayCaseSensitive,
-			Sortable:           sortable,
-			SortExpr:           sortExpr,
+			ExpressionNumeric:    pg.ExpressionNumeric,
+			SQLiteDatetimeFormat: pg.DatetimeFormat,
+			SQLiteSortField:      sqliteSortField,
+			Groupable:            groupable,
+			AggregateOps:         aggregateOps,
+			Name:                 f.Name,
+			Kind:                 kind,
+			Expr:                 pg.Expr,
+			Synthetic:            pg.Synthetic,
+			ServerFilter:         serverFilter,
+			FilterOps:            filterOps,
+			ArrayCaseSensitive:   f.Filter != nil && f.Filter.ArrayCaseSensitive,
+			Sortable:             sortable,
+			SortExpr:             sortExpr,
+		}
+	}
+	if dialect == "sqlite" {
+		if err := validateSQLiteSchema(s); err != nil {
+			return Schema{}, err
 		}
 	}
 	return s, nil

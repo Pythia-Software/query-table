@@ -26,6 +26,9 @@ type CompileResult struct {
 	SelectExprs []string
 	// Args are the $N bound values, in placeholder order starting at startIdx.
 	Args []any
+	// SQLite-only parameter partitions, for composing count and row statements.
+	WhereArgs []any
+	OrderArgs []any
 }
 
 // Compile validates q against schema and emits SQL fragments. startIdx is the
@@ -151,8 +154,8 @@ type AggCompileResult struct {
 // op that needs one, or an op not allowed for the measure field's kind.
 func CompileAggregation(spec AggSpec, schema Schema) (AggCompileResult, error) {
 	var res AggCompileResult
-	if spec.Expression != "" || spec.ExpressionY != "" || spec.Distribution != nil || (spec.Scope != "" && spec.Scope != "allMatching") || len(spec.Sort) > 0 || spec.GroupLimit != 0 || len(spec.Diagnostics) > 0 || (spec.Display != nil && spec.Display.Kind == "scatter") {
-		return res, fmt.Errorf("modern metrics require CompileMetrics")
+	if err := validateBasicMetricShape(spec); err != nil {
+		return res, err
 	}
 	if !aggOpKnown(spec.Op) {
 		return res, fmt.Errorf("unknown aggregate op %q", spec.Op)
@@ -604,4 +607,12 @@ func safeIdent(name string) string {
 		s = "col"
 	}
 	return "\"" + s + "\""
+}
+
+// validateBasicMetricShape guards v1 entry points against dropping v2 intent.
+func validateBasicMetricShape(spec AggSpec) error {
+	if spec.Expression != "" || spec.ExpressionY != "" || spec.Distribution != nil || (spec.Scope != "" && spec.Scope != "allMatching") || len(spec.Sort) > 0 || spec.GroupLimit != 0 || len(spec.Diagnostics) > 0 || (spec.Display != nil && spec.Display.Kind == "scatter") {
+		return fmt.Errorf("modern metrics require CompileMetrics")
+	}
+	return nil
 }

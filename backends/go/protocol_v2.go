@@ -37,7 +37,14 @@ func (q *ServerQueryV2) UnmarshalJSON(data []byte) error {
 	return nil
 }
 func requestOptions(ctx context.Context, profile, token, snapshot string, revisions map[string]string, o PlanOptions) (PlanOptions, error) {
-	if profile != "" && profile != ServerExpressionProfile {
+	return requestOptionsDialect(ctx, false, profile, token, snapshot, revisions, o)
+}
+func requestOptionsDialect(ctx context.Context, sqlite bool, profile, token, snapshot string, revisions map[string]string, o PlanOptions) (PlanOptions, error) {
+	expected := ServerExpressionProfile
+	if sqlite {
+		expected = SQLiteExpressionProfile
+	}
+	if profile != "" && profile != expected {
 		return o, diagnostic("profile_mismatch", "requested execution profile is unavailable")
 	}
 	if snapshot != "" {

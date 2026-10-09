@@ -3,6 +3,7 @@ import { loadSchema } from "@pythia-software/query-table-core";
 export interface GoGenerationOptions {
   packageName: string;
   importPath?: string;
+  dialect?: "postgres" | "sqlite";
 }
 
 const DEFAULT_GO_IMPORT = "github.com/Pythia-Software/query-table/backends/go";
@@ -56,7 +57,9 @@ interface GoField {
   filterOps?: string[];
   sortable: boolean;
   sortExpr: string;
+  sqliteSortField?: string;
   expressionNumeric: boolean;
+  datetimeFormat?: string;
   aggregateOps?: string[];
   groupable?: boolean;
 }
@@ -154,7 +157,7 @@ function renderOrderTerms(terms: OrderTerm[]): string {
   return `[]querytable.OrderBy{${members.join(", ")}}`;
 }
 
-function projectGoFields(doc: JsonObject): GoField[] {
+function projectGoFields(doc: JsonObject, dialect: "postgres" | "sqlite"): GoField[] {
   if (!Array.isArray(doc.fields))
     throw new Error("schema.fields must be an array");
   const rawFields = doc.fields.map((field, index) =>
@@ -169,16 +172,16 @@ function projectGoFields(doc: JsonObject): GoField[] {
       field.bindings,
       `schema.fields[${index}].bindings`,
     );
-    if (bindings.postgres == null) continue;
-    const postgres = asObject(
-      bindings.postgres,
-      `schema.fields[${index}].bindings.postgres`,
+    if (bindings[dialect] == null) continue;
+    const binding = asObject(
+      bindings[dialect],
+      `schema.fields[${index}].bindings.${dialect}`,
     );
     exprByName.set(
       name,
       requiredString(
-        postgres.expr,
-        `schema.fields[${index}].bindings.postgres.expr`,
+        binding.expr,
+        `schema.fields[${index}].bindings.${dialect}.expr`,
       ),
     );
   }
@@ -192,18 +195,18 @@ function projectGoFields(doc: JsonObject): GoField[] {
       field.bindings,
       `schema.fields[${index}].bindings`,
     );
-    const postgres = asObject(
-      bindings.postgres,
-      `schema.fields[${index}].bindings.postgres`,
+    const binding = asObject(
+      bindings[dialect],
+      `schema.fields[${index}].bindings.${dialect}`,
     );
     const kindName =
-      typeof postgres.kind === "string"
-        ? postgres.kind
+      typeof binding.kind === "string"
+        ? binding.kind
         : requiredString(field.type, `schema.fields[${index}].type`);
     const kind = GO_KINDS[kindName];
     if (!kind)
       throw new Error(
-        `field ${JSON.stringify(name)} has unknown postgres kind ${JSON.stringify(kindName)}`,
+        `field ${JSON.stringify(name)} has unknown ${dialect} kind ${JSON.stringify(kindName)}`,
       );
 
     let arrayCaseSensitive = false;
@@ -230,6 +233,7 @@ function projectGoFields(doc: JsonObject): GoField[] {
 
     let sortable = true;
     let sortExpr = expr;
+    let sqliteSortField: string | undefined;
     if (field.sort != null) {
       const sort = asObject(field.sort, `schema.fields[${index}].sort`);
       if (typeof sort.enabled === "boolean") sortable = sort.enabled;
@@ -237,10 +241,11 @@ function projectGoFields(doc: JsonObject): GoField[] {
         const referencedExpr = exprByName.get(sort.field);
         if (!referencedExpr) {
           throw new Error(
-            `field ${JSON.stringify(name)} sort target ${JSON.stringify(sort.field)} has no postgres binding`,
+            `field ${JSON.stringify(name)} sort target ${JSON.stringify(sort.field)} has no ${dialect} binding`,
           );
         }
         sortExpr = referencedExpr;
+        if (dialect === "sqlite") sqliteSortField = sort.field;
       }
     }
 
@@ -248,13 +253,24 @@ function projectGoFields(doc: JsonObject): GoField[] {
       name,
       kind,
       expr,
-      synthetic: postgres.synthetic === true,
+      synthetic: binding.synthetic === true,
       serverFilter,
       arrayCaseSensitive,
       sortable,
       sortExpr,
-      expressionNumeric: postgres.expressionNumeric === true,
+      expressionNumeric: binding.expressionNumeric === true,
     };
+    if (sqliteSortField !== undefined) projected.sqliteSortField = sqliteSortField;
+    if (dialect === "sqlite" && binding.datetimeFormat != null) {
+      if (
+        kindName !== "datetime" ||
+        !["rfc3339", "utc-millis", "unix-seconds", "unix-millis"].includes(
+          String(binding.datetimeFormat),
+        )
+      )
+        throw new Error(`field ${JSON.stringify(name)} has invalid SQLite datetimeFormat`);
+      projected.datetimeFormat = String(binding.datetimeFormat);
+    }
     if (field.aggregate != null) {
       const aggregate = asObject(
         field.aggregate,
@@ -307,10 +323,12 @@ export function generateGo(
   const doc = asObject(input, "schema");
   const name = requiredString(doc.name, "schema.name");
   const idField = requiredString(doc.idField, "schema.idField");
-  const fields = projectGoFields(doc);
+  const dialect = options.dialect ?? "postgres";
+  if (dialect !== "postgres" && dialect !== "sqlite") throw new Error("invalid SQL dialect");
+  const fields = projectGoFields(doc, dialect);
   if (!fields.some((field) => field.name === idField)) {
     throw new Error(
-      `id field ${JSON.stringify(idField)} has no postgres binding`,
+      `id field ${JSON.stringify(idField)} has no ${dialect} binding`,
     );
   }
   const fieldNames = new Set(
@@ -350,7 +368,7 @@ export function generateGo(
       field.groupable !== undefined
         ? `, Groupable: func() *bool { v := ${field.groupable}; return &v }()`
         : "";
-    return `\t\t\t${key}:${spacing}{Name: ${goString(field.name)}, Kind: querytable.${field.kind}, Expr: ${goString(field.expr)}, Synthetic: ${field.synthetic}${field.expressionNumeric ? ", ExpressionNumeric: true" : ""}${aggregateOps}${groupable}, ServerFilter: ${field.serverFilter}${filterOps}${field.arrayCaseSensitive ? ", ArrayCaseSensitive: true" : ""}, Sortable: ${field.sortable}, SortExpr: ${goString(field.sortExpr)}},`;
+    return `\t\t\t${key}:${spacing}{Name: ${goString(field.name)}, Kind: querytable.${field.kind}, Expr: ${goString(field.expr)}, Synthetic: ${field.synthetic}${field.sqliteSortField ? `, SQLiteSortField: ${goString(field.sqliteSortField)}` : ""}${field.expressionNumeric ? ", ExpressionNumeric: true" : ""}${field.datetimeFormat ? `, SQLiteDatetimeFormat: ${goString(field.datetimeFormat)}` : ""}${aggregateOps}${groupable}, ServerFilter: ${field.serverFilter}${filterOps}${field.arrayCaseSensitive ? ", ArrayCaseSensitive: true" : ""}, Sortable: ${field.sortable}, SortExpr: ${goString(field.sortExpr)}},`;
   });
 
   return [

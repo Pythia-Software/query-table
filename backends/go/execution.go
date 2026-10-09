@@ -20,6 +20,19 @@ type ExecutionPlan struct {
 }
 
 func CompileExecution(ctx context.Context, rows WireQuery, metrics MetricQuery, s Schema, o PlanOptions) (ExecutionPlan, error) {
+	return compileExecutionDialect(ctx, rows, metrics, s, o, false)
+}
+
+// CompileSQLiteExecution shares one clock and resolver cache across row/metric
+// plans. The host executes them in the resolver's SQLite transaction; use
+// SQLiteV2Dataset.ExecuteV2In for bounded execution and wire-format results.
+func CompileSQLiteExecution(ctx context.Context, rows WireQuery, metrics MetricQuery, s Schema, o PlanOptions) (ExecutionPlan, error) {
+	return compileExecutionDialect(ctx, rows, metrics, s, o, true)
+}
+func compileExecutionDialect(ctx context.Context, rows WireQuery, metrics MetricQuery, s Schema, o PlanOptions, sqlite bool) (ExecutionPlan, error) {
+	if sqlite && metrics.ExpectedRevisions != nil {
+		o.ExpectedRevisions = metrics.ExpectedRevisions
+	}
 	if o.Now.IsZero() {
 		o.Now = time.Now()
 	}
@@ -39,11 +52,11 @@ func CompileExecution(ctx context.Context, rows WireQuery, metrics MetricQuery, 
 	}
 	var out ExecutionPlan
 	var err error
-	out.Rows, err = CompileComputedRows(ctx, rows, s, o)
+	out.Rows, err = compileComputedRowsDialect(ctx, rows, s, o, sqlite)
 	if err != nil {
 		return ExecutionPlan{}, err
 	}
-	out.Metrics, err = CompileMetrics(ctx, metrics, s, o)
+	out.Metrics, err = compileMetricsDialect(ctx, metrics, s, o, sqlite)
 	if err != nil {
 		return ExecutionPlan{}, err
 	}
