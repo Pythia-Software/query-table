@@ -965,6 +965,17 @@ export function evaluateMetrics<Row>(
         const rowEval = (node: FormulaNode, row: Row, p: FormulaPlan) => {
           budget -= cost(node);
           tick();
+          // A direct aggregate input needs only its own binding, even when the
+          // composed metric reaches many other fields. Keep runtime validation.
+          if (node.kind === "field") {
+            const value = readFieldValue(fields.get(node.name)!, row);
+            return formulaRuntime(node, {
+              [node.name]:
+                value instanceof Date
+                  ? value.toISOString()
+                  : ((value ?? null) as FormulaValue),
+            });
+          }
           return options.evaluateInput && hasRegex({ ...p, ast: node })
             ? options.evaluateInput(node, row, p)
             : formulaRuntime(node, inputs(row, p));

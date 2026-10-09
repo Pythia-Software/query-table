@@ -176,6 +176,11 @@ func NewComputedColumnsHandler(repo ComputedColumnRepository, authorize func(*ht
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
+		var invalid *PlanDiagnostic
+		if errors.As(err, &invalid) {
+			http.Error(w, invalid.Error(), http.StatusBadRequest)
+			return
+		}
 		if err != nil {
 			http.Error(w, "could not save definition", http.StatusInternalServerError)
 			return

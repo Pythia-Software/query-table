@@ -73,7 +73,11 @@ export function toServerQueryV2<Row>(
   for (const c of normalized.select.length
     ? normalized.select
     : selectedFields(schema, normalized).map((f) => ({ field: f.name })))
-    if (isComputedField(c.field) && requireField(c.field, "select"))
+    if (
+      isComputedField(c.field) &&
+      execution.fields[c.field]?.select &&
+      requireField(c.field, "select")
+    )
       select.push(c.field);
   // Retain unsupported clauses in state; gate execution using the server envelope.
   const orderBy: ServerQuery["orderBy"] = [];

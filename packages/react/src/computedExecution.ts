@@ -32,8 +32,16 @@ export function validateComputedResponse<Row>(
     throw Error(
       "Server computed execution identity changed. Refresh the handshake.",
     );
+  // The backend validates the full transitive envelope. Browser response checks
+  // concern only fields actually executed for this row request; a catalogue can
+  // also contain revisions for browser-only definitions.
+  const executed = new Set([
+    ...request.select.filter(isComputedField),
+    ...request.orderBy.map((term) => term.field).filter(isComputedField),
+  ]);
   for (const [name, revision] of Object.entries(request.expectedRevisions)) {
     const id = name.replace(/^@computed\//, "");
+    if (!executed.has(`@computed/${id}`)) continue;
     if (executionRevision(execution, id) !== revision)
       throw Error(
         "Server computed definition revision changed. Refresh the handshake.",

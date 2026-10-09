@@ -246,8 +246,12 @@ export function useComputedColumns<Row>(options: Options<Row>): {
     const ac = new AbortController();
     const values = new Map<string, FormulaResult[]>();
     void (async () => {
-      if (options.execution && transport?.fetchRowsV2) return;
       for (const id of activeIds.split(",").filter(Boolean)) {
+        if (
+          options.execution?.fields[computedFieldName(id)]?.select &&
+          transport?.fetchRowsV2
+        )
+          continue;
         const entry = plans.get(id);
         if (!entry?.plan) continue;
         try {
@@ -299,7 +303,10 @@ export function useComputedColumns<Row>(options: Options<Row>): {
           dependencies: entry?.plan ? backendDependencies(entry.plan) : [],
           accessor: (row: Row) => {
             if (entry?.error) return { computedError: entry.error };
-            if (options.execution && transport?.fetchRowsV2) {
+            if (
+              options.execution?.fields[computedFieldName(def.id)]?.select &&
+              transport?.fetchRowsV2
+            ) {
               if (
                 options.serverExecution?.profile !==
                   options.execution.profile ||

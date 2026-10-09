@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"reflect"
@@ -161,8 +162,7 @@ func (d SQLiteV2Dataset) ExecuteV2(ctx context.Context, db *sql.DB, rows *Server
 	}
 	return sqliteRead(ctx, db, func(tx *sql.Tx) (SQLiteV2ExecutionResult, error) { return d.ExecuteV2In(ctx, tx, rows, metrics, o) })
 }
-func (d SQLiteV2Dataset) ExecuteV2In(ctx context.Context, tx *sql.Tx, rows *ServerQueryV2, metrics *MetricQuery, o PlanOptions) (SQLiteV2ExecutionResult, error) {
-	var out SQLiteV2ExecutionResult
+func (d SQLiteV2Dataset) ExecuteV2In(ctx context.Context, tx *sql.Tx, rows *ServerQueryV2, metrics *MetricQuery, o PlanOptions) (out SQLiteV2ExecutionResult, err error) {
 	maxRows, maxGroups, maxPopulation, e := d.limits()
 	if e != nil {
 		return out, e
@@ -286,11 +286,31 @@ func (d SQLiteV2Dataset) ExecuteV2In(ctx context.Context, tx *sql.Tx, rows *Serv
 	}
 	if metrics != nil {
 		r := SQLiteMetricsV2Result{Metrics: []SQLiteMetricV2{}}
+		memo := map[string]SQLiteMetricV2{}
+		reductions := newSQLiteReductionCache(batch)
+		defer func() {
+			if cleanupErr := reductions.close(tx); cleanupErr != nil {
+				out = SQLiteV2ExecutionResult{}
+				err = errors.Join(err, cleanupErr)
+			}
+		}()
 		for i, p := range batch.Metrics {
+			key := p.Fingerprint + "\x00" + p.Scope
+			if previous, ok := memo[key]; ok {
+				previous = cloneSQLiteMetric(previous)
+				previous.ID = p.ID
+				r.Metrics = append(r.Metrics, previous)
+				continue
+			}
+			p, err := reductions.plan(ctx, tx, p)
+			if err != nil {
+				return SQLiteV2ExecutionResult{}, err
+			}
 			m, err := d.readV2Metric(ctx, tx, p, metrics.Metrics[i], total, *metrics, maxGroups)
 			if err != nil {
 				return SQLiteV2ExecutionResult{}, err
 			}
+			memo[key] = m
 			r.Metrics = append(r.Metrics, m)
 		}
 		out.Metrics = &r
@@ -544,4 +564,42 @@ func (d SQLiteV2Dataset) capabilityForPlan(name string, p SQLPlan) SQLiteCompute
 		}
 	}
 	return c
+}
+
+// Reuse identical plans only within the transaction after validating every plan.
+// Return independent results so callers cannot mutate a sibling metric.
+func cloneSQLiteMetric(m SQLiteMetricV2) SQLiteMetricV2 {
+	m.Buckets = append([]SQLiteMetricV2Bucket{}, m.Buckets...)
+	for i := range m.Buckets {
+		b := &m.Buckets[i]
+		b.Keys = append([]any{}, b.Keys...)
+		if b.Y != nil {
+			y := *b.Y
+			b.Y = &y
+		}
+		if b.NullCount != nil {
+			n := *b.NullCount
+			b.NullCount = &n
+		}
+		if b.InputErrorCount != nil {
+			n := *b.InputErrorCount
+			b.InputErrorCount = &n
+		}
+		switch d := b.Distribution.(type) {
+		case *MetricHistogramDistribution:
+			c := *d
+			c.Edges = append([]float64{}, d.Edges...)
+			c.Counts = append([]int64{}, d.Counts...)
+			b.Distribution = &c
+		case *MetricBoxDistribution:
+			c := *d
+			if d.Summary != nil {
+				summary := *d.Summary
+				summary.Outliers = append([]float64{}, d.Summary.Outliers...)
+				c.Summary = &summary
+			}
+			b.Distribution = &c
+		}
+	}
+	return m
 }

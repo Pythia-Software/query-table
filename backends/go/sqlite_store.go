@@ -54,19 +54,33 @@ func (s SQLiteComputedColumnStore) Save(ctx context.Context, scope, dataset stri
 	if s.DB == nil {
 		return ComputedColumn{}, errors.New("nil SQLite database")
 	}
+	return sqliteSaveComputed(ctx, s.DB, scope, dataset, request)
+}
+
+// SaveIn lets a host validate the resulting canonical graph in the same
+// transaction before committing. The caller owns commit/rollback.
+func (s SQLiteComputedColumnStore) SaveIn(ctx context.Context, tx *sql.Tx, scope, dataset string, request SaveComputedColumnRequest) (ComputedColumn, error) {
+	if tx == nil {
+		return ComputedColumn{}, errors.New("nil SQLite transaction")
+	}
+	return sqliteSaveComputed(ctx, tx, scope, dataset, request)
+}
+func sqliteSaveComputed(ctx context.Context, db interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, scope, dataset string, request SaveComputedColumnRequest) (ComputedColumn, error) {
 	c := request.Column
 	if err := validateComputed(c); err != nil {
 		return ComputedColumn{}, err
 	}
 	var row *sql.Row
 	if request.ExpectedRevision == nil {
-		row = s.DB.QueryRowContext(ctx, `INSERT INTO query_table_computed_columns (scope,dataset,id,label,language,language_version,source) VALUES (?,?,?,?,?,?,?) ON CONFLICT DO NOTHING RETURNING revision`, scope, dataset, c.ID, c.Label, c.Expression.Language, c.Expression.Version, c.Expression.Source)
+		row = db.QueryRowContext(ctx, `INSERT INTO query_table_computed_columns (scope,dataset,id,label,language,language_version,source) VALUES (?,?,?,?,?,?,?) ON CONFLICT DO NOTHING RETURNING revision`, scope, dataset, c.ID, c.Label, c.Expression.Language, c.Expression.Version, c.Expression.Source)
 	} else {
 		revision, err := strconv.ParseInt(*request.ExpectedRevision, 10, 64)
 		if err != nil || revision < 1 {
 			return ComputedColumn{}, ErrComputedConflict
 		}
-		row = s.DB.QueryRowContext(ctx, `UPDATE query_table_computed_columns SET label=?,language=?,language_version=?,source=?,revision=revision+1,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE scope=? AND dataset=? AND id=? AND revision=? RETURNING revision`, c.Label, c.Expression.Language, c.Expression.Version, c.Expression.Source, scope, dataset, c.ID, revision)
+		row = db.QueryRowContext(ctx, `UPDATE query_table_computed_columns SET label=?,language=?,language_version=?,source=?,revision=revision+1,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE scope=? AND dataset=? AND id=? AND revision=? RETURNING revision`, c.Label, c.Expression.Language, c.Expression.Version, c.Expression.Source, scope, dataset, c.ID, revision)
 	}
 	var revision int64
 	if err := row.Scan(&revision); errors.Is(err, sql.ErrNoRows) {
