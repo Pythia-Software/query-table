@@ -137,7 +137,7 @@
           "type": "object",
           "description": "Per-backend binding, keyed by backend id so one schema can serve several backends.",
           "additionalProperties": false,
-          "properties": { "postgres": { "$ref": "#/$defs/sqlBinding" } }
+          "properties": { "postgres": { "$ref": "#/$defs/sqlBinding" }, "sqlite": { "$ref": "#/$defs/sqliteBinding" } }
         }
       }
     },
@@ -153,6 +153,18 @@
         },
         { "type": "object", "required": ["source"], "additionalProperties": false, "properties": { "source": { "const": "freeform" } } }
       ]
+    },
+    "sqliteBinding": {
+      "type": "object",
+      "required": ["expr"],
+      "additionalProperties": false,
+      "properties": {
+        "expr": { "type": "string", "minLength": 1, "description": "Trusted SQLite expression; never derived from request input. textarray bindings store JSON arrays of strings." },
+        "synthetic": { "type": "boolean", "default": false },
+        "kind": { "enum": ["text", "number", "datetime", "bool", "enum", "textarray"] },
+        "expressionNumeric": { "type": "boolean", "default": false, "description": "Trusted opt-in for numeric bindings used by the bounded SQLite v2 expression profile." },
+        "datetimeFormat": { "enum": ["rfc3339", "utc-millis", "unix-seconds", "unix-millis"], "description": "Datetime storage: RFC3339 text is normalized by default; utc-millis certifies fixed-width UTC text for indexed sorting and comparisons." }
+      }
     },
     "sqlBinding": {
       "type": "object",

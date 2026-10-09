@@ -25,7 +25,8 @@ func (f DefinitionResolverFunc) ResolveComputed(c context.Context, id string) (C
 
 // PlanOptions contains trusted host configuration. SourceSQL is a SELECT whose
 // output exposes the aliases used by Schema field bindings (normally alias r).
-// SourceArgs occupy $1..$N. SourceSQL must include authorization predicates.
+// SourceArgs occupy $1..$N for PostgreSQL or ?1..?N for SQLite. SourceSQL
+// must include authorization predicates.
 type PlanOptions struct {
 	// ComputedGroupable is a trusted host allowlist of computed IDs permitted as group keys.
 	ComputedGroupable map[string]bool
@@ -59,6 +60,7 @@ type SQLPlan struct {
 	RequiresSnapshot bool
 }
 type planBuilder struct {
+	sqlite       bool
 	projection   []string
 	emitInputs   map[int][]string
 	rowMemo      map[string]ValueSQL
@@ -79,13 +81,21 @@ type planBuilder struct {
 }
 
 func newPlan(ctx context.Context, s Schema, o PlanOptions) (*planBuilder, error) {
+	return newPlanDialect(ctx, s, o, false)
+}
+func newPlanDialect(ctx context.Context, s Schema, o PlanOptions, sqlite bool) (*planBuilder, error) {
+	if sqlite {
+		if e := validateSQLiteSchema(s); e != nil {
+			return nil, e
+		}
+	}
 	if strings.TrimSpace(o.SourceSQL) == "" {
 		return nil, diagnostic("source_required", "host must supply authorized source SELECT")
 	}
 	if o.Now.IsZero() {
 		o.Now = time.Now()
 	}
-	b := &planBuilder{emitInputs: map[int][]string{}, rowMemo: map[string]ValueSQL{}, ctx: ctx, schema: s, options: o, args: append([]any{}, o.SourceArgs...), fields: map[string]ValueSQL{}, revisions: map[string]string{}, visiting: map[string]bool{}, dependencies: map[string]bool{}, checked: map[string]bool{}, definitions: map[string]ComputedColumn{}}
+	b := &planBuilder{sqlite: sqlite, emitInputs: map[int][]string{}, rowMemo: map[string]ValueSQL{}, ctx: ctx, schema: s, options: o, args: append([]any{}, o.SourceArgs...), fields: map[string]ValueSQL{}, revisions: map[string]string{}, visiting: map[string]bool{}, dependencies: map[string]bool{}, checked: map[string]bool{}, definitions: map[string]ComputedColumn{}}
 	// Project bindings exactly once in the source namespace. Internal aliases do
 	// not depend on request names, labels or trusted SQL identifiers.
 	names := make([]string, 0, len(s.Fields))
@@ -101,11 +111,11 @@ func newPlan(ctx context.Context, s Schema, o PlanOptions) (*planBuilder, error)
 		}
 		v := fmt.Sprintf("f%d", i)
 		expr := f.Expr
-		if f.Kind == FieldText || f.Kind == FieldEnum {
+		if !sqlite && (f.Kind == FieldText || f.Kind == FieldEnum) {
 			expr = "(" + expr + ")::text"
 		}
 		cols = append(cols, expr+" AS "+v)
-		b.fields[n] = ValueSQL{Value: v, Error: "NULL::text", Type: expressionType(f.Kind)}
+		b.fields[n] = ValueSQL{Value: v, Error: b.nullError(), Type: expressionType(f.Kind)}
 	}
 	if len(cols) > 512 {
 		return nil, diagnostic("schema_limit", "v2 profile supports at most 512 projected schema fields")
@@ -151,6 +161,9 @@ func (b *planBuilder) stage(sql string) {
 }
 func (b *planBuilder) param(v any, typ string) string {
 	b.args = append(b.args, v)
+	if b.sqlite {
+		return fmt.Sprintf("?%d", len(b.args))
+	}
 	return fmt.Sprintf("$%d::%s", len(b.args), typ)
 }
 func (b *planBuilder) emit(v, e, t string) ValueSQL {
@@ -235,11 +248,11 @@ func (b *planBuilder) finish(sql, scope string, cols []OutputColumn) SQLPlan {
 	}
 	sort.Strings(deps)
 	h := sha256.New()
-	fmt.Fprintf(h, "%s\x00%s\x00%s\x00%#v", ServerExpressionProfile, b.options.Identity, full, b.args)
+	fmt.Fprintf(h, "%s\x00%s\x00%s\x00%#v", b.profile(), b.options.Identity, full, b.args)
 	for _, d := range deps {
 		fmt.Fprintf(h, "\x00%s=%s", d, b.revisions[strings.TrimPrefix(d, "@computed/")])
 	}
-	return SQLPlan{SQL: full, Args: b.args, Stages: b.stages, Columns: cols, Dependencies: deps, ResolvedRevisions: b.revisions, Profile: ServerExpressionProfile, Fingerprint: hex.EncodeToString(h.Sum(nil)), Scope: scope, RequiresSnapshot: true}
+	return SQLPlan{SQL: full, Args: b.args, Stages: b.stages, Columns: cols, Dependencies: deps, ResolvedRevisions: b.revisions, Profile: b.profile(), Fingerprint: hex.EncodeToString(h.Sum(nil)), Scope: scope, RequiresSnapshot: true}
 }
 func (b *planBuilder) field(name string) (ValueSQL, error) {
 	if len(b.stages) > 500 {
@@ -253,12 +266,15 @@ func (b *planBuilder) field(name string) (ValueSQL, error) {
 		if v.Type == "unsupported" {
 			return v, diagnostic("unsupported_type", "arrays are outside the server expression profile")
 		}
+		if b.sqlite && !strings.HasPrefix(name, "@computed/") && !b.checked[name] {
+			return b.sqliteField(name, v)
+		}
 		if v.Type == "number" && !strings.HasPrefix(name, "@computed/") && !b.checked[name] {
 			f := b.schema.Fields[name]
 			if !f.ExpressionNumeric {
 				return v, &PlanDiagnostic{Code: "numeric_domain_required", Message: "numeric SQL binding must opt into the bounded arithmetic profile", Field: name}
 			}
-			raw := b.emit("("+v.Value+")::text::numeric", "NULL::text", "number").Value
+			raw := b.emit("("+v.Value+")::text::numeric", b.nullError(), "number").Value
 			valid := "(abs(" + raw + ") <= 1e100::numeric AND (" + raw + "=0 OR abs(" + raw + ") >= 1e-300::numeric))"
 			v = b.emit("CASE WHEN "+valid+" THEN ("+raw+")::double precision END", "CASE WHEN "+v.Value+" IS NOT NULL AND NOT ("+valid+") THEN 'numeric_range'::text END", "number")
 			b.fields[name] = v
@@ -354,16 +370,16 @@ func (b *planBuilder) row(n *exprNode) (result ValueSQL, err error) {
 	if n.op == "literal" {
 		switch v := n.value.(type) {
 		case nil:
-			return ValueSQL{"NULL", "NULL::text", "null"}, nil
+			return ValueSQL{"NULL", b.nullError(), "null"}, nil
 		case float64:
 			if v > 1e100 || v < -1e100 || (v != 0 && v < 1e-300 && v > -1e-300) {
 				return ValueSQL{}, diagnostic("numeric_range", "literal outside profile range")
 			}
-			return ValueSQL{b.param(v, "double precision"), "NULL::text", "number"}, nil
+			return ValueSQL{b.param(v, "double precision"), b.nullError(), "number"}, nil
 		case string:
-			return ValueSQL{b.param(v, "text") + ` COLLATE "C"`, "NULL::text", "text"}, nil
+			return ValueSQL{b.param(v, "text") + b.collation(), b.nullError(), "text"}, nil
 		case bool:
-			return ValueSQL{b.param(v, "boolean"), "NULL::text", "bool"}, nil
+			return ValueSQL{b.param(v, "boolean"), b.nullError(), "bool"}, nil
 		}
 	}
 	args := []ValueSQL{}
@@ -399,7 +415,7 @@ func (b *planBuilder) operation(op string, a []ValueSQL) (ValueSQL, error) {
 	for _, v := range a {
 		errors = append(errors, v.Error)
 	}
-	e := "COALESCE(" + strings.Join(append(errors, "NULL::text"), ",") + ")"
+	e := "COALESCE(" + strings.Join(append(errors, b.nullError()), ",") + ")"
 	v := ""
 	t := "number"
 	numeric := false
@@ -426,7 +442,7 @@ func (b *planBuilder) operation(op string, a []ValueSQL) (ValueSQL, error) {
 			}
 		}
 		v = "NULL"
-		e = "NULL::text"
+		e = b.nullError()
 		for i := len(a) - 1; i >= 0; i-- {
 			x := a[i]
 			cond := x.Error + " IS NOT NULL OR " + x.Value + " IS NOT NULL"
@@ -458,7 +474,7 @@ func (b *planBuilder) operation(op string, a []ValueSQL) (ValueSQL, error) {
 			if op == "OR" {
 				stop = "TRUE"
 			}
-			e = "COALESCE(" + a[0].Error + ",CASE WHEN " + a[0].Value + " IS " + stop + " THEN NULL::text ELSE " + a[1].Error + " END)"
+			e = "COALESCE(" + a[0].Error + ",CASE WHEN " + a[0].Value + " IS " + stop + " THEN " + b.nullError() + " ELSE " + a[1].Error + " END)"
 		}
 	case "=", "!=", "<>", "<", ">", "<=", ">=":
 		typ, err := mergeType(a[0].Type, a[1].Type)
@@ -475,6 +491,9 @@ func (b *planBuilder) operation(op string, a []ValueSQL) (ValueSQL, error) {
 			if err := requireType(x, "number"); err != nil {
 				return ValueSQL{}, err
 			}
+		}
+		if b.sqlite {
+			return b.sqliteArithmetic(op, a, e)
 		}
 		numeric = true
 		switch op {
@@ -529,6 +548,9 @@ func (b *planBuilder) operation(op string, a []ValueSQL) (ValueSQL, error) {
 }
 
 func (b *planBuilder) filter(where []WhereTerm) error {
+	if b.sqlite {
+		return b.sqliteFilter(where)
+	}
 	for _, term := range where {
 		for _, p := range term.Predicates() {
 			if p.Op == "matches_regex" || p.Op == "not_matches_regex" {
@@ -560,12 +582,18 @@ func (b *planBuilder) filter(where []WhereTerm) error {
 // typing them as text earlier would break numeric/boolean NULL consumers.
 func (b *planBuilder) key(v ValueSQL) ValueSQL {
 	if v.Type == "null" {
+		if b.sqlite {
+			return b.emit("CAST("+v.Value+" AS TEXT)", v.Error, "text")
+		}
 		return b.emit("("+v.Value+")::text", v.Error, "text")
 	}
 	return v
 }
 
 func (b *planBuilder) order(terms []OrderBy) (string, error) {
+	if b.sqlite {
+		return b.sqliteOrder(terms)
+	}
 	if len(terms) == 0 {
 		terms = b.schema.DefaultSort
 	}
@@ -609,10 +637,13 @@ func (b *planBuilder) order(terms []OrderBy) (string, error) {
 // CompileComputedRows resolves SELECT and hidden ORDER BY dependencies before
 // applying the globally ordered page window. Computed filters are not admitted.
 func CompileComputedRows(ctx context.Context, q WireQuery, s Schema, o PlanOptions) (SQLPlan, error) {
+	return compileComputedRowsDialect(ctx, q, s, o, false)
+}
+func compileComputedRowsDialect(ctx context.Context, q WireQuery, s Schema, o PlanOptions, sqlite bool) (SQLPlan, error) {
 	if err := q.Validate(); err != nil {
 		return SQLPlan{}, err
 	}
-	b, err := newPlan(ctx, s, o)
+	b, err := newPlanDialect(ctx, s, o, sqlite)
 	if err != nil {
 		return SQLPlan{}, err
 	}
@@ -627,12 +658,22 @@ func CompileComputedRows(ctx context.Context, q WireQuery, s Schema, o PlanOptio
 	if q.Limit > 0 {
 		window += " LIMIT " + b.param(q.Limit, "bigint")
 	}
+	if b.sqlite && q.Limit == 0 {
+		window += " LIMIT -1"
+	}
 	window += " OFFSET " + b.param(q.Offset, "bigint")
 	b.stage(window)
 	cols := []OutputColumn{}
 	selects := []string{}
 	for i, n := range q.Select {
 		v, e := b.field(n)
+		if b.sqlite {
+			if f, ok := s.Fields[n]; ok && f.Kind == FieldTextArray {
+				v = b.fields[n]
+				v.Type = "textarray"
+				e = nil
+			}
+		}
 		if e != nil {
 			return SQLPlan{}, e
 		}
@@ -653,7 +694,10 @@ func CompileComputedRows(ctx context.Context, q WireQuery, s Schema, o PlanOptio
 // CompileRowExpression builds a standalone typed value/error projection over an
 // authorized source, useful for host-side definition validation and previews.
 func CompileRowExpression(ctx context.Context, source string, s Schema, o PlanOptions) (SQLPlan, error) {
-	b, e := newPlan(ctx, s, o)
+	return compileRowExpressionDialect(ctx, source, s, o, false)
+}
+func compileRowExpressionDialect(ctx context.Context, source string, s Schema, o PlanOptions, sqlite bool) (SQLPlan, error) {
+	b, e := newPlanDialect(ctx, s, o, sqlite)
 	if e != nil {
 		return SQLPlan{}, e
 	}

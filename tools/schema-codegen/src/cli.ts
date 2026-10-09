@@ -18,6 +18,7 @@ interface CliOptions {
   go?: string;
   goPackage?: string;
   goImport?: string;
+  dialect?: "postgres" | "sqlite";
 }
 
 const HELP = `query-table-codegen ${VERSION}
@@ -25,6 +26,8 @@ const HELP = `query-table-codegen ${VERSION}
 Usage:
   query-table-codegen <schema.json> --ts <output.ts>
   query-table-codegen <schema.json> --go <output.go> --go-package <name> [--go-import <path>]
+
+Use --dialect sqlite with --go to read bindings.sqlite (default: postgres).
 
 Both --ts and --go may be supplied in one invocation.
 `;
@@ -57,6 +60,13 @@ function parseArgs(args: string[]): CliOptions | "help" | "version" {
         options.goPackage = optionValue(args, index, flag);
         index += 1;
         break;
+      case "--dialect": {
+        const value = optionValue(args, index, flag);
+        if (value !== "postgres" && value !== "sqlite") throw new Error("--dialect must be postgres or sqlite");
+        options.dialect = value;
+        index += 1;
+        break;
+      }
       case "--go-import":
         options.goImport = optionValue(args, index, flag);
         index += 1;
@@ -68,7 +78,7 @@ function parseArgs(args: string[]): CliOptions | "help" | "version" {
 
   if (!options.ts && !options.go) throw new Error("at least one of --ts or --go is required");
   if (options.go && !options.goPackage) throw new Error("--go-package is required with --go");
-  if (!options.go && (options.goPackage || options.goImport)) throw new Error("--go-package/--go-import require --go");
+  if (!options.go && (options.goPackage || options.goImport || options.dialect)) throw new Error("--go-package/--go-import require --go");
   return options;
 }
 
@@ -109,7 +119,7 @@ async function main(): Promise<void> {
       ? { packageName: options.goPackage!, importPath: options.goImport }
       : { packageName: options.goPackage! }
     : undefined;
-  const goOutput = goOptions ? generateGo(document, goOptions) : undefined;
+  const goOutput = goOptions ? generateGo(document, { ...goOptions, ...(options.dialect ? { dialect: options.dialect } : {}) }) : undefined;
 
   await Promise.all([
     ...(options.ts && tsOutput ? [writeGenerated(options.ts, tsOutput)] : []),

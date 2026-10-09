@@ -45,6 +45,31 @@ describe("schema code generation", () => {
     expect(formatted.stdout).toBe(output);
   });
 
+  it("generates SQLite bindings without using Postgres expressions", () => {
+    const configured = structuredClone(document);
+    for (const field of configured.fields) {
+      if (!field.bindings?.postgres) continue;
+      field.bindings.sqlite = { expr: `s.${field.name}` };
+      if (field.type === "datetime") field.bindings.sqlite.datetimeFormat = "utc-millis";
+      if (field.type === "number") field.bindings.sqlite.expressionNumeric = true;
+    }
+    configured.fields.find((f: { name: string }) => f.name === "job_name").sort = { field: "enqueued_at" };
+    const metaSchema = JSON.parse(readFileSync(new URL("../../../schema/query-table.schema.json", import.meta.url), "utf8"));
+    const validate = new Ajv2020({ strict: false }).compile(metaSchema);
+    expect(validate(configured), JSON.stringify(validate.errors)).toBe(true);
+    const output = generateGo(configured, { packageName: "catalog", dialect: "sqlite" });
+    expect(output).toContain('Expr: "s.id"');
+    expect(output).toContain('SQLiteDatetimeFormat: "utc-millis"');
+    expect(output).toContain('SQLiteSortField: "enqueued_at"');
+    expect(output).toContain("ExpressionNumeric: true");
+    expect(output).not.toContain('Expr: "r.id"');
+    const formatted = spawnSync("gofmt", { input: output, encoding: "utf8" });
+    expect(formatted.status).toBe(0);
+    expect(formatted.stdout).toBe(output);
+    delete configured.fields.find((f: { name: string }) => f.name === "id").bindings.sqlite;
+    expect(() => generateGo(configured, { packageName: "catalog", dialect: "sqlite" })).toThrow(/id field .* has no sqlite binding/);
+  });
+
   it("preserves metric policy and trusted numeric expression bindings", () => {
     const configured = structuredClone(document);
     const numeric = configured.fields.find(

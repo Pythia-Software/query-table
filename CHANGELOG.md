@@ -2,7 +2,22 @@
 
 ## Unreleased
 
+## 0.6.0 — 2026-10-08
+
 ### Added
+
+- Add a driver-independent Go SQLite v1 adapter with guarded basic aggregates,
+  Unicode/RE2 and JSON-array filters, stable paging, transaction-consistent reads,
+  autocomplete, field statistics, and revision-safe computed-definition storage.
+- Support `bindings.sqlite` in shared schemas and `--dialect sqlite` in Go schema
+  generation, including trusted numeric expression opt-in.
+- Add SQLite v2 metric/formula planning and transaction-based execution under
+  `qt-sqlite-v1`: paired metrics, shown-row scopes, computed projection/sorting,
+  transitive revision checks, top-N groups, guarded exact SUM/AVG/MEDIAN, and
+  frontend-compatible capabilities/results.
+- Add SQLite exact-linear box plots with bounded Tukey outliers and histograms
+  with shared edges before top-N, numeric precision guards, typed payloads,
+  null/error counts, and cross-language conformance tests.
 
 - Add a metric and dashboard workbench with composed aggregate formulas, multiple
   groupings, result sorting, shown-row and all-matching scopes, resizable cards,

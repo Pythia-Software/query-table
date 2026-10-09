@@ -38,3 +38,11 @@ path with `--go-import` when using a fork or a vendored module.
 
 The package also exports `generateTypeScript` and `generateGo` for build-tool
 integrations.
+
+## SQLite
+
+Pass `--dialect sqlite` with `--go` (or `{ dialect: "sqlite" }` to `generateGo`)
+to read `bindings.sqlite`. The default remains `postgres`; neither dialect falls
+back to the other's expressions. SQLite bindings support `datetimeFormat`:
+`rfc3339`, `utc-millis`, `unix-seconds`, and `unix-millis`. The frontend projection
+continues to omit backend SQL. See [the SQLite guide](../../docs/backend-sqlite.md).
