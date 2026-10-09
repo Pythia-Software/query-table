@@ -75,7 +75,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GO_TAG: backends/go/${{ github.ref_name }}
         run: |
-          existing="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${GO_TAG}" --jq '.object.type + " " + .object.sha' 2>/dev/null || true)"
+          set -euo pipefail
+          # Matching refs returns [] for a missing tag, without a 404 response
+          # body that could be mistaken for an existing object. Match exactly
+          # because this endpoint can also return tags with the same prefix.
+          existing="$(gh api "repos/${GITHUB_REPOSITORY}/git/matching-refs/tags/${GO_TAG}" |
+            jq -r --arg ref "refs/tags/${GO_TAG}" '.[] | select(.ref == $ref) | .object.type + " " + .object.sha')"
           if [ "${existing%% *}" = "tag" ]; then
             existing="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${existing#* }" --jq .object.sha)"
           else
