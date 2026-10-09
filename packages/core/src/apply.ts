@@ -1,3 +1,6 @@
+import { aggOpsForField, isMeasurable } from "./agg";
+import type { MetricKey } from "./metricTypes";
+import { evaluateMetrics, type MetricEvaluationOptions } from "./metrics";
 // apply.ts — client-side filter + multi-sort + paginate.
 //
 // applyQuery is the client mirror of the backend compiler. Three jobs:
@@ -15,11 +18,17 @@
 
 import { evaluationTime, type QueryEvaluationOptions } from "./relativeTime";
 import { isComputedField } from "./computed";
-import type { AggOp, AggregationClause, QueryState, WhereClause, WhereTerm } from "./query";
+import type {
+  AggOp,
+  AggregationClause,
+  QueryState,
+  WhereClause,
+  WhereTerm,
+} from "./query";
 import type { FieldSchema, FieldDef } from "./schema";
 import type { AggregationBucket, AggregationResult } from "./encode";
 import { indexFields, readFieldValue, resolveFieldName } from "./schema";
-import { isOrGroup, predicatesOf } from "./query";
+import { isOrGroup, predicatesOf, normalizeQueryState } from "./query";
 import { coerceValue } from "./ops";
 
 export interface ApplyResult<Row> {
@@ -33,7 +42,12 @@ export interface ApplyResult<Row> {
  *  from `schema`. Never mutates `rows`. Relative predicates use options.now or
  *  one captured Date.now(). Clauses/sorts on unknown fields are
  *  ignored (the backend already enforced its own allowlist). */
-export function applyQuery<Row>(rows: Row[], q: QueryState, schema: FieldSchema<Row>, options: QueryEvaluationOptions = {}): ApplyResult<Row> {
+export function applyQuery<Row>(
+  rows: Row[],
+  q: QueryState,
+  schema: FieldSchema<Row>,
+  options: QueryEvaluationOptions = {},
+): ApplyResult<Row> {
   const now = evaluationTime(options);
   const byName = indexFields(schema);
   const resolveField = (name: string) => resolveFieldName(schema, name) ?? name;
@@ -48,7 +62,9 @@ export function applyQuery<Row>(rows: Row[], q: QueryState, schema: FieldSchema<
     .filter((term) => !isComputedField(term.field))
     .map((term) => ({ ...term, field: resolveField(term.field) }));
 
-  let out = rows.filter((row) => whereTerms.every((term) => matchesTerm(byName, row, term)));
+  let out = rows.filter((row) =>
+    whereTerms.every((term) => matchesTerm(byName, row, term)),
+  );
   const total = out.length;
 
   if (orderBy.length) {
@@ -60,8 +76,14 @@ export function applyQuery<Row>(rows: Row[], q: QueryState, schema: FieldSchema<
         extract: compileRegex(t.extract?.regex),
       }))
       .filter(
-        (t): t is { field: FieldDef<Row>; dir: "asc" | "desc"; nullsLast: boolean; extract: RegExp | null | undefined } =>
-          t.field != null,
+        (
+          t,
+        ): t is {
+          field: FieldDef<Row>;
+          dir: "asc" | "desc";
+          nullsLast: boolean;
+          extract: RegExp | null | undefined;
+        } => t.field != null,
       );
     out = [...out].sort((a, b) => {
       for (const t of terms) {
@@ -86,10 +108,18 @@ export function applyQuery<Row>(rows: Row[], q: QueryState, schema: FieldSchema<
 }
 
 /** Does one row satisfy one clause? Exposed for the CellMenu preview + tests. */
-export function matchesClause<Row>(row: Row, clause: WhereClause, schema: FieldSchema<Row>, options: QueryEvaluationOptions = {}): boolean {
+export function matchesClause<Row>(
+  row: Row,
+  clause: WhereClause,
+  schema: FieldSchema<Row>,
+  options: QueryEvaluationOptions = {},
+): boolean {
   const field = resolveFieldName(schema, clause.field) ?? clause.field;
   const byName = indexFields(schema);
-  const prepared = prepareWhereClause({ ...clause, field }, evaluationTime(options));
+  const prepared = prepareWhereClause(
+    { ...clause, field },
+    evaluationTime(options),
+  );
   prepareDatetimePredicates([{ kind: "lit", predicate: prepared }], byName);
   return matchesWith(byName, row, prepared);
 }
@@ -99,7 +129,60 @@ export function matchesClause<Row>(row: Row, clause: WhereClause, schema: FieldS
  *  only — ORDER BY / LIMIT / OFFSET are intentionally ignored, so a metric
  *  reflects every matching row, not the visible page. Must agree with
  *  backends/go's aggregate compile on op semantics. */
-export function applyAggregations<Row>(rows: Row[], q: QueryState, schema: FieldSchema<Row>, options: QueryEvaluationOptions = {}): AggregationResult {
+export function applyAggregations<Row>(
+  rows: Row[],
+  q: QueryState,
+  schema: FieldSchema<Row>,
+  options: MetricEvaluationOptions<Row> = {},
+): AggregationResult {
+  if (
+    options.signal?.aborted ||
+    q.where.some((t) =>
+      predicatesOf(t).some(
+        (p) => p.op === "matches_regex" || p.op === "not_matches_regex",
+      ),
+    )
+  )
+    return evaluateMetrics(rows, q, schema, options);
+  const advanced = (q.aggregations ?? []).filter(
+    (a) =>
+      a.diagnostics?.length ||
+      a.expression !== undefined ||
+      a.expressionY !== undefined ||
+      a.scope !== undefined ||
+      a.distribution ||
+      a.sort ||
+      a.groupLimit !== undefined,
+  );
+  if (advanced.length) {
+    // Partitioning must not hide invalid IDs/shapes or the query-wide card cap.
+    if (
+      (q.aggregations?.length ?? 0) > 20 ||
+      normalizeQueryState(q).aggregations?.length !== q.aggregations?.length
+    )
+      return evaluateMetrics(rows, q, schema, options);
+    const legacy = (q.aggregations ?? []).filter((a) => !advanced.includes(a));
+    const results = [
+      ...evaluateMetrics(
+        rows,
+        { ...q, aggregations: advanced },
+        schema,
+        options,
+      ).metrics,
+      ...(legacy.length
+        ? applyAggregations(
+            rows,
+            { ...q, aggregations: legacy },
+            schema,
+            options,
+          ).metrics
+        : []),
+    ];
+    const byId = new Map(results.map((result) => [result.id, result]));
+    return {
+      metrics: (q.aggregations ?? []).flatMap((a) => byId.get(a.id) ?? []),
+    };
+  }
   const now = evaluationTime(options);
   const byName = indexFields(schema);
   const resolveField = (name: string) => resolveFieldName(schema, name) ?? name;
@@ -107,13 +190,30 @@ export function applyAggregations<Row>(rows: Row[], q: QueryState, schema: Field
     .filter((term) => !predicatesOf(term).some((c) => isComputedField(c.field)))
     .map((term) => prepareWhereTerm(term, resolveField, now));
   prepareDatetimePredicates(whereTerms, byName);
-  const filtered = rows.filter((row) => whereTerms.every((term) => matchesTerm(byName, row, term)));
+  const filtered = rows.filter((row) =>
+    whereTerms.every((term) => matchesTerm(byName, row, term)),
+  );
   const metrics = (q.aggregations ?? [])
-    .filter((a) => !isComputedField(a.field ?? "") && !a.groupBy.some(isComputedField))
-    .map((agg) => ({
-      id: agg.id,
-      buckets: computeBuckets(filtered, agg, byName, resolveField),
-    }));
+    .filter(
+      (a) =>
+        !isComputedField(a.field ?? "") && !a.groupBy.some(isComputedField),
+    )
+    .map((agg) => {
+      const field = agg.field ? byName.get(resolveField(agg.field)) : undefined;
+      if (
+        field &&
+        (!isMeasurable(field) || !aggOpsForField(field).includes(agg.op))
+      )
+        return {
+          id: agg.id,
+          buckets: [],
+          error: `Field ${field.name} does not allow ${agg.op}.`,
+        };
+      return {
+        id: agg.id,
+        buckets: computeBuckets(filtered, agg, byName, resolveField),
+      };
+    });
   return { metrics };
 }
 
@@ -130,12 +230,19 @@ function computeBuckets<Row>(
   const groupFields = agg.groupBy.map((n) => byName.get(resolveField(n)));
   const measure = agg.field ? byName.get(resolveField(agg.field)) : undefined;
 
-  const groups = new Map<string, { keys: (string | null)[]; rows: Row[] }>();
+  const groups = new Map<string, { keys: MetricKey[]; rows: Row[] }>();
+  if (!agg.groupBy.length) groups.set("[]", { keys: [], rows: [] });
   for (const row of rows) {
     const keys = groupFields.map((f) => {
       if (!f) return null; // unresolved group field → NULL bucket, never a missing column
       const v = readFieldValue(f, row);
-      return v == null || v === "" ? null : String(v);
+      return v == null || v === ""
+        ? null
+        : typeof v === "number" ||
+            typeof v === "boolean" ||
+            typeof v === "string"
+          ? v
+          : String(v);
     });
     const k = JSON.stringify(keys);
     let g = groups.get(k);
@@ -154,7 +261,11 @@ function computeBuckets<Row>(
   return sortBuckets(buckets);
 }
 
-function aggValue<Row>(op: AggOp, measure: FieldDef<Row> | undefined, rows: Row[]): number | string | null {
+function aggValue<Row>(
+  op: AggOp,
+  measure: FieldDef<Row> | undefined,
+  rows: Row[],
+): number | string | null {
   if (op === "count") {
     if (!measure) return rows.length; // COUNT(*)
     let n = 0;
@@ -162,7 +273,9 @@ function aggValue<Row>(op: AggOp, measure: FieldDef<Row> | undefined, rows: Row[
     return n;
   }
   if (!measure) return null;
-  const values = rows.map((r) => readFieldValue(measure, r)).filter((v) => v != null);
+  const values = rows
+    .map((r) => readFieldValue(measure, r))
+    .filter((v) => v != null);
 
   switch (op) {
     case "count_distinct":
@@ -222,36 +335,77 @@ type PreparedWhereTerm =
   | { kind: "lit"; predicate: PreparedWhereClause }
   | { kind: "or"; predicates: PreparedWhereClause[] };
 
-function prepareWhereClause(clause: WhereClause, now: number): PreparedWhereClause {
-  const usesRegex = clause.op === "matches_regex" || clause.op === "not_matches_regex";
-  return { clause, now, regex: usesRegex ? compileRegex(clause.value) : undefined };
+function prepareWhereClause(
+  clause: WhereClause,
+  now: number,
+): PreparedWhereClause {
+  const usesRegex =
+    clause.op === "matches_regex" || clause.op === "not_matches_regex";
+  return {
+    clause,
+    now,
+    regex: usesRegex ? compileRegex(clause.value) : undefined,
+  };
 }
 
-function prepareWhereTerm(term: WhereTerm, resolveField: (name: string) => string, now: number): PreparedWhereTerm {
+function prepareWhereTerm(
+  term: WhereTerm,
+  resolveField: (name: string) => string,
+  now: number,
+): PreparedWhereTerm {
   if (isOrGroup(term)) {
-    return { kind: "or", predicates: term.any.map((c) => prepareWhereClause({ ...c, field: resolveField(c.field) }, now)) };
+    return {
+      kind: "or",
+      predicates: term.any.map((c) =>
+        prepareWhereClause({ ...c, field: resolveField(c.field) }, now),
+      ),
+    };
   }
-  return { kind: "lit", predicate: prepareWhereClause({ ...term, field: resolveField(term.field) }, now) };
+  return {
+    kind: "lit",
+    predicate: prepareWhereClause(
+      { ...term, field: resolveField(term.field) },
+      now,
+    ),
+  };
 }
 
-function prepareDatetimePredicates<Row>(terms: PreparedWhereTerm[], fields: Map<string, FieldDef<Row>>): void {
-  for (const term of terms) for (const p of term.kind === "lit" ? [term.predicate] : term.predicates) {
-    const field = fields.get(p.clause.field);
-    if (field?.type !== "datetime" || p.clause.value === "" || p.clause.op === "is_null" || p.clause.op === "is_not_null") continue;
-    p.datetime = coerceValue("datetime", p.clause.value, p.now) as number;
-  }
+function prepareDatetimePredicates<Row>(
+  terms: PreparedWhereTerm[],
+  fields: Map<string, FieldDef<Row>>,
+): void {
+  for (const term of terms)
+    for (const p of term.kind === "lit" ? [term.predicate] : term.predicates) {
+      const field = fields.get(p.clause.field);
+      if (
+        field?.type !== "datetime" ||
+        p.clause.value === "" ||
+        p.clause.op === "is_null" ||
+        p.clause.op === "is_not_null"
+      )
+        continue;
+      p.datetime = coerceValue("datetime", p.clause.value, p.now) as number;
+    }
 }
 
 /** A row satisfies the WHERE when every term matches (AND); a term matches when
  *  its sole predicate matches, or — for an OR group — when any member does. */
-function matchesTerm<Row>(byName: Map<string, FieldDef<Row>>, row: Row, term: PreparedWhereTerm): boolean {
+function matchesTerm<Row>(
+  byName: Map<string, FieldDef<Row>>,
+  row: Row,
+  term: PreparedWhereTerm,
+): boolean {
   if (term.kind === "lit") return matchesWith(byName, row, term.predicate);
   // Normalization never yields an empty group (0 dropped, 1 flattened), so
   // `some` over a non-empty list is the OR.
   return term.predicates.some((p) => matchesWith(byName, row, p));
 }
 
-function matchesWith<Row>(byName: Map<string, FieldDef<Row>>, row: Row, prepared: PreparedWhereClause): boolean {
+function matchesWith<Row>(
+  byName: Map<string, FieldDef<Row>>,
+  row: Row,
+  prepared: PreparedWhereClause,
+): boolean {
   const { clause } = prepared;
   const field = byName.get(clause.field);
   if (!field) return true; // unknown field → no client opinion
@@ -270,14 +424,28 @@ function matchesWith<Row>(byName: Map<string, FieldDef<Row>>, row: Row, prepared
     return true;
   }
 
-  if (clause.op === "length_gt" || clause.op === "length_lt" || clause.op === "length_eq") {
-    if (!/^(0|[1-9]\d*)$/.test(clause.value) || !Number.isSafeInteger(Number(clause.value))) return false;
+  if (
+    clause.op === "length_gt" ||
+    clause.op === "length_lt" ||
+    clause.op === "length_eq"
+  ) {
+    if (
+      !/^(0|[1-9]\d*)$/.test(clause.value) ||
+      !Number.isSafeInteger(Number(clause.value))
+    )
+      return false;
   }
 
   let base: boolean;
   if (prepared.datetime !== undefined) {
-    const timestamp = v instanceof Date ? v.getTime()
-      : typeof v === "number" ? v : typeof v === "string" ? Date.parse(v) : NaN;
+    const timestamp =
+      v instanceof Date
+        ? v.getTime()
+        : typeof v === "number"
+          ? v
+          : typeof v === "string"
+            ? Date.parse(v)
+            : NaN;
     if (v === "" || !Number.isFinite(timestamp)) return false;
     base = matchesDatetime(timestamp, prepared.datetime, clause.op);
   } else {
@@ -291,29 +459,48 @@ function matchesWith<Row>(byName: Map<string, FieldDef<Row>>, row: Row, prepared
   return !isNull && !base;
 }
 
-function matchesDatetime(timestamp: number, rhs: number, op: WhereClause["op"]): boolean {
+function matchesDatetime(
+  timestamp: number,
+  rhs: number,
+  op: WhereClause["op"],
+): boolean {
   switch (op) {
-    case "=": return timestamp === rhs;
-    case "!=": return timestamp !== rhs;
-    case ">": return timestamp > rhs;
-    case ">=": return timestamp >= rhs;
-    case "<": return timestamp < rhs;
-    case "<=": return timestamp <= rhs;
-    default: return false;
+    case "=":
+      return timestamp === rhs;
+    case "!=":
+      return timestamp !== rhs;
+    case ">":
+      return timestamp > rhs;
+    case ">=":
+      return timestamp >= rhs;
+    case "<":
+      return timestamp < rhs;
+    case "<=":
+      return timestamp <= rhs;
+    default:
+      return false;
   }
 }
 
 /** The bare predicate result, ignoring `negated` and the empty-value skip
  *  (both handled by `matchesWith`). */
-function matchesBase<Row>(field: FieldDef<Row>, v: unknown, prepared: PreparedWhereClause): boolean {
+function matchesBase<Row>(
+  field: FieldDef<Row>,
+  v: unknown,
+  prepared: PreparedWhereClause,
+): boolean {
   const { clause, regex } = prepared;
 
   // Nullity, with array-aware semantics.
-  if (clause.op === "is_null") return Array.isArray(v) ? v.length === 0 : v == null || v === "";
-  if (clause.op === "is_not_null") return Array.isArray(v) ? v.length > 0 : v != null && v !== "";
+  if (clause.op === "is_null")
+    return Array.isArray(v) ? v.length === 0 : v == null || v === "";
+  if (clause.op === "is_not_null")
+    return Array.isArray(v) ? v.length > 0 : v != null && v !== "";
 
-  const arrayText = (value: unknown) => field.filter?.arrayCaseSensitive
-    ? String(value) : String(value).toLowerCase();
+  const arrayText = (value: unknown) =>
+    field.filter?.arrayCaseSensitive
+      ? String(value)
+      : String(value).toLowerCase();
 
   // `includes` is array membership (ARRAY_HAS): a null/missing array contains
   // nothing. Handle before the array/scalar split so null can't fall through.
@@ -330,12 +517,21 @@ function matchesBase<Row>(field: FieldDef<Row>, v: unknown, prepared: PreparedWh
     return clause.op === "matches_regex" ? matches : !matches;
   }
 
-  if (clause.op === "length_gt" || clause.op === "length_lt" || clause.op === "length_eq") {
-    if (typeof v !== "string" || !/^(0|[1-9]\d*)$/.test(clause.value)) return false;
+  if (
+    clause.op === "length_gt" ||
+    clause.op === "length_lt" ||
+    clause.op === "length_eq"
+  ) {
+    if (typeof v !== "string" || !/^(0|[1-9]\d*)$/.test(clause.value))
+      return false;
     const limit = Number(clause.value);
     if (!Number.isSafeInteger(limit)) return false;
     const length = Array.from(v).length;
-    return clause.op === "length_gt" ? length > limit : clause.op === "length_lt" ? length < limit : length === limit;
+    return clause.op === "length_gt"
+      ? length > limit
+      : clause.op === "length_lt"
+        ? length < limit
+        : length === limit;
   }
 
   if (Array.isArray(v)) {
@@ -367,11 +563,17 @@ function matchesBase<Row>(field: FieldDef<Row>, v: unknown, prepared: PreparedWh
     case "<=":
       return compare(v, coerceSafe(field, clause.value)) <= 0;
     case "contains":
-      return String(v ?? "").toLowerCase().includes(clause.value.toLowerCase());
+      return String(v ?? "")
+        .toLowerCase()
+        .includes(clause.value.toLowerCase());
     case "starts_with":
-      return String(v ?? "").toLowerCase().startsWith(clause.value.toLowerCase());
+      return String(v ?? "")
+        .toLowerCase()
+        .startsWith(clause.value.toLowerCase());
     case "ends_with":
-      return String(v ?? "").toLowerCase().endsWith(clause.value.toLowerCase());
+      return String(v ?? "")
+        .toLowerCase()
+        .endsWith(clause.value.toLowerCase());
     default:
       return true;
   }
@@ -387,7 +589,10 @@ function compileRegex(pattern: string | undefined): RegExp | null | undefined {
   }
 }
 
-function extractSortValue(value: unknown, regex: RegExp | null | undefined): unknown {
+function extractSortValue(
+  value: unknown,
+  regex: RegExp | null | undefined,
+): unknown {
   if (regex === undefined) return value;
   if (regex === null || value == null) return null;
   const match = regex.exec(String(value));
@@ -410,6 +615,7 @@ function compare(a: unknown, b: unknown): number {
   if (a == null) return -1;
   if (b == null) return 1;
   if (typeof a === "number" && typeof b === "number") return a - b;
-  if (typeof a === "boolean" && typeof b === "boolean") return a === b ? 0 : a ? 1 : -1;
+  if (typeof a === "boolean" && typeof b === "boolean")
+    return a === b ? 0 : a ? 1 : -1;
   return String(a).localeCompare(String(b));
 }

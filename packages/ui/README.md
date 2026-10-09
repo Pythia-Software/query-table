@@ -163,9 +163,7 @@ touch-based landscape viewports use a mobile interaction model:
   sticky bulk actions, a horizontal table scroll cue, and the device's native
   share sheet when available (clipboard fallback otherwise).
 
-Edits continue to update the query immediately, as on desktop; **Done** dismisses
-the sheet. The column workbench retains its explicit **Apply columns** draft
-workflow. Desktop chips, popovers, and drag-and-drop remain available.
+Filter and sort edits update the query immediately; **Done** dismisses the sheet. The column and metric workbenches retain explicit **Apply** draft workflows. Desktop chips, popovers, and drag-and-drop remain available.
 
 Keep the standard viewport meta tag in the host page:
 
@@ -210,3 +208,19 @@ The searchable static picker matches both labels and keys. Selection emits the
 canonical `value` only; presentation is never serialized into queries. A resolver
 can present a current value even when it is absent from the options. Strings without
 a presentation provider retain the existing select control.
+
+## Metric workbench and dashboards
+
+QueryBuilder's **Edit metrics** opens the resizable four-pane `MetricsEditor`. Apply commits drafts together; Cancel discards them. Dashboard layout provides draggable canvas widths, whole-rem card sizing through corner handles or inputs, canvas presets, pointer/keyboard reordering, and inline names. Metrics use their own workbench on desktop and compact viewports; their changes commit on Apply.
+
+Use the icon buttons beside **Panels** to show or hide the metric list, definition, references, and preview. At least one panel stays visible; the metric picker and Previous/Next controls remain available when the list is hidden. **See in dashboard** reveals the selected card in the same draft; **Back to metric**, the card’s pencil action, or a double-click returns to editing. Open settings and panel preferences survive these transitions.
+
+Drag the dashboard canvas’s right edge to test responsive wrapping. Card corner handles adjust preferred width and height in whole rems; arrow keys resize and Shift increases the step. Escape or a cancelled pointer gesture restores the dimensions at drag start. Canvas and panel geometry are temporary preferences; card geometry commits on Apply. Removal offers **Undo remove**, and **Review issues** opens the metric needing attention while valid metrics continue to preview.
+
+Use **Dialog size** for keyboard-editable pixel width/height controls; the native resize corner remains available. **Reset layout** restores the modal and all pane widths without changing metric drafts. Card minimum widths apply equally in the layout canvas and saved dashboard; narrower containers scroll horizontally.
+
+**Value** requires no grouping. Incompatible drafts show an actionable diagnostic and block Apply; standalone `MetricCard` also rejects grouped or multiple scalar buckets. Lists suppress magnitude bars for signed results. Charts visibly disclose missing/error points and drawing limits while keeping ordinary captions compact. Malformed remote box/histogram summaries produce a card-local diagnostic instead of throwing during rendering.
+
+`MetricsPanel` renders values, lists, pivots/flat tables, bars, lines, pie/ring, scatter, box, and histogram cards through native SVG and accessible data tables/tooltips. Pass a `MetricTheme` as `metricTheme` to QueryBuilder and `theme` to MetricsPanel for consistent typed-category palette assignments. Labels, temporal units/patterns, legends, list styling, axis labels, and card dimensions are query-local. `MetricCard` and `MetricsEditor` are also exported for standalone integration.
+
+See [the production metrics guide](../../docs/metrics.md). Run `npm run test:metrics` against the demo for authoring/layout/persistence and chart interactions.

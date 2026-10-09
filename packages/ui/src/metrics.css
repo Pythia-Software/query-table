@@ -1,0 +1,313 @@
+/* Metric presentation inherits the caller's --qt-* tokens. All card geometry is rem based. */
+.qt-metric.qt-metric {
+  color: var(--qt-metric-text, var(--qt-text, #24292f));
+  background: var(--qt-metric-surface, var(--qt-bg, #fff));
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: auto;
+}
+.qt-metric.qt-metric--chart {
+  flex: 1 1 28rem;
+  display: flex;
+  flex-direction: column;
+  width: 28rem;
+  min-height: 20rem;
+}
+.qt-metric-chart-layout {
+  display: flex;
+  flex: 1 0 12rem;
+  min-height: 8rem;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.qt-metric-plot {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  min-height: 8rem;
+}
+.qt-metric-plot svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+.qt-metric-axis {
+  fill: var(--qt-metric-muted, var(--qt-muted, #68717d));
+  font:
+    0.6875rem system-ui,
+    sans-serif;
+}
+.qt-metric-grid {
+  stroke: var(--qt-metric-grid, var(--qt-border, #d8dee4));
+  stroke-width: 1;
+}
+.qt-metric-mark {
+  outline: none;
+}
+.qt-metric-mark:focus-visible {
+  outline: 2px solid var(--qt-metric-accent, var(--qt-accent, #3979c3));
+  outline-offset: 2px;
+}
+.qt-metric-legend {
+  display: flex;
+  flex-direction: column;
+  list-style: none;
+  gap: 0.4rem;
+  padding: 0;
+  margin: 0;
+  max-width: 35%;
+  max-height: 16rem;
+  overflow: auto;
+  font-size: 0.75rem;
+}
+.qt-metric-legend li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  overflow-wrap: anywhere;
+}
+.qt-metric-swatch {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 0.1rem;
+}
+.qt-metric-legend-left {
+  flex-direction: row-reverse;
+}
+.qt-metric-legend-top {
+  flex-direction: column-reverse;
+}
+.qt-metric-legend-bottom {
+  flex-direction: column;
+}
+.qt-metric-legend-top .qt-metric-legend,
+.qt-metric-legend-bottom .qt-metric-legend {
+  flex-direction: row;
+  flex-wrap: wrap;
+  max-width: 100%;
+  max-height: 4rem;
+}
+.qt-metric-note {
+  color: var(--qt-metric-muted, var(--qt-muted, #68717d));
+  font-size: 0.6875rem;
+  margin: 0.4rem 0;
+}
+.qt-metric-tooltip {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  padding: 0.5rem 0.625rem;
+  background: var(--qt-metric-surface, var(--qt-bg, #fff));
+  color: var(--qt-metric-text, var(--qt-text, #24292f));
+  border: 1px solid var(--qt-metric-grid, var(--qt-border, #d8dee4));
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+  box-shadow: 0 0.15rem 0.5rem #0002;
+}
+.qt-metric-message {
+  font-size: 0.8125rem;
+  padding: 0.75rem;
+}
+.qt-metric-format-error,
+.qt-metrics-error {
+  color: var(--qt-metric-error, var(--qt-danger, #c23934));
+}
+.qt-metric.qt-metric {
+  position: relative;
+}
+.qt-metric-tooltip {
+  position: absolute;
+  z-index: 2;
+  inset-inline: 0.5rem;
+  bottom: 2rem;
+  pointer-events: none;
+  max-height: 80%;
+  overflow: auto;
+}
+
+.qt-metric .qt-metric-big-value,
+.qt-metric .qt-metric-bar-value {
+  color: var(--qt-metric-text, var(--qt-text, #24292f));
+}
+.qt-metric .qt-metric-bar-fill {
+  background: var(--qt-metric-accent, var(--qt-accent, #3979c3));
+}
+.qt-metric .qt-metric-pivot thead th,
+.qt-metric .qt-metric-flat thead th {
+  background: var(--qt-metric-surface, var(--qt-header-bg, #fff));
+}
+
+/* Honor card minima and contain overflow within the dashboard tray. */
+.qt-metrics {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+/* Final cards share the workbench's quiet, compact presentation. */
+.qt-metric.qt-metric {
+  border-radius: 8px;
+  padding: 10px 12px;
+  box-shadow: none;
+  gap: 6px;
+}
+.qt-metric .qt-metric-head {
+  flex-shrink: 0;
+  align-items: baseline;
+}
+.qt-metric .qt-metric-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+.qt-metric .qt-metric-by {
+  font-size: 10px;
+}
+.qt-metric .qt-metric-big {
+  text-align: center;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+}
+.qt-metric .qt-metric-big-value {
+  font-size: clamp(24px, 2.125rem, 34px);
+  font-weight: 600;
+  line-height: 1.2;
+}
+.qt-metric .qt-metric-big-sub {
+  font-size: 11px;
+  color: var(--qt-metric-muted, var(--qt-muted));
+}
+.qt-metric .qt-metric-pivot,
+.qt-metric .qt-metric-flat {
+  width: 100%;
+}
+.qt-metric .qt-metric-pivot thead th,
+.qt-metric .qt-metric-flat thead th {
+  background: var(--qt-header-bg, #f6f8fa);
+  color: var(--qt-metric-muted, var(--qt-muted));
+  font-weight: 500;
+}
+.qt-metric .qt-metric-pivot-wrap {
+  min-height: 0;
+  overflow: auto;
+}
+.qt-metric .qt-metric-legend {
+  font-size: 10px;
+  gap: 6px;
+  max-width: 40%;
+}
+.qt-metric .qt-metric-legend li {
+  align-items: center;
+  gap: 5px;
+}
+.qt-metric .qt-metric-legend .qt-metric-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.qt-metric-legend-top .qt-metric-legend,
+.qt-metric-legend-bottom .qt-metric-legend {
+  max-width: 100%;
+}
+.qt-metric-loading {
+  padding: 12px;
+}
+.qt-metric-empty {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  font-style: normal;
+}
+.qt-metric .qt-metrics-error {
+  margin: 6px 0;
+  padding: 10px;
+  background: var(--qt-fail-bg, #ffebe9);
+  border-radius: 6px;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.qt-metrics {
+  position: relative;
+}
+.qt-metric.qt-metric {
+  position: relative;
+}
+.qt-metric-edit,
+.qt-metrics-edit {
+  position: absolute;
+  right: 0.35rem;
+  top: 0.35rem;
+  z-index: 1;
+  opacity: 0;
+  pointer-events: none;
+  background: transparent;
+}
+.qt-btn.qt-metric-edit,
+.qt-btn.qt-metrics-edit {
+  color: var(--qt-metric-muted, var(--qt-muted, #8c959f));
+  border: 1px dotted var(--qt-border, #d0d7de);
+}
+.qt-btn.qt-metric-edit:hover,
+.qt-btn.qt-metrics-edit:hover {
+  color: var(--qt-metric-muted, var(--qt-muted, #8c959f));
+  border-color: var(--qt-border, #d0d7de);
+  background: var(--qt-header-bg, #f6f8fa);
+}
+.qt-metrics-edit {
+  top: -0.75rem;
+  z-index: 3;
+  background: var(--qt-header-bg, #f6f8fa);
+}
+.qt-metric:hover > .qt-metric-edit,
+.qt-metric:focus-within > .qt-metric-edit,
+.qt-metrics:hover > .qt-metrics-edit,
+.qt-metrics:focus-within > .qt-metrics-edit {
+  opacity: 1;
+  pointer-events: auto;
+}
+.qt-metric:has(> .qt-metric-edit) .qt-metric-head {
+  padding-right: 1.75rem;
+}
+@media (hover: none) {
+  .qt-metric-edit,
+  .qt-metrics-edit {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+.qt-request-activity {
+  padding: 0.75rem;
+  margin-block: 0.5rem;
+  border: 1px solid var(--qt-border, #d0d7de);
+  border-radius: 0.5rem;
+  font-size: 0.8rem;
+}
+.qt-request-activity-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+.qt-request-activity-head .qt-btn {
+  margin-left: auto;
+}
+.qt-request-activity-scroll {
+  overflow: auto;
+  max-height: 18rem;
+}
+.qt-request-activity table {
+  width: 100%;
+  text-align: left;
+  border-collapse: collapse;
+}
+.qt-request-activity th,
+.qt-request-activity td {
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--qt-border, #d0d7de);
+  overflow-wrap: anywhere;
+}
+.qt-request-activity [data-status="error"] {
+  color: var(--qt-danger, #cf222e);
+}

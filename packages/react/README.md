@@ -44,7 +44,7 @@ for transport and schema examples.
 
 ## Shared computed column definitions
 
-Pass a stable `computedColumnStore` (for example, `httpComputedColumnStore("/api/computed-columns")` from core) to `useQueryTable`. `api.computed` exposes the catalogue, compile/preview, save with revision checking, and reload operations. Queries store only `@computed/<id>` SELECT references; formula evaluation stays in browser workers. Without a store, definitions are in memory for the mounted hook. See the repository’s `docs/computed-columns.md` for the complete integration contract and PostgreSQL adapter.
+Pass a stable `computedColumnStore` (for example, `httpComputedColumnStore("/api/computed-columns")` from core) to `useQueryTable`. `api.computed` exposes the catalogue, compile/preview, save with revision checking, and reload operations. Queries store only `@computed/<id>` SELECT references. Local evaluation uses browser workers. With `fetchRowsV2` and an authoritative `computedExecution` envelope, computed SELECT and global sorting run on the server and values attach through validated stable-row-ID sidecars. Without a store, definitions are in memory for the mounted hook. See the repository’s `docs/computed-columns.md` for the complete integration contract and PostgreSQL adapter.
 
 ### Canonical keys and unavailable filters
 
@@ -64,3 +64,9 @@ For native set editors, use core's `mapSetFilterValues(query.where, (field, key)
 canonicalKey)` inside `canonicalizeQuery` to update aliases in both the existing
 predicates and their editor identity. Leave unrecognized/deleted keys unchanged
 and reject them through `validateQuery` so users can repair the selected tags.
+
+## Metric execution and drafts
+
+`api.aggregations.preview(clauses, signal)` evaluates a draft without modifying the query. `replace(clauses, expected?)` commits the entire dashboard as one undoable change and can reject a stale editor baseline. Presentation-only changes reuse computation. Advanced remote execution uses `fetchMetrics` plus explicit v2 `metricCapabilities`; v1 transports continue to support representable simple metrics. All-matching scope requires the complete client dataset or a server metric service. Shown-row fallback uses committed inputs and reports missing dependencies.
+
+See [the metrics integration guide](../../docs/metrics.md) for scopes, cancellation, worker-isolated regex, capability negotiation, computed revisions, and snapshot requirements.

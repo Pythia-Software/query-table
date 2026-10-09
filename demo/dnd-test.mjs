@@ -28,7 +28,10 @@ const PAGE_HELPERS = () => {
     fire(node, type, dt, clientX) {
       const ev = new Event(type, { bubbles: true, cancelable: true });
       Object.defineProperty(ev, "dataTransfer", { value: dt, configurable: true });
-      if (clientX != null) Object.defineProperty(ev, "clientX", { value: clientX, configurable: true });
+      // Supply real target coordinates; generic Event has no DragEvent clientX.
+      const bounds = node.getBoundingClientRect();
+      Object.defineProperty(ev, "clientX", { value: clientX ?? bounds.left + bounds.width * 0.25, configurable: true });
+      Object.defineProperty(ev, "clientY", { value: bounds.top + bounds.height / 2, configurable: true });
       node.dispatchEvent(ev);
       return ev;
     },
@@ -89,13 +92,13 @@ const record = (name, expected, actual, info) =>
 
 const browser = await chromium.launch();
 
-// ── S1: SELECT chip — drag "Case" onto "Overall" (forward move) ──
+// ── S1: SELECT chip — drag "Job" onto "Overall" (forward move) ──
 {
   const page = await freshPage(browser);
   const r = await page.evaluate(async () => {
     const qt = window.__qt, dt = qt.makeDT();
     const before = qt.headerOrder();
-    qt.fire(qt.byChip("Case"), "dragstart", dt);
+    qt.fire(qt.byChip("Job"), "dragstart", dt);
     await qt.raf();
     const tgt = qt.byChip("Overall");
     qt.fire(tgt, "dragover", dt);
@@ -103,7 +106,7 @@ const browser = await chromium.launch();
     // preview = order implied by the live drop-slot the user sees before releasing
     const sel = qt.row("select");
     const nodes = [...sel.querySelectorAll(".qt-chip--col, .qt-chip-drop-slot")];
-    const preview = nodes.map((n) => (n.classList.contains("qt-chip-drop-slot") ? "Case" : qt.chipLabel(n)));
+    const preview = nodes.map((n) => (n.classList.contains("qt-chip-drop-slot") ? "Job" : qt.chipLabel(n)));
     qt.fire(tgt, "drop", dt);
     await qt.raf();
     return { before, preview, after: qt.headerOrder() };
@@ -132,13 +135,13 @@ const browser = await chromium.launch();
   await page.close();
 }
 
-// ── S3: TABLE HEADER — drag "Case" onto "Overall", release on the header ──
+// ── S3: TABLE HEADER — drag "Job" onto "Overall", release on the header ──
 {
   const page = await freshPage(browser);
   const r = await page.evaluate(async () => {
     const qt = window.__qt, dt = qt.makeDT();
     const before = qt.headerOrder();
-    qt.fire(qt.byHeader("Case"), "dragstart", dt);
+    qt.fire(qt.byHeader("Job"), "dragstart", dt);
     await qt.raf();
     const tgt = qt.byHeader("Overall");
     qt.fire(tgt, "dragover", dt);
@@ -146,7 +149,7 @@ const browser = await chromium.launch();
     const nodes = [...document.querySelectorAll("th.qt-th")].filter(
       (t) => t.querySelector(".qt-th-label") || t.classList.contains("qt-th-drop-slot"));
     const preview = nodes.map((t) =>
-      t.classList.contains("qt-th-drop-slot") ? "Case" : t.querySelector(".qt-th-label").textContent.replace(/[↑↓\d\s]/g, ""));
+      t.classList.contains("qt-th-drop-slot") ? "Job" : t.querySelector(".qt-th-label").textContent.replace(/[↑↓\d\s]/g, ""));
     qt.fire(tgt, "drop", dt);
     await qt.raf();
     return { before, preview, after: qt.headerOrder() };
@@ -162,7 +165,7 @@ const browser = await chromium.launch();
   const r = await page.evaluate(async () => {
     const qt = window.__qt, dt = qt.makeDT();
     const before = qt.headerOrder();
-    const src = qt.byHeader("Case");
+    const src = qt.byHeader("Job");
     qt.fire(src, "dragstart", dt);
     await qt.raf();
     return { before, draggedStaysMounted: document.contains(src), headersWhileDragging: qt.headerOrder() };
@@ -172,13 +175,13 @@ const browser = await chromium.launch();
   await page.close();
 }
 
-// ── S5: SELECT chip — backward move (drag "★" onto "Platform") ──
+// ── S5: SELECT chip — backward move (drag "Priority" onto "Platform") ──
 {
   const page = await freshPage(browser);
   const r = await page.evaluate(async () => {
     const qt = window.__qt, dt = qt.makeDT();
     const before = qt.headerOrder();
-    qt.fire(qt.byChip("★"), "dragstart", dt);
+    qt.fire(qt.byChip("Priority"), "dragstart", dt);
     await qt.raf();
     const tgt = qt.byChip("Platform");
     qt.fire(tgt, "dragover", dt); // default clientX=0 => left half => insert before
@@ -200,9 +203,9 @@ const browser = await chromium.launch();
   const r = await page.evaluate(async () => {
     const qt = window.__qt, dt = qt.makeDT();
     const before = qt.headerOrder();
-    qt.fire(qt.byChip("Case"), "dragstart", dt);
+    qt.fire(qt.byChip("Job"), "dragstart", dt);
     await qt.raf();
-    const last = qt.byChip("★");
+    const last = qt.byChip("Priority");
     qt.fire(last, "dragover", dt, qt.rightHalfX(last)); // right half => insert AFTER => append
     await qt.raf();
     const nodes = [...qt.row("select").querySelectorAll(".qt-chip--col")];
@@ -211,7 +214,7 @@ const browser = await chromium.launch();
     await qt.raf();
     return { before, preview, after: qt.headerOrder() };
   });
-  record("S6 a column can be dragged to the very last position", ["Platform", "Overall", "Total", "★", "Case"], r.after,
+  record("S6 a column can be dragged to the very last position", ["Platform", "Overall", "Total", "Priority", "Job"], r.after,
     { before: r.before, preview: r.preview });
   await page.close();
 }
@@ -221,7 +224,7 @@ const browser = await chromium.launch();
   const page = await freshPage(browser);
   const r = await page.evaluate(async () => {
     const qt = window.__qt, dt = qt.makeDT();
-    qt.fire(qt.byHeader("Case"), "dragstart", dt);
+    qt.fire(qt.byHeader("Job"), "dragstart", dt);
     await qt.raf();
     const tgt = qt.byHeader("Overall");
     qt.fire(tgt, "dragover", dt);
@@ -256,7 +259,7 @@ const browser = await chromium.launch();
   // dragging the chip must dim BOTH the chip and the matching table column, and
   // live-reorder the table columns (Total slides before Platform).
   record("S8 dragging a select chip dims + live-reorders the matching table column",
-    { chipDimmed: true, headerDimmed: true, tableReordered: ["Case", "Total", "Platform", "Overall", "★"] },
+    { chipDimmed: true, headerDimmed: true, tableReordered: ["Job", "Total", "Platform", "Overall", "Priority"] },
     { chipDimmed: r.chipDimmed, headerDimmed: r.headerDimmed, tableReordered: r.tableHeaderOrderWhileDraggingChip });
   await page.close();
 }
@@ -271,6 +274,64 @@ const browser = await chromium.launch();
     return { chipDimmed: qt.hasClass(qt.byChip("Platform"), "qt-chip--dragging") };
   });
   record("S8b dragging a table header dims the matching select chip", true, r.chipDimmed);
+  await page.close();
+}
+
+// Cross-surface drops must commit the preview with selection moved into the middle.
+{
+  const page = await freshPage(browser);
+  const r = await page.evaluate(async () => {
+    const qt = window.__qt;
+    const selectionHeader = () => document.querySelector("th.qt-checkbox-cell");
+    const fullOrder = () => [...document.querySelectorAll("th[data-qt-field]")].map((node) => node.dataset.qtField);
+    let dt = qt.makeDT();
+    qt.fire(selectionHeader(), "dragstart", dt);
+    await qt.raf();
+    qt.fire(qt.byHeader("Overall"), "dragover", dt);
+    await qt.raf();
+    qt.fire(qt.byHeader("Overall"), "drop", dt);
+    await qt.raf();
+    const beforeStart = fullOrder();
+    dt = qt.makeDT();
+    qt.fire(selectionHeader(), "dragstart", dt);
+    await qt.raf();
+    qt.fire(qt.byHeader("Job"), "dragover", dt);
+    await qt.raf();
+    qt.fire(selectionHeader(), "dragend", dt);
+    await qt.raf();
+    const cancellationStable = JSON.stringify(beforeStart) === JSON.stringify(fullOrder());
+    dt = qt.makeDT();
+    qt.fire(qt.byChip("Platform"), "dragstart", dt);
+    await qt.raf();
+    const afterStart = fullOrder();
+    qt.fire(qt.byChip("Platform"), "dragend", dt);
+    await qt.raf();
+    dt = qt.makeDT();
+    qt.fire(qt.byChip("Total"), "dragstart", dt);
+    await qt.raf();
+    qt.fire(qt.byChip("Platform"), "dragover", dt);
+    await qt.raf();
+    const chipToHeaderPreview = qt.headerOrder();
+    qt.fire(qt.byHeader("Platform"), "drop", dt);
+    await qt.raf();
+    const chipToHeaderFinal = qt.headerOrder();
+    dt = qt.makeDT();
+    qt.fire(qt.byHeader("Total"), "dragstart", dt);
+    await qt.raf();
+    qt.fire(qt.byHeader("Priority"), "dragover", dt);
+    await qt.raf();
+    const headerToChipPreview = qt.headerOrder();
+    const completePreview = fullOrder();
+    qt.fire(qt.byChip("Priority"), "drop", dt);
+    await qt.raf();
+    const completeFinal = fullOrder();
+    const chipFinal = [...qt.row("select").querySelectorAll(".qt-chip--col")].map(qt.chipLabel);
+    return { cancellationStable, completeOrderPreserved: JSON.stringify(completePreview) === JSON.stringify(completeFinal), chipsAgree: JSON.stringify(chipFinal) === JSON.stringify(qt.headerOrder()), initialStable: JSON.stringify(beforeStart) === JSON.stringify(afterStart), chipToHeaderPreview, chipToHeaderFinal,
+      headerToChipPreview, headerToChipFinal: qt.headerOrder() };
+  });
+  record("S8c cross-surface drops persist with a selection column in the middle",
+    { cancellationStable: true, completeOrderPreserved: true, chipsAgree: true, initialStable: true, chipToHeaderPreview: ["Job", "Total", "Platform", "Overall", "Priority"], chipToHeaderFinal: ["Job", "Total", "Platform", "Overall", "Priority"],
+      headerToChipPreview: ["Job", "Platform", "Overall", "Total", "Priority"], headerToChipFinal: ["Job", "Platform", "Overall", "Total", "Priority"] }, r);
   await page.close();
 }
 

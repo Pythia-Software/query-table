@@ -6,9 +6,20 @@
 // never hand-edits QueryState. @pythia-software/query-table-ui is a thin layer over this; you
 // can also build an entirely custom table on it.
 
-import { useComputedColumns, type ComputedColumnsApi } from "./useComputedColumns";
+import {
+  executionRevision,
+  validateComputedResponse,
+} from "./computedExecution";
+import {
+  useComputedColumns,
+  type ComputedColumnsApi,
+} from "./useComputedColumns";
 import type { FormulaWorkerFactory } from "./formulaWorker";
-import type { ComputedColumnStore } from "@pythia-software/query-table-core";
+import type {
+  ComputedColumnStore,
+  ComputedExecution,
+  RowComputedValues,
+} from "@pythia-software/query-table-core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   EMPTY_QUERY,
@@ -25,6 +36,11 @@ import {
   predicatesOf,
   negateClause,
   opsForField,
+  metricPlans,
+  validateMetric,
+  metricDependencies,
+  isComputedField,
+  toServerQueryV2,
 } from "@pythia-software/query-table-core";
 
 const AUTOCOMPLETE_LIMIT = 50;
@@ -45,6 +61,10 @@ import type {
   DistinctValuesResult,
   FieldStats,
 } from "@pythia-software/query-table-core";
+import {
+  useRequestActivity,
+  type RequestActivityApi,
+} from "./useRequestActivity";
 import { useAggregations } from "./useAggregations";
 import { useSelection, type SelectionApi } from "./useSelection";
 import { useSelect, type SelectApi } from "./useSelect";
@@ -68,6 +88,8 @@ export interface UseQueryTableOptions<Row> {
   storage?: StorageAdapter;
   /** Shared reusable definitions, independent of saved-query storage. */
   computedColumnStore?: ComputedColumnStore;
+  /** Authoritative host handshake for versioned server SELECT, sorts, and metrics. */
+  computedExecution?: ComputedExecution;
   /** Override the worker factory when CSP disallows blob workers. */
   formulaWorkerFactory?: FormulaWorkerFactory;
   /** Seed query, normalized and resource-bounded before use. When omitted the
@@ -110,12 +132,10 @@ export interface AutoRefreshApi {
 /** A patch for one metric. `field`/`label` accept an explicit `undefined` to
  *  CLEAR them (e.g. switching to an op whose measure no longer applies); an
  *  absent key leaves the existing value untouched. */
-export interface AggregationPatch {
-  op?: AggOp;
-  field?: string | undefined;
-  groupBy?: string[];
-  label?: string | undefined;
-}
+export type AggregationPatch = { op?: AggOp; groupBy?: string[] } & {
+  [K in keyof Omit<AggregationClause, "id" | "op" | "groupBy">]?:
+    AggregationClause[K] | undefined;
+};
 
 export interface AggregationsApi {
   /** The metric specs currently in the query. */
@@ -136,6 +156,20 @@ export interface AggregationsApi {
   remove: (id: string) => void;
   /** Remove all metrics. */
   clear: () => void;
+  /** Evaluate a draft without modifying the query. */
+  preview?: (
+    clauses: AggregationClause[],
+    signal?: AbortSignal,
+  ) => Promise<AggregationResult>;
+  /** Commit the complete draft as one undoable change. */
+  replace?: (
+    clauses: AggregationClause[],
+    expected?: AggregationClause[],
+  ) => void;
+  /** Validate a clause, including reusable computed dependencies. */
+  compile?: (clause: AggregationClause) => unknown;
+  /** Invalidation token for page, refresh, schema, and definition changes. */
+  contextKey?: string;
 }
 
 export interface QueryTableApi<Row> {
@@ -153,6 +187,8 @@ export interface QueryTableApi<Row> {
   /** Move forward through local, unsaved query history. */
   redo: () => void;
 
+  requestActivity: RequestActivityApi;
+
   // data
   rows: Row[];
   total: number | null;
@@ -160,6 +196,8 @@ export interface QueryTableApi<Row> {
   error: Error | null;
   refresh: () => void;
   autoRefresh: AutoRefreshApi;
+  /** Refresh one legacy row, or schedule a full V2 page refresh so computed
+   * values and page membership remain coherent. Track V2 completion via loading/error. */
   refreshRow: (id: RowId) => Promise<void>;
 
   // aggregation metrics (the dashboard panel above the table)
@@ -176,7 +214,11 @@ export interface QueryTableApi<Row> {
   removeFilter: (index: number) => void;
   clearFilters: () => void;
   /** Replace one predicate inside a term (predIndex 0 for a literal term). */
-  updatePredicate: (termIndex: number, predIndex: number, clause: WhereClause) => void;
+  updatePredicate: (
+    termIndex: number,
+    predIndex: number,
+    clause: WhereClause,
+  ) => void;
   /** Remove one predicate; a group of one flattens to a literal, an emptied term drops. */
   removePredicate: (termIndex: number, predIndex: number) => void;
   /** Logically invert one predicate (flips the op, else toggles its NOT flag). */
@@ -191,7 +233,10 @@ export interface QueryTableApi<Row> {
   /** Reset the complete query state back to schema defaults. */
   resetAll: () => void;
   /** Keystroke-driven filter-value autocomplete (Transport.fetchDistinctValues). */
-  filterValues: (field: string, search: string) => Promise<DistinctValuesResult>;
+  filterValues: (
+    field: string,
+    search: string,
+  ) => Promise<DistinctValuesResult>;
   /** Dataset-wide field statistics for catalogue and picker affordances. */
   fieldStats: (
     fields: string[],
@@ -230,8 +275,11 @@ function defaultsFor<Row>(schema: FieldSchema<Row>): QueryState {
 }
 
 function cloneWhereTerm(term: WhereTerm): WhereTerm {
-  const copy = isOrGroup(term) ? { ...term, any: term.any.map((c) => ({ ...c })) } : { ...term };
-  if (term.setFilter) copy.setFilter = { ...term.setFilter, values: [...term.setFilter.values] };
+  const copy = isOrGroup(term)
+    ? { ...term, any: term.any.map((c) => ({ ...c })) }
+    : { ...term };
+  if (term.setFilter)
+    copy.setFilter = { ...term.setFilter, values: [...term.setFilter.values] };
   return copy;
 }
 
@@ -239,27 +287,30 @@ function cloneQueryState(q: QueryState): QueryState {
   const clone: QueryState = {
     select: q.select.map((column) => ({ ...column })),
     where: q.where.map(cloneWhereTerm),
-    orderBy: q.orderBy.map((term) => (term.extract ? { ...term, extract: { ...term.extract } } : { ...term })),
+    orderBy: q.orderBy.map((term) =>
+      term.extract ? { ...term, extract: { ...term.extract } } : { ...term },
+    ),
     limit: q.limit,
     offset: q.offset,
   };
-  if (q.aggregations) clone.aggregations = q.aggregations.map((a) => ({ ...a, groupBy: [...a.groupBy] }));
+  if (q.aggregations)
+    clone.aggregations = JSON.parse(
+      JSON.stringify(q.aggregations),
+    ) as AggregationClause[];
   return clone;
 }
 
 /** Apply a patch to a metric, building a fresh clause so optional `field`/`label`
  *  can be dropped (passing them as `undefined` clears; omitting the key keeps the
  *  current value) without ever materializing an `undefined`-valued property. */
-function mergeAggregation(a: AggregationClause, patch: AggregationPatch): AggregationClause {
-  const next: AggregationClause = {
-    id: a.id,
-    op: patch.op ?? a.op,
-    groupBy: patch.groupBy ?? a.groupBy,
-  };
-  const field = "field" in patch ? patch.field : a.field;
-  if (field) next.field = field;
-  const label = "label" in patch ? patch.label : a.label;
-  if (label) next.label = label;
+function mergeAggregation(
+  a: AggregationClause,
+  patch: AggregationPatch,
+): AggregationClause {
+  const next = { ...a, ...patch } as AggregationClause;
+  for (const key of Object.keys(next) as Array<keyof AggregationClause>) {
+    if (next[key] === undefined) delete next[key];
+  }
   return next;
 }
 
@@ -269,7 +320,11 @@ function isNullLike(value: unknown): boolean {
 
 function asDistinctValue(value: unknown): string | null {
   if (isNullLike(value)) return null;
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
     return String(value);
   }
   return null;
@@ -282,7 +337,11 @@ function fieldHasNullInRows<Row>(field: FieldDef<Row>, rows: Row[]): boolean {
   return false;
 }
 
-function distinctValuesFromRows<Row>(field: FieldDef<Row>, rows: Row[], search: string): { values: string[]; hasMore: boolean } {
+function distinctValuesFromRows<Row>(
+  field: FieldDef<Row>,
+  rows: Row[],
+  search: string,
+): { values: string[]; hasMore: boolean } {
   const target = search.trim().toLowerCase();
   const values: string[] = [];
   const seen = new Set<string>();
@@ -290,7 +349,8 @@ function distinctValuesFromRows<Row>(field: FieldDef<Row>, rows: Row[], search: 
 
   rowsLoop: for (const row of rows) {
     const value = readFieldValue(field, row);
-    const candidates = field.type === "textarray" && Array.isArray(value) ? value : [value];
+    const candidates =
+      field.type === "textarray" && Array.isArray(value) ? value : [value];
     for (const candidate of candidates) {
       const raw = asDistinctValue(candidate);
       if (raw == null || seen.has(raw)) continue;
@@ -310,37 +370,82 @@ function distinctValuesFromRows<Row>(field: FieldDef<Row>, rows: Row[], search: 
   return { values: values.sort((a, b) => a.localeCompare(b)), hasMore };
 }
 
-function resolveInitial<Row>(opts: UseQueryTableOptions<Row>): { q: QueryState; fromUrl: boolean } {
+function resolveInitial<Row>(opts: UseQueryTableOptions<Row>): {
+  q: QueryState;
+  fromUrl: boolean;
+} {
   const defaults = defaultsFor(opts.schema);
-  if (opts.initialQuery) return { q: normalizeQueryState(opts.initialQuery, defaults), fromUrl: false };
+  if (opts.initialQuery)
+    return {
+      q: normalizeQueryState(opts.initialQuery, defaults),
+      fromUrl: false,
+    };
   if (opts.syncUrl === true && typeof window !== "undefined") {
     const token = new URLSearchParams(window.location.search).get("q");
-    if (token) return { q: normalizeQueryState(decodeQuery(token), defaults), fromUrl: true };
+    if (token)
+      return {
+        q: normalizeQueryState(decodeQuery(token), defaults),
+        fromUrl: true,
+      };
   }
   return { q: defaults, fromUrl: false };
 }
 
-export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableApi<Row> {
-  const { schema, transport, clientRows, initialQuery, syncUrl = false, debounceMs = 200 } = opts;
-  const storage = useMemo(() => opts.storage ?? memoryStorageAdapter(), [opts.storage]);
+export function useQueryTable<Row>(
+  opts: UseQueryTableOptions<Row>,
+): QueryTableApi<Row> {
+  const {
+    schema,
+    transport: sourceTransport,
+    clientRows,
+    initialQuery,
+    syncUrl = false,
+    debounceMs = 200,
+  } = opts;
+  const { transport, activity: requestActivity } =
+    useRequestActivity(sourceTransport);
+  const storage = useMemo(
+    () => opts.storage ?? memoryStorageAdapter(),
+    [opts.storage],
+  );
   const now = opts.now ?? Date.now;
   const nowRef = useRef(now);
   const onRefreshRef = useRef(opts.onRefresh);
   const defaults = useMemo(() => defaultsFor(schema), [schema]);
-  const byName = useMemo(() => new Map(schema.fields.map((f) => [f.name, f])), [schema]);
+  const byName = useMemo(
+    () => new Map(schema.fields.map((f) => [f.name, f])),
+    [schema],
+  );
 
   const initRef = useRef(resolveInitial(opts));
   const aggIdRef = useRef(0);
   const [storedQuery, setQueryState] = useState<QueryState>(initRef.current.q);
-  const query = useMemo(() => opts.canonicalizeQuery?.(storedQuery) ?? storedQuery, [storedQuery, opts.canonicalizeQuery]);
+  const query = useMemo(
+    () => opts.canonicalizeQuery?.(storedQuery) ?? storedQuery,
+    [storedQuery, opts.canonicalizeQuery],
+  );
   const undoStack = useRef<QueryState[]>([cloneQueryState(initRef.current.q)]);
   const redoStack = useRef<QueryState[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
+  const [serverComputed, setServerComputed] = useState<
+    Map<RowId, RowComputedValues>
+  >(new Map());
+  const [committedFields, setCommittedFields] = useState<string[]>([]);
+  const [serverExecution, setServerExecution] = useState<
+    ComputedExecution | undefined
+  >();
   const [total, setTotal] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [nonce, setNonce] = useState(0);
-  const [autoRefreshStatus, setAutoRefreshStatus] = useState<AutoRefreshStatus | null>(null);
+  const [committedPage, setCommittedPage] = useState<string | null>(null);
+  const [committedSource, setCommittedSource] = useState<{
+    schema: FieldSchema<Row>;
+    transport: Transport<Row> | undefined;
+    clientRows: Row[] | undefined;
+  } | null>(null);
+  const [autoRefreshStatus, setAutoRefreshStatus] =
+    useState<AutoRefreshStatus | null>(null);
 
   useEffect(() => {
     nowRef.current = now;
@@ -350,16 +455,22 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
     onRefreshRef.current = opts.onRefresh;
   }, [opts.onRefresh]);
 
-  const setQuery = useCallback<QueryTableApi<Row>["setQuery"]>((next) => {
-    setQueryState((prev) => {
-      const candidate = typeof next === "function" ? (next as (p: QueryState) => QueryState)(prev) : next;
-      const nextQuery = normalizeQueryState(candidate, defaults);
-      if (queriesEqual(prev, nextQuery)) return prev;
-      undoStack.current.push(cloneQueryState(prev));
-      redoStack.current = [];
-      return cloneQueryState(nextQuery);
-    });
-  }, [defaults]);
+  const setQuery = useCallback<QueryTableApi<Row>["setQuery"]>(
+    (next) => {
+      setQueryState((prev) => {
+        const candidate =
+          typeof next === "function"
+            ? (next as (p: QueryState) => QueryState)(prev)
+            : next;
+        const nextQuery = normalizeQueryState(candidate, defaults);
+        if (queriesEqual(prev, nextQuery)) return prev;
+        undoStack.current.push(cloneQueryState(prev));
+        redoStack.current = [];
+        return cloneQueryState(nextQuery);
+      });
+    },
+    [defaults],
+  );
 
   // Restore the default saved query (preferred) or last query on mount when
   // nothing explicit seeded the view.
@@ -368,7 +479,8 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
     let cancelled = false;
     void (async () => {
       const defaultSaved = await storage.loadDefaultSaved?.(schema.name);
-      const restored = defaultSaved?.query ?? (await storage.loadLast(schema.name));
+      const restored =
+        defaultSaved?.query ?? (await storage.loadLast(schema.name));
       if (!cancelled && restored) {
         const normalized = normalizeQueryState(restored, defaults);
         undoStack.current = [cloneQueryState(normalized)];
@@ -384,24 +496,121 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
   }, []);
 
   const { api: computed, displaySchema } = useComputedColumns({
-    schema, query, rows,
-    ...(opts.computedColumnStore ? {store:opts.computedColumnStore} : {}),
-    ...(opts.formulaWorkerFactory ? {workerFactory:opts.formulaWorkerFactory} : {}),
-    ...(transport ? {transport} : {}), ...(clientRows ? {clientRows} : {}),
+    schema,
+    query,
+    rows,
+    serverComputed,
+    ...(serverExecution ? { serverExecution } : {}),
+    ...(opts.computedExecution ? { execution: opts.computedExecution } : {}),
+    ...(opts.computedColumnStore ? { store: opts.computedColumnStore } : {}),
+    ...(opts.formulaWorkerFactory
+      ? { workerFactory: opts.formulaWorkerFactory }
+      : {}),
+    ...(transport ? { transport } : {}),
+    ...(clientRows ? { clientRows } : {}),
   });
+
+  const resolveComputed = useCallback(
+    (name: string) =>
+      isComputedField(name)
+        ? computed.compile(`[${name.replace(/]/g, "]] ".trim())}]`)
+        : undefined,
+    [computed.compile],
+  );
+  const metricCompile = useCallback(
+    (clause: AggregationClause) => {
+      const diagnostics = validateMetric(
+        clause,
+        displaySchema,
+        resolveComputed,
+      );
+      if (diagnostics.length)
+        throw new Error(diagnostics.map((d) => d.message).join(" "));
+      return metricPlans(clause, displaySchema, resolveComputed);
+    },
+    [displaySchema, resolveComputed],
+  );
+  const computedRevisions = useMemo(
+    () =>
+      Object.fromEntries(computed.definitions.map((d) => [d.id, d.revision])),
+    [computed.definitions],
+  );
+  const definitionKey = JSON.stringify(computedRevisions);
 
   // Fetch (debounced + abortable). Transport mode, or client-side applyQuery.
   const queryKey = useMemo(() => encodeQuery(query), [query]);
-  const serverRowQuery = useMemo(() => toServerQuery(query, displaySchema), [queryKey, displaySchema]);
+  const serverRowQuery = useMemo(() => {
+    const execution = opts.computedExecution;
+    const v2Request =
+      execution && transport?.fetchRowsV2
+        ? toServerQueryV2(query, displaySchema, execution)
+        : undefined;
+    const request = v2Request ?? toServerQuery(query, displaySchema);
+    if (v2Request)
+      for (const definition of computed.definitions) {
+        if (
+          executionRevision(execution, definition.id) !== undefined &&
+          executionRevision(execution, definition.id) !== definition.revision
+        )
+          v2Request.diagnostics.push({
+            from: 0,
+            to: 1,
+            code: "definition_changed",
+            message:
+              "Computed definitions changed. Refresh the server execution handshake.",
+          });
+      }
+    // A shown-row metric may refer to columns outside the visible projection.
+    for (const clause of query.aggregations ?? [])
+      if (clause.scope === "shownRows") {
+        try {
+          for (const name of metricDependencies(
+            clause,
+            schema,
+            resolveComputed,
+          )) {
+            const field = schema.fields.find((f) => f.name === name);
+            if (field?.source.kind === "backend") request.select.push(name);
+            else
+              for (const dep of field?.source.kind === "derived"
+                ? (field.source.dependencies ?? [])
+                : [])
+                request.select.push(dep);
+          }
+        } catch {
+          /* Invalid metric stays editable and fails metric validation. */
+        }
+      }
+    request.select = [...new Set(request.select)].sort();
+    return request;
+  }, [
+    queryKey,
+    displaySchema,
+    transport,
+    computedRevisions,
+    schema,
+    resolveComputed,
+    opts.computedExecution,
+  ]);
   // Keep presentation-only query changes out of the expensive row pipeline.
   // Widths do not leave the client at all, and SELECT does not affect client-side
   // filtering/sorting/paging. The full queryKey still drives URL + persistence.
   const rowQueryKey = useMemo(
-    () => transport
-      ? `server:${JSON.stringify(serverRowQuery)}`
-      : `client:${JSON.stringify([query.where, query.orderBy, query.limit, query.offset])}`,
-    [transport, serverRowQuery, query.where, query.orderBy, query.limit, query.offset],
+    () =>
+      transport
+        ? `server:${JSON.stringify(serverRowQuery)}`
+        : `client:${JSON.stringify([query.where, query.orderBy, query.limit, query.offset])}`,
+    [
+      transport,
+      serverRowQuery,
+      query.where,
+      query.orderBy,
+      query.limit,
+      query.offset,
+    ],
   );
+  const executionKey = JSON.stringify(opts.computedExecution ?? null);
+  const pageContext = `${schema.name}:${rowQueryKey}:${nonce}:${executionKey}`;
   useEffect(() => {
     const ac = new AbortController();
     let cancelled = false;
@@ -411,20 +620,66 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
       try {
         opts.validateQuery?.(query);
         if (transport) {
-          const res = await transport.fetchRows(serverRowQuery, ac.signal);
+          const useV2 = "version" in serverRowQuery && transport.fetchRowsV2;
+          if (
+            "diagnostics" in serverRowQuery &&
+            Array.isArray(serverRowQuery.diagnostics) &&
+            serverRowQuery.diagnostics.length
+          )
+            throw Error(
+              serverRowQuery.diagnostics.map((d) => d.message).join(" "),
+            );
+          if (!useV2 && query.orderBy.some((s) => isComputedField(s.field)))
+            throw Error(
+              "Global computed sorting requires a server execution handshake and fetchRowsV2.",
+            );
+          const res = useV2
+            ? await transport.fetchRowsV2!(
+                serverRowQuery as ReturnType<typeof toServerQueryV2<Row>>,
+                ac.signal,
+              )
+            : await transport.fetchRows(serverRowQuery, ac.signal);
+          if (useV2)
+            validateComputedResponse(
+              serverRowQuery as ReturnType<typeof toServerQueryV2<Row>>,
+              res as import("@pythia-software/query-table-core").FetchRowsResultV2<Row>,
+              schema,
+            );
           if (!cancelled) {
+            setCommittedFields(serverRowQuery.select);
+            setServerExecution(
+              useV2
+                ? (
+                    res as import("@pythia-software/query-table-core").FetchRowsResultV2<Row>
+                  ).execution
+                : undefined,
+            );
+            if ("computed" in res && Array.isArray(res.computed))
+              setServerComputed(
+                new Map(res.computed.map((c) => [c.id, c.values])),
+              );
+            else setServerComputed(new Map());
             setRows(res.rows);
             setTotal(res.total);
+            setCommittedPage(pageContext);
+            setCommittedSource({ schema, transport, clientRows });
           }
         } else {
           const res = applyQuery(clientRows ?? [], query, schema);
           if (!cancelled) {
             setRows(res.rows);
             setTotal(res.total);
+            setCommittedPage(pageContext);
+            setCommittedSource({ schema, transport, clientRows });
           }
         }
       } catch (e) {
-        if (!cancelled && !ac.signal.aborted) { setError(e as Error); setRows([]); setTotal(null); }
+        if (!cancelled && !ac.signal.aborted) {
+          setError(e as Error);
+          setRows([]);
+          setTotal(null);
+          setCommittedPage(null);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -438,7 +693,16 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
     // rowQueryKey captures only row-affecting query state; clientRows/nonce
     // force refetch. Presentation changes still sync/persist via queryKey below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rowQueryKey, transport, clientRows, schema, debounceMs, nonce, opts.validateQuery]);
+  }, [
+    rowQueryKey,
+    transport,
+    clientRows,
+    schema,
+    debounceMs,
+    nonce,
+    opts.validateQuery,
+    executionKey,
+  ]);
 
   // URL sync.
   useEffect(() => {
@@ -457,14 +721,21 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
   }, [queryKey, storage, schema.name, query]);
 
   // Resolved id accessor.
-  const idField = useMemo(() => schema.fields.find((f) => f.name === schema.idField), [schema]);
+  const idField = useMemo(
+    () => schema.fields.find((f) => f.name === schema.idField),
+    [schema],
+  );
   const rowId = useCallback(
-    (row: Row): RowId | null => (idField ? (readFieldValue(idField, row) as RowId | null) : null),
+    (row: Row): RowId | null =>
+      idField ? (readFieldValue(idField, row) as RowId | null) : null,
     [idField],
   );
 
   // Sub-APIs.
-  const displayedIds = useMemo(() => rows.map(rowId).filter((id): id is RowId => id != null), [rows, rowId]);
+  const displayedIds = useMemo(
+    () => rows.map(rowId).filter((id): id is RowId => id != null),
+    [rows, rowId],
+  );
   const selection = useSelection(displayedIds);
   const select = useSelect(query, setQuery, displaySchema);
   const columnDrag = useColumnDrag();
@@ -475,7 +746,67 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
     storage,
     now,
   );
-  const aggState = useAggregations(query, schema, transport, clientRows, debounceMs, nonce, opts.validateQuery);
+  const pageReady =
+    committedPage === pageContext &&
+    committedSource?.schema === schema &&
+    committedSource?.transport === transport &&
+    committedSource?.clientRows === clientRows &&
+    !error;
+  const dataToken = useRef(0);
+  const dataVersion = useMemo(
+    () => ++dataToken.current,
+    [schema, transport, clientRows, nonce, definitionKey, executionKey],
+  );
+  const aggState = useAggregations(
+    query,
+    schema,
+    transport,
+    clientRows,
+    debounceMs,
+    nonce,
+    opts.validateQuery,
+    {
+      shownRows: rows,
+      rowsReady: pageReady,
+      rowsError: error,
+      ...(transport ? { shownFields: committedFields } : {}),
+      resolveComputed,
+      revisions: computedRevisions,
+      ...(opts.computedExecution
+        ? {
+            execution:
+              pageReady && serverExecution
+                ? serverExecution
+                : opts.computedExecution,
+          }
+        : {}),
+      ...(opts.formulaWorkerFactory
+        ? { workerFactory: opts.formulaWorkerFactory }
+        : {}),
+    },
+  );
+  const queryRef = useRef(query);
+  queryRef.current = query;
+  const replaceAggregations = useCallback(
+    (clauses: AggregationClause[], expected?: AggregationClause[]) => {
+      if (
+        expected &&
+        JSON.stringify(queryRef.current.aggregations ?? []) !==
+          JSON.stringify(expected)
+      )
+        throw new Error(
+          "Metrics changed while editing. Reopen the editor to use the latest configuration.",
+        );
+      for (const clause of clauses) metricCompile(clause);
+      setQuery((q) => ({
+        ...q,
+        aggregations: JSON.parse(
+          JSON.stringify(clauses),
+        ) as AggregationClause[],
+      }));
+    },
+    [setQuery, metricCompile],
+  );
 
   const canUndo = undoStack.current.length > 0;
   const canRedo = redoStack.current.length > 0;
@@ -499,19 +830,38 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
   }, []);
 
   // ---- intent helpers (keep offset/url/storage coherent) ----
-  const patch = useCallback((p: Partial<QueryState>) => setQuery((prev) => ({ ...prev, ...p })), [setQuery]);
+  const patch = useCallback(
+    (p: Partial<QueryState>) => setQuery((prev) => ({ ...prev, ...p })),
+    [setQuery],
+  );
 
-  const addFilter = useCallback((clause: WhereClause) => setQuery((q) => ({ ...q, offset: 0, where: [...q.where, clause] })), [setQuery]);
+  const addFilter = useCallback(
+    (clause: WhereClause) =>
+      setQuery((q) => ({ ...q, offset: 0, where: [...q.where, clause] })),
+    [setQuery],
+  );
   const updateFilter = useCallback(
     (index: number, clause: WhereClause) =>
-      setQuery((q) => ({ ...q, offset: 0, where: q.where.map((t, i) => (i === index ? clause : t)) })),
+      setQuery((q) => ({
+        ...q,
+        offset: 0,
+        where: q.where.map((t, i) => (i === index ? clause : t)),
+      })),
     [setQuery],
   );
   const removeFilter = useCallback(
-    (index: number) => setQuery((q) => ({ ...q, offset: 0, where: q.where.filter((_, i) => i !== index) })),
+    (index: number) =>
+      setQuery((q) => ({
+        ...q,
+        offset: 0,
+        where: q.where.filter((_, i) => i !== index),
+      })),
     [setQuery],
   );
-  const clearFilters = useCallback(() => setQuery((q) => ({ ...q, offset: 0, where: [] })), [setQuery]);
+  const clearFilters = useCallback(
+    () => setQuery((q) => ({ ...q, offset: 0, where: [] })),
+    [setQuery],
+  );
 
   const updatePredicate = useCallback<QueryTableApi<Row>["updatePredicate"]>(
     (termIndex, predIndex, clause) =>
@@ -520,7 +870,10 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
         offset: 0,
         where: q.where.map((term, i) => {
           if (i !== termIndex) return term;
-          if (isOrGroup(term)) return { any: term.any.map((c, j) => (j === predIndex ? clause : c)) };
+          if (isOrGroup(term))
+            return {
+              any: term.any.map((c, j) => (j === predIndex ? clause : c)),
+            };
           return clause;
         }),
       })),
@@ -561,7 +914,10 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
         offset: 0,
         where: q.where.map((term, i) => {
           if (i !== termIndex) return term;
-          if (isOrGroup(term)) return { any: term.any.map((c, j) => (j === predIndex ? negateOne(c) : c)) };
+          if (isOrGroup(term))
+            return {
+              any: term.any.map((c, j) => (j === predIndex ? negateOne(c) : c)),
+            };
           return negateOne(term);
         }),
       })),
@@ -585,7 +941,9 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
         const source = q.where[sourceIndex];
         const target = q.where[targetIndex];
         if (!source || !target) return q;
-        const merged: WhereTerm = { any: [...predicatesOf(target), ...predicatesOf(source)] };
+        const merged: WhereTerm = {
+          any: [...predicatesOf(target), ...predicatesOf(source)],
+        };
         const where: WhereTerm[] = [];
         q.where.forEach((term, i) => {
           if (i === sourceIndex) return; // remove the dragged term
@@ -595,14 +953,25 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
       }),
     [setQuery],
   );
-  const resetAll = useCallback(() => setQuery(() => cloneQueryState(defaults)), [setQuery, defaults]);
+  const resetAll = useCallback(
+    () => setQuery(() => cloneQueryState(defaults)),
+    [setQuery, defaults],
+  );
 
   // ---- aggregation metric mutators (don't touch paging — scope is the whole set) ----
   const addAggregation = useCallback<AggregationsApi["add"]>(
     (partial) => {
       const id = `a${nowRef.current()}-${aggIdRef.current++}`;
-      const clause: AggregationClause = { id, op: "count", groupBy: [], ...partial };
-      setQuery((q) => ({ ...q, aggregations: [...(q.aggregations ?? []), clause] }));
+      const clause: AggregationClause = {
+        id,
+        op: "count",
+        groupBy: [],
+        ...partial,
+      };
+      setQuery((q) => ({
+        ...q,
+        aggregations: [...(q.aggregations ?? []), clause],
+      }));
       return id;
     },
     [setQuery],
@@ -611,7 +980,9 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
     (id, patch) =>
       setQuery((q) => ({
         ...q,
-        aggregations: (q.aggregations ?? []).map((a) => (a.id === id ? mergeAggregation(a, patch) : a)),
+        aggregations: (q.aggregations ?? []).map((a) =>
+          a.id === id ? mergeAggregation(a, patch) : a,
+        ),
       })),
     [setQuery],
   );
@@ -629,7 +1000,11 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
     [setQuery],
   );
   const removeAggregation = useCallback<AggregationsApi["remove"]>(
-    (id) => setQuery((q) => ({ ...q, aggregations: (q.aggregations ?? []).filter((a) => a.id !== id) })),
+    (id) =>
+      setQuery((q) => ({
+        ...q,
+        aggregations: (q.aggregations ?? []).filter((a) => a.id !== id),
+      })),
     [setQuery],
   );
   const clearAggregations = useCallback<AggregationsApi["clear"]>(
@@ -637,17 +1012,34 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
     [setQuery],
   );
 
-  const setSort = useCallback((orderBy: OrderByClause[]) => setQuery((q) => ({ ...q, offset: 0, orderBy })), [setQuery]);
+  const setSort = useCallback(
+    (orderBy: OrderByClause[]) =>
+      setQuery((q) => ({ ...q, offset: 0, orderBy })),
+    [setQuery],
+  );
   const toggleSort = useCallback(
     (field: string, additive = false) =>
-      setQuery((q) => ({ ...q, offset: 0, orderBy: nextOrderBy(q.orderBy, field, additive) })),
+      setQuery((q) => ({
+        ...q,
+        offset: 0,
+        orderBy: nextOrderBy(q.orderBy, field, additive),
+      })),
     [setQuery],
   );
 
-  const setLimit = useCallback((limit: number) => patch({ limit, offset: 0 }), [patch]);
+  const setLimit = useCallback(
+    (limit: number) => patch({ limit, offset: 0 }),
+    [patch],
+  );
   const setOffset = useCallback((offset: number) => patch({ offset }), [patch]);
-  const nextPage = useCallback(() => setQuery((q) => ({ ...q, offset: q.offset + q.limit })), [setQuery]);
-  const prevPage = useCallback(() => setQuery((q) => ({ ...q, offset: Math.max(0, q.offset - q.limit) })), [setQuery]);
+  const nextPage = useCallback(
+    () => setQuery((q) => ({ ...q, offset: q.offset + q.limit })),
+    [setQuery],
+  );
+  const prevPage = useCallback(
+    () => setQuery((q) => ({ ...q, offset: Math.max(0, q.offset - q.limit) })),
+    [setQuery],
+  );
 
   const filterValues = useCallback(
     async (field: string, search: string): Promise<DistinctValuesResult> => {
@@ -711,7 +1103,10 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
   const stopAutoRefresh = useCallback(() => setAutoRefreshStatus(null), []);
   const startAutoRefresh = useCallback(
     ({ frequencyMs, turnOffAfterMs }: AutoRefreshConfig) => {
-      const pollCount = frequencyMs > 0 && turnOffAfterMs > 0 ? Math.floor(turnOffAfterMs / frequencyMs) : 0;
+      const pollCount =
+        frequencyMs > 0 && turnOffAfterMs > 0
+          ? Math.floor(turnOffAfterMs / frequencyMs)
+          : 0;
       if (pollCount < 1 || pollCount > MAX_AUTO_REFRESH_POLLS) {
         throw new Error("Auto-refresh must schedule between 1 and 1000 polls.");
       }
@@ -737,7 +1132,9 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
 
     const tick = () => {
       if (nowRef.current() >= autoRefreshStopsAt) {
-        setAutoRefreshStatus((current) => (current?.stopsAt === autoRefreshStopsAt ? null : current));
+        setAutoRefreshStatus((current) =>
+          current?.stopsAt === autoRefreshStopsAt ? null : current,
+        );
         return;
       }
 
@@ -751,7 +1148,10 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
 
     const interval = setInterval(tick, autoRefreshFrequencyMs);
     const timeout = setTimeout(
-      () => setAutoRefreshStatus((current) => (current?.stopsAt === autoRefreshStopsAt ? null : current)),
+      () =>
+        setAutoRefreshStatus((current) =>
+          current?.stopsAt === autoRefreshStopsAt ? null : current,
+        ),
       Math.max(0, autoRefreshStopsAt - nowRef.current()),
     );
 
@@ -772,14 +1172,26 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
 
   const refreshRow = useCallback(
     async (id: RowId) => {
+      if (opts.computedExecution && transport?.fetchRowsV2) {
+        // Base rows and computed sidecars belong to one committed page. A
+        // single-row fetch cannot replace either independently, and changes
+        // to a computed sort may also change page membership.
+        refresh();
+        return;
+      }
       if (!transport?.fetchRow) return;
       const updated = await transport.fetchRow(id);
-      setRows((prev) => prev.map((r) => (rowId(r) === id ? updated ?? r : r)));
+      setRows((prev) =>
+        prev.map((r) => (rowId(r) === id ? (updated ?? r) : r)),
+      );
     },
-    [transport, rowId],
+    [transport, rowId, opts.computedExecution, refresh],
   );
 
-  const visibleFields = useMemo(() => selectedFields(displaySchema, query), [displaySchema, query]);
+  const visibleFields = useMemo(
+    () => selectedFields(displaySchema, query),
+    [displaySchema, query],
+  );
 
   const aggregations = useMemo<AggregationsApi>(
     () => ({
@@ -792,6 +1204,10 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
       move: moveAggregation,
       remove: removeAggregation,
       clear: clearAggregations,
+      preview: aggState.preview,
+      replace: replaceAggregations,
+      compile: metricCompile,
+      contextKey: `${dataVersion}:${pageContext}:${pageReady}:${JSON.stringify(query.where)}`,
     }),
     [
       query.aggregations,
@@ -803,6 +1219,13 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
       moveAggregation,
       removeAggregation,
       clearAggregations,
+      aggState.preview,
+      replaceAggregations,
+      metricCompile,
+      pageContext,
+      pageReady,
+      dataVersion,
+      query.where,
     ],
   );
 
@@ -814,6 +1237,7 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
     total,
     loading,
     error,
+    requestActivity,
     canUndo,
     canRedo,
     undo,
@@ -855,11 +1279,16 @@ export function useQueryTable<Row>(opts: UseQueryTableOptions<Row>): QueryTableA
  *   - plain click on another column → make it the only sort (desc)
  *   - shift-click a new column → append it (desc) as a secondary term
  *   - shift-click an existing term → cycle desc → asc → remove */
-function nextOrderBy(existing: OrderByClause[], field: string, additive: boolean): OrderByClause[] {
+function nextOrderBy(
+  existing: OrderByClause[],
+  field: string,
+  additive: boolean,
+): OrderByClause[] {
   const i = existing.findIndex((s) => s.field === field);
   if (!additive) {
     if (i === 0 && existing.length === 1) {
-      const flipped: "asc" | "desc" = existing[0]!.dir === "desc" ? "asc" : "desc";
+      const flipped: "asc" | "desc" =
+        existing[0]!.dir === "desc" ? "asc" : "desc";
       return [{ ...existing[0]!, dir: flipped }];
     }
     return [{ field, dir: "desc" }];

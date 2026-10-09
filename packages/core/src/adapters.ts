@@ -1,3 +1,5 @@
+import type { ServerQueryV2, FetchRowsResultV2 } from "./execution";
+import type { MetricQuery, MetricCapabilities } from "./metricTypes";
 // adapters.ts — the pluggable seams. Everything project-specific is injected
 // here so the package core stays generic.
 //
@@ -47,6 +49,9 @@ export interface FieldStats {
 }
 
 export interface Transport<Row = any> {
+  fetchRowsV2?(query: ServerQueryV2, signal?: AbortSignal): Promise<FetchRowsResultV2<Row>>;
+  metricCapabilities?: MetricCapabilities;
+  fetchMetrics?(query: MetricQuery, signal?: AbortSignal): Promise<AggregationResult>;
   /** Run a server query. The only required method — a purely client-side table
    *  can omit a Transport entirely and rely on applyQuery over local rows. */
   fetchRows(query: ServerQuery, signal?: AbortSignal): Promise<FetchRowsResult<Row>>;

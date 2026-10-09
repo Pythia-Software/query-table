@@ -1,0 +1,112 @@
+.qt-postgres-demo {
+  width: min(1480px, calc(100% - 48px));
+}
+.qt-demo-latency {
+  border: 1px solid var(--qt-border);
+  background: var(--qt-bg, #fff);
+  border-radius: 9px;
+  padding: 16px;
+  margin: 18px 0;
+}
+.qt-demo-latency-inputs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: end;
+}
+.qt-demo-latency label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+}
+.qt-demo-latency input {
+  width: 110px;
+}
+.qt-demo-latency input,
+.qt-demo-latency select {
+  box-sizing: border-box;
+  border: 1px solid var(--qt-border);
+  border-radius: 5px;
+  background: white;
+  font-size: 13px;
+  padding: 8px;
+}
+.qt-demo-latency button,
+.qt-demo-connection-error button {
+  padding: 8px 12px;
+  background: white;
+  border: 1px solid var(--qt-border);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.qt-demo-latency p,
+.qt-demo-refresh-note {
+  margin: 12px 0 0;
+  color: var(--qt-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.qt-demo-latency .qt-demo-live-status {
+  color: var(--qt-text);
+  font-weight: 500;
+}
+.qt-demo-connection-error {
+  border: 1px solid #e7adb1;
+  background: #fff2f2;
+  padding: 12px;
+  border-radius: 6px;
+}
+.qt-demo-requests {
+  margin: 16px 0;
+  background: white;
+  border: 1px solid var(--qt-border);
+  border-radius: 7px;
+}
+.qt-demo-requests summary {
+  padding: 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.qt-demo-request-table {
+  overflow: auto;
+  max-height: 240px;
+}
+.qt-demo-requests table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 11px;
+}
+.qt-demo-requests th,
+.qt-demo-requests td {
+  padding: 7px 12px;
+  text-align: left;
+  border-top: 1px solid var(--qt-border);
+  white-space: nowrap;
+}
+.qt-demo-requests td:nth-child(2) {
+  max-width: 340px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.qt-demo-requests th {
+  background: #f6f8fb;
+  font-weight: 600;
+}
+.qt-demo-requests [data-status="pending"] {
+  color: #3262b9;
+}
+.qt-demo-requests [data-status="error"] {
+  color: #a32539;
+}
+.qt-demo-requests [data-status="aborted"] {
+  color: #8b6b2e;
+}
+.qt-demo-backend-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  justify-content: space-between;
+  margin-top: 24px;
+  color: var(--qt-muted);
+  font-size: 12px;
+}

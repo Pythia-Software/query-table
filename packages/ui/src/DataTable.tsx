@@ -9,7 +9,7 @@ import { Icon } from "./Icon";
 // schema-driven table so adoption is mechanical.
 
 import { isComputedCellError } from "@pythia-software/query-table-core";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type SetStateAction } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type SetStateAction } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { OrderByClause, QueryState, FieldDef, RowId, SelectColumn, WhereClause } from "@pythia-software/query-table-core";
 import { isSortable, readFieldValue } from "@pythia-software/query-table-core";
@@ -115,7 +115,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
 
   const [menu, setMenu] = useState<MenuState<Row> | null>(null);
   const [selectionColumnWidth, setSelectionColumnWidth] = useState(DEFAULT_SELECTION_WIDTH);
-  const [tableColumnOrder, setTableColumnOrder] = useState<string[]>([]);
+  const [selectionColumnIndex, setSelectionColumnIndex] = useState(0);
   const [copiedCellKey, setCopiedCellKey] = useState<string | null>(null);
   const [headerHeight, setHeaderHeight] = useState(0);
   const [showHorizontalCue, setShowHorizontalCue] = useState(false);
@@ -460,7 +460,8 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     if (withoutDragged.length === tableColumnNames.length) return; // `from` not visible
     const at = Math.max(0, Math.min(overIndex, withoutDragged.length));
     withoutDragged.splice(at, 0, from);
-    setTableColumnOrder(withoutDragged);
+    const nextSelectionIndex = withoutDragged.indexOf(SELECTION_COLUMN);
+    if (nextSelectionIndex >= 0) setSelectionColumnIndex(nextSelectionIndex);
     const nextFieldOrder = withoutDragged.filter((name) => name !== SELECTION_COLUMN);
     if (!sameOrder(nextFieldOrder, fieldNames)) {
       onQueryChange({ ...query, select: reorderSelect(query.select, fields, nextFieldOrder) });
@@ -471,12 +472,13 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
   const fieldNames = useMemo(() => fields.map((f) => f.name), [fields]);
   const tableColumnNames = useMemo(() => {
     if (!showSel) return fieldNames;
-    const defaultOrder = [SELECTION_COLUMN, ...fieldNames];
-    const valid = new Set(defaultOrder);
-    const kept = tableColumnOrder.filter((name) => valid.has(name));
-    const missing = defaultOrder.filter((name) => !kept.includes(name));
-    return [...kept, ...missing];
-  }, [fieldNames, showSel, tableColumnOrder]);
+    // QueryState.select owns field order on every surface. Keep only the
+    // auxiliary selection column's position locally, so chip edits/undo cannot
+    // be shadowed by a stale header order.
+    const order = [...fieldNames];
+    order.splice(Math.min(selectionColumnIndex, order.length), 0, SELECTION_COLUMN);
+    return order;
+  }, [fieldNames, showSel, selectionColumnIndex]);
   const dragSource = columnDrag.source;
   // While dragging, render the WHOLE column (header + body cells + width) in the
   // order a drop would commit: the dragged column stays MOUNTED (removing the
@@ -484,6 +486,25 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
   // hovered slot and is dimmed. Because the rendered order IS the would-be
   // result, the live preview can never disagree with where the drop lands.
   const renderedColumnNames = useMemo(() => columnDrag.preview(tableColumnNames), [columnDrag, tableColumnNames]);
+  const dragPreviewRef = useRef<string[] | null>(null);
+  const dropRevisionRef = useRef(columnDrag.dropRevision);
+  // A drop handled by chips also commits the full table preview's auxiliary
+  // position. Cancelled drags must never move selection, even when fields match.
+  const useCommitLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
+  useCommitLayoutEffect(() => {
+    if (columnDrag.active) {
+      dragPreviewRef.current = renderedColumnNames;
+      return;
+    }
+    const confirmed = dropRevisionRef.current !== columnDrag.dropRevision;
+    dropRevisionRef.current = columnDrag.dropRevision;
+    const preview = dragPreviewRef.current;
+    dragPreviewRef.current = null;
+    if (!confirmed || !preview || !sameOrder(preview.filter((name) => name !== SELECTION_COLUMN), fieldNames)) return;
+    const index = preview.indexOf(SELECTION_COLUMN);
+    if (index >= 0) setSelectionColumnIndex(index);
+  }, [columnDrag.active, columnDrag.dropRevision, renderedColumnNames, fieldNames]);
+
 
   // ---- selection ----
   function toggleHeader() {
@@ -664,7 +685,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                           e.preventDefault();
                           return;
                         }
-                        columnDrag.start(name, tableColumnNames.indexOf(name));
+                        columnDrag.start(name, tableColumnNames.indexOf(name), tableColumnNames);
                         e.dataTransfer.effectAllowed = "move";
                         e.dataTransfer.setData("text/plain", name);
                       }}
@@ -678,7 +699,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                           if (next >= 0) {
                             const rect = e.currentTarget.getBoundingClientRect();
                             if (e.clientX > rect.left + rect.width / 2) next += 1;
-                            columnDrag.over(next);
+                            columnDrag.over(next, tableColumnNames);
                           }
                         }
                       }}
@@ -686,8 +707,8 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                         e.preventDefault();
                         e.dataTransfer.dropEffect = "move";
                         const from = columnDrag.source || e.dataTransfer.getData("text/plain");
-                        if (from && columnDrag.overIndex != null) reorderByIndex(from, columnDrag.overIndex);
-                        columnDrag.end();
+                        if (from && columnDrag.overIndex != null) reorderByIndex(from, renderedColumnNames.indexOf(from));
+                        columnDrag.end(Boolean(from && columnDrag.overIndex != null));
                       }}
                       onDragEnd={() => columnDrag.end()}
                     >
@@ -728,7 +749,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                         e.preventDefault();
                         return;
                       }
-                      columnDrag.start(f.name, tableColumnNames.indexOf(f.name));
+                      columnDrag.start(f.name, tableColumnNames.indexOf(f.name), tableColumnNames);
                       e.dataTransfer.effectAllowed = "move";
                       e.dataTransfer.setData("text/plain", f.name);
                     }}
@@ -746,7 +767,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                           // so a column can be moved into the last slot.
                           const rect = e.currentTarget.getBoundingClientRect();
                           if (e.clientX > rect.left + rect.width / 2) next += 1;
-                          columnDrag.over(next);
+                          columnDrag.over(next, tableColumnNames);
                         }
                       }
                     }}
@@ -754,8 +775,8 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                       e.preventDefault();
                       e.dataTransfer.dropEffect = "move";
                       const from = columnDrag.source || e.dataTransfer.getData("text/plain");
-                      if (from && columnDrag.overIndex != null) reorderByIndex(from, columnDrag.overIndex);
-                      columnDrag.end();
+                      if (from && columnDrag.overIndex != null) reorderByIndex(from, renderedColumnNames.indexOf(from));
+                      columnDrag.end(Boolean(from && columnDrag.overIndex != null));
                     }}
                     onDragEnd={() => columnDrag.end()}
                   >

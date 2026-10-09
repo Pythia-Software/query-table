@@ -1,0 +1,214 @@
+{
+  "name": "postgres-runs",
+  "version": 1,
+  "idField": "id",
+  "defaultLimit": 100,
+  "defaultSort": [
+    {
+      "field": "enqueued_at",
+      "dir": "desc",
+      "nulls": "last"
+    }
+  ],
+  "tiebreakSort": [
+    {
+      "field": "id",
+      "dir": "asc"
+    }
+  ],
+  "defaultSelect": [
+    {
+      "field": "id"
+    },
+    {
+      "field": "job_name"
+    },
+    {
+      "field": "platform"
+    },
+    {
+      "field": "overall"
+    },
+    {
+      "field": "total_ms"
+    },
+    {
+      "field": "worker"
+    },
+    {
+      "field": "enqueued_at"
+    }
+  ],
+  "fields": [
+    {
+      "name": "id",
+      "label": "Run",
+      "type": "number",
+      "group": "Runs",
+      "bindings": {
+        "postgres": {
+          "expr": "r.id::double precision",
+          "expressionNumeric": true
+        }
+      },
+      "aggregate": {
+        "groupable": false
+      }
+    },
+    {
+      "name": "job_name",
+      "label": "Job",
+      "type": "text",
+      "group": "Runs",
+      "bindings": {
+        "postgres": {
+          "expr": "r.job_name"
+        }
+      }
+    },
+    {
+      "name": "platform",
+      "label": "Platform",
+      "type": "enum",
+      "group": "Runs",
+      "bindings": {
+        "postgres": {
+          "expr": "r.platform"
+        }
+      },
+      "filter": {
+        "values": {
+          "source": "static",
+          "options": ["linux", "macos", "windows"]
+        }
+      }
+    },
+    {
+      "name": "overall",
+      "label": "Result",
+      "type": "enum",
+      "group": "Runs",
+      "bindings": {
+        "postgres": {
+          "expr": "r.overall"
+        }
+      },
+      "filter": {
+        "values": {
+          "source": "static",
+          "options": ["PASS", "FAIL", "DIFFERENCES"]
+        }
+      }
+    },
+    {
+      "name": "total_ms",
+      "label": "Duration",
+      "type": "number",
+      "group": "Runs",
+      "bindings": {
+        "postgres": {
+          "expr": "r.total_ms",
+          "expressionNumeric": true
+        }
+      },
+      "render": "duration_ms",
+      "select": {
+        "align": "right"
+      }
+    },
+    {
+      "name": "queue_ms",
+      "label": "Queue wait",
+      "type": "number",
+      "group": "Runs",
+      "bindings": {
+        "postgres": {
+          "expr": "r.queue_ms",
+          "expressionNumeric": true
+        }
+      },
+      "render": "duration_ms",
+      "select": {
+        "align": "right"
+      }
+    },
+    {
+      "name": "input_mb",
+      "label": "Input MB",
+      "type": "number",
+      "group": "Runs",
+      "bindings": {
+        "postgres": {
+          "expr": "r.input_mb",
+          "expressionNumeric": true
+        }
+      },
+      "select": {
+        "align": "right"
+      }
+    },
+    {
+      "name": "worker",
+      "label": "Worker",
+      "type": "text",
+      "group": "Runs",
+      "bindings": {
+        "postgres": {
+          "expr": "r.worker"
+        }
+      }
+    },
+    {
+      "name": "run_day",
+      "label": "Day",
+      "type": "text",
+      "group": "Runs",
+      "bindings": {
+        "postgres": {
+          "expr": "r.run_day"
+        }
+      }
+    },
+    {
+      "name": "hour",
+      "label": "Hour (UTC)",
+      "type": "number",
+      "group": "Runs",
+      "bindings": {
+        "postgres": {
+          "expr": "r.hour::double precision",
+          "expressionNumeric": true
+        }
+      },
+      "aggregate": {
+        "groupable": true
+      }
+    },
+    {
+      "name": "enqueued_at",
+      "label": "Enqueued",
+      "type": "datetime",
+      "group": "Runs",
+      "bindings": {
+        "postgres": {
+          "expr": "r.enqueued_at"
+        }
+      },
+      "render": "datetime",
+      "aggregate": {
+        "groupable": false
+      }
+    },
+    {
+      "name": "is_starred",
+      "label": "Priority",
+      "type": "bool",
+      "group": "Runs",
+      "bindings": {
+        "postgres": {
+          "expr": "r.is_starred"
+        }
+      }
+    }
+  ]
+}

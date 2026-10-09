@@ -35,9 +35,10 @@ let root: Root;
 let container: HTMLDivElement;
 let api: QueryTableApi<Row>;
 
-function Fixture({ running = false, total }: { running?: boolean; total?: number }) {
-  api = useQueryTable<Row>({ schema, initialQuery, clientRows: [], debounceMs: 0 });
-  return createElement(QueryBuilder<Row>, { api, fields: schema.fields, total: total ?? api.total, running });
+const emptyRows:Row[]=[];
+function Fixture({ running = false, total, filterValues }: { running?: boolean; total?: number; filterValues?: QueryTableApi<Row>["filterValues"] }) {
+  api = useQueryTable<Row>({ schema, initialQuery, clientRows: emptyRows, debounceMs: 0 });
+  return createElement(QueryBuilder<Row>, { api: filterValues ? { ...api, filterValues } : api, fields: schema.fields, total: total ?? api.total, running });
 }
 
 beforeEach(async () => {
@@ -109,7 +110,7 @@ it("omits placeholders for empty filters and metrics", async () => {
   expect(container.querySelector(".qt-qb-row--filters .qt-qb-hint")).toBeNull();
   expect(container.querySelector(".qt-qb-row--metrics .qt-qb-hint")).toBeNull();
   expect(container.querySelector('[aria-label="Add filter"]')).not.toBeNull();
-  expect(container.querySelector('[aria-label="Add metric"]')).not.toBeNull();
+  expect(container.querySelector('[aria-label="Edit metrics"]')).not.toBeNull();
 });
 
 it("renders a smaller save star without reducing its button target", () => {
@@ -240,34 +241,22 @@ it("opens a new sort directly and edits direction, null placement, and optional 
   expect(document.querySelector('[aria-modal="true"]')).toBeNull();
 });
 
-it("opens new metrics immediately and keeps function, measure, and grouping in sync", async () => {
-  await act(async () => container.querySelector<HTMLButtonElement>(".qt-qb-row--metrics .qt-add")!.click());
+it("opens the metrics workbench and commits a complete draft with one undo", async () => {
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Edit metrics"]')!.click());
   expect(document.querySelectorAll('[aria-modal="true"]')).toHaveLength(1);
+  await act(async () => Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(b=>b.textContent==="+ Create metric")!.click());
+  await changeSelect('[aria-label="Measure field"]', "duration");
   await changeSelect('[aria-label="Aggregation function"]', "avg");
-  await changeSelect('[aria-label="Metric measure"]', "duration");
-  const addGroup = document.querySelector<HTMLButtonElement>(".qt-chip-agg-add")!;
-  expect(addGroup.textContent).toBe("group");
-  expect(addGroup.querySelector('[data-icon="add"]')).not.toBeNull();
-  await act(async () => addGroup.click());
-  expect(document.querySelectorAll('[aria-modal="true"]')).toHaveLength(2);
-  const status = Array.from(document.querySelectorAll<HTMLButtonElement>(".qt-picker-item")).find((button) => button.querySelector(".qt-picker-label")?.textContent === "Status")!;
-  await act(async () => status.click());
-  expect(document.querySelectorAll('[aria-modal="true"]')).toHaveLength(1);
-  expect(api.aggregations.clauses[0]).toMatchObject({ op: "avg", field: "duration", groupBy: ["status"] });
-  expect(document.querySelector(".qt-mobile-form-hint")!.textContent).toContain("all filtered rows");
-  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Remove Status grouping"]')!.click());
-  expect(api.aggregations.clauses[0]!.groupBy).toEqual([]);
-  await changeSelect('[aria-label="Aggregation function"]', "count_distinct");
-  await changeSelect('[aria-label="Metric measure"]', "name");
-  await changeSelect('[aria-label="Aggregation function"]', "sum");
-  expect(api.aggregations.clauses[0]).toMatchObject({ op: "sum", groupBy: [] });
-  expect(api.aggregations.clauses[0]!.field).toBeUndefined();
-  await act(async () => document.querySelector<HTMLButtonElement>(".qt-mobile-form-remove")!.click());
+  await changeSelect('[aria-label="Add grouping"]', "status");
   expect(api.aggregations.clauses).toEqual([]);
+  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,350));});
+  const apply=Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(b=>b.textContent==="Apply metrics")!;
+  expect(apply.disabled).toBe(false);
+  await act(async()=>apply.click());
+  expect(api.aggregations.clauses[0]).toMatchObject({op:"avg",field:"duration",groupBy:["status"]});
   expect(document.querySelector('[aria-modal="true"]')).toBeNull();
-  await act(async () => api.undo());
-  expect(api.aggregations.clauses).toHaveLength(1);
-  expect(document.querySelector('[aria-modal="true"]')).toBeNull();
+  await act(async()=>api.undo());
+  expect(api.aggregations.clauses).toEqual([]);
 });
 
 it("omits duplicate single-filter headings and hides value controls for nullary conditions", async () => {
@@ -281,14 +270,14 @@ it("omits duplicate single-filter headings and hides value controls for nullary 
   expect(document.querySelector('[aria-modal="true"]')).toBeNull();
 });
 
-it("disables filter, sort, and metric summaries while a query runs", async () => {
+it("disables row clauses while a query runs and keeps metrics authoring available", async () => {
   await act(async () => {
     api.setSort([{ field: "name", dir: "asc" }]);
     api.aggregations.add();
   });
   await act(async () => root.render(createElement(Fixture, { running: true })));
   const summaries = container.querySelectorAll<HTMLButtonElement>(".qt-mobile-filter");
-  expect(summaries).toHaveLength(4);
+  expect(summaries).toHaveLength(3);
   for (const summary of summaries) {
     expect(summary.disabled).toBe(true);
     await act(async () => summary.click());
@@ -298,6 +287,7 @@ it("disables filter, sort, and metric summaries while a query runs", async () =>
   expect(api.query.where).toHaveLength(2);
   expect(api.query.orderBy).toHaveLength(1);
   expect(api.aggregations.clauses).toHaveLength(1);
+  expect(container.querySelector<HTMLButtonElement>('[aria-label="Edit metrics"]')!.disabled).toBe(false);
   expect(document.querySelector('[aria-modal="true"]')).toBeNull();
 });
 
@@ -337,8 +327,10 @@ it("deletes only the tapped sort or metric while retaining the other clauses", a
   await act(async () => container.querySelector<HTMLButtonElement>(".qt-qb-row--sort .qt-mobile-filter")!.click());
   await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Remove Name sort"]')!.click());
   expect(api.query.orderBy).toEqual([{ field: "status", dir: "desc" }]);
-  await act(async () => container.querySelector<HTMLButtonElement>(".qt-qb-row--metrics .qt-mobile-filter")!.click());
-  await act(async () => document.querySelector<HTMLButtonElement>(".qt-mobile-form-remove")!.click());
+  await act(async () => container.querySelector<HTMLButtonElement>(".qt-qb-row--metrics .qt-chip")!.click());
+  await act(async () => Array.from(document.querySelectorAll<HTMLButtonElement>('.qt-metric-library .qt-metric-actions button')).find(b=>b.textContent==="Remove")!.click());
+  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,350));});
+  await act(async()=>Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(b=>b.textContent==="Apply metrics")!.click());
   expect(api.aggregations.clauses).toHaveLength(1);
   expect(api.aggregations.clauses[0]!.label).toBe("Second metric");
   expect(api.query.where).toEqual(initialQuery.where);
@@ -363,8 +355,24 @@ it("reorders columns, sort priority, and metrics directly without Order buttons 
   expect(api.query.select.map((column) => column.field)).toEqual(["status", "name"]);
   await reorder("sort", "ArrowDown");
   expect(api.query.orderBy.map((term) => term.field)).toEqual(["status", "name"]);
-  await reorder("metrics", "ArrowDown");
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Edit metrics"]')!.click());
+  await act(async()=>document.querySelector('.qt-metric-library .qt-reorder-handle')!.dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowDown",bubbles:true})));
+  expect(api.aggregations.clauses.map(c=>c.label)).toEqual(["First","Second"]);
+  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,350));});
+  await act(async()=>Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(b=>b.textContent==="Apply metrics")!.click());
   expect(api.aggregations.clauses.map((clause) => clause.label)).toEqual(["Second", "First"]);
   expect(document.querySelector('[aria-modal="true"]')).toBeNull();
   expect(api.query.where).toEqual(initialQuery.where);
 });
+
+ it("does not refetch null metadata when a parent rerenders with a new API object", async () => {
+  const filterValues = vi.fn(async () => ({ values: [], hasMore: false, hasNull: true }));
+  await act(async () => api.setQuery({ ...api.query, orderBy: [{ field: "duration", dir: "asc" }] }));
+  await act(async () => root.render(createElement(Fixture, { filterValues })));
+  const calls = filterValues.mock.calls.length;
+  expect(calls).toBeGreaterThan(0);
+  for (let i = 0; i < 3; i++) {
+    await act(async () => root.render(createElement(Fixture, { filterValues, total: i, running: i % 2 === 0 })));
+  }
+  expect(filterValues).toHaveBeenCalledTimes(calls);
+ });

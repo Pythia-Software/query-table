@@ -49,6 +49,7 @@ export function aggOpAllowedForType(type: FieldType, op: AggOp): boolean {
  *  to aggregate); derived/render-only columns are never pushed to the server. An
  *  explicit `aggregate.measure` wins over the type default. */
 export function isMeasurable(field: FieldDef): boolean {
+  if (field.source.kind === "derived" && field.source.computedId) return field.aggregate?.measure === true;
   if (field.source.kind !== "backend") return false;
   if (field.aggregate?.measure != null) return field.aggregate.measure;
   return aggOpsForField(field).length > 0;
@@ -58,6 +59,7 @@ export function isMeasurable(field: FieldDef): boolean {
  *  types (enum/text/bool); numbers/datetimes need bucketing (out of scope) so they
  *  default off, but `aggregate.groupable: true` opts any backend field in. */
 export function isGroupable(field: FieldDef): boolean {
+  if (field.source.kind === "derived" && field.source.computedId) return field.aggregate?.groupable === true;
   if (field.source.kind !== "backend") return false;
   if (field.aggregate?.groupable != null) return field.aggregate.groupable;
   return field.type === "enum" || field.type === "text" || field.type === "bool";

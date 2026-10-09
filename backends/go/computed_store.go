@@ -1,7 +1,7 @@
 package querytable
 
 // Reusable computed definitions are metadata, never SQL expressions. Formula
-// evaluation remains in the browser. This optional PostgreSQL repository uses
+// execution requires the separately negotiated server profile. This optional PostgreSQL repository uses
 // database/sql; applications supply their driver, connection, and authorization.
 import (
 	"context"

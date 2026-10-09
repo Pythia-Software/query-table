@@ -1,3 +1,4 @@
+import type { MetricKey, MetricValue, MetricScope, MetricDistributionResult, MetricDiagnostic } from "./metricTypes";
 // encode.ts — URL serialization + the server-bound query subset.
 //
 // Two distinct serializations, deliberately kept apart:
@@ -199,6 +200,7 @@ function termIsPushdown<Row>(
  *  metrics describe every matching row, not the visible page. Mirrors the Go
  *  AggSpec list. */
 export interface AggregationRequest {
+  diagnostics?: MetricDiagnostic[];
   where: WhereTerm[];
   aggregations: AggregationClause[];
 }
@@ -206,17 +208,31 @@ export interface AggregationRequest {
 /** One group's result. `keys` has one entry per AggregationClause.groupBy field,
  *  in axis order (`[]` for a grand total); a null key is the NULL/empty bucket. */
 export interface AggregationBucket {
-  keys: (string | null)[];
+  keys: MetricKey[];
+  error?: string;
+  y?: MetricValue;
+  yError?: string;
+  components?: {expression:string; value:MetricValue}[];
+  nullCount?: number;
+  inputErrorCount?: number;
+  distribution?: MetricDistributionResult;
   /** The metric: a number for count/sum/avg, or the column's value for min/max
    *  (which may be a string for text/datetime). null when undefined (e.g. avg of
    *  an all-null column). */
-  value: number | string | null;
+  value: MetricValue;
   /** COUNT(*) of rows in the group — always present, even when `value` isn't a
    *  count, so the panel can show group sizes / shares. */
   count: number;
 }
 
 export interface AggregationResultEntry {
+  /** Exact omitted additive quantity; unavailable for ratios/averages/distinct. */
+  other?: AggregationBucket;
+  error?: string;
+  scope?: MetricScope;
+  processedRows?: number;
+  groupCount?: number;
+  coverage?: "exact" | "partial";
   /** Echoes AggregationClause.id. */
   id: string;
   buckets: AggregationBucket[];
@@ -232,7 +248,9 @@ export interface AggregationResult {
  *  all server-capable backend columns. Aggregations referencing a derived /
  *  unknown field are dropped — the server has no SQL for them. */
 export function toAggregationQuery<Row>(q: QueryState, schema: FieldSchema<Row>): AggregationRequest {
+  const suppliedPredicateCount = q.where.reduce((n,t)=>n+predicatesOf(t).length,0);
   q = normalizeQueryState(q);
+  if (q.aggregations?.some(a => a.diagnostics?.length || a.expression !== undefined || a.expressionY !== undefined || a.distribution || a.scope === "shownRows" || a.sort?.length || a.groupLimit)) throw new Error("Metric definition requires the version 2 metric transport.");
   const byName = indexFields(schema);
   const resolveField = (name: string) => resolveFieldName(schema, name) ?? name;
 
@@ -249,5 +267,8 @@ export function toAggregationQuery<Row>(q: QueryState, schema: FieldSchema<Row>)
     (a) => isBackend(a.field) && a.groupBy.every((g) => isBackend(g)),
   );
 
-  return { where, aggregations };
+  const diagnostics: MetricDiagnostic[] = [];
+  for (const c of q.aggregations ?? []) if (!aggregations.includes(c)) diagnostics.push({ metricId: c.id, code: "unsupported_metric", message: "Metric requires unavailable backend fields.", from: 0, to: 1 });
+  if (where.length !== q.where.length || suppliedPredicateCount !== q.where.reduce((n,t)=>n+predicatesOf(t).length,0)) diagnostics.push({ code: "residual_filter", message: "All-matching metrics are unavailable with residual client-only filters.", from: 0, to: 1 });
+  return { where, aggregations, ...(diagnostics.length ? { diagnostics } : {}) };
 }

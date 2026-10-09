@@ -1,9 +1,12 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import {
-  FormulaError,
-  type FieldDef,
-  type FormulaPlan,
-} from "@pythia-software/query-table-core";
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type MutableRefObject,
+} from "react";
+import { FormulaError, type FieldDef } from "@pythia-software/query-table-core";
 import {
   formulaCompletions,
   formulaContext,
@@ -18,7 +21,15 @@ export interface FormulaEditorProps {
   value: string;
   onChange: (value: string) => void;
   fields: FieldDef[];
-  compile: (value: string) => FormulaPlan;
+  compile: (value: string) => unknown;
+  /** Metric authoring uses a separate reference pane and no suggestions. */
+  suggestions?: boolean;
+  showLibrary?: boolean;
+  rows?: number;
+  ariaLabel?: string;
+  inputRef?: MutableRefObject<HTMLTextAreaElement | null>;
+  onFocus?: () => void;
+  onReady?: (input: HTMLTextAreaElement) => void;
 }
 
 export default function FormulaEditor({
@@ -26,9 +37,16 @@ export default function FormulaEditor({
   onChange,
   fields,
   compile,
+  suggestions = true,
+  showLibrary = true,
+  ariaLabel = "Computed column formula",
+  inputRef,
+  onFocus,
+  onReady,
+  rows = 6,
 }: FormulaEditorProps) {
   const id = useId();
-  const editor = useRef<HTMLTextAreaElement>(null);
+  const editor = useRef<HTMLTextAreaElement | null>(null);
   const applyingEdit = useRef(false);
   const composing = useRef(false);
   // Track generated pairs through edits; existing closing characters stay editable.
@@ -82,8 +100,8 @@ export default function FormulaEditor({
     from: number;
     to: number;
   } | null>(null);
-  const options = completions?.options.slice(0, 50) ?? [];
-  const hint = signatureAt(value.slice(0, caret));
+  const options = suggestions ? (completions?.options.slice(0, 50) ?? []) : [];
+  const hint = suggestions ? signatureAt(value.slice(0, caret)) : "";
 
   useEffect(() => {
     // Native edits already updated the DOM; avoid resetting selection/undo on each keystroke.
@@ -113,6 +131,10 @@ export default function FormulaEditor({
   }, [value]);
 
   useEffect(() => {
+    if (editor.current) onReady?.(editor.current);
+  }, [onReady]);
+
+  useEffect(() => {
     document
       .getElementById(`${id}-option-${active}`)
       ?.scrollIntoView?.({ block: "nearest" });
@@ -120,7 +142,7 @@ export default function FormulaEditor({
 
   const suggest = (explicit = false) => {
     const input = editor.current;
-    if (!input || composing.current) return;
+    if (!suggestions || !input || composing.current) return;
     selection.current = {
       start: input.selectionStart,
       end: input.selectionEnd,
@@ -191,7 +213,7 @@ export default function FormulaEditor({
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     const input = event.currentTarget;
     if (composing.current || event.nativeEvent.isComposing) return;
-    if (event.ctrlKey && event.code === "Space") {
+    if (suggestions && event.ctrlKey && event.code === "Space") {
       event.preventDefault();
       suggest(true);
       return;
@@ -269,18 +291,21 @@ export default function FormulaEditor({
     <div className="qt-formula-layout">
       <div className="qt-formula-editor">
         <textarea
-          ref={editor}
+          ref={(input) => {
+            editor.current = input;
+            if (inputRef) inputRef.current = input;
+          }}
           className="qt-formula-input"
-          aria-label="Computed column formula"
+          aria-label={ariaLabel}
           aria-describedby={`${id}-hint${diagnostic ? ` ${id}-error` : ""}`}
           aria-invalid={diagnostic ? true : undefined}
-          aria-autocomplete="list"
+          aria-autocomplete={suggestions ? "list" : "none"}
           aria-controls={options.length ? `${id}-suggestions` : undefined}
           aria-activedescendant={
             options.length ? `${id}-option-${active}` : undefined
           }
           defaultValue={value}
-          rows={6}
+          rows={rows}
           spellCheck={false}
           autoCapitalize="off"
           autoCorrect="off"
@@ -310,19 +335,22 @@ export default function FormulaEditor({
             suggest();
           }}
           onBlur={() => setCompletions(null)}
+          onFocus={onFocus}
         />
         <div className="qt-formula-tools">
-          <button
-            type="button"
-            className="qt-link-btn"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => {
-              editor.current?.focus();
-              suggest(true);
-            }}
-          >
-            Suggestions
-          </button>
+          {suggestions && (
+            <button
+              type="button"
+              className="qt-link-btn"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                editor.current?.focus();
+                suggest(true);
+              }}
+            >
+              Suggestions
+            </button>
+          )}
           <span>
             Line {value.slice(0, caret).split("\n").length}, column{" "}
             {caret - value.slice(0, caret).lastIndexOf("\n")}
@@ -385,22 +413,24 @@ export default function FormulaEditor({
           </div>
         )}
       </div>
-      <FormulaFunctionBrowser
-        onInsert={(name) => {
-          const input = editor.current;
-          if (!input) return;
-          const from = input.selectionStart;
-          const to = input.selectionEnd;
-          const selected = input.value.slice(from, to);
-          insert(
-            from,
-            to,
-            `${name}(${selected})`,
-            name.length + selected.length + 1,
-            { open: name.length, close: name.length + selected.length + 1 },
-          );
-        }}
-      />
+      {showLibrary && (
+        <FormulaFunctionBrowser
+          onInsert={(name) => {
+            const input = editor.current;
+            if (!input) return;
+            const from = input.selectionStart;
+            const to = input.selectionEnd;
+            const selected = input.value.slice(from, to);
+            insert(
+              from,
+              to,
+              `${name}(${selected})`,
+              name.length + selected.length + 1,
+              { open: name.length, close: name.length + selected.length + 1 },
+            );
+          }}
+        />
+      )}
     </div>
   );
 }

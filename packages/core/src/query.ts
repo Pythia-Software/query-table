@@ -1,3 +1,5 @@
+import type { MetricDisplay, MetricLayout, MetricDistribution, MetricSort, MetricScope } from "./metricTypes";
+import { normalizeMetricOptions } from "./metricNormalize";
 import { isComputedField } from "./computed";
 // query.ts — the canonical query state shape.
 //
@@ -131,6 +133,17 @@ export type AggOp = "count" | "count_distinct" | "sum" | "avg" | "min" | "max";
  *  page. Lives inside QueryState so it round-trips through `?q=`, saved queries,
  *  and undo/redo for free — a saved query is a saved dashboard. */
 export interface AggregationClause {
+  expression?: string;
+  expressionY?: string;
+  scope?: MetricScope;
+  sort?: MetricSort[];
+  groupLimit?: number;
+  display?: MetricDisplay;
+  layout?: MetricLayout;
+  distribution?: MetricDistribution;
+  diagnostics?: string[];
+  /** Preserved source operation when this client does not implement it. */
+  unsupportedOp?: string;
   /** Stable id; keys the metric panel and survives a `?q=` round-trip. */
   id: string;
   op: AggOp;
@@ -326,7 +339,7 @@ export function normalizeQueryState(input: unknown, fallback: QueryState = EMPTY
     for (const item of raw.orderBy.slice(0, MAX_ORDER_BY_TERMS)) {
       if (!isRecord(item)) continue;
       const field = boundedString(item.field, MAX_FIELD_NAME_LENGTH);
-      if (!field || isComputedField(field) || (item.dir !== "asc" && item.dir !== "desc")) continue;
+      if (!field || (item.dir !== "asc" && item.dir !== "desc")) continue;
       const term: OrderByClause = { field, dir: item.dir };
       if (item.nulls === "first" || item.nulls === "last") term.nulls = item.nulls;
       if (
@@ -357,22 +370,29 @@ export function normalizeQueryState(input: unknown, fallback: QueryState = EMPTY
     for (const item of raw.aggregations.slice(0, MAX_AGGREGATIONS)) {
       if (!isRecord(item)) continue;
       const id = boundedString(item.id, MAX_FIELD_NAME_LENGTH);
-      if (!id || typeof item.op !== "string" || !AGG_OPS.has(item.op) || !Array.isArray(item.groupBy)) continue;
-      const groupBy = item.groupBy
+      if (!id) continue;
+      const validOp = typeof item.op === "string" && AGG_OPS.has(item.op);
+      const rawGroups: unknown[] = Array.isArray(item.groupBy) ? item.groupBy : [];
+      const groupBy = rawGroups
         .slice(0, MAX_GROUP_BY_FIELDS)
         .map((field) => boundedString(field, MAX_FIELD_NAME_LENGTH))
         .filter((field): field is string => field != null);
-      const aggregation: AggregationClause = { id, op: item.op as AggOp, groupBy };
+      const aggregation: AggregationClause = { id, op: validOp ? item.op as AggOp : "count", groupBy };
       const field = boundedString(item.field, MAX_FIELD_NAME_LENGTH);
       const label = boundedString(item.label, MAX_LABEL_LENGTH);
-      if ((field && isComputedField(field)) || groupBy.some(isComputedField)) continue;
       if (field) aggregation.field = field;
       if (label) aggregation.label = label;
+      Object.assign(aggregation, normalizeMetricOptions(item));
+      if (!Array.isArray(item.groupBy) || rawGroups.length > MAX_GROUP_BY_FIELDS || groupBy.length !== rawGroups.length) aggregation.diagnostics = [...(aggregation.diagnostics ?? []), "Invalid metric grouping fields or grouping budget exceeded."];
+      const unsupportedOp = boundedString(item.unsupportedOp ?? (!validOp ? item.op : undefined), MAX_FIELD_NAME_LENGTH);
+      if (unsupportedOp) aggregation.unsupportedOp = unsupportedOp;
+      if (item.field !== undefined && !field) aggregation.diagnostics = [...(aggregation.diagnostics ?? []), "Invalid metric measure field."];
+      if (!validOp && typeof item.expression !== "string") aggregation.diagnostics = [...(aggregation.diagnostics ?? []), "Unsupported aggregate operation."];
       aggregations.push(aggregation);
     }
     if (aggregations.length > 0) out.aggregations = aggregations;
   } else if (fallback.aggregations?.length) {
-    out.aggregations = fallback.aggregations.map((aggregation) => ({ ...aggregation, groupBy: [...aggregation.groupBy] }));
+    out.aggregations = normalizeQueryState({ aggregations: fallback.aggregations }).aggregations!;
   }
 
   return out;
