@@ -429,6 +429,7 @@ export function compileFormula(
   source: string,
   fields: readonly { name: string; type: FieldType }[],
   resolve?: (name: string) => FormulaPlan | undefined,
+  extension?: (node: FormulaNode, check: (node: FormulaNode) => FormulaType) => FormulaType | undefined,
 ): FormulaPlan {
   if (!source.trim() || source.length > 10000)
     throw new FormulaError("Formula must contain 1–10,000 characters.");
@@ -648,6 +649,8 @@ export function compileFormula(
       n.valueType = t === "enum" ? "text" : t;
       return n.valueType;
     }
+    const extended = extension?.(n, (arg) => check(arg, level + 1));
+    if (extended !== undefined) return extended;
     const ts = n.args.map((a) => check(a, level + 1));
     const need = (index: number, t: FormulaType) => {
       if (ts[index] !== undefined && ts[index] !== "null" && ts[index] !== t)
@@ -756,6 +759,7 @@ export function compileFormula(
 export function formulaRuntime(
   ast: FormulaNode,
   inputs: Record<string, FormulaValue>,
+  extension?: (node: Extract<FormulaNode, { kind: "call" }>) => FormulaResult | undefined,
 ): FormulaResult {
   const fail = (s: string): never => {
     throw new Error(s);
@@ -837,6 +841,11 @@ export function formulaRuntime(
       if (n.valueType === "text") return str(v);
       if (n.valueType === "textarray") return arr(v);
       return v;
+    }
+    const extended = extension?.(n);
+    if (extended) {
+      if (extended.error) fail(extended.error);
+      return bound(extended.value);
     }
     const name = n.name;
     const args = n.args;

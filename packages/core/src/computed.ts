@@ -220,3 +220,22 @@ export function groupPreview(
     errors,
   };
 }
+
+/** Server-issued capabilities are hints for client planning, never authorization. */
+export interface ComputedFieldCapabilities {
+  type: import('./schema').FieldType;
+  select: boolean;
+  sort: boolean;
+  measure: boolean;
+  group: boolean;
+  reason?: string;
+}
+export interface ComputedExecution {
+  profile: string;
+  planToken: string;
+  resolvedRevisions: Record<string,string>;
+  fields: Record<string,ComputedFieldCapabilities>;
+  fingerprint?: string;
+  snapshot?: string;
+}
+export type RowComputedValues = Record<string,{value: import('./metricTypes').MetricValue; error?: {code:string}}>;

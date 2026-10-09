@@ -99,10 +99,18 @@ type RegexExtract struct {
 // columns. Compiled by CompileAggregation; the metric panel runs one per spec
 // over the WHERE-filtered set (no paging).
 type AggSpec struct {
-	ID      string   `json:"id"`
-	Op      string   `json:"op"`
-	Field   string   `json:"field,omitempty"`
-	GroupBy []string `json:"groupBy,omitempty"`
+	Diagnostics  []string            `json:"diagnostics,omitempty"`
+	Display      *MetricDisplayHint  `json:"display,omitempty"`
+	Expression   string              `json:"expression,omitempty"`
+	ExpressionY  string              `json:"expressionY,omitempty"`
+	Scope        string              `json:"scope,omitempty"`
+	Sort         []MetricSort        `json:"sort,omitempty"`
+	GroupLimit   int                 `json:"groupLimit,omitempty"`
+	Distribution *MetricDistribution `json:"distribution,omitempty"`
+	ID           string              `json:"id"`
+	Op           string              `json:"op"`
+	Field        string              `json:"field,omitempty"`
+	GroupBy      []string            `json:"groupBy,omitempty"`
 }
 
 // WireQuery is the server-bound subset of QueryState (the TS ServerQuery / the
@@ -125,17 +133,17 @@ type WireQuery struct {
 // safe API boundary even when the caller does not use DecodeWireQuery.
 func (q *WireQuery) UnmarshalJSON(data []byte) error {
 	var payload struct {
-		Select              []string      `json:"select"`
-		Where               []WhereTerm   `json:"where"`
-		CompactWhere        []WhereTerm   `json:"w"`
-		OrderBy             OrderBys      `json:"orderBy"`
-		CompactOrderBy      OrderBys      `json:"o"`
-		Limit               *int          `json:"limit"`
-		CompactLimit        *int          `json:"l"`
-		Offset              *int          `json:"offset"`
-		CompactOffset       *int          `json:"f"`
-		Aggregations        []AggSpec     `json:"aggregations"`
-		CompactAggregations []AggSpec     `json:"g"`
+		Select              []string    `json:"select"`
+		Where               []WhereTerm `json:"where"`
+		CompactWhere        []WhereTerm `json:"w"`
+		OrderBy             OrderBys    `json:"orderBy"`
+		CompactOrderBy      OrderBys    `json:"o"`
+		Limit               *int        `json:"limit"`
+		CompactLimit        *int        `json:"l"`
+		Offset              *int        `json:"offset"`
+		CompactOffset       *int        `json:"f"`
+		Aggregations        []AggSpec   `json:"aggregations"`
+		CompactAggregations []AggSpec   `json:"g"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return err

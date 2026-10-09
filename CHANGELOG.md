@@ -4,6 +4,13 @@
 
 ### Added
 
+- Add a metric and dashboard workbench with composed aggregate formulas, multiple
+  groupings, result sorting, shown-row and all-matching scopes, resizable cards,
+  configurable charts, temporal output formatting, and caller-owned palettes.
+- Add versioned Go/PostgreSQL metric and computed-column execution with guarded
+  formulas, snapshot consistency, scatter measures, and exact distributions.
+- Add request activity diagnostics and a seeded PostgreSQL playground with
+  configurable database and response latency.
 - Add a responsive formula function library with search by name or intent,
   concept and return-type filters, and keyboard insertion at the cursor or
   around selected formula text.

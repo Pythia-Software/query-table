@@ -43,7 +43,10 @@
     "test:feedback": "node demo/agentation-test.mjs",
     "test:computed": "node demo/computed-test.mjs",
     "test:formula-editor": "node demo/formula-editor-test.mjs",
-    "prepare": "husky"
+    "prepare": "husky",
+    "test:metrics": "node demo/metrics-test.mjs && node demo/metric-usability-test.mjs",
+    "demo:postgres": "node demo/start-postgres-demo.mjs",
+    "test:postgres-demo": "node demo/postgres-test.mjs"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",

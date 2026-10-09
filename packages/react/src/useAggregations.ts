@@ -1,23 +1,26 @@
-// useAggregations — the metric panel's data side.
-//
-// Runs the optional GROUP BY queries that back the metrics shown above the table.
-// Kept separate from the rows fetch so the panel loads/refreshes independently:
-// metrics depend ONLY on the WHERE filter + the aggregation specs (scope is the
-// whole filtered set — never the page window), so paging or re-sorting the table
-// does not re-issue them. Debounced + abortable, mirroring the rows fetch.
-
-import { useEffect, useMemo, useState } from "react";
-import { applyAggregations, toAggregationQuery } from "@pythia-software/query-table-core";
-import type { AggregationResult, FieldSchema, QueryState, Transport } from "@pythia-software/query-table-core";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  metricComputationKey,
+  metricPlans,
+  hasRegex,
+  type AggregationClause,
+  type AggregationResult,
+  type FieldSchema,
+  type QueryState,
+  type Transport,
+} from "@pythia-software/query-table-core";
+import { executeMetrics, type MetricExecutionContext } from "./metricExecution";
 
 export interface AggregationsApiState {
   results: AggregationResult | null;
   loading: boolean;
   error: Error | null;
+  preview: (
+    clauses: AggregationClause[],
+    signal?: AbortSignal,
+  ) => Promise<AggregationResult>;
 }
-
-const EMPTY_RESULT: AggregationResult = { metrics: [] };
-
+/** Fetch state is keyed by computation and scope, never card presentation. */
 export function useAggregations<Row>(
   query: QueryState,
   schema: FieldSchema<Row>,
@@ -25,59 +28,148 @@ export function useAggregations<Row>(
   clientRows: Row[] | undefined,
   debounceMs: number,
   nonce: number,
-  validateQuery?: (query: QueryState) => void,
+  validateQuery?: (q: QueryState) => void,
+  options: Omit<
+    MetricExecutionContext<Row>,
+    "schema" | "transport" | "clientRows"
+  > = {},
 ): AggregationsApiState {
   const [results, setResults] = useState<AggregationResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
-
-  // Metrics depend only on WHERE + the agg specs. Keying on just those avoids
-  // refetching when the user pages or re-sorts the table.
-  const key = useMemo(
-    () => JSON.stringify({ where: query.where, aggregations: query.aggregations ?? [] }),
-    [query.where, query.aggregations],
+  const latest = useRef({
+    query,
+    schema,
+    transport,
+    clientRows,
+    options,
+    validateQuery,
+  });
+  latest.current = {
+    query,
+    schema,
+    transport,
+    clientRows,
+    options,
+    validateQuery,
+  };
+  const preview = useCallback(
+    async (clauses: AggregationClause[], signal?: AbortSignal) => {
+      const current = latest.current;
+      const draft = { ...current.query, aggregations: clauses };
+      current.validateQuery?.(draft);
+      return executeMetrics(
+        draft,
+        {
+          schema: current.schema,
+          transport: current.transport,
+          clientRows: current.clientRows,
+          ...current.options,
+        },
+        signal,
+      );
+    },
+    [],
   );
-  const hasAggregations = (query.aggregations?.length ?? 0) > 0;
-
+  const shown = (query.aggregations ?? []).some((c) => c.scope === "shownRows");
+  // A v2 server scopes shownRows from the query window and snapshot itself.
+  // Only client/legacy/regex evaluation depends on the downloaded row page.
+  const localPage =
+    shown &&
+    (!transport?.fetchMetrics ||
+      transport.metricCapabilities?.version !== 2 ||
+      (query.aggregations ?? []).some((clause) => {
+        if (clause.scope !== "shownRows") return false;
+        try {
+          return metricPlans(clause, schema, options.resolveComputed).some(
+            hasRegex,
+          );
+        } catch {
+          return true;
+        } // Validation reports invalid inputs through fetch state.
+      }));
+  const key = useMemo(
+    () =>
+      JSON.stringify([
+        query.where,
+        metricComputationKey(query.aggregations ?? []),
+        shown ? [query.orderBy, query.limit, query.offset] : null,
+      ]),
+    [
+      query.where,
+      query.aggregations,
+      query.orderBy,
+      query.limit,
+      query.offset,
+      shown,
+    ],
+  );
+  const dependencyKey = JSON.stringify([
+    options.revisions ?? {},
+    options.execution ?? null,
+  ]);
   useEffect(() => {
-    if (!hasAggregations) {
+    if (!latest.current.query.aggregations?.length) {
       setResults(null);
-      setError(null);
       setLoading(false);
+      setError(null);
       return;
     }
-
     const ac = new AbortController();
-    let cancelled = false;
-    const run = async () => {
-      setLoading(true);
+    setLoading(true);
+    setResults(null);
+    // Automatic shown-page evaluation waits for the committed page. Explicit
+    // previews still report missing inputs rather than using stale rows.
+    if (localPage && transport && !options.rowsReady) {
+      try {
+        latest.current.validateQuery?.(latest.current.query);
+        setError(options.rowsError ?? null);
+        if (options.rowsError) setLoading(false);
+      } catch (e) {
+        setError(e instanceof Error ? e : Error(String(e)));
+        setLoading(false);
+      }
+      return;
+    }
+    const timer = setTimeout(() => {
       setError(null);
       try {
-        validateQuery?.(query);
-        let res: AggregationResult;
-        if (transport?.fetchAggregations) {
-          res = await transport.fetchAggregations(toAggregationQuery(query, schema), ac.signal);
-        } else if (clientRows) {
-          res = applyAggregations(clientRows, query, schema);
-        } else {
-          res = EMPTY_RESULT;
-        }
-        if (!cancelled) setResults(res);
+        latest.current.validateQuery?.(latest.current.query);
       } catch (e) {
-        if (!cancelled && !ac.signal.aborted) { setError(e as Error); setResults(null); }
-      } finally {
-        if (!cancelled) setLoading(false);
+        setError(e instanceof Error ? e : Error(String(e)));
+        setLoading(false);
+        return;
       }
-    };
-    const t = setTimeout(run, debounceMs);
+      void preview(latest.current.query.aggregations ?? [], ac.signal)
+        .then((result) => {
+          if (!ac.signal.aborted) setResults(result);
+        })
+        .catch((e) => {
+          if (!ac.signal.aborted)
+            setError(e instanceof Error ? e : Error(String(e)));
+        })
+        .finally(() => {
+          if (!ac.signal.aborted) setLoading(false);
+        });
+    }, debounceMs);
     return () => {
-      cancelled = true;
-      clearTimeout(t);
       ac.abort();
+      clearTimeout(timer);
     };
-    // `key` captures the relevant query subset; clientRows/nonce force a refetch.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, hasAggregations, transport, clientRows, schema, debounceMs, nonce, validateQuery]);
-
-  return { results, loading, error };
+  }, [
+    key,
+    schema,
+    transport,
+    clientRows,
+    debounceMs,
+    nonce,
+    validateQuery,
+    dependencyKey,
+    localPage,
+    localPage ? options.shownRows : undefined,
+    localPage ? options.rowsReady : undefined,
+    localPage ? options.rowsError : undefined,
+    preview,
+  ]);
+  return { results, loading, error, preview };
 }

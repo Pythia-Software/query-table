@@ -151,6 +151,9 @@ type AggCompileResult struct {
 // op that needs one, or an op not allowed for the measure field's kind.
 func CompileAggregation(spec AggSpec, schema Schema) (AggCompileResult, error) {
 	var res AggCompileResult
+	if spec.Expression != "" || spec.ExpressionY != "" || spec.Distribution != nil || (spec.Scope != "" && spec.Scope != "allMatching") || len(spec.Sort) > 0 || spec.GroupLimit != 0 || len(spec.Diagnostics) > 0 || (spec.Display != nil && spec.Display.Kind == "scatter") {
+		return res, fmt.Errorf("modern metrics require CompileMetrics")
+	}
 	if !aggOpKnown(spec.Op) {
 		return res, fmt.Errorf("unknown aggregate op %q", spec.Op)
 	}
@@ -158,6 +161,9 @@ func CompileAggregation(spec AggSpec, schema Schema) (AggCompileResult, error) {
 	groupExprs := make([]string, 0, len(spec.GroupBy))
 	for i, g := range spec.GroupBy {
 		gs, ok := schema.Fields[g]
+		if ok && gs.Groupable != nil && !*gs.Groupable {
+			return res, fmt.Errorf("grouping disabled for %q", g)
+		}
 		if !ok {
 			return res, fmt.Errorf("unknown group field %q", g)
 		}
@@ -189,6 +195,15 @@ func aggValueExpr(spec AggSpec, schema Schema) (string, error) {
 	fs, ok := schema.Fields[spec.Field]
 	if !ok {
 		return "", fmt.Errorf("unknown measure field %q", spec.Field)
+	}
+	if fs.AggregateOps != nil {
+		allowed := false
+		for _, op := range fs.AggregateOps {
+			allowed = allowed || op == spec.Op
+		}
+		if !allowed {
+			return "", fmt.Errorf("aggregate op %q disabled for %q", spec.Op, spec.Field)
+		}
 	}
 	if !aggOpAllowed(fs.Kind, spec.Op) {
 		return "", fmt.Errorf("aggregate op %q not allowed on %s field", spec.Op, kindName(fs.Kind))

@@ -81,6 +81,44 @@ afterEach(() => {
 });
 
 describe("formula completion context", () => {
+  it("keeps a stable signature live region and described-by target before hints appear", () => {
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    const props = {
+      value: "",
+      fields,
+      compile,
+      onChange: vi.fn(),
+      suggestions: false,
+    };
+    act(() => root.render(createElement(FormulaEditor, props)));
+    const input = container.querySelector("textarea")!;
+    const hint = container.querySelector(".qt-formula-hint")!;
+    expect(hint.getAttribute("aria-live")).toBe("polite");
+    expect(hint.textContent).toBe("");
+    expect(input.getAttribute("aria-describedby")?.split(" ")).toContain(
+      hint.id,
+    );
+    act(() =>
+      root.render(
+        createElement(FormulaEditor, {
+          ...props,
+          value: "ROUND(",
+          suggestions: true,
+        }),
+      ),
+    );
+    act(() => {
+      input.focus();
+      input.setSelectionRange(6, 6);
+      input.dispatchEvent(
+        new KeyboardEvent("keyup", { key: "End", bubbles: true }),
+      );
+    });
+    expect(container.querySelector(".qt-formula-hint")).toBe(hint);
+    expect(hint.textContent).toContain("ROUND");
+  });
   it("replaces complete tokens and escaped field references around the caret", () => {
     const field = formulaCompletions("[a]]b]", 3, 3, fields, true)!;
     expect([field.from, field.to]).toEqual([0, 6]);

@@ -175,7 +175,7 @@ export function isPushdownFilter(f: FieldDef): boolean {
   return isFilterable(f) && (f.filter?.pushdown ?? f.source.kind === "backend");
 }
 export function isSortable(f: FieldDef): boolean {
-  if (f.source.kind === "derived" && f.source.computedId) return false;
+  if (f.source.kind === "derived" && f.source.computedId) return f.sort?.enabled === true;
   return f.sort?.enabled ?? f.source.kind === "backend";
 }
 export function isSelectable(f: FieldDef): boolean {

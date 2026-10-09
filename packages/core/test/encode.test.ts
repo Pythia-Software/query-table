@@ -121,7 +121,7 @@ describe("normalizeQueryState", () => {
     expect(q.orderBy).toEqual([{ field: "name", dir: "asc" }]);
     expect(q.limit).toBe(EMPTY_QUERY.limit);
     expect(q.offset).toBe(0);
-    expect(q.aggregations).toBeUndefined();
+    expect(q.aggregations?.[0]?.diagnostics).toEqual(["Unsupported aggregate operation."]);
   });
 });
 

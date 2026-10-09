@@ -16,6 +16,12 @@ Define it once; both ends consume it.
 
 ---
 
+## Real-data demo
+
+Run `npm run demo:postgres` and open [the PostgreSQL playground](http://localhost:5179/postgres)
+for 500,000 records, 20 seeded metrics, the Go backend, and adjustable latency.
+See [setup and loading experiments](docs/postgres-demo.md).
+
 ## Install
 
 Choose the highest-level package you need:
@@ -223,58 +229,15 @@ meta-schema and loadable by both the TypeScript and Go loaders.
 
 ---
 
-## Aggregation metrics (the dashboard add-on)
+## Metric dashboards
 
-Optional **metrics** pin above the table: each is a single aggregate
-(`count`/`count_distinct`/`sum`/`avg`/`min`/`max`) over one measure column,
-broken down by zero or more group columns. They turn the query builder into a
-lightweight dashboard — and because they live inside `QueryState`, a saved query
-*is* a saved dashboard. URL sharing is available when explicitly enabled.
+Metrics are saved with the query and edited in a transactional, resizable workbench. Build composed group formulas such as `SUM([x]) / NULLIF(SUM([y]), 0)`, sort the resulting groups, choose all matching rows or the displayed page, and arrange compact cards into a dashboard.
 
-```ts
-interface AggregationClause {
-  id: string;          // stable; survives a ?q= round-trip
-  op: AggOp;           // count | count_distinct | sum | avg | min | max
-  field?: string;      // measure column; omit only for count ⇒ COUNT(*)
-  groupBy: string[];   // 0 ⇒ one number · 1 ⇒ bars · 2 ⇒ x/y pivot · 3+ ⇒ flat table
-  label?: string;
-}
-```
+Displays include values, tables (two-group pivots and multi-group flat tables), lists, bars, lines, pie/ring charts, paired-measure scatterplots, box plots, and histograms. Names, axis labels, temporal output units/patterns, legends, list bars, and whole-rem desired/minimum card sizes are configurable. Caller-supplied palette layers keep the same typed category consistent across charts. The implementation uses native inputs, SVG, Intl, and the existing worker infrastructure, with no new runtime dependencies.
 
-**Scope is the whole filtered set.** A metric runs as a real server `GROUP BY`
-over the *same `WHERE`* as the table, but **without** its `ORDER BY` / `LIMIT` /
-`OFFSET` — so it reflects every matching row, not the visible page. It is never a
-client-side reduction of the rows already on screen: the measure or group column
-is often not even among the visible/selected columns, so it genuinely needs the
-database.
+Existing simple `AggregationClause` definitions and v1 aggregation transports remain supported. Advanced remote metrics require an explicitly advertised v2 metric transport. Server-computed SELECT and global sorting use an authoritative profile/revision/capability handshake and stable-row-ID sidecars. The Go library compiles validated, parameterized PostgreSQL plans; hosts provide authorized endpoints, execution, result mapping, and snapshot consistency.
 
-Each metric is its own request, kept off the rows pipeline:
-
-- **Transport** gains `fetchAggregations?(req: AggregationRequest)`. `core`
-  projects the query with `toAggregationQuery` (pushdown `WHERE` subset + the
-  server-capable specs). `clientRows` mode falls back to `applyAggregations`, the
-  client mirror, so the demo works with no backend.
-- **`backends/go`** adds `CompileAggregation(spec, schema)`, a sibling of
-  `Compile` that emits the `SELECT`/`GROUP BY` fragments and reuses `Compile`'s
-  `WhereSQL`. The op×type matrix (`AGG_OPS_BY_TYPE` ⇄ Go `aggOpAllowed`) and the
-  field-expression allowlist are enforced on both ends, exactly like filters.
-
-```
-SELECT <group exprs…>, AVG(r.total_ms) AS "value", COUNT(*) AS "count"
-FROM <caller FROM/JOIN>
-WHERE <shared WhereSQL>          -- same filter as the rows query
-GROUP BY <group exprs…>          -- no ORDER BY / LIMIT / OFFSET
-```
-
-The **`MetricsPanel`** component renders the results (big number · ranked bars ·
-pivot · flat table) and the **QueryBuilder** grows a `metrics` row to build them.
-Per-field `aggregate: { measure?, groupable?, ops? }` config tunes what the
-pickers offer (defaults are type-driven: numbers are measurable, enum/text/bool
-are groupable).
-
-> Caveat: a non-pushdown (`pushdown:false`) `WHERE` clause isn't sent to the
-> server, so a DB-backed metric is computed over a superset of those rows. Such
-> filters are rare; surface them in the UI if your dataset uses them.
+See [the production metrics guide](docs/metrics.md) for definitions, React/UI usage, scopes, formatting, palette customization, and transports, and [the PostgreSQL compiler guide](docs/backend-metrics.md) for backend integration. The [approved playground](docs/mockups/metric-playground.html) and [design notes](docs/metric-playground-design.md) preserve the original design reference. The demo starts with a varied, persistent production dashboard.
 
 ---
 

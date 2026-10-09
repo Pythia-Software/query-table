@@ -21,3 +21,5 @@ export { useSavedQueries } from "./useSavedQueries";
 export type { ComputedColumnsApi } from "./useComputedColumns";
 export { createFormulaWorker, evaluateFormulaRows } from "./formulaWorker";
 export type { FormulaWorkerFactory } from "./formulaWorker";
+
+export type { RequestActivityApi, RequestActivityEntry } from "./useRequestActivity";

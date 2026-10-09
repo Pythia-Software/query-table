@@ -45,6 +45,12 @@ func kindFromString(s string) (FieldKind, error) {
 // expression (from the document's bindings.postgres.expr) and is the injection
 // boundary: it is never built from request input.
 type FieldSpec struct {
+	// ExpressionNumeric certifies a SQL numeric binding eligible for the bounded
+	// v2 profile. Values outside +/-1e100 produce numeric_range, never DB overflow.
+	ExpressionNumeric bool
+	// AggregateOps nil uses defaults; an empty slice disables aggregation.
+	AggregateOps []string
+	Groupable    *bool // nil defaults to text/enum/bool grouping in v2
 	Name         string
 	Kind         FieldKind
 	Expr         string
@@ -71,16 +77,23 @@ type Schema struct {
 // ---- JSON document shapes (subset we read on the backend) -----------------
 
 type docSQLBinding struct {
-	Expr      string `json:"expr"`
-	Synthetic bool   `json:"synthetic"`
-	Kind      string `json:"kind"`
+	Expr              string `json:"expr"`
+	Synthetic         bool   `json:"synthetic"`
+	Kind              string `json:"kind"`
+	ExpressionNumeric bool   `json:"expressionNumeric"`
 }
 
 type docField struct {
-	Name   string `json:"name"`
-	Label  string `json:"label"`
-	Type   string `json:"type"`
-	Source any    `json:"source"` // "backend"|"derived" | object | absent
+	Name      string `json:"name"`
+	Label     string `json:"label"`
+	Type      string `json:"type"`
+	Aggregate *struct {
+		Enabled   *bool    `json:"enabled"`
+		Measure   *bool    `json:"measure"`
+		Groupable *bool    `json:"groupable"`
+		Ops       []string `json:"ops"`
+	} `json:"aggregate"`
+	Source any `json:"source"` // "backend"|"derived" | object | absent
 	Filter *struct {
 		ArrayCaseSensitive bool     `json:"arrayCaseSensitive"`
 		Enabled            *bool    `json:"enabled"`
@@ -183,7 +196,19 @@ func LoadSchema(doc []byte) (Schema, error) {
 			}
 		}
 
+		var groupable *bool
+		var aggregateOps []string
+		if f.Aggregate != nil {
+			groupable = f.Aggregate.Groupable
+			aggregateOps = f.Aggregate.Ops
+			if (f.Aggregate.Enabled != nil && !*f.Aggregate.Enabled) || (f.Aggregate.Measure != nil && !*f.Aggregate.Measure) {
+				aggregateOps = []string{}
+			}
+		}
 		s.Fields[f.Name] = FieldSpec{
+			ExpressionNumeric:  pg.ExpressionNumeric,
+			Groupable:          groupable,
+			AggregateOps:       aggregateOps,
 			Name:               f.Name,
 			Kind:               kind,
 			Expr:               pg.Expr,

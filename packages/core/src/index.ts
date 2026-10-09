@@ -53,6 +53,7 @@ export {
   indexFields,
   selectedFields,
   readFieldValue,
+  resolveFieldName,
   loadSchema,
 } from "./schema";
 
@@ -98,3 +99,8 @@ export type { SetFilterMetadata, SetFilterMode } from "./query";
 
 export { parseRelativeDuration, MAX_RELATIVE_TIME_MS } from "./relativeTime";
 export type { QueryEvaluationOptions } from "./relativeTime";
+
+export * from "./metricTypes";
+export * from "./metrics";
+export * from "./metricDistributions";
+export * from "./execution";

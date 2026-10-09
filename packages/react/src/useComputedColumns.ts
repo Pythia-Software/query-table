@@ -1,3 +1,4 @@
+import { executionRevision } from "./computedExecution";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   applyQuery,
@@ -10,8 +11,12 @@ import {
   toServerQuery,
   validateComputedColumn,
   isSelectable,
+  hasRegex,
   type ColumnPreview,
   type ComputedColumn,
+  type ComputedExecution,
+  type RowComputedValues,
+  type RowId,
   type ComputedColumnDraft,
   type ComputedColumnStore,
   type FieldDef,
@@ -55,6 +60,9 @@ interface Options<Row> {
   transport?: Transport<Row>;
   clientRows?: Row[];
   workerFactory?: FormulaWorkerFactory;
+  execution?: ComputedExecution;
+  serverComputed?: Map<RowId, RowComputedValues>;
+  serverExecution?: ComputedExecution;
 }
 export function useComputedColumns<Row>(options: Options<Row>): {
   api: ComputedColumnsApi<Row>;
@@ -238,6 +246,7 @@ export function useComputedColumns<Row>(options: Options<Row>): {
     const ac = new AbortController();
     const values = new Map<string, FormulaResult[]>();
     void (async () => {
+      if (options.execution && transport?.fetchRowsV2) return;
       for (const id of activeIds.split(",").filter(Boolean)) {
         const entry = plans.get(id);
         if (!entry?.plan) continue;
@@ -265,7 +274,15 @@ export function useComputedColumns<Row>(options: Options<Row>): {
       if (!ac.signal.aborted) setEvaluated({ rows, plans, values });
     })();
     return () => ac.abort();
-  }, [activeIds, rows, plans, inputsFor, workerFactory]);
+  }, [
+    activeIds,
+    rows,
+    plans,
+    inputsFor,
+    workerFactory,
+    options.execution,
+    transport,
+  ]);
   const displaySchema = useMemo<FieldSchema<Row>>(() => {
     const indices = new Map(rows.map((row, i) => [row, i]));
     const fields: FieldDef<Row>[] = definitions.map((def) => {
@@ -282,6 +299,38 @@ export function useComputedColumns<Row>(options: Options<Row>): {
           dependencies: entry?.plan ? backendDependencies(entry.plan) : [],
           accessor: (row: Row) => {
             if (entry?.error) return { computedError: entry.error };
+            if (options.execution && transport?.fetchRowsV2) {
+              if (
+                options.serverExecution?.profile !==
+                  options.execution.profile ||
+                options.serverExecution?.planToken !==
+                  options.execution.planToken ||
+                options.serverExecution?.snapshot !==
+                  options.execution.snapshot ||
+                executionRevision(options.execution, def.id) !== def.revision ||
+                executionRevision(options.serverExecution, def.id) !==
+                  def.revision
+              )
+                return {
+                  computedError:
+                    "Definition changed or values are pending. Refresh the server handshake.",
+                };
+              const idField = schema.fields.find(
+                (f) => f.name === schema.idField,
+              );
+              const id = idField
+                ? (readFieldValue(idField, row) as RowId)
+                : null;
+              const server =
+                id === null
+                  ? undefined
+                  : options.serverComputed?.get(id)?.[def.id];
+              return server
+                ? server.error
+                  ? { computedError: server.error.code }
+                  : server.value
+                : { computedError: "Server computed result unavailable." };
+            }
             const result =
               evaluated?.rows === rows && evaluated.plans === plans
                 ? evaluated.values.get(def.id)?.[indices.get(row) ?? -1]
@@ -294,8 +343,24 @@ export function useComputedColumns<Row>(options: Options<Row>): {
           },
         },
         filter: { enabled: false },
-        sort: { enabled: false },
-        aggregate: { measure: false, groupable: false },
+        sort: {
+          enabled:
+            !!transport?.fetchRowsV2 &&
+            !!options.execution?.fields[computedFieldName(def.id)]?.sort &&
+            executionRevision(options.execution, def.id) === def.revision &&
+            !!entry?.plan &&
+            !hasRegex(entry.plan),
+        },
+        aggregate: {
+          measure: !!entry?.plan,
+          groupable:
+            !!transport?.fetchMetrics &&
+            transport.metricCapabilities?.version === 2 &&
+            !!options.execution?.fields[computedFieldName(def.id)]?.group &&
+            executionRevision(options.execution, def.id) === def.revision &&
+            !!entry?.plan &&
+            !hasRegex(entry.plan),
+        },
       };
     });
     for (const col of activeSelect)
@@ -331,6 +396,10 @@ export function useComputedColumns<Row>(options: Options<Row>): {
     query.select,
     schema.defaultSelect,
     loading,
+    transport,
+    options.execution,
+    options.serverComputed,
+    options.serverExecution,
   ]);
   const save = useCallback(
     async (column: ComputedColumnDraft, expectedRevision: string | null) => {

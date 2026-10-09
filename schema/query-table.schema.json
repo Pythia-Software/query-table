@@ -164,6 +164,7 @@
           "description": "Server-defined SQL expression (e.g. \"r.commit_id\" or \"(r.stats->>'duration_ms')::numeric\"). NEVER derived from request input — it and the validated operator are the only request-influenced tokens that reach SQL; values are always bound parameters."
         },
         "synthetic": { "type": "boolean", "default": false, "description": "Computed expression with no backing column (e.g. \"(w.tags ? 'rerun')\")." },
+        "expressionNumeric": { "type": "boolean", "default": false, "description": "Trusted server opt-in for finite numeric bindings in the bounded PostgreSQL expression profile. Never accepted from query request input." },
         "kind": {
           "enum": ["text", "number", "datetime", "bool", "enum", "textarray"],
           "description": "SQL coercion path. Defaults to the field's `type`; override when the column's SQL type differs."

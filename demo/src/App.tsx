@@ -1,5 +1,9 @@
 import { useState } from "react";
-import { loadSchema, type RowId } from "@pythia-software/query-table-core";
+import {
+  loadSchema,
+  localStorageAdapter,
+  type RowId,
+} from "@pythia-software/query-table-core";
 import { useQueryTable } from "@pythia-software/query-table-react";
 import {
   Icon,
@@ -14,27 +18,65 @@ import {
 import "@pythia-software/query-table-ui/theme.css";
 
 import runsDoc from "../../schema/examples/runs.schema.json";
+import { DEMO_METRICS, DEMO_METRIC_THEME } from "./metrics";
 import { RUNS, type Run } from "./data";
 import { CollapsibleSection } from "./CollapsibleSection";
 import "./demo.css";
 
 const schema = loadSchema<Run>(runsDoc);
-const errorCodesField = schema.fields.find((field) => field.name === "error_codes");
+const storage = localStorageAdapter();
+// The demo has a durable seeded dashboard; saved query/URL restoration still wins.
+const demoStorage = {
+  ...storage,
+  loadLast: async (name: string) =>
+    (await storage.loadLast(name)) ?? {
+      select: schema.defaultSelect ?? [],
+      where: [],
+      orderBy: schema.defaultSort ?? [],
+      limit: schema.defaultLimit ?? 100,
+      offset: 0,
+      aggregations: DEMO_METRICS,
+    },
+};
+const runIdField = schema.fields.find((f) => f.name === "id");
+if (runIdField)
+  runIdField.aggregate = { ...runIdField.aggregate, groupable: true };
+const errorCodesField = schema.fields.find(
+  (field) => field.name === "error_codes",
+);
 if (errorCodesField) {
   errorCodesField.filter = {
     ...errorCodesField.filter,
     editor: "set",
     arrayCaseSensitive: true,
-    values: { source: "static", options: [{ value: "timeout", label: "Timeout" }, { value: "validation", label: "Validation" }] },
+    values: {
+      source: "static",
+      options: [
+        { value: "timeout", label: "Timeout" },
+        { value: "validation", label: "Validation" },
+      ],
+    },
   };
 }
 
 const renderers: RenderRegistry<Run> = {
   ...defaultRenderers,
   overall_pill: ({ value }: CellContext<Run>) =>
-    value ? <span className={`qt-pill--${String(value).toLowerCase()}`}>{String(value)}</span> : <span>—</span>,
-  tag_marker: ({ value }: CellContext<Run>) => <span role="img" aria-label={value ? "Priority" : "Not priority"}><Icon name="star" filled={Boolean(value)} /></span>,
-  link_run: ({ value }: CellContext<Run>) => <a href={`#run-${value}`}>{String(value)}</a>,
+    value ? (
+      <span className={`qt-pill--${String(value).toLowerCase()}`}>
+        {String(value)}
+      </span>
+    ) : (
+      <span>—</span>
+    ),
+  tag_marker: ({ value }: CellContext<Run>) => (
+    <span role="img" aria-label={value ? "Priority" : "Not priority"}>
+      <Icon name="star" filled={Boolean(value)} />
+    </span>
+  ),
+  link_run: ({ value }: CellContext<Run>) => (
+    <a href={`#run-${value}`}>{String(value)}</a>
+  ),
   code_tags: ({ value }: CellContext<Run>) => (
     <>
       {((value as string[] | null) ?? []).map((s) => (
@@ -54,6 +96,7 @@ export function App() {
   const api = useQueryTable<Run>({
     schema,
     clientRows: RUNS,
+    storage: demoStorage,
     syncUrl: true,
   });
   const metricCount = api.aggregations.clauses.length;
@@ -68,15 +111,26 @@ export function App() {
       </header>
       <p className="qt-demo-intro">
         <span className="qt-demo-desktop-copy">
-          Client-side mode over {RUNS.length} mock rows. Drag the <code>select</code> chips and the table
-          headers to reorder columns; drag the <code>order by</code> chips to re-prioritize sort.
+          Client-side mode over {RUNS.length} mock rows. Drag the{" "}
+          <code>select</code> chips and the table headers to reorder columns;
+          drag the <code>order by</code> chips to re-prioritize sort.
         </span>
         <span className="qt-demo-mobile-copy">
-          Explore {RUNS.length} mock rows. Tap the pencil to edit or remove a clause, drag handles to reorder, and swipe the table to see every column.
+          Explore {RUNS.length} mock rows. Tap the pencil to edit or remove a
+          clause, drag handles to reorder, and swipe the table to see every
+          column.
         </span>
       </p>
 
-      <QueryBuilder api={api} fields={schema.fields} total={api.total} running={api.loading} />
+      <p className="qt-demo-intro"><a href="/postgres">Explore 500,000 PostgreSQL rows with the Go backend and adjustable latency</a></p>
+
+      <QueryBuilder
+        api={api}
+        fields={schema.fields}
+        total={api.total}
+        running={api.loading}
+        metricTheme={DEMO_METRIC_THEME}
+      />
 
       <CollapsibleSection
         title="Metrics"
@@ -85,7 +139,13 @@ export function App() {
         collapsedSummary={metricLabel}
         className="qt-qt-section--metrics"
       >
-        <MetricsPanel aggregations={api.aggregations} fields={schema.fields} renderers={renderers} />
+        <MetricsPanel
+          api={api}
+          aggregations={api.aggregations}
+          fields={schema.fields}
+          renderers={renderers}
+          theme={DEMO_METRIC_THEME}
+        />
       </CollapsibleSection>
 
       <CollapsibleSection

@@ -12,7 +12,7 @@ body {
   color: var(--qt-text);
 }
 
-.qt-modal-surface:has(.qt-demo-feedback) {
+.qt-modal-surface:not(.qt-metrics-editor):has(.qt-demo-feedback) {
   box-sizing: border-box;
   padding-bottom: calc(72px + env(safe-area-inset-bottom));
 }
