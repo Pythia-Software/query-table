@@ -10,6 +10,9 @@ Existing `Compile`, `CompileAt`, `CompileAggregation`, query decoding, and compu
 - `CompileRowsV2(ctx, ServerQueryV2, schema, options)` validates the version/profile/revision/token envelope and delegates to row planning. Nonempty tokens require `PlanOptions.ValidatePlanToken`; the host callback must verify actor, dataset, profile, snapshot and expiry.
 - `CompileComputedRows(ctx, query, schema, options)` resolves selected and hidden sort dependencies, then globally orders and paginates.
 - `CompileMetrics(ctx, MetricQuery, schema, options)` compiles a v2 batch. Each metric is one SQL statement, including distribution stages. Paired X/Y use the same grouped relation.
+- `CompileCombinedMetrics(ctx, MetricQuery, schema, options)` optionally returns
+  one PostgreSQL statement with shared input stages and compatible scalar
+  reductions. Independent `CompileMetrics` plans remain available.
 - `CompileExecution(ctx, rowQuery, metricQuery, schema, options)` compiles both using one reference time and cached authoritative definition graph, returning the union of resolved revisions. Supply identical table filters/order/window to both inputs when they describe the same view.
 
 `MetricQuery` mirrors the core computation request: `version: 2`, `where`, `orderBy`, `limit`, `offset`, `metrics`, and `diagnostics`, plus optional `profile`, `expectedRevisions`, `planToken`, and `snapshot`. `AggSpec` retains `id/op/field/groupBy` and adds `expression`, `expressionY`, `scope`, `sort`, `groupLimit`, and `distribution`. Nonempty client diagnostics are rejected. Presentation properties have no SQL or fingerprint effect; `display.kind: scatter` is retained only to reject a missing second expression. Explicit `expressionY` is always paired, and explicit `distribution` selects a distribution reduction. The frontend computation projection removes inactive saved alternatives.
@@ -58,7 +61,7 @@ The profile is `qt-postgres-v1`. This identifies a compiler subset, not deployed
 - JSON strings, finite numeric literals, booleans, NULL, escaped bracket references (`[a]]b]`), arithmetic `+ - * /`, comparisons, boolean AND/OR/NOT.
 - `IF`, `NULLIF`, `COALESCE`, `IS_NULL`, `ABS`, with strict scalar type checking.
 - Metric reductions `COUNT()`, `COUNT(expr)`, `COUNT_DISTINCT`, `SUM`, `AVG`, `MIN`, `MAX`; the SQL planner additionally admits `MEDIAN` as exact continuous percentile reduction. v1 remains unchanged and rejects median.
-- Regex, arrays, conversions, dates/functions, `%`, power, arbitrary SQL, and nested aggregates are rejected. v2 regex predicates/sort extraction are also rejected; legacy filter behavior is preserved in v1.
+- Regex, array formulas/group keys, conversions, dates/functions, `%`, power, arbitrary SQL, and nested aggregates are rejected. Raw selected text-array fields are supported and mapped as `textarray`; this does not admit arrays into expressions or metric grouping. v2 regex predicates/sort extraction are also rejected; legacy filter behavior is preserved in v1.
 
 Numeric fields must explicitly set `FieldSpec.ExpressionNumeric`. The shared schema admits `bindings.postgres.expressionNumeric`; both the Go loader and schema code generator preserve this trusted binding flag. The generator also preserves `aggregate.measure`, `aggregate.ops`, and `aggregate.groupable` policy. SQL numeric bindings must hold finite display-arithmetic values. Nonzero magnitudes outside `[1e-300, 1e100]`, NaN, and infinities produce `numeric_range`; zero and NULL are supported. Numeric literals outside that domain fail compilation. This intentionally bounded profile does not claim arbitrary IEEE-double or exact accounting support.
 
@@ -76,9 +79,23 @@ Text bindings are cast to text with PostgreSQL `C` collation for exact grouping/
 
 Expression/reduction CTEs are materialized deliberately to keep repeated safe value/error expressions from expanding exponentially during PostgreSQL planning. The initial authorized projection stays inlineable so base predicates can push down. This is an execution cost tradeoff: many formula nodes mean many stages and additional intermediate storage. Inspect EXPLAIN under realistic cardinality and enforce timeout/memory limits. This implementation favors bounded, inspectable execution over optimistic optimizer inlining.
 
-Rows execute authorized source → base filters → computed dependency stages → ORDER BY plus stable ID → LIMIT/OFFSET. Hidden computed sorts work. NULL-only computed keys use typed projected aliases for row sorting and metric grouping, preserving stable-ID ties and NULL group keys. Numeric sort errors have NULL values and follow explicit null placement. Alternate `SortExpr` bindings must be expressed as explicit schema sort fields in v2; unsupported alternatives fail instead of changing order. Source rows must have unique stable identities after joins.
+Rows execute authorized source → base filters → computed dependency stages → ORDER BY plus stable ID → LIMIT/OFFSET. Hidden computed sorts work. NULL-only computed keys use typed projected aliases for row sorting and metric grouping, preserving stable-ID ties and NULL group keys. Numeric sort errors have NULL values and follow explicit null placement. Alternate `SortExpr` bindings must be expressed as explicit schema sort fields in v2; unsupported alternatives fail instead of changing order. Source rows must have unique, non-NULL stable identities after joins. PostgreSQL
+row planning derives the reachable bindings, including transitive computed
+references and hidden filter/sort dependencies, and omits unrelated schema
+expressions. Bindings needed only by SELECT are projected after the window.
+The bounded page rejoins the same authorized source CTE by raw identity inside
+one statement snapshot; text identity comparisons use C collation. This may
+read the source twice when PostgreSQL inlines the CTE, but costly SELECT-only
+schema bindings run only for page rows. Source SQL that already performs costly
+work remains a host concern. Computed sort dependencies still evaluate globally;
+NULL placement, stable ties, selected value/error guards, revisions, and the
+fingerprint of the full requested computation remain applicable.
 
 `allMatching` metrics reduce the entire filtered relation without the table page limit. `shownRows` uses the same globally ordered window; it requires a positive limit. Virtualization and selection never define scope. Group/result limits happen only after final expressions or statistical reductions. The compiler never silently changes scope or samples data.
+
+PostgreSQL `shownRows` metrics use the same narrow identity window as row SELECT: filter and global sort dependencies run before LIMIT/OFFSET, then the page rejoins the authorized source before projecting measure and grouping bindings. This covers scalar, paired, grouped, box, and histogram plans. Combined batches share identical window/input stages where compatible; different measure projections can retain separate page joins. Stable unique identities and exception-free trusted bindings remain required.
+
+Stage pass-through columns are selected from downstream liveness before adding the current expression's input references for the preceding relation. Inputs used only by a numeric guard therefore stop at that guard; materialization, guards, lazy branch diagnostics, and ordering are preserved.
 
 Row output uses `column0`, `column0_error`, etc. `SQLPlan.Columns` maps these aliases to original requested field names and types. Metric SQL output uses:
 
@@ -99,9 +116,54 @@ Box results contain `{kind:"box",summary}`. Summary is null for zero numeric sam
 
 Histograms support zero or one grouping key and 2–30 equal-width bins (default ten). Global extent comes from all scoped values before group ranking/limits. Groups share one edge array; counts include zero bins. Edges use the browser’s double arithmetic order, `min + (max - min) * (i / bins)`, with endpoints pinned to the observed minimum and maximum. Bucket counts at floating boundaries must agree exactly; numeric tolerances do not excuse shifted counts. Lower edges are inclusive, upper edges exclusive except the final maximum. Constants produce `[value,value]` and one count; empty inputs produce empty edges/counts. Unsafe integral edges produce `unsafe_integer`; collapsed floating-point edges produce `histogram_precision`. Any input error invalidates every histogram group because the global extent is unknowable; never present the remaining counts as complete.
 
+## Optional combined metric batches
+
+```go
+combined, err := querytable.CompileCombinedMetrics(ctx, query, schema, options)
+if err != nil { return err }
+rows, err := tx.QueryContext(ctx, combined.SQL, combined.Args...)
+// Each row: metric_index (integer), buckets (JSONB array), group_count (bigint).
+// Map index to combined.Metrics[index].ID and Scope. Decode the bucket array
+// using the ordinary metric SQL column mapping above; check group_count against
+// the host budget before returning the complete batch response.
+```
+
+The optional plan validates every metric before execution, captures one
+reference clock, caches authoritative definitions within compilation, and
+returns the union of dependencies and reached revisions. `combined.Metrics`
+retains the original independent plans and their fingerprints; the combined
+fingerprint also binds their IDs, SQL, arguments, and execution identities.
+It does not authorize execution or retain data between requests.
+
+Exact compiler-produced input stages and their bound values share materialized
+CTEs across the batch. Different scalar reductions over the same validated
+relation and grouping fuse into a grouped SELECT when their combined projection
+has at most 128 expressions. Larger reductions retain separate grouped stages
+while still sharing compatible input stages. Different scopes or group keys
+retain separate reductions. Final formulas, paired X/Y, error propagation,
+per-metric sorting, and top-N retain the independent plans' behavior.
+Distributions keep their exact sample/edge/statistical stages and may share
+identical input stages; no sample caps, input guards, or diagnostics are weakened.
+
+The statement returns one envelope per requested metric in request order,
+including `buckets: []` and `group_count: 0` for empty grouped populations.
+Bucket order matches each metric's requested sort; `group_count` includes all
+groups before top-N. `buckets` contains the same SQL bucket columns as an
+independent plan, including optional inspection columns. Map only the protocol
+columns needed by the frontend. The envelope also retains `group_count` so a
+small top-N cannot hide a population that exceeds the host's group budget.
+
+Combined execution creates no temporary tables and works inside a read-only
+transaction. It still requires host population/group/distinct-state budgets,
+deadlines, and memory/response limits. Building JSONB bucket arrays and sharing
+materialized CTEs use server memory and temporary storage; benchmark the
+representative workload before adopting this optional path. Rows and a
+separate combined metric statement must share the host's repeatable-read
+snapshot and reference clock just as independent plans do.
+
 ## Required service behavior and limits
 
-Each metric's stages are one statement and therefore see one PostgreSQL statement snapshot. Separate row/metric statements require the same repeatable-read transaction or equivalent snapshot. Catalogue consistency and data consistency are distinct. A nonempty requested `snapshot` requires `PlanOptions.ValidateSnapshot`; the callback must verify access/expiry and bind the active transaction to that snapshot. The row and metric protocols preserve this token and reject it when no host validation is provided. Echo the union of resolved revisions and plan identity; bind any reusable plan token to actor/dataset/schema/profile/snapshot and expiry. A fingerprint is not an authorization token. Refresh/retry once on `definition_changed`, then surface persistent churn.
+Each metric's stages are one statement and therefore see one PostgreSQL statement snapshot. Separate row/metric statements require the same repeatable-read transaction or equivalent snapshot. Catalogue consistency and data consistency are distinct. A nonempty requested `snapshot` requires `PlanOptions.ValidateSnapshot`; the callback must verify access/expiry and bind the active transaction to that snapshot. The row and metric protocols preserve this token and reject it when no host validation is provided. Echo the union of resolved revisions and plan identity; bind any reusable plan token to actor/dataset/schema/profile/snapshot and expiry. A fingerprint is not an authorization token. Successful results with identical `SQLPlan.Fingerprint` may be reused within one fully validated batch and snapshot transaction. Keep each card's ID, scope, and metadata, and clone mutable payloads. Do not cache errors or carry results across snapshots. Bound serialized cached results and response assembly separately (for example, 8 MiB each); a cache bound does not itself bound the response. Reuse requires no protocol change. Refresh/retry once on `definition_changed`, then surface persistent churn.
 
 Capture one reference time for relative filters. `CompileMetrics` and `CompileExecution` do this automatically when `Now` is omitted. Hosts compiling independent statements should pass the same `Now` themselves.
 
@@ -122,4 +184,4 @@ go test -run '^$' -fuzz FuzzExpressionParser -fuzztime 5s -parallel 2
 
 The PostgreSQL fixtures exercise guarded and lazy arithmetic, paired ratios, scopes, top-N after final expressions, hidden computed global sort beyond the first page (including NULL-only sorting, grouping, and shown-row windows), transitive revision validation, empty and all-null populations, positive/negative unsafe numeric samples across all reductions (including cancellation, averaging, extrema, distinct cardinality, and COUNT presence), safe boundary and fractional samples, lazy reduction errors, final metric expression overflow, group-local box errors and global histogram errors, distribution shown-row windows, quartiles/Tukey tails (including both fences, one-ULP inside/outside memberships, mirrored decimal boundaries, minmax quartiles, singleton and two-sample populations), shared histogram edges, exact floating-boundary bucket parity, NULL/COALESCE NULL distributions on empty and populated sources, constant populations, precision collapse, and error propagation. Unit fixtures cover injection, schema restrictions, Unicode literal boundaries, cancellation, cycles, source/node limits, and v1 refusal to downgrade modern requests.
 
-The planner prunes unused row bindings through formula stages, filters, and page windows before materialization. Hosts do not need to narrow the schema to avoid copying every column through filtered populations. Tukey box plots reuse each group's exact sorted sample array, scan it once for observed endpoints and outlier counts, and retain at most 20 outlier values through ordinal lookup; they do not rescan the full population for each group. Working sample arrays never appear in the response.
+The planner prunes unused row bindings at the PostgreSQL source projection and through formula stages, filters, and page windows before materialization. PostgreSQL performance regressions inspect actual correlated SELECT subplan loops at small page sizes, including OFFSET and hidden computed sorts, and verify that a compatible scalar batch scans its population once. Combined-plan fixtures compare scalar, paired, distribution, empty, unsafe-input, and top-N results against independent execution. Hosts do not need to narrow the schema to avoid copying every column through filtered populations. Tukey box plots reuse each group's exact sorted sample array, scan it once for observed endpoints and outlier counts, and retain at most 20 outlier values through ordinal lookup; they do not rescan the full population for each group. Working sample arrays never appear in the response.

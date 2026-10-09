@@ -58,6 +58,9 @@ func sqliteUnsafe(n float64) bool { return math.Trunc(n) == n && math.Abs(n) > s
 // Decimal rendering matches the profile's documented decimal-domain checks;
 // final row arithmetic still exposes the IEEE result.
 func sqliteRat(n float64) *big.Rat {
+	if math.Trunc(n) == n && math.Abs(n) <= sqliteSafeInteger {
+		return big.NewRat(int64(n), 1)
+	}
 	r, ok := new(big.Rat).SetString(strconv.FormatFloat(n, 'g', -1, 64))
 	if !ok {
 		panic("finite numeric precondition")
@@ -250,18 +253,19 @@ func SQLiteV2Aggregates() []SQLiteAggregateDescriptor {
 	for _, op := range []string{"sum", "avg", "median"} {
 		op := op
 		out = append(out, SQLiteAggregateDescriptor{Name: "qt_v2_" + op, Arity: 1, New: func() SQLiteAggregateFunction {
-			return &sqliteV2Aggregate{op: op, sum: new(big.Rat), abs: new(big.Rat)}
+			return &sqliteV2Aggregate{op: op}
 		}})
 	}
 	return append(out, sqliteDistributionAggregates()...)
 }
 
 type sqliteV2Aggregate struct {
-	op       string
-	n        int64
-	sum, abs *big.Rat
-	samples  []float64
-	err      string
+	op                     string
+	n                      int64
+	sum, abs               *big.Rat
+	integerSum, integerAbs int64
+	samples                []float64
+	err                    string
 }
 
 func (a *sqliteV2Aggregate) Step(values []driver.Value) error {
@@ -293,6 +297,18 @@ func (a *sqliteV2Aggregate) Step(values []driver.Value) error {
 		}
 		a.samples = append(a.samples, n)
 	} else {
+		// Safe integral populations need no per-sample rational allocation.
+		// Promote before the absolute bound is exceeded, also for AVG, so
+		// large/cancelling populations keep exact semantics and error priority.
+		if a.sum == nil && math.Trunc(n) == n && math.Abs(n) <= float64(sqliteSafeInteger-a.integerAbs) {
+			a.integerSum += int64(n)
+			a.integerAbs += int64(math.Abs(n))
+			return nil
+		}
+		if a.sum == nil {
+			a.sum = big.NewRat(a.integerSum, 1)
+			a.abs = big.NewRat(a.integerAbs, 1)
+		}
 		r := sqliteRat(n)
 		a.sum.Add(a.sum, r)
 		a.abs.Add(a.abs, new(big.Rat).Abs(r))
@@ -305,6 +321,10 @@ func (a *sqliteV2Aggregate) Value() (driver.Value, error) {
 	}
 	if a.n == 0 {
 		return sqliteNumericJSON(nil, "")
+	}
+	if a.op != "median" && a.sum == nil {
+		a.sum = big.NewRat(a.integerSum, 1)
+		a.abs = big.NewRat(a.integerAbs, 1)
 	}
 	var exact *big.Rat
 	switch a.op {

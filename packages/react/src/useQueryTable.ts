@@ -40,6 +40,7 @@ import {
   validateMetric,
   metricDependencies,
   isComputedField,
+  computedFieldName,
   toServerQueryV2,
 } from "@pythia-software/query-table-core";
 
@@ -549,6 +550,10 @@ export function useQueryTable<Row>(
     if (v2Request)
       for (const definition of computed.definitions) {
         if (
+          (execution?.fields[computedFieldName(definition.id)]?.select ||
+            v2Request.orderBy.some(
+              (term) => term.field === computedFieldName(definition.id),
+            )) &&
           executionRevision(execution, definition.id) !== undefined &&
           executionRevision(execution, definition.id) !== definition.revision
         )

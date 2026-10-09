@@ -8,6 +8,7 @@ import {
   memoryComputedColumnStore,
   readFieldValue,
   type ComputedColumnStore,
+  type ComputedExecution,
   type FieldSchema,
   type FormulaNode,
   type FormulaValue,
@@ -15,6 +16,7 @@ import {
 } from "@pythia-software/query-table-core";
 import { useQueryTable, type QueryTableApi } from "../src/useQueryTable";
 import { evaluateFormulaRows } from "../src/formulaWorker";
+import { validateComputedResponse } from "../src/computedExecution";
 (
   globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
@@ -70,12 +72,17 @@ afterEach(() => {
   cleanup.splice(0).forEach((fn) => fn());
   vi.useRealTimers();
 });
-function mount(store: ComputedColumnStore, transport?: Transport<Row>) {
+function mount(
+  store: ComputedColumnStore,
+  transport?: Transport<Row>,
+  execution?: ComputedExecution,
+) {
   const result = {} as { current: QueryTableApi<Row> };
   function Probe() {
     result.current = useQueryTable({
       schema,
       computedColumnStore: store,
+      ...(execution ? { computedExecution: execution } : {}),
       formulaWorkerFactory: worker,
       debounceMs: 0,
       ...(transport ? { transport } : { clientRows: rows }),
@@ -216,6 +223,79 @@ describe("shared computed columns", () => {
     expect(
       readFieldValue(result.current.visibleFields[0]!, rows[0]!),
     ).toMatchObject({ computedError: expect.stringContaining("unavailable") });
+  });
+  it("mixes browser formulas with server sidecars and ignores browser revision changes", async () => {
+    const store = memoryComputedColumnStore();
+    const prefix = await store.save("shared", definition, null);
+    const double = await store.save("shared", {
+      id: "double", label: "Double",
+      expression: { language: "qt-expr", version: 1, source: "[id]*2" },
+    }, null);
+    const execution: ComputedExecution = {
+      profile: "qt-postgres-v1", planToken: "plan", snapshot: "snapshot",
+      resolvedRevisions: { prefix: prefix.revision, double: double.revision },
+      fields: { "@computed/double": {
+        type: "number", select: true, sort: true, measure: true, group: true,
+      } },
+    };
+    const responseExecution = {
+      ...execution, resolvedRevisions: { double: double.revision },
+    };
+    const fetchRowsV2 = vi.fn<NonNullable<Transport<Row>["fetchRowsV2"]>>(async () => ({
+      version: 2, rows: [rows[0]!], total: rows.length,
+      computed: [{ id: 1, values: { double: { value: 17 } } }],
+      execution: responseExecution,
+    }));
+    const result = mount(store, {
+      fetchRows: async () => ({ rows: [rows[0]!], total: rows.length }),
+      fetchRowsV2,
+    }, execution);
+    await settle();
+    await settle();
+    act(() => result.current.setQuery(q => ({
+      ...q, select: [{ field: "@computed/prefix" }, { field: "@computed/double" }],
+    })));
+    await settle();
+    await settle();
+    const query = fetchRowsV2.mock.calls.at(-1)![0];
+    expect(query.select).toContain("name");
+    expect(query.select).toContain("@computed/double");
+    expect(query.select).not.toContain("@computed/prefix");
+    expect(query.diagnostics).toEqual([]);
+    // Keep the host's complete envelope for authoritative transitive checks.
+    expect(query.expectedRevisions).toEqual(execution.resolvedRevisions);
+    const response = await fetchRowsV2.mock.results.at(-1)!.value;
+    const staleResponse = {
+      ...response,
+      execution: { ...responseExecution, resolvedRevisions: { double: "stale" } },
+    };
+    expect(() => validateComputedResponse(query, staleResponse, schema)).toThrow("revision changed");
+    expect(() => validateComputedResponse({
+      ...query, select: ["id"], orderBy: [{ field: "@computed/double", dir: "desc" }],
+    }, staleResponse, schema)).toThrow("revision changed");
+    expect(() => validateComputedResponse(query, {
+      ...response, computed: [],
+    }, schema)).toThrow("Missing or invalid server computed result");
+    expect(result.current.error).toBeNull();
+    expect(result.current.visibleFields.map(f => readFieldValue(f, result.current.rows[0]!))).toEqual(["al", 17]);
+    await act(async () => {
+      await store.save("shared", {
+        ...definition, expression: { ...definition.expression, source: "LEFT([name],3)" },
+      }, prefix.revision);
+    });
+    await settle();
+    await settle();
+    expect(result.current.error).toBeNull();
+    expect(result.current.visibleFields.map(f => readFieldValue(f, result.current.rows[0]!))).toEqual(["alp", 17]);
+    expect(result.current.visibleFields[0]!.sort?.enabled).toBe(false);
+    expect(result.current.visibleFields[0]!.aggregate?.groupable).toBe(false);
+    const calls = fetchRowsV2.mock.calls.length;
+    act(() => result.current.setQuery(q => ({
+      ...q, orderBy: [{ field: "@computed/prefix", dir: "asc" }],
+    })));
+    await settle();
+    expect(result.current.error?.message).toContain("unavailable for sort");
+    expect(fetchRowsV2).toHaveBeenCalledTimes(calls);
   });
   it("terminates timed-out and cancelled workers", async () => {
     vi.useFakeTimers();

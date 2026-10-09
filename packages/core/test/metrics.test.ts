@@ -37,6 +37,102 @@ const query = (
 const result = (source: string, extra: Partial<AggregationClause> = {}) =>
   evaluateMetrics(rows, query(metric(source, extra)), runsSchema).metrics[0]!;
 describe("production metric expressions", () => {
+  it("reads only each scalar leaf's field in wide aggregate formulas", () => {
+    const reads = Array<number>(12).fill(0);
+    const schema: FieldSchema = {
+      name: "wide",
+      idField: "id",
+      fields: [
+        { name: "id", label: "ID", type: "number", source: { kind: "backend" } },
+        ...reads.map((_, i) => ({
+          name: `n${i}`,
+          label: `N${i}`,
+          type: "number" as const,
+          source: { kind: "backend" as const },
+        })),
+      ],
+    };
+    const data = [1, 2].map((id) =>
+      Object.defineProperties(
+        { id },
+        Object.fromEntries(
+          reads.map((_, i) => [
+            `n${i}`,
+            { get: () => {
+              reads[i] = reads[i]! + 1;
+              return id + i;
+            } },
+          ]),
+        ),
+      ),
+    );
+    const expression = reads.map((_, i) => `SUM([n${i}])`).join(" + ");
+    const output = evaluateMetrics(
+      data, query(metric(expression)), schema,
+    );
+    expect(output.metrics[0]!.error).toBeUndefined();
+    expect(output.metrics[0]!.buckets).toEqual([{ keys: [], count: 2, value: 168 }]);
+    expect(reads).toEqual(Array(12).fill(2));
+  });
+  it("preserves typed field validation, nulls, dates and paired reductions", () => {
+    const date = new Date("2026-01-01T00:00:00Z");
+    const schema: FieldSchema = {
+      name: "typed",
+      idField: "id",
+      fields: [
+        { name: "id", label: "ID", type: "number", source: { kind: "backend" } },
+        { name: "n", label: "Number", type: "number", source: { kind: "backend" } },
+        { name: "s", label: "Text", type: "text", source: { kind: "backend" } },
+        { name: "at", label: "Date", type: "datetime", source: { kind: "backend" } },
+        { name: "b", label: "Boolean", type: "bool", source: { kind: "backend" } },
+      ],
+    };
+    const data = [
+      { id: 1, n: 2, s: "alpha", at: date, b: true },
+      { id: 2, n: null, s: null, at: date.toISOString(), b: false },
+      { id: 3, n: 4, s: "beta", at: null, b: null },
+    ];
+    for (const [expression, expected] of [
+      ["SUM([n])", 6], ["AVG([n])", 3], ["MIN([s])", "alpha"],
+      ["MAX([at])", date.toISOString()], ["COUNT_DISTINCT([b])", 2],
+      ["SUM([n])+COUNT([s])", 8], ["SUM([n]+1)", 8],
+      ["IF(TRUE,SUM([n]),SUM([n]/0))", 6],
+    ] as const) {
+      const output = evaluateMetrics(
+        data, query(metric(expression)), schema,
+      ).metrics[0]!;
+      expect(output.error).toBeUndefined();
+      expect(output.buckets[0]).toMatchObject({ value: expected });
+      expect(output.buckets[0]!.error).toBeUndefined();
+    }
+    const paired = evaluateMetrics(data, query(metric("SUM([n])", {
+      expressionY: "COUNT([b])", display: { kind: "scatter" },
+    })), schema).metrics[0]!;
+    expect(paired.buckets[0]).toMatchObject({ value: 6, y: 2 });
+    for (const [field, value, expression] of [
+      ["n", "2", "SUM([n])"], ["s", 2, "MIN([s])"],
+      ["b", "true", "COUNT([b])"], ["at", "invalid", "MAX([at])"],
+      ["n", Infinity, "SUM([n])"],
+    ] as const) {
+      const output = evaluateMetrics(
+        [{ ...data[0]!, [field]: value }], query(metric(expression)), schema,
+      ).metrics[0]!;
+      expect(output.buckets[0]!.error).toBeTruthy();
+      expect(output.buckets[0]!.inputErrorCount).toBe(1);
+    }
+    const unsafe = evaluateMetrics([
+      { ...data[0]!, n: Number.MAX_SAFE_INTEGER + 1 },
+      { ...data[0]!, n: -(Number.MAX_SAFE_INTEGER + 1) },
+    ], query(metric("SUM([n])")), schema).metrics[0]!;
+    expect(unsafe.buckets[0]!.value).toBeNull();
+    expect(unsafe.buckets[0]!.error).toBeTruthy();
+    expect(evaluateMetrics(data, query(metric("SUM([n])")), schema, {
+      maxOperations: 12,
+    }).metrics[0]!.error).toContain("operation budget");
+    expect(evaluateMetrics(data, query(metric("SUM([n])")), schema, {
+      maxOperations: 13,
+    }).metrics[0]!.buckets[0]!.value).toBe(6);
+  });
   it("includes null-only SUM groups in an exact Other remainder", () => {
     const data = [
       { ...rows[0]!, total_ms: 100, case_name: "top" },

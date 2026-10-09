@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+### Added
+
+- Add optional PostgreSQL `CompileCombinedMetrics` execution with shared input
+  stages and compatible scalar reductions, preserving independent metric plans.
+- Export Go relative datetime resolution and SQLite `SaveIn` for host-owned
+  transactions that validate computed definitions before committing.
+
+### Changed
+
+- Prune unused SQL bindings and stage-local inputs, and evaluate PostgreSQL
+  SELECT-only and shown-row metric bindings after the ordered page window.
+- Reuse identical SQLite metric results and compatible reductions within one
+  transaction, with independent result payloads and temporary-table cleanup.
+- Avoid rational allocations for safe integral SQLite SUM/AVG inputs and build
+  only the needed field input for direct-field browser aggregate samples.
+- Preserve SQLite indexed windows for trusted text identities and canonical
+  UTC-millisecond datetime storage.
+
+### Fixed
+
+- Keep browser-only computed columns evaluating locally beside server sidecars,
+  without browser-only revision edits blocking valid v2 pages.
+- Support raw PostgreSQL text-array SELECT while retaining expression and
+  grouping restrictions.
+- Return HTTP 400 for computed-definition plan diagnostics, including wrapped
+  validation errors.
+
 ## 0.6.0 — 2026-10-08
 
 ### Added

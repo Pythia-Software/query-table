@@ -43,3 +43,21 @@ func relativeTimestamp(now time.Time, offset int64) (time.Time, error) {
 	// captured server clock's precision (including for +0s).
 	return time.Unix(now.Unix()+offset/1000, int64(now.Nanosecond())+(offset%1000)*1_000_000).UTC(), nil
 }
+
+// ResolveRelativeDatetime resolves a signed duration using one host clock.
+// Absolute operands are returned unchanged. Hosts with map-backed legacy paths
+// can share the compiler's duration grammar and bounds without duplicating it.
+func ResolveRelativeDatetime(value string, now time.Time) (string, error) {
+	if len(value) == 0 || value[0] != '+' && value[0] != '-' {
+		return value, nil
+	}
+	offset, err := parseRelativeDuration(value)
+	if err != nil {
+		return "", err
+	}
+	instant, err := relativeTimestamp(now, offset)
+	if err != nil {
+		return "", err
+	}
+	return instant.Format(time.RFC3339Nano), nil
+}

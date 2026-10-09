@@ -117,6 +117,8 @@ func (b *planBuilder) sqliteFilter(where []WhereTerm) error {
 	b.args = append(b.args, p.Args...)
 	if sql != "" {
 		b.stage("SELECT * FROM " + b.rel + " WHERE " + sql)
+		// Filters over raw bindings can be flattened into an indexed window.
+		b.stages[len(b.stages)-1].Materialized = false
 	}
 	return nil
 }
@@ -181,6 +183,20 @@ func (b *planBuilder) sqliteOrder(terms []OrderBy) (string, error) {
 			}
 		} else if term.Extract != nil {
 			return "", diagnostic("unsupported_regex", "computed sorts do not support extraction")
+		}
+		// IDs are guaranteed scalar and canonical utc-millis is trusted host
+		// storage. Their raw BINARY keys preserve indexes; selected values and
+		// formula operands still pass the ordinary value/error guards.
+		f, base := b.schema.Fields[name]
+		if base && term.Extract == nil && (name == b.schema.IDField && f.Kind == FieldText || f.Kind == FieldDatetime && f.SQLiteDatetimeFormat == "utc-millis") {
+			raw := b.fields[name].Value
+			b.dependencies[name] = true
+			sql, err := orderTerm(raw+" COLLATE BINARY", term.Dir, term.Nulls)
+			if err != nil {
+				return "", err
+			}
+			out = append(out, sql)
+			continue
 		}
 		v, e := b.field(name)
 		if e != nil {

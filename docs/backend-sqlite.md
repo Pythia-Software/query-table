@@ -198,6 +198,14 @@ canonical column or matching expression index for frequent operations. Require
 a unique, non-NULL, nonempty scalar ID across the complete FROM/JOIN result;
 the executor also rejects duplicate IDs within a returned page.
 
+V2 windows trust text IDs and `utc-millis` sort bindings: they order those raw
+values with BINARY collation and allow raw filter stages to flatten before LIMIT.
+The host must enforce unique, nonempty scalar text IDs and canonical fixed-width
+UTC timestamps at ingestion, across the complete authorized source. Sorting
+alone does not validate those bindings. Selected fields and consumed formula
+inputs still pass their normal storage/error guards. Arbitrary RFC3339,
+extracted keys, and computed ordering retain normalization and checking.
+
 ## V2 formulas and computed execution
 
 Enable the profile by registering **both** `SQLiteFunctions()` and
@@ -283,8 +291,24 @@ SQL, scope, or definition text is trusted.
 
 Either request may be nil. Combined requests must carry the same filters,
 ordering, window, revision envelope, and token/snapshot binding. All plans are
-validated before execution. Definition resolution, the bounded count, the row
-page, and every metric run in the same short transaction. Use `ExecuteV2In`
+validated before execution. Identical metric fingerprints and scopes share a
+result within that execution, with independent mutable bucket/distribution
+payloads. Scalar cards with exactly matching compiler input stages and grouping
+share grouped reductions; compatible SUM/AVG/MIN and other scalar reductions
+fuse into one grouped SELECT, limited to 128 projected expressions. Final
+formulas, group sorting, and top-N still run per plan. Distributions retain their
+existing exact sampling/streaming paths. No cache crosses requests or snapshots.
+
+Shared reductions use uniquely named temporary tables in the same transaction.
+The executor drops them before returning, using a separate bounded cleanup
+context if the request is cancelled; cleanup failures are returned as errors.
+Drivers must accept unused numbered positional arguments in rewritten plans;
+modernc is covered by the integration tests. Test this behavior before using
+another driver. Compiler reduction metadata is intended for this adapter's
+execution path, and does not authorize a plan or bypass its guards.
+
+Definition resolution, the bounded count, the row page, and every metric run
+in the same short transaction. Use `ExecuteV2In`
 when a host already owns that transaction. `PlanOptions.Resolver` can override
 the built-in scoped `SQLiteComputedDefinitionResolver`, but it must resolve
 canonical definitions in that same snapshot.
@@ -335,8 +359,12 @@ zero or ±[1e-300,1e100]. Formula failures produce per-value diagnostics; IF,
 COALESCE, AND, and OR propagate only errors from the consumed branch. Source
 NULL remains distinct from an error. SUM/AVG accumulate exact rationals of the
 shortest decimal representation of each finite sample, then round the final
-result to IEEE double. Row arithmetic checks the decimal intermediate and
-returns the IEEE operation result. These semantics are deterministic but do not
+result to IEEE double. Safe integral SUM/AVG populations use an integer
+accumulator until a fractional sample or the absolute safe-integer bound
+requires promotion to exact rationals.
+AVG allows large cancelling populations when the final exact value is safe;
+SUM retains its conservative absolute-sum check. Row arithmetic checks the
+decimal intermediate and returns the IEEE operation result. These semantics are deterministic but do not
 promise arbitrary-precision accounting or identical browser accumulation order.
 Numeric metric samples/results reject integral doubles outside MAX_SAFE_INTEGER;
 COUNT observes presence without that metric-only restriction. SUM also rejects
@@ -443,7 +471,18 @@ Close result sets before starting another operation on a single-connection pool.
 Do not deploy WAL databases on network filesystems. Long read transactions can
 prevent checkpoint progress. Use context deadlines for autocomplete/metrics and
 let database failures propagate; the adapter uses context-aware operations and
-never retries writes invisibly.
+never retries writes invisibly. SQLite interruption may abort a caller-owned
+transaction (including with modernc); after a cancelled or failed execution,
+the host should roll back rather than assume it can commit other operations.
+
+Temporary-storage policy belongs to the host. For large batches, consider
+leasing a connection with `PRAGMA temp_store=MEMORY`, opening the transaction
+on that connection, then restoring its previous setting after closing the
+transaction and before releasing the connection. Changing this setting drops
+existing temporary objects, so only use an appropriate dedicated lease with
+no unrelated temporary state. Memory-backed temporary storage trades disk I/O
+for memory use; retain population/group limits and deadlines. The reusable
+adapter does not change this connection setting.
 
 Plain `:memory:` is a separate database per physical connection. Tests should
 use a file-backed database, or deliberately retain a shared in-memory connection.
@@ -459,6 +498,23 @@ own. The existing handler requires scope/dataset authorization and write/CSRF
 checks. Saves use one atomic INSERT/UPDATE RETURNING statement with a revision
 predicate. Only an already-existing create or a stale revision becomes
 `ErrComputedConflict`; a locked database remains a database failure.
+
+For transactional graph validation, begin an authorized transaction, call
+`store.SaveIn(ctx, tx, scope, dataset, request)`, and then call
+`v2.DescribeComputedIn(ctx, tx, allCatalogueIDs, opts)` before committing. Supply
+the complete resulting catalogue so updates that invalidate dependents are also
+rejected; roll back on any failure. `SaveIn` preserves `Save`'s revision
+predicates and leaves commit/rollback to the caller. Metadata-only applications
+can continue using `Save` without graph validation. A host repository wrapper
+can perform this sequence for `NewComputedColumnsHandler`: wrapped
+`PlanDiagnostic` errors return HTTP 400, revision conflicts return 409, and
+infrastructure errors return 500.
+
+Legacy map/SQL paths can resolve signed datetime operands with
+`ResolveRelativeDatetime(value, now)`. Capture one clock per request (including
+OR branches), resolve into new operands, and retain the original saved values.
+The helper shares the compiler's signed-duration grammar, precision, and bounds;
+absolute operands are returned unchanged.
 
 ## Verification and first client
 

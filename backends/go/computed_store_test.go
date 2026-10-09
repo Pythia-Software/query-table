@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +15,7 @@ type fakeComputedRepo struct {
 	scope, dataset string
 	saved          int
 	conflict       bool
+	saveError      error
 }
 
 func (f *fakeComputedRepo) List(_ context.Context, scope, dataset string) ([]ComputedColumn, error) {
@@ -25,6 +27,9 @@ func (f *fakeComputedRepo) Save(_ context.Context, scope, dataset string, r Save
 	f.saved++
 	f.scope = scope
 	f.dataset = dataset
+	if f.saveError != nil {
+		return ComputedColumn{}, f.saveError
+	}
 	if f.conflict {
 		return ComputedColumn{}, ErrComputedConflict
 	}
@@ -107,5 +112,25 @@ func TestComputedUnicodeLimitsMatchJavaScript(t *testing.T) {
 				t.Fatalf("status=%d writes=%d; wanted status=%d writes=%d", response.Code, repo.saved, expectedStatus, expectedSaved)
 			}
 		})
+	}
+}
+
+func TestComputedHandlerSaveErrors(t *testing.T) {
+	for _, tc := range []struct {
+		err    error
+		status int
+	}{
+		{fmt.Errorf("catalogue: %w", &PlanDiagnostic{Code: "type_error", Message: "invalid definition"}), http.StatusBadRequest},
+		{ErrComputedConflict, http.StatusConflict},
+		{errors.New("database unavailable"), http.StatusInternalServerError},
+	} {
+		repo := &fakeComputedRepo{saveError: tc.err}
+		handler := NewComputedColumnsHandler(repo, func(*http.Request, string, bool) (string, error) { return "one", nil })
+		body := `{"column":{"id":"x","label":"X","expression":{"language":"qt-expr","version":1,"source":"1"}}}`
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest("PUT", "/?dataset=runs", strings.NewReader(body)))
+		if response.Code != tc.status {
+			t.Fatalf("error %v: got %d want %d", tc.err, response.Code, tc.status)
+		}
 	}
 }

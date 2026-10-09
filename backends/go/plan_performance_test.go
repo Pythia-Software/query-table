@@ -124,3 +124,28 @@ func TestPostgresGroupedBoxPopulation(t *testing.T) {
 		t.Logf("%s: 200k rows, 500 groups in %s", whiskers, time.Since(start))
 	}
 }
+
+func TestRowStageDoesNotRetainItsOwnTemporaryInputs(t *testing.T) {
+	p, err := CompileRowExpression(context.Background(), "[x]*2", metricSchema(), metricOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	guards := 0
+	for _, stage := range p.Stages {
+		if strings.Contains(stage.SQL, "numeric_range") {
+			guards++
+			if !strings.HasPrefix(stage.SQL, "SELECT CASE WHEN ") {
+				t.Fatalf("guard copies its temporary inputs: %s", stage.SQL)
+			}
+		}
+	}
+	if guards == 0 {
+		t.Fatal("numeric guard lost")
+	}
+	rows := executePlan(t, p)
+	for i, want := range []float64{2, 18, 40} {
+		if rows[i]["value"] != want || rows[i]["error"] != nil {
+			t.Fatal(rows)
+		}
+	}
+}
