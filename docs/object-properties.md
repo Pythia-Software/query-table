@@ -234,9 +234,10 @@ renderer context, including the complete row and `presentation: "property"`.
 The view editor changes
 presentation only and has no object update callback.
 
-JSON properties embed the searchable tree directly, including when using
+JSON properties embed collapsible, pretty-printed JSON directly, including when using
 `render: "json"`. Native objects, serialized JSON, and encoded/escaped strings
-share key/path/value search and original, decoded, and per-path copying. The
+share compact upper-right key/path/value search and original, decoded, and
+per-object/value copying. Search retains the matching branches' JSON structure. The
 properties editor offers JSON encoding, decode-pass, and expansion settings;
 these persist in named views and item share links. A literal string can use
 `format: { kind: "json", encoding: "value" }`. Configured chips can use

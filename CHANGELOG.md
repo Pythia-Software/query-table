@@ -4,6 +4,9 @@
 
 ### Added
 
+- Display JSON as collapsible, pretty-printed code with branch-preserving search
+  in the upper-right toolbar and whole-object/per-value copying. Align its
+  resizable modal, Close control, footer, and mobile sheet with item details.
 - Add typed, serializable field cell displays for JSON, date/time, duration,
   number/percent, text, and labeled chips, with a shared searchable JSON inspector
   for native, serialized, encoded, and escaped values.

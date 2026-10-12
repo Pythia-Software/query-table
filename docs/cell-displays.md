@@ -57,10 +57,18 @@ The compact cell button opens a dialog on desktop and a bottom sheet on mobile.
 In item details, the same inspector is embedded directly in the property value,
 including popovers, modals, expanded rows, and standalone `ObjectInspector`
 cards. Search and copy controls stay inside the details surface.
-The inspector provides expandable objects and arrays, typed values, literal
-case-insensitive search across keys, full paths, and values, and per-path copying.
-Searching includes descendants of collapsed containers. JSONPath bracket notation
-keeps keys with dots, brackets, quotes, or Unicode unambiguous.
+The inspector displays pretty-printed JSON with quoted keys, indentation, braces,
+commas, and syntax colors. Use the chevron beside an object or array to collapse
+or expand that section. Hover a line (or focus it with the keyboard) to copy that
+object, array, or scalar; copy controls stay visible on touch devices.
+
+Literal, case-insensitive search stays in the upper-right toolbar. Search includes
+descendants of collapsed containers, opens matching branches, and highlights
+matching text while retaining ancestor braces and indentation. Clearing search
+restores the previous expansion state. Line tooltips and copy-button labels use
+JSONPath bracket notation to keep keys with dots, brackets, quotes, or Unicode
+unambiguous. Clipboard copying always uses the complete selected value, even
+when search filters the visible document.
 
 - `auto` accepts native JSON values, serialized JSON text, JSON-encoded strings,
   and escaped JSON such as `{\"id\":42}`. It unwraps the whole value up to
@@ -74,12 +82,13 @@ keeps keys with dots, brackets, quotes, or Unicode unambiguous.
 **Copy original** preserves API strings exactly (including escapes); native
 objects/arrays are serialized as JSON. **Copy JSON** copies the decoded, formatted
 JSON. Each path's copy button copies its typed JSON value; string values include
-quotes. The Original view shows the original source. Malformed JSON opens with its
+quotes. The toolbar's source toggle shows the original input. Malformed JSON opens with its
 original text and an error, and remains copyable.
 
 Inspection accepts up to 1,048,576 UTF-16 characters of source/formatted JSON and
 visits at most 5,000 entries and 64 nested levels. Tree traversal starts when the
-inspector opens or a detail property mounts, and rows are shown in batches of 200. A visible notice states
+inspector opens or a detail property mounts, and values are shown in batches of
+200 with balanced closing braces and a Show more control. A visible notice states
 when inspection/search is partial; copying a valid decoded document still includes
 the full accepted value. Larger or unserializable values show an error. Very large
 original text is truncated in the viewer while Copy original retains the source.
@@ -121,6 +130,9 @@ import { JsonCell, JsonValueView } from "@pythia-software/query-table-ui";
 surfaces. Import `theme.css` for bundled styling, or provide equivalent styles for
 the `qt-json-*` and `qt-cell-format-error` classes. The inspector uses the existing
 modal focus trap, Escape dismissal, focus restoration, and mobile sheet behavior.
+Its flush toolbar, icon Close control, fixed footer, and resizable desktop frame
+follow the item-details modal conventions. The JSON body scrolls independently
+so search remains available in the toolbar.
 
 The `/cells` playground includes **Cell displays** with object, serialized, encoded,
 escaped, array, and malformed payload examples beside formatted timestamps,

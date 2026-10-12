@@ -33,8 +33,9 @@ describe("JSON in item properties", () => {
     expect(container.textContent).toContain("00:01:01.250");
     expect(container.textContent).toContain("Ready");
     input(container.querySelector<HTMLInputElement>('input[type="search"]')!, "ada");
-    expect(container.querySelectorAll(".qt-json-entry")).toHaveLength(1);
-    expect(container.textContent).toContain('$["customer"]["name"]');
+    expect(container.querySelectorAll(".qt-json-match")).toHaveLength(1);
+    expect(container.querySelectorAll(".qt-json-entry")).toHaveLength(3);
+    expect(container.querySelector('[data-json-path="$[\\"customer\\"][\\"name\\"]"]')).not.toBeNull();
     expect(container.textContent).toContain("Ada");
   });
   it("honors saved format overrides and detail-specific JSON formats and renderers", () => {
