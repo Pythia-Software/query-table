@@ -34,6 +34,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@floating-ui/react": "^0.27.20",
     "@pythia-software/query-table-core": "0.6.0",
     "@pythia-software/query-table-react": "0.6.0",
     "@tanstack/react-virtual": "3.14.11"

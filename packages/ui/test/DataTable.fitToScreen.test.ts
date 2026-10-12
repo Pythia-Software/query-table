@@ -46,7 +46,8 @@ beforeEach(() => {
   root = createRoot(container);
 });
 
-afterEach(() => {
+afterEach(async () => {
+  await act(async () => {});
   act(() => root.unmount());
   container.remove();
   vi.restoreAllMocks();
@@ -59,8 +60,8 @@ function widths(): number[] {
 
 function preset(label: string) {
   act(() => container.querySelector<HTMLElement>('th[data-qt-field="a"] .qt-th-label')!.click());
-  act(() => container.querySelector<HTMLButtonElement>(".qt-cm-submenu-trigger")!.click());
-  act(() => Array.from(container.querySelectorAll<HTMLButtonElement>(".qt-cm-submenu button"))
+  act(() => document.querySelector<HTMLButtonElement>(".qt-cm-submenu-trigger")!.click());
+  act(() => Array.from(document.querySelectorAll<HTMLButtonElement>(".qt-cm-submenu button"))
     .find((button) => button.textContent === label)!.click());
 }
 
@@ -179,7 +180,7 @@ describe("persistent fit to screen", () => {
     // Remove B using the header menu, then suspend fitting during the refetch
     // or while the viewport is hidden. The local widths still contain B.
     act(() => container.querySelector<HTMLElement>('th[data-qt-field="b"] .qt-th-label')!.click());
-    act(() => Array.from(container.querySelectorAll<HTMLButtonElement>(".qt-cm-item"))
+    act(() => Array.from(document.querySelectorAll<HTMLButtonElement>(".qt-cm-item"))
       .find((button) => button.textContent === "Remove Column")!.click());
     expect(query.select.map((column) => column.field)).toEqual(["a"]);
     if (paused === "loading") loading = true;

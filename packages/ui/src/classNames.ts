@@ -44,6 +44,7 @@ export interface QueryBuilderClassNames {
 
 export interface MenuClassNames {
   popover?: string;
+  submenu?: string;
   item?: string;
   separator?: string;
 }
