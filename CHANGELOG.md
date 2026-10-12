@@ -26,6 +26,7 @@
 
 ### Fixed
 
+- Align table-header sort indicators with their labels in the bundled theme.
 - Open column actions when clicking anywhere in a table header, including
   padding and blank space, while preserving resize handle behavior.
 - Keep browser-only computed columns evaluating locally beside server sidecars,

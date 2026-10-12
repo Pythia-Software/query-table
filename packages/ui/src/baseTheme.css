@@ -154,7 +154,7 @@
   box-sizing: border-box;
 }
 .qt-th:hover > .qt-th-label { color: var(--qt-accent); }
-.qt-sort-indicator { display: inline-flex; align-items: center; margin-left: 3px; color: var(--qt-accent); }
+.qt-sort-indicator { display: inline-flex; align-items: center; vertical-align: -0.125em; margin-left: 3px; color: var(--qt-accent); }
 .qt-sort-priority { font-size: 9px; margin-left: 1px; }
 .qt-table-wrap--resizing { cursor: col-resize; }
 .qt-resize-guide {

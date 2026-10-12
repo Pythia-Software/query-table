@@ -128,6 +128,9 @@ argument remain compatible.
 
 ## Icons
 
+The bundled theme aligns table-header sort arrows and priority indicators with
+their labels for both single-column and multi-column sorts.
+
 `Icon` is the shared, hand-drawn SVG set used throughout the UI and demo. Its
 24px grid, rounded 1.8px strokes, and `currentColor` styling keep controls
 cohesive without forcing every shape into the same silhouette. Drag handles
