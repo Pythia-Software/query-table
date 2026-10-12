@@ -482,6 +482,36 @@
   min-width: 0;
   flex: 1;
 }
+.qt-metric-date-grouping {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-top: 1px solid var(--qt-border-subtle, #eaeef2);
+  padding-top: 12px;
+}
+.qt-metric-date-grouping label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.qt-metric-date-grouping .qt-metric-date-toggle {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.qt-metric-date-toggle input {
+  accent-color: var(--qt-accent, #0969da);
+}
+.qt-metric-date-bounds {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+.qt-metric-date-bounds input {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
 .qt-metric-sort-row {
   display: grid;
   grid-template-columns: minmax(100px, 1fr) minmax(90px, 0.9fr) 26px;

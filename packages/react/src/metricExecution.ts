@@ -56,6 +56,7 @@ async function localMetrics<Row>(
   const originalClauses = query.aggregations ?? [];
   const advanced = (query.aggregations ?? []).filter(
     (c) =>
+      c.dateGrouping ||
       isComputedField(c.field ?? "") ||
       c.groupBy.some(isComputedField) ||
       c.diagnostics?.length ||
@@ -216,10 +217,14 @@ export async function executeMetrics<Row>(
   const needsWorker = (c: AggregationClause) =>
     metricPlans(c, context.schema, context.resolveComputed).some(hasRegex);
   const shown = clauses.filter(
-    (c) => c.scope === "shownRows" && (!supportsV2 || needsWorker(c)),
+    (c) =>
+      c.scope === "shownRows" &&
+      (!supportsV2 || needsWorker(c) || !!c.dateGrouping),
   );
   const matching = clauses.filter(
-    (c) => c.scope !== "shownRows" || (supportsV2 && !needsWorker(c)),
+    (c) =>
+      c.scope !== "shownRows" ||
+      (supportsV2 && !needsWorker(c) && !c.dateGrouping),
   );
   const results: AggregationResult["metrics"] = [];
   if (shown.length) {
@@ -262,9 +267,10 @@ export async function executeMetrics<Row>(
           `Shown-page input ${name} is not loaded. Add it to the selected columns and refresh, or use a snapshot-capable metric transport.`,
         );
     }
+    // Committed shown rows supply the population; original filters still define
+    // the calendar domain for completing empty dates.
     const pageQuery = {
       ...query,
-      where: [],
       orderBy: [],
       limit: Math.max(1, context.shownRows.length),
       offset: 0,
@@ -276,6 +282,10 @@ export async function executeMetrics<Row>(
     );
   }
   if (matching.length) {
+    if (matching.some((c) => c.dateGrouping))
+      throw Error(
+        "Date grouping currently requires a complete client dataset or local shown-row execution. This metric server does not support it.",
+      );
     const transport = context.transport;
     const scoped = { ...query, aggregations: matching };
     if (

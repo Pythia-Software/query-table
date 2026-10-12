@@ -47,6 +47,74 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe("shared metric card", () => {
+  it("formats explicitly calendar-grouped line and vertical bar axes without changing raw groups", () => {
+    const dateBuckets: MetricBucket[] = [
+      { keys: ["2026-10-01T00:00:00.000Z"], value: 0, count: 0 },
+      { keys: ["2026-10-03T00:00:00.000Z"], value: 5, count: 5 },
+    ];
+    for (const kind of ["line", "bar-vertical"] as const) {
+      const c: RenderingClause = {
+        ...clause,
+        dateGrouping: {
+          field: "group",
+          interval: "day",
+          includeEmpty: false,
+          range: "observed",
+        },
+        display: {
+          kind,
+          xFormat: {
+            kind: "date",
+            style: "custom",
+            pattern: "MMM DD",
+            timeZone: "UTC",
+          },
+        },
+      };
+      const html = render(c, dateBuckets);
+      expect(html).toContain(">Oct 01</text>");
+      expect(html).toContain(">Oct 03</text>");
+      expect(html).toContain("2026-10-01 00:00 +00:00");
+      expect(render({ ...clause, display: { kind } }, dateBuckets)).toContain(
+        ">2026-10-01T00:00:00.000Z</text>",
+      );
+    }
+    expect(dateBuckets[0]!.keys[0]).toBe("2026-10-01T00:00:00.000Z");
+  });
+  it("keeps raw group labels after switching away from a scatter or histogram with a retained X format", () => {
+    for (const previousKind of ["scatter", "histogram"] as const)
+      for (const formatKind of ["duration", "date", "time"] as const) {
+        const previous: RenderingClause = {
+          ...clause,
+          display: { kind: previousKind, xFormat: { kind: formatKind } },
+        };
+        const bars = render(
+          {
+            ...previous,
+            display: { ...previous.display!, kind: "bar-vertical" },
+          },
+          [
+            { keys: ["prod"], value: 1, count: 1 },
+            { keys: ["staging"], value: 2, count: 2 },
+          ],
+        );
+        expect(bars).toContain(">prod</text>");
+        expect(bars).toContain(">staging</text>");
+        expect(bars).not.toContain("Invalid format");
+        // Line coordinates must still be chronological, but their raw keys
+        // must not inherit the previous measure's X formatter either.
+        const line = render(
+          { ...previous, display: { ...previous.display!, kind: "line" } },
+          [
+            { keys: ["2026-10-01T00:00:00.000Z"], value: 1, count: 1 },
+            { keys: ["2026-10-03T00:00:00.000Z"], value: 2, count: 2 },
+          ],
+        );
+        expect(line).toContain(">2026-10-01T00:00:00.000Z</text>");
+        expect(line).toContain(">2026-10-03T00:00:00.000Z</text>");
+        expect(line).not.toContain("Invalid format");
+      }
+  });
   it("draws constant-value histogram bars with visible widths and usable hover targets", () => {
     const markup = render({ ...clause, display: { kind: "histogram" } }, [
       {

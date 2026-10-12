@@ -146,6 +146,7 @@ export function applyAggregations<Row>(
     return evaluateMetrics(rows, q, schema, options);
   const advanced = (q.aggregations ?? []).filter(
     (a) =>
+      a.dateGrouping ||
       a.diagnostics?.length ||
       a.expression !== undefined ||
       a.expressionY !== undefined ||

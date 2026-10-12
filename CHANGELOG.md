@@ -4,6 +4,16 @@
 
 ### Added
 
+- Add an isolated date metric demo prototype with calendar intervals, optional
+  empty buckets, explicit ranges, and count/sum versus average behavior.
+- Add date interval and empty-date settings to the existing metric editor,
+  persisted with metric definitions. Complete calendar buckets locally over
+  query, observed, or custom bounds, with an example at `/date-metrics-workbench`.
+  Server date grouping remains unsupported and reports an explicit error.
+- Add named timezones to metric date grouping (UTC by default), with local
+  calendar boundaries, custom date bounds, and matching graph/list/table labels.
+  Handle daylight-saving gaps, repeated hours, and fractional offset changes;
+  persist timezone settings with metric definitions and shared URLs.
 - Detail columns default to Modal and support configurable Page URL templates,
   tab targets, and item toolbar sharing. Query history uses compact header icons
   matching item views, with one-step undo/redo under React Strict Mode.
@@ -48,6 +58,13 @@
 
 ### Fixed
 
+- Keep raw chart group labels when a scatter/histogram X format survives a
+  display change without calendar grouping.
+- Reuse the last date bucket's boundaries and ISO key for dense timestamp rows,
+  avoiding repeated timezone conversion while preserving DST boundaries,
+  out-of-order results, and evaluation limits.
+- Honor temporal `xFormat` on explicitly calendar-grouped labels so date axes can
+  display compact calendar labels while retaining raw grouping values.
 - Preserve parent palettes in submenus and let a second column-header click
   dismiss its menu, including open submenus; avoid stale mobile filter editors
   opening after a desktop viewport resize.
