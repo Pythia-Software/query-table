@@ -34,6 +34,106 @@
     "fields": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/field" } }
   },
   "$defs": {
+    "propertyField": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "default": {
+          "type": "boolean"
+        },
+        "render": {
+          "type": "string"
+        },
+        "format": {
+          "$ref": "#/$defs/propertyFormat"
+        }
+      }
+    },
+    "propertyFormat": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "text",
+            "code",
+            "json",
+            "boolean",
+            "chips",
+            "relative",
+            "currency",
+            "number",
+            "percent",
+            "duration",
+            "date",
+            "time",
+            "datetime"
+          ]
+        },
+        "decimals": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        },
+        "sourceUnit": {
+          "enum": [
+            "milliseconds",
+            "seconds",
+            "minutes",
+            "hours",
+            "days",
+            "iso",
+            "epochSeconds",
+            "epochMilliseconds",
+            "secondsOfDay",
+            "millisecondsOfDay"
+          ]
+        },
+        "style": {
+          "enum": [
+            "human",
+            "long",
+            "clock",
+            "custom",
+            "iso"
+          ]
+        },
+        "pattern": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "timeZone": {
+          "type": "string",
+          "maxLength": 256
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "currency"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "currency"
+            ]
+          }
+        }
+      ]
+    },
     "fieldType": { "enum": ["text", "number", "enum", "datetime", "bool", "textarray"] },
     "filterOp": {
       "enum": ["=", "!=", ">", ">=", "<", "<=", "contains", "starts_with", "ends_with", "matches_regex", "not_matches_regex", "length_gt", "length_lt", "length_eq", "includes", "is_null", "is_not_null"]
@@ -134,6 +234,49 @@
         "aliases": { "type": "array", "items": { "type": "string" }, "description": "Extra search terms for the picker." },
         "display": { "$ref": "#/$defs/cellDisplay" },
         "render": { "type": "string", "description": "Render-registry key resolved on the frontend (code, not data — only the key is stored)." },
+        "property": {
+          "$ref": "#/$defs/propertyField"
+        },
+        "origin": {
+          "type": "object",
+          "required": [
+            "table",
+            "column"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "table": {
+              "type": "string",
+              "minLength": 1
+            },
+            "column": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "relationship": {
+          "type": "object",
+          "required": [
+            "objectType",
+            "key"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "objectType": {
+              "type": "string",
+              "minLength": 1
+            },
+            "key": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
         "bindings": {
           "type": "object",
           "description": "Per-backend binding, keyed by backend id so one schema can serve several backends.",

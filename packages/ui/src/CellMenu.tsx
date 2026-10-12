@@ -6,13 +6,13 @@ import { PresentedFilterValue } from "./FilterValuePresentation";
 // with the clicked cell's value; array cells get a per-element `includes` row.
 // Anchors just off the click point and clamps to the viewport.
 
-import { useEffect, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { Icon } from "./Icon";
 import type { FieldDef, FilterOp, WhereClause } from "@pythia-software/query-table-core";
 import { NULLARY_OPS, negateClause, opsForField, opPairsForField, isFilterable } from "@pythia-software/query-table-core";
 import type { MenuClassNames } from "./classNames";
-import { AdaptiveOverlay, useMobileLayout } from "./AdaptiveOverlay";
 import { cellValueText } from "./jsonValue";
+import { Menu, MenuGroup, MenuItem, MenuSeparator } from "./Menu";
 
 export interface CellMenuProps<Row> {
   field: FieldDef<Row>;
@@ -23,41 +23,17 @@ export interface CellMenuProps<Row> {
   onAddFilter: (clause: WhereClause) => void;
   onClose: () => void;
   classNames?: MenuClassNames;
+  returnFocus?: HTMLElement | null | undefined;
 }
 
 const cx = (...parts: Array<string | undefined | false>): string => parts.filter(Boolean).join(" ");
-
-/** Approximate sizing so the popover can clamp itself into the viewport. */
-const MENU_WIDTH = 320;
-const ROW_HEIGHT = 32;
-const POINTER_OFFSET = 4;
 
 interface FilterRow {
   positive?: WhereClause;
   negative?: WhereClause;
 }
 
-export function CellMenu<Row>({ field, value, x, y, onAddFilter, onClose, classNames }: CellMenuProps<Row>): ReactNode {
-  const mobile = useMobileLayout();
-  // Dismiss on Escape or an outside click. The opening click is deferred a tick
-  // so it doesn't immediately re-close the freshly-opened menu.
-  useEffect(() => {
-    if (mobile) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    function onDocClick() {
-      onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    const t = setTimeout(() => window.addEventListener("click", onDocClick), 0);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("click", onDocClick);
-      clearTimeout(t);
-    };
-  }, [onClose, mobile]);
-
+export function CellMenu<Row>({ field, value, x, y, onAddFilter, onClose, classNames, returnFocus }: CellMenuProps<Row>): ReactNode {
   // A non-filterable field (e.g. a computed column that opted out) offers no
   // filter rows; only the header + copy remain. `pairs` is the shared keep/
   // exclude op source the WHERE op picker uses too, so the two read identically.
@@ -71,7 +47,6 @@ export function CellMenu<Row>({ field, value, x, y, onAddFilter, onClose, classN
 
   function applyClause(clause: WhereClause) {
     onAddFilter(clause);
-    onClose();
   }
 
   // Build one row = a positive predicate and its negation opposite.
@@ -109,84 +84,57 @@ export function CellMenu<Row>({ field, value, x, y, onAddFilter, onClose, classN
     pairRow("is_null", cellText);
   }
 
-  const vw = typeof window !== "undefined" ? window.innerWidth : 9999;
-  const vh = typeof window !== "undefined" ? window.innerHeight : 9999;
-  // header + copy + separator + one line per filter row.
-  const approxRows = 3 + rows.length;
-  const left = Math.max(8, Math.min(x + POINTER_OFFSET, vw - MENU_WIDTH - 8));
-  const top = Math.max(8, Math.min(y + POINTER_OFFSET, vh - ROW_HEIGHT * approxRows - 8));
-
   return (
-    <AdaptiveOverlay title={field.label} onClose={onClose}>
-    <div
-      className={cx("qt-cell-menu", classNames?.popover)}
-      style={{ left, top, width: MENU_WIDTH }}
-      onClick={(e) => e.stopPropagation()}
-      onContextMenu={(e) => e.preventDefault()}
-      role="menu"
-    >
+    <Menu label={field.label} anchor={{ x: x + 4, y: y + 4 }} width={320} onClose={onClose} classNames={classNames} returnFocus={returnFocus}>
       <div className="qt-cm-header">
         <span className="qt-cm-field">{field.label}</span>
         <span className="qt-cm-value">{json ? cellText : Array.isArray(value) ? value.map(v => <PresentedFilterValue key={String(v)} field={field.name} value={String(v)}/>) : <PresentedFilterValue field={field.name} value={String(value ?? "")}/>}</span>
       </div>
       <MenuItem
-        classNames={classNames}
-        onClick={async () => {
-          try {
-            await navigator.clipboard.writeText(cellText);
-          } catch {
-            /* clipboard denial is non-fatal */
-          }
-          onClose();
+        icon={<Icon name="copy" />}
+        onSelect={() => {
+          // Start during the user gesture, then dismiss without waiting for permission.
+          void navigator.clipboard?.writeText(cellText).catch(() => { /* denial is non-fatal */ });
         }}
       >
-        <Icon name="copy" /> copy value
+        copy value
       </MenuItem>
-      <div className={cx("qt-cm-sep", classNames?.separator)} />
+      <MenuSeparator />
       {rows.length > 0 && (
-        <div className="qt-cm-filter-grid" role="group" aria-label="Filter by this cell">
+        <MenuGroup className="qt-cm-filter-grid" label="Filter by this cell" columns={2}>
           <span className="qt-cm-col-head">keep</span>
           <span className="qt-cm-col-head qt-cm-col-head--neg">exclude</span>
           {rows.map((row, i) => (
-            <FilterPairRow key={i} row={row} value={value} classNames={classNames} onApply={applyClause} />
+            <FilterPairRow key={i} row={row} onApply={applyClause} />
           ))}
-        </div>
+        </MenuGroup>
       )}
-    </div>
-    </AdaptiveOverlay>
+    </Menu>
   );
 }
 
-function FilterPairRow<Row>({
+function FilterPairRow({
   row,
-  value,
-  classNames,
   onApply,
 }: {
   row: FilterRow;
-  value: unknown;
-  classNames: MenuClassNames | undefined;
   onApply: (clause: WhereClause) => void;
 }): ReactNode {
   return (
     <>
-      <FilterButton clause={row.positive} value={value} classNames={classNames} onApply={onApply} />
-      <FilterButton clause={row.negative} value={value} negative classNames={classNames} onApply={onApply} />
+      <FilterButton clause={row.positive} onApply={onApply} />
+      <FilterButton clause={row.negative} negative onApply={onApply} />
     </>
   );
 }
 
 function FilterButton({
   clause,
-  value,
   negative,
-  classNames,
   onApply,
 }: {
   clause: WhereClause | undefined;
-  value: unknown;
   negative?: boolean;
-  classNames: MenuClassNames | undefined;
   onApply: (clause: WhereClause) => void;
 }): ReactNode {
   if (!clause) return <span className="qt-cm-filter-empty" aria-hidden />;
@@ -194,11 +142,9 @@ function FilterButton({
     (clause.op === "length_eq" || clause.op === "length_gt");
   const nullary = NULLARY_OPS.has(clause.op) || emptyStringLength;
   return (
-    <button
-      type="button"
-      className={cx("qt-cm-item", "qt-cm-filter", negative && "qt-cm-filter--neg", classNames?.item)}
-      onClick={() => onApply(clause)}
-      role="menuitem"
+    <MenuItem
+      className={cx("qt-cm-filter", negative && "qt-cm-filter--neg")}
+      onSelect={() => onApply(clause)}
     >
       <span className="qt-cm-op">{predicateSymbol(clause)}</span>
       {!nullary ? (
@@ -207,23 +153,7 @@ function FilterButton({
           <code><PresentedFilterValue field={clause.field} value={clause.value}/></code>
         </>
       ) : null}
-    </button>
-  );
-}
-
-function MenuItem({
-  children,
-  onClick,
-  classNames,
-}: {
-  children: ReactNode;
-  onClick: () => void;
-  classNames: MenuClassNames | undefined;
-}) {
-  return (
-    <button type="button" className={cx("qt-cm-item", classNames?.item)} onClick={onClick} role="menuitem">
-      {children}
-    </button>
+    </MenuItem>
   );
 }
 
@@ -234,6 +164,14 @@ function predicateSymbol(clause: WhereClause): string {
   }
   if (clause.value === "0" && clause.op === "length_gt" && !clause.negated) {
     return "exclude empty strings";
+  }
+  switch (clause.op) {
+    case "length_gt":
+      return clause.negated ? "length ≤" : "length >";
+    case "length_lt":
+      return clause.negated ? "length ≥" : "length <";
+    case "length_eq":
+      return clause.negated ? "length ≠" : "length =";
   }
   const base = opSymbol(clause.op);
   return clause.negated ? `not ${base}` : base;
@@ -255,12 +193,6 @@ function opSymbol(op: FilterOp): string {
       return "matches";
     case "not_matches_regex":
       return "not matches";
-    case "length_eq":
-      return "length equals";
-    case "length_gt":
-      return "length above";
-    case "length_lt":
-      return "length below";
     case "is_null":
       return "is null";
     case "is_not_null":
@@ -274,13 +206,4 @@ function valueToString(v: unknown): string {
   if (v == null) return "";
   if (Array.isArray(v)) return v.join(", ");
   return String(v);
-}
-
-function previewValue(v: unknown): string {
-  if (v == null || v === "") return "(empty)";
-  if (Array.isArray(v)) {
-    return v.length === 0 ? "(empty)" : `[${v.length}] ${v.slice(0, 2).join(", ")}${v.length > 2 ? "…" : ""}`;
-  }
-  const s = String(v);
-  return s.length > 50 ? s.slice(0, 50) + "…" : s;
 }

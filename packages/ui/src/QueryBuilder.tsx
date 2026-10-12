@@ -38,6 +38,7 @@ import type {
 } from "@pythia-software/query-table-core";
 import {
   NULLARY_OPS,
+  ITEM_DETAILS_COLUMN,
   MAX_WHERE_CLAUSES,
   encodeQuery,
   filterValues as filterValuesFor,
@@ -59,12 +60,13 @@ import { FieldPicker } from "./FieldPicker";
 import { SavedQueriesModal } from "./SavedQueriesModal";
 import { formatRowCount, rowCountTitle } from "./formatRowCount";
 import {
-  AdaptiveOverlay,
   ModalSurface,
   useMobileLayout,
 } from "./AdaptiveOverlay";
 import { ReorderList } from "./ReorderList";
 import { Icon } from "./Icon";
+import { MenuButton, MenuGroup, MenuItem } from "./Menu";
+import { Popover } from "./Popover";
 
 export interface QueryBuilderProps<Row> {
   /** Additional diagnostics shown inside request activity. */
@@ -384,10 +386,7 @@ export function QueryBuilder<Row>({
   const lastRowsRef = useRef<Row[] | null>(null);
   const lastTotalRef = useRef<number | null>(null);
   const previousLoadingRef = useRef(api.loading);
-  const autoRefreshRef = useRef<HTMLSpanElement>(null);
-  const autoRefreshPopoverRef = useRef<HTMLSpanElement>(null);
-  const [autoRefreshPopoverAlignRight, setAutoRefreshPopoverAlignRight] =
-    useState(false);
+  const autoRefreshRef = useRef<HTMLButtonElement>(null);
   const shareFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -557,47 +556,6 @@ export function QueryBuilder<Row>({
     setAutoRefreshTurnOffAfterMs(autoRefreshStatus.turnOffAfterMs);
   }, [showAutoRefresh, autoRefreshStatus]);
 
-  useEffect(() => {
-    if (!showAutoRefresh || mobile) return;
-
-    function onDocumentClick(event: MouseEvent) {
-      const wrapper = autoRefreshRef.current;
-      const target = event.target as Node | null;
-      if (!wrapper || !target) return;
-      if (!wrapper.contains(target)) setShowAutoRefresh(false);
-    }
-
-    function onDocumentKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setShowAutoRefresh(false);
-    }
-
-    function calculateAutoRefreshPosition() {
-      const popover = autoRefreshPopoverRef.current;
-      const wrapper = autoRefreshRef.current;
-      if (!popover || !wrapper) return;
-      const wrapperRect = wrapper.getBoundingClientRect();
-      const popWidth = popover.offsetWidth;
-      const viewportRightInset = 8;
-      setAutoRefreshPopoverAlignRight(
-        wrapperRect.right + popWidth > window.innerWidth - viewportRightInset,
-      );
-    }
-
-    calculateAutoRefreshPosition();
-    const t = setTimeout(
-      () => window.addEventListener("click", onDocumentClick),
-      0,
-    );
-    window.addEventListener("keydown", onDocumentKeyDown);
-    window.addEventListener("resize", calculateAutoRefreshPosition);
-    return () => {
-      clearTimeout(t);
-      window.removeEventListener("click", onDocumentClick);
-      window.removeEventListener("keydown", onDocumentKeyDown);
-      window.removeEventListener("resize", calculateAutoRefreshPosition);
-    };
-  }, [showAutoRefresh, mobile]);
-
   function submitAutoRefresh() {
     if (!canSubmitAutoRefresh) return;
     try {
@@ -759,6 +717,20 @@ export function QueryBuilder<Row>({
           Saved
           {api.saved.items.length > 0 ? ` (${api.saved.items.length})` : ""}
         </button>
+        <div className="qt-property-history qt-query-history" role="group" aria-label="Query history">
+          <button type="button" className={cx("qt-link-btn", "qt-property-icon-button", classNames?.button)}
+            aria-label="Undo" title="Undo query change" disabled={!api.canUndo || isBusy} onClick={api.undo}>
+            <Icon name="undo" size={14} />
+          </button>
+          <button type="button" className={cx("qt-link-btn", "qt-property-icon-button", classNames?.button)}
+            aria-label="Redo" title="Redo query change" disabled={!api.canRedo || isBusy} onClick={api.redo}>
+            <Icon name="redo" size={14} />
+          </button>
+          <button type="button" className={cx("qt-link-btn", "qt-property-icon-button", classNames?.button)}
+            aria-label="Reset" title="Reset query" disabled={isBusy} onClick={api.resetAll}>
+            <Icon name="reset" size={14} />
+          </button>
+        </div>
         <button
           type="button"
           className={cx("qt-btn", "qt-qb-collapse-btn", classNames?.button)}
@@ -819,35 +791,7 @@ export function QueryBuilder<Row>({
               locale={metricLocale}
             />
           </div>
-          <div className="qt-qb-editor-stack">
-            <button
-              type="button"
-              className={cx("qt-btn", classNames?.button)}
-              onClick={api.undo}
-              disabled={!api.canUndo || isBusy}
-            >
-              <Icon name="undo" />
-              Undo
-            </button>
-            <button
-              type="button"
-              className={cx("qt-btn", classNames?.button)}
-              onClick={api.redo}
-              disabled={!api.canRedo || isBusy}
-            >
-              <Icon name="redo" />
-              Redo
-            </button>
-            <button
-              type="button"
-              className={cx("qt-btn", classNames?.button)}
-              onClick={api.resetAll}
-              disabled={isBusy}
-            >
-              <Icon name="reset" />
-              Reset
-            </button>
-          </div>
+
         </div>
       ) : null}
 
@@ -885,7 +829,7 @@ export function QueryBuilder<Row>({
           >
             <Icon name="stopwatch" />
           </button>
-          <span className="qt-auto-refresh" ref={autoRefreshRef}>
+          <span className="qt-auto-refresh">
             <button
               type="button"
               className={cx(
@@ -893,6 +837,8 @@ export function QueryBuilder<Row>({
                 Boolean(autoRefreshStatus) && "qt-btn--active",
                 classNames?.button,
               )}
+              ref={autoRefreshRef}
+              aria-haspopup="dialog"
               onClick={() => setShowAutoRefresh((next) => !next)}
               aria-expanded={showAutoRefresh}
               title={
@@ -904,21 +850,14 @@ export function QueryBuilder<Row>({
               <Icon name="clock" />
               {autoRefreshButtonText}
             </button>
-            {showAutoRefresh ? (
-              <AdaptiveOverlay
-                title="Auto-update"
+            {showAutoRefresh && autoRefreshRef.current ? (
+              <Popover
+                anchor={autoRefreshRef.current}
+                width={260}
+                className="qt-auto-refresh-popover"
+                label="Auto-refresh settings"
                 onClose={() => setShowAutoRefresh(false)}
               >
-                <span
-                  ref={autoRefreshPopoverRef}
-                  className={cx(
-                    "qt-auto-refresh-popover",
-                    autoRefreshPopoverAlignRight &&
-                      "qt-auto-refresh-popover--align-right",
-                  )}
-                  role={mobile ? undefined : "dialog"}
-                  aria-label="Auto-refresh settings"
-                >
                   <label className="qt-auto-refresh-field">
                     <span>Frequency</span>
                     <select
@@ -1004,8 +943,7 @@ export function QueryBuilder<Row>({
                       </button>
                     ) : null}
                   </span>
-                </span>
-              </AdaptiveOverlay>
+              </Popover>
             ) : null}
           </span>
           <button
@@ -1052,7 +990,18 @@ function SelectRow<Row>({
   const { select, columnDrag } = api;
   const mobile = useMobileLayout();
   const [editingColumns, setEditingColumns] = useState(false);
+  const [editingField, setEditingField] = useState<string | undefined>();
+  function openColumnEditor(field?: string) {
+    setEditingField(field);
+    setEditingColumns(true);
+  }
+  const detailSettingsButton = (field: string) => field === ITEM_DETAILS_COLUMN && api.itemDetails ? (
+    <button type="button" className="qt-chip-op-btn" aria-label="Configure Detail column" title="Configure Detail column"
+      aria-haspopup="dialog" aria-expanded={editingColumns && editingField === field} disabled={disabled}
+      onClick={() => openColumnEditor(field)}><Icon name="chevronRight" size={18} /></button>
+  ) : null;
   const [adding, setAdding] = useState(false);
+  const addColumnRef = useRef<HTMLButtonElement>(null);
   const fieldLabelByName = useMemo(
     () => new Map(select.fields.map((f) => [f.name, f.label])),
     [select.fields],
@@ -1081,8 +1030,11 @@ function SelectRow<Row>({
           type="button"
           className="qt-add"
           aria-label="Add column"
-          onClick={() => setAdding(true)}
-          disabled={disabled || adding || select.hidden.length === 0}
+          ref={addColumnRef}
+          aria-haspopup="dialog"
+          aria-expanded={adding}
+          onClick={() => setAdding(previous => !previous)}
+          disabled={disabled || select.hidden.length === 0}
         >
           <Icon name="add" />
           {mobile ? "Add" : "add column"}
@@ -1095,7 +1047,7 @@ function SelectRow<Row>({
           aria-haspopup="dialog"
           aria-expanded={editingColumns}
           disabled={disabled}
-          onClick={() => setEditingColumns(true)}
+          onClick={() => openColumnEditor()}
         >
           <Icon name="chevronRight" size={18} />
         </button>
@@ -1124,6 +1076,7 @@ function SelectRow<Row>({
       {editingColumns && (
         <SelectColumnEditor
           api={api}
+          {...(editingField ? { initialField: editingField } : {})}
           onClose={() => setEditingColumns(false)}
         />
       )}
@@ -1141,6 +1094,7 @@ function SelectRow<Row>({
           renderItem={(item) => (
             <>
               <span className="qt-chip-field">{item.label}</span>
+              {detailSettingsButton(item.id)}
               <button
                 type="button"
                 className="qt-chip-x"
@@ -1214,6 +1168,7 @@ function SelectRow<Row>({
                 <Icon name="grip" />
               </span>
               <span className="qt-chip-field">{label}</span>
+              {detailSettingsButton(name)}
               <button
                 type="button"
                 className="qt-chip-x"
@@ -1230,6 +1185,7 @@ function SelectRow<Row>({
       {!mobile && actions}
       {adding ? (
         <FieldPicker
+          anchor={addColumnRef.current ?? undefined}
           fields={select.hidden.filter(isSelectable)}
           onPick={(f) => {
             select.show(f.name);
@@ -1285,7 +1241,6 @@ function WhereRow<Row>({
   const addFilterButton = useRef<HTMLButtonElement>(null);
   const [editingSet, setEditingSet] = useState<{
     field: FieldDef<Row>;
-    anchor: HTMLElement;
     returnFocus: HTMLElement;
     index: number;
     count: number;
@@ -1345,7 +1300,6 @@ function WhereRow<Row>({
       if (!anchor) return;
       setEditingSet({
         field: f,
-        anchor,
         returnFocus: anchor,
         index: where.length,
         count: 0,
@@ -1359,7 +1313,9 @@ function WhereRow<Row>({
       setAdding(false);
       return;
     }
-    setEditingFilter(where.length);
+    // Desktop uses inline controls; avoid leaving a pending sheet that opens
+    // unexpectedly when the viewport later crosses the mobile breakpoint.
+    if (mobile) setEditingFilter(where.length);
     const op = positiveOpsForField(f)[0] ?? opsForField(f)[0] ?? "=";
     api.addFilter({ field: f.name, op, value: "" });
     setAdding(false);
@@ -1403,15 +1359,17 @@ function WhereRow<Row>({
         type="button"
         className="qt-add"
         aria-label="Add filter"
+        aria-haspopup="dialog"
         aria-expanded={adding}
-        onClick={() => setAdding(true)}
-        disabled={disabled || adding}
+        onClick={() => setAdding(previous => !previous)}
+        disabled={disabled}
       >
         <Icon name="add" />
         add filter
       </button>
       {adding && (
         <FieldPicker
+          anchor={addFilterButton.current ?? undefined}
           fields={fields.filter(isFilterable)}
           gateOnDistinct
           onPick={addClause}
@@ -1456,7 +1414,6 @@ function WhereRow<Row>({
                   onClick={(event) =>
                     setEditingSet({
                       field: set.field,
-                      anchor: event.currentTarget,
                       returnFocus: event.currentTarget,
                       index,
                       count: set.count,
@@ -1530,7 +1487,6 @@ function WhereRow<Row>({
         <SetFilterEditor
           api={api}
           field={editingSet.field}
-          anchor={editingSet.anchor}
           returnFocus={editingSet.returnFocus}
           classNames={classNames}
           mode={editingSet.metadata.mode}
@@ -1895,29 +1851,6 @@ function OpPicker<Row>({
   classNames: QueryBuilderClassNames | undefined;
   onPick: (choice: OpChoice) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLSpanElement>(null);
-  const mobile = useMobileLayout();
-
-  useEffect(() => {
-    if (!open || mobile) return;
-    function onDocClick(e: MouseEvent) {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node))
-        setOpen(false);
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
-    }
-    // Defer the document listener a tick so the opening click doesn't close it.
-    const t = setTimeout(() => window.addEventListener("click", onDocClick), 0);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      clearTimeout(t);
-      window.removeEventListener("click", onDocClick);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [open, mobile]);
-
   const pairs = useMemo(() => (field ? opPairsForField(field) : []), [field]);
   const visiblePairs =
     clause.value === "0" && pairs.some((pair) => pair.keep.op === "length_gt")
@@ -1937,68 +1870,28 @@ function OpPicker<Row>({
   };
 
   return (
-    <span className="qt-op-picker" ref={wrapRef}>
-      <button
-        type="button"
-        className={cx("qt-chip-op-btn", "qt-op-trigger", classNames?.select)}
-        disabled={disabled}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-      >
-        {choiceLabel(clause.op, Boolean(clause.negated), clause.value)}
-        <Icon name="chevronDown" size={12} className="qt-op-caret" />
-      </button>
-      {open && visiblePairs.length > 0 && (
-        <AdaptiveOverlay
-          title={`Condition for ${field?.label ?? clause.field}`}
-          onClose={() => setOpen(false)}
-        >
-          <span
-            className="qt-op-pop"
-            role={mobile ? undefined : "dialog"}
-            aria-label="Choose condition"
-          >
+    <span className="qt-op-picker">
+      <MenuButton label="Choose condition" width={320}
+        buttonProps={{ className: cx("qt-chip-op-btn", "qt-op-trigger", classNames?.select), disabled: disabled || visiblePairs.length === 0,
+          "aria-label": choiceLabel(clause.op, Boolean(clause.negated), clause.value) }}
+        trigger={<>{choiceLabel(clause.op, Boolean(clause.negated), clause.value)}<Icon name="chevronDown" size={12} className="qt-op-caret" /></>}>
+          <MenuGroup label={`Condition for ${field?.label ?? clause.field}`} columns={2} className="qt-op-pop">
             <span className="qt-cm-col-head">keep</span>
             <span className="qt-cm-col-head qt-cm-col-head--neg">exclude</span>
             {visiblePairs.map((pair, i) => (
               <Fragment key={i}>
-                <button
-                  type="button"
-                  className={cx(
-                    "qt-op-cell",
-                    isActive(pair.keep) && "qt-op-cell--on",
-                  )}
-                  onClick={() => {
-                    onPick(pair.keep);
-                    setOpen(false);
-                  }}
-                >
+                <MenuItem className={cx("qt-op-cell", isActive(pair.keep) && "qt-op-cell--on")}
+                  checked={isActive(pair.keep)} selectionType="radio" onSelect={() => onPick(pair.keep)}>
                   {choiceLabel(pair.keep.op, pair.keep.negated, clause.value)}
-                </button>
-                <button
-                  type="button"
-                  className={cx(
-                    "qt-op-cell",
-                    "qt-op-cell--neg",
-                    isActive(pair.exclude) && "qt-op-cell--on",
-                  )}
-                  onClick={() => {
-                    onPick(pair.exclude);
-                    setOpen(false);
-                  }}
-                >
-                  {choiceLabel(
-                    pair.exclude.op,
-                    pair.exclude.negated,
-                    clause.value,
-                  )}
-                </button>
+                </MenuItem>
+                <MenuItem className={cx("qt-op-cell", "qt-op-cell--neg", isActive(pair.exclude) && "qt-op-cell--on")}
+                  checked={isActive(pair.exclude)} selectionType="radio" tone="danger" onSelect={() => onPick(pair.exclude)}>
+                  {choiceLabel(pair.exclude.op, pair.exclude.negated, clause.value)}
+                </MenuItem>
               </Fragment>
             ))}
-          </span>
-        </AdaptiveOverlay>
-      )}
+          </MenuGroup>
+      </MenuButton>
     </span>
   );
 }
@@ -2619,6 +2512,7 @@ function OrderRow<Row>({
     overIndex: number;
   } | null>(null);
   const [adding, setAdding] = useState(false);
+  const addSortRef = useRef<HTMLButtonElement>(null);
   // Field chosen in the "sort with regex extraction" configurator (split-button caret).
   const [regexField, setRegexField] = useState<FieldDef<Row> | null>(null);
 
@@ -2772,8 +2666,11 @@ function OrderRow<Row>({
           type="button"
           className="qt-add"
           aria-label="Add sort"
-          onClick={() => setAdding(true)}
-          disabled={disabled || adding || sortable.length === 0}
+          ref={addSortRef}
+          aria-haspopup="dialog"
+          aria-expanded={adding}
+          onClick={() => setAdding(previous => !previous)}
+          disabled={disabled || sortable.length === 0}
         >
           <Icon name="add" />
           {mobile ? "Add" : "add sort"}
@@ -2840,6 +2737,7 @@ function OrderRow<Row>({
       {!mobile && actions}
       {adding && (
         <FieldPicker
+          anchor={addSortRef.current ?? undefined}
           fields={sortable}
           onPick={(field) => addTerm(field)}
           onClose={() => setAdding(false)}

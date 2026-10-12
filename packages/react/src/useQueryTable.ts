@@ -1,3 +1,5 @@
+import { ITEM_DETAILS_COLUMN, itemPageFields } from "@pythia-software/query-table-core";
+import { useItemDetails, initialDetailModes, type ItemDetailsApi, type ItemDetailsOptions } from "./useItemDetails";
 // useQueryTable — the one hook that owns everything.
 //
 // The headless brain of the table: it holds the QueryState, keeps it in sync
@@ -100,6 +102,8 @@ export interface UseQueryTableOptions<Row> {
    * base64url is encoding, not encryption: filters will appear in browser
    * history, referrers, logs, analytics, and screenshots when enabled. */
   syncUrl?: boolean;
+  /** Enable schema-driven click popovers, item modals and row expansion. */
+  itemDetails?: boolean | ItemDetailsOptions<Row>;
   /** Debounce (ms) between a query change and the fetch it triggers. Default 200. */
   debounceMs?: number;
   /** Injected clock for deterministic saved-query timestamps. Default Date.now. */
@@ -174,6 +178,8 @@ export interface AggregationsApi {
 }
 
 export interface QueryTableApi<Row> {
+  /** Built-in item details, enabled by the instance creator. */
+  itemDetails?: ItemDetailsApi<Row>;
   // state
   query: QueryState;
   /** Schema defaults used for reset controls. */
@@ -265,7 +271,19 @@ export interface QueryTableApi<Row> {
   rowId: (row: Row) => RowId | null;
 }
 
-function defaultsFor<Row>(schema: FieldSchema<Row>): QueryState {
+function detailColumnSchema<Row>(schema: FieldSchema<Row>, enabled: boolean): FieldSchema<Row> {
+  if (!enabled) return schema;
+  return { ...schema,
+    defaultSelect: [...(schema.defaultSelect ?? selectedFields(schema, { select: [] }).map(field => ({ field: field.name }))), { field: ITEM_DETAILS_COLUMN }],
+    fields: [...schema.fields, { name: ITEM_DETAILS_COLUMN, label: "Detail", type: "text",
+      source: { kind: "derived", accessor: () => null }, select: { default: true, width: 112 },
+      filter: { enabled: false }, sort: { enabled: false }, aggregate: { measure: false, groupable: false },
+      property: { enabled: false },
+    }],
+  };
+}
+function defaultsFor<Row>(schema: FieldSchema<Row>, details = false): QueryState {
+  schema = detailColumnSchema(schema, details);
   return normalizeQueryState({
     select: schema.defaultSelect ?? [],
     where: [],
@@ -294,10 +312,12 @@ function cloneQueryState(q: QueryState): QueryState {
     limit: q.limit,
     offset: q.offset,
   };
+  if (q.fitToScreen) clone.fitToScreen = true;
   if (q.aggregations)
     clone.aggregations = JSON.parse(
       JSON.stringify(q.aggregations),
     ) as AggregationClause[];
+  if (q.itemDetails) clone.itemDetails = JSON.parse(JSON.stringify(q.itemDetails)) as NonNullable<QueryState["itemDetails"]>;
   return clone;
 }
 
@@ -375,7 +395,7 @@ function resolveInitial<Row>(opts: UseQueryTableOptions<Row>): {
   q: QueryState;
   fromUrl: boolean;
 } {
-  const defaults = defaultsFor(opts.schema);
+  const defaults = defaultsFor(opts.schema, Boolean(opts.itemDetails));
   if (opts.initialQuery)
     return {
       q: normalizeQueryState(opts.initialQuery, defaults),
@@ -412,7 +432,7 @@ export function useQueryTable<Row>(
   const now = opts.now ?? Date.now;
   const nowRef = useRef(now);
   const onRefreshRef = useRef(opts.onRefresh);
-  const defaults = useMemo(() => defaultsFor(schema), [schema]);
+  const defaults = useMemo(() => defaultsFor(schema, Boolean(opts.itemDetails)), [schema, Boolean(opts.itemDetails)]);
   const byName = useMemo(
     () => new Map(schema.fields.map((f) => [f.name, f])),
     [schema],
@@ -420,13 +440,14 @@ export function useQueryTable<Row>(
 
   const initRef = useRef(resolveInitial(opts));
   const aggIdRef = useRef(0);
-  const [storedQuery, setQueryState] = useState<QueryState>(initRef.current.q);
+  const [queryHistory, setQueryHistory] = useState<{ query: QueryState; past: QueryState[]; future: QueryState[] }>(
+    () => ({ query: initRef.current.q, past: [], future: [] }),
+  );
+  const storedQuery = queryHistory.query;
   const query = useMemo(
     () => opts.canonicalizeQuery?.(storedQuery) ?? storedQuery,
     [storedQuery, opts.canonicalizeQuery],
   );
-  const undoStack = useRef<QueryState[]>([cloneQueryState(initRef.current.q)]);
-  const redoStack = useRef<QueryState[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
   const [serverComputed, setServerComputed] = useState<
     Map<RowId, RowComputedValues>
@@ -458,16 +479,15 @@ export function useQueryTable<Row>(
 
   const setQuery = useCallback<QueryTableApi<Row>["setQuery"]>(
     (next) => {
-      setQueryState((prev) => {
+      setQueryHistory((history) => {
+        const prev = history.query;
         const candidate =
           typeof next === "function"
             ? (next as (p: QueryState) => QueryState)(prev)
             : next;
         const nextQuery = normalizeQueryState(candidate, defaults);
-        if (queriesEqual(prev, nextQuery)) return prev;
-        undoStack.current.push(cloneQueryState(prev));
-        redoStack.current = [];
-        return cloneQueryState(nextQuery);
+        if (queriesEqual(prev, nextQuery)) return history;
+        return { query: cloneQueryState(nextQuery), past: [...history.past, cloneQueryState(prev)], future: [] };
       });
     },
     [defaults],
@@ -484,9 +504,7 @@ export function useQueryTable<Row>(
         defaultSaved?.query ?? (await storage.loadLast(schema.name));
       if (!cancelled && restored) {
         const normalized = normalizeQueryState(restored, defaults);
-        undoStack.current = [cloneQueryState(normalized)];
-        redoStack.current = [];
-        setQueryState(normalized);
+        setQueryHistory({ query: normalized, past: [], future: [] });
       }
     })();
     return () => {
@@ -542,11 +560,20 @@ export function useQueryTable<Row>(
   const queryKey = useMemo(() => encodeQuery(query), [query]);
   const serverRowQuery = useMemo(() => {
     const execution = opts.computedExecution;
+    const detailConfig = typeof opts.itemDetails === "object" ? opts.itemDetails : undefined;
+    const page = query.itemDetails?.page ?? detailConfig?.page;
+    const pageEnabled = Boolean(opts.itemDetails) && (query.itemDetails?.modes ?? initialDetailModes(detailConfig)).includes("page")
+      && (!detailConfig?.modes || detailConfig.modes.includes("page"));
+    const pageFields = pageEnabled ? itemPageFields(page?.urlTemplate ?? "") : [];
+    // Page templates can use fields outside the visible projection. Ask the
+    // transport for those dependencies through its usual SELECT planning.
+    const requestQuery = pageFields.length ? { ...query, select: [...(query.select.length ? query.select : defaults.select),
+      ...pageFields.filter(name => displaySchema.fields.some(field => field.name === name)).map(field => ({ field }))] } : query;
     const v2Request =
       execution && transport?.fetchRowsV2
-        ? toServerQueryV2(query, displaySchema, execution)
+        ? toServerQueryV2(requestQuery, displaySchema, execution)
         : undefined;
-    const request = v2Request ?? toServerQuery(query, displaySchema);
+    const request = v2Request ?? toServerQuery(requestQuery, displaySchema);
     if (v2Request)
       for (const definition of computed.definitions) {
         if (
@@ -596,6 +623,8 @@ export function useQueryTable<Row>(
     schema,
     resolveComputed,
     opts.computedExecution,
+    opts.itemDetails,
+    defaults,
   ]);
   // Keep presentation-only query changes out of the expensive row pipeline.
   // Widths do not leave the client at all, and SELECT does not affect client-side
@@ -732,8 +761,11 @@ export function useQueryTable<Row>(
   );
   const rowId = useCallback(
     (row: Row): RowId | null =>
-      idField ? (readFieldValue(idField, row) as RowId | null) : null,
-    [idField],
+      (() => {
+        const value = idField ? readFieldValue(idField, row) : (row as Record<string, unknown> | null)?.[schema.idField];
+        return typeof value === "string" || (typeof value === "number" && Number.isFinite(value)) ? value : null;
+      })(),
+    [idField, schema.idField],
   );
 
   // Sub-APIs.
@@ -742,7 +774,8 @@ export function useQueryTable<Row>(
     [rows, rowId],
   );
   const selection = useSelection(displayedIds);
-  const select = useSelect(query, setQuery, displaySchema);
+  const columnSchema = useMemo(() => detailColumnSchema(displaySchema, Boolean(opts.itemDetails)), [displaySchema, Boolean(opts.itemDetails)]);
+  const select = useSelect(query, setQuery, columnSchema);
   const columnDrag = useColumnDrag();
   const saved = useSavedQueries(
     schema.name,
@@ -813,24 +846,22 @@ export function useQueryTable<Row>(
     [setQuery, metricCompile],
   );
 
-  const canUndo = undoStack.current.length > 0;
-  const canRedo = redoStack.current.length > 0;
+  const canUndo = queryHistory.past.length > 0;
+  const canRedo = queryHistory.future.length > 0;
 
   const undo = useCallback(() => {
-    setQueryState((prev) => {
-      const previous = undoStack.current.pop();
-      if (!previous) return prev;
-      redoStack.current.push(cloneQueryState(prev));
-      return cloneQueryState(previous);
+    setQueryHistory((history) => {
+      const previous = history.past[history.past.length - 1];
+      if (!previous) return history;
+      return { query: cloneQueryState(previous), past: history.past.slice(0, -1), future: [...history.future, cloneQueryState(history.query)] };
     });
   }, []);
 
   const redo = useCallback(() => {
-    setQueryState((prev) => {
-      const next = redoStack.current.pop();
-      if (!next) return prev;
-      undoStack.current.push(cloneQueryState(prev));
-      return cloneQueryState(next);
+    setQueryHistory((history) => {
+      const next = history.future[history.future.length - 1];
+      if (!next) return history;
+      return { query: cloneQueryState(next), past: [...history.past, cloneQueryState(history.query)], future: history.future.slice(0, -1) };
     });
   }, []);
 
@@ -1194,8 +1225,8 @@ export function useQueryTable<Row>(
   );
 
   const visibleFields = useMemo(
-    () => selectedFields(displaySchema, query),
-    [displaySchema, query],
+    () => selectedFields(columnSchema, query),
+    [columnSchema, query],
   );
 
   const aggregations = useMemo<AggregationsApi>(
@@ -1234,7 +1265,13 @@ export function useQueryTable<Row>(
     ],
   );
 
+  const itemDetails = useItemDetails({
+    schema: displaySchema, query, setQuery, options: opts.itemDetails,
+    rows, clientRows, rowId, transport, refreshKey: nonce,
+  });
+
   return {
+    ...(itemDetails ? { itemDetails } : {}),
     query,
     defaults,
     setQuery,

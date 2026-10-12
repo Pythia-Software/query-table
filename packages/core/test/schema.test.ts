@@ -72,6 +72,17 @@ describe("readFieldValue", () => {
 });
 
 describe("loadSchema", () => {
+  it("rejects invalid object presentation and relationship metadata", () => {
+    const document = { name: "x", idField: "id", fields: [{ name: "id", label: "ID", type: "text" }] };
+    for (const metadata of [
+      { property: false }, { property: { enabled: "no" } },
+      { property: { format: { kind: "unknown" } } },
+      { origin: { table: "x" } },
+      { relationship: { objectType: "x", key: {} } },
+    ]) {
+      expect(() => loadSchema({ ...document, fields: [{ ...document.fields[0], ...metadata }] })).toThrow(/schema: field id/);
+    }
+  });
   it("projects a JSON doc and infers source from bindings", () => {
     const doc = {
       name: "wb",

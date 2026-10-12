@@ -1,6 +1,10 @@
 import type { ReactNode } from "react";
 
 const artwork = {
+  externalLink: <><path d="M14 3h7v7m0-7L10 14" /><path d="M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5" /></>,
+  itemHover: <><rect x="8" y="8" width="13" height="12" rx="2" /><path d="M16 5V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h1m7-3h5m-5 4h5" /></>,
+  itemModal: <><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 8h18m-4-2h.01m-9 6h8m-8 4h5" /></>,
+  itemExpand: <><path d="M3 4h18M3 20h18m-9-13v10m-4-6 4-4 4 4m-8 2 4 4 4-4" /></>,
   panelList: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16M13 8h4M13 12h4M13 16h4" /></>,
   panelDefinition: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="m10 9-3 3 3 3m4-6 3 3-3 3" /></>,
   panelReference: <><path d="M12 5v15M12 5C9 3 6 3 3 4v15c3-1 6-1 9 1 3-2 6-2 9-1V4c-3-1-6-1-9 1Z" /><path d="M6 8h3m6 0h3M6 12h3m6 0h3" /></>,

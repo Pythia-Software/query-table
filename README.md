@@ -11,6 +11,10 @@ One schema drives both the frontend (column rendering, which operators are
 offered, what's sortable) and the backend (the exact SQL it's allowed to emit).
 Define it once; both ends consume it.
 
+The same catalogue can display individual objects with ordered, formatted,
+read-only properties and multiple saved views per object type. See
+[object property views](docs/object-properties.md) and the `/objects` demo.
+
 > Naming: the package family is **`query-table`**. Use `query_table` where
 > dashes are illegal (Go identifiers), and `querytable` where neither is allowed.
 
@@ -135,6 +139,7 @@ regression check (`node demo/dnd-test.mjs`).
 // what data + how to view it — reads like the SQL it compiles to
 interface QueryState {
   select:  SelectColumn[];   // ordered visible columns + per-column width; [] = schema defaults
+  fitToScreen?: boolean;    // responsive widths for each viewer; shared in ?q= and saved queries
   where:   WhereTerm[];      // WHERE in conjunctive normal form: AND of terms (see below)
   orderBy: OrderByClause[];  // multi-sort, priority = array order
   limit:   number;

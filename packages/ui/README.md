@@ -1,5 +1,24 @@
 # @pythia-software/query-table-ui
 
+`ObjectInspector`, `ObjectProperties`, `PropertyViewControls`, and
+`PropertyViewEditor` provide customizable read-only object details. See
+[object property views](../../docs/object-properties.md) for setup and composition.
+
+`ObjectInspector` supplies a compact card with a saved-view toolbar, property/value
+rows, and a read-only footer. The host owns visible identity. Its property editor
+opens a modal workbench with an ordered list, display settings and a live preview.
+
+Enable `useQueryTable({ schema, itemDetails: true })` and pass
+`itemDetails={api.itemDetails}` to `DataTable` for click popovers, resizable item modals
+and row expansion. Detail is a regular draggable/resizable column, defaulting to Modal. Page links
+support URL templates and same-tab/new-tab navigation. Item toolbars include Share. Each
+modality has independent saved property views; shared links carry the query,
+typed item ID, modality and layouts. Property label widths are saved with the
+view; values support double click or focused Enter to copy raw data.
+The Detail chip's right caret opens its settings in the column selector.
+Popovers use compact icon controls and scroll properties within the card;
+expanded rows keep Collapse in the card toolbar. Mode labels appear only in
+the properties editor's context strip.
 Opinionated, themeable React components for query-table, including the data
 table, query builder, field picker, metrics panel, saved queries, cell menus,
 and selection toolbar.
@@ -13,16 +32,131 @@ npm install @pythia-software/query-table-core @pythia-software/query-table-react
 ## Column widths
 
 Drag a header edge to resize one column (arrow keys nudge, Enter auto-fits).
-Click a header and open **Column Widths** to resize in one step:
+Click anywhere in a column header to open its actions menu, including padding
+and blank space. Resize handles remain dedicated to resizing.
+Open **Column Widths** to resize in one step:
 
 - **Fit This Column** sizes the clicked column to its widest rendered value.
 - **Fit All to Content** does the same for every column.
 - **Fit All to Screen** fills the viewport; when content overflows, narrow
-  columns keep their content width and only the widest ones are trimmed.
+  columns keep their content width and only the widest ones are trimmed. It
+  sets `query.fitToScreen`, so shared links and saved queries fit each viewer's
+  available table area after loading and when that area changes.
 - **Equal Widths** splits the viewport evenly.
 - **Reset Widths** drops explicit widths back to schema defaults.
 
 Widths live in `query.select`, so presets are shareable and undoable.
+The fit-to-screen preference travels in the existing encoded `?q=` parameter
+(`fs: true` in its compact payload). Manual column resizing, fitting a single
+column, another width preset, or resetting widths clears it. Set
+`fitToScreen: true` on an initial query to enable the same behavior directly.
+
+## Cell quick filters
+
+Click a text cell to open paired keep/exclude filters. Length comparisons use
+`length > / ≤`, `length < / ≥`, and `length = / ≠`, prefilled with the clicked
+value's Unicode code-point count.
+
+## Reusable menus
+
+`Menu`, `MenuButton`, `MenuGroup`, `MenuItem`, `MenuSubmenu`, and `MenuSeparator`
+serve table header/cell actions, condition choices, and metric actions. They also
+work independently of a table.
+Mount a `Menu` while open, place it beneath your theme provider, and supply a
+trigger element or viewport `{ x, y }` coordinates as its `anchor`:
+
+```tsx
+import { useState } from "react";
+import { Menu, MenuItem, MenuSubmenu, MenuSeparator } from "@pythia-software/query-table-ui";
+
+function ViewActions() {
+  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
+  return <>
+    <button aria-haspopup="menu" aria-expanded={!!anchor}
+      onClick={event => { const trigger = event.currentTarget; setAnchor(previous => previous ? null : trigger); }}>
+      Actions
+    </button>
+    {anchor && <Menu label="View actions" anchor={anchor} onClose={() => setAnchor(null)}>
+      <MenuItem onSelect={() => copyView()}>Copy view</MenuItem>
+      <MenuSubmenu label="Export">
+        <MenuItem onSelect={() => exportCsv()}>CSV</MenuItem>
+        <MenuItem disabled>Image</MenuItem>
+      </MenuSubmenu>
+      <MenuSeparator />
+      <MenuItem tone="danger" onSelect={() => removeView()}>Remove view</MenuItem>
+    </Menu>}
+  </>;
+}
+```
+
+For a button trigger, `MenuButton` owns open/close state, click toggling, and
+ArrowDown/ArrowUp opening at the first/last enabled action:
+
+```tsx
+<MenuButton label="Metric actions" trigger="⋯" width={200}
+  buttonProps={{ className: "my-trigger" }}>
+  <MenuItem onSelect={duplicate}>Duplicate</MenuItem>
+  <MenuItem disabled={!canMove} onSelect={move}>Move up</MenuItem>
+  <MenuSeparator />
+  <MenuItem tone="danger" onSelect={remove}>Remove</MenuItem>
+</MenuButton>
+```
+
+`MenuGroup` adds a labeled group. Set `columns={2}` for paired actions: horizontal
+arrows move within a row, vertical arrows follow a column, disabled cells are
+skipped, and vertical boundaries continue to adjacent actions. Direct action
+children should follow visual row order. Set `checked` with
+`selectionType="radio"` for exclusive choices; the consumer owns selected state.
+
+Items accept `icon`, `shortcut`, `disabled`, and `textValue` for rich-content
+typeahead labels. Set `checked` for checkbox semantics and `closeOnSelect={false}`
+for toggles that should keep the menu open. Submenus can nest and accept `width`.
+Actions close the whole tree; Escape and the back arrow close one level. Up/Down,
+Home/End, typeahead, and direction-aware submenu arrows handle keyboard navigation.
+Desktop Tab closes the menu and continues from its trigger. `returnFocus` supplies
+a destination for coordinate menus; outside interactions keep their own focus.
+
+Desktop menus follow element anchors, flip/shift at viewport edges, scroll when
+long, and portal outside clipping containers. Within a dialog, they remain inside
+its focus trap. Coordinate menus dismiss on external scrolling. Mouse travel across
+submenu gaps uses a safe corridor; only one child submenu opens at each level.
+Phones use the shared focus-trapping sheet with expandable inline submenus.
+
+Scoped `--qt-*` variables, font family, color scheme, and text direction propagate
+through portals, including theme changes while open. Optional tokens are
+`--qt-menu-bg`, `--qt-menu-border`, `--qt-menu-radius`, `--qt-menu-shadow`, and
+`--qt-menu-hover`; defaults use the existing palette. `classNames` supports
+`popover`, `submenu`, `item`, and `separator`; existing `qt-cm-*` CSS hooks remain.
+Import `theme.css` for the standard visual and responsive behavior.
+
+Visit the demo's `/menus` playground for nested, themed, RTL, clipped, long, and
+dialog examples. With the demo running, `npm run test:menus` checks those behaviors
+in Chromium and WebKit (`QT_DEMO_URL` can point to a different server).
+
+### Forms and searchable pickers
+
+Use `Popover` for inputs and settings. It shares menu positioning, theme,
+dismissal, portals, and mobile sheets, with regular form Tab behavior and dialog
+semantics. Desktop focus starts at the first enabled control; `initialFocus` can
+supply a selector scoped to the surface. Escape restores the trigger, leaving
+focus dismisses the popover, and outside clicks retain the clicked destination.
+It accepts `anchor`, `label`, `onClose`, `returnFocus`, `width`, `placement`,
+`className`, and arbitrary children. Mount it only while open:
+
+```tsx
+{open && trigger.current && <Popover label="View settings" anchor={trigger.current}
+  placement="bottom-end" width={280} onClose={() => setOpen(false)}>
+  <label>Name <input value={name} onChange={event => setName(event.target.value)} /></label>
+  <button onClick={() => { save(name); setOpen(false); }}>Save</button>
+</Popover>}
+```
+
+Add column/filter/sort field pickers, rich filter-value pickers, and auto-refresh
+settings use this surface. `FieldPicker` accepts an optional `anchor` for floating
+use; omitting it preserves standalone inline usage. Tag multi-select editors and
+full workbenches use the shared modal/sheet foundation with Apply/Cancel and focus
+containment. Native selects, expandable sections, and formula autocomplete keep
+their respective form, disclosure, and combobox interactions.
 
 ## Tag/set filters
 
@@ -97,12 +231,31 @@ current query, including a saved default query. Configure `useQueryTable` with
 `syncUrl: true` so recipients load shared query URLs. Query tokens are encoded,
 not encrypted, and may contain raw filter values.
 
+Pass `selection={table.selection}` to enable row checkboxes with editable ranges:
+
+- Click a checkbox to toggle it and start a new range, preserving prior checks.
+- Shift-click to grow or shrink the range from its fixed starting row. Starting
+  by unchecking a row makes Shift-click uncheck the range instead.
+- Ctrl/Cmd-click toggles one checkbox; Ctrl/Cmd+Shift-click adds the span while
+  preserving every existing check.
+- Space toggles the focused checkbox; Shift+Space adjusts the range, with
+  Ctrl/Cmd+Shift+Space available for an additive span.
+
+For example, click 2, Shift-click 4, click 8, Shift-click 12, then Shift-click 10
+to select rows 2–4 and 8–10. Shrinking an overlapping range preserves checks that
+existed before it began. Ranges follow the current page's displayed order,
+including virtualized rows, and reset when that order changes. The header
+checkbox selects or clears the current page and starts a fresh range context.
+
 `SelectionToolbar` action callbacks receive `(selectedIds, selection)`, so
 consumer-owned bulk actions can call `selection.replace(ids)` or
 `selection.retain(ids)` atomically. Existing callbacks that use only the first
 argument remain compatible.
 
 ## Icons
+
+The bundled theme aligns table-header sort arrows and priority indicators with
+their labels for both single-column and multi-column sorts.
 
 `Icon` is the shared, hand-drawn SVG set used throughout the UI and demo. Its
 24px grid, rounded 1.8px strokes, and `currentColor` styling keep controls

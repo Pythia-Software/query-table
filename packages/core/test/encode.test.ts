@@ -1,9 +1,12 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   encodeQuery,
   decodeQuery,
   toServerQuery,
   normalizeQueryState,
+  queriesEqual,
+  memoryStorageAdapter,
+  localStorageAdapter,
   EMPTY_QUERY,
   MAX_QUERY_LIMIT,
   MAX_QUERY_OFFSET,
@@ -14,6 +17,15 @@ import type { QueryState } from "../src/index";
 import { runsSchema } from "./fixtures";
 
 describe("encodeQuery / decodeQuery", () => {
+  it("round-trips fit-to-screen without changing legacy tokens", () => {
+    const fitted = { ...EMPTY_QUERY, fitToScreen: true };
+    expect(decodeQuery(encodeQuery(fitted))).toEqual(fitted);
+    expect(encodeQuery({ ...EMPTY_QUERY, fitToScreen: false })).toBe(encodeQuery(EMPTY_QUERY));
+    expect(toServerQuery(fitted, runsSchema)).toEqual(toServerQuery(EMPTY_QUERY, runsSchema));
+    expect(queriesEqual(fitted, EMPTY_QUERY)).toBe(false);
+    expect(queriesEqual({ ...EMPTY_QUERY, fitToScreen: false }, EMPTY_QUERY)).toBe(true);
+  });
+
   it("round-trips a full query including widths and multi-sort", () => {
     const q: QueryState = {
       select: [{ field: "case_name", width: 200 }, { field: "overall" }],
@@ -97,6 +109,13 @@ describe("encodeQuery / decodeQuery", () => {
 });
 
 describe("normalizeQueryState", () => {
+  it("accepts only an explicit boolean fit-to-screen preference", () => {
+    expect(normalizeQueryState({ fitToScreen: true }).fitToScreen).toBe(true);
+    for (const fitToScreen of [false, "true", 1, {}, null, undefined]) {
+      expect(normalizeQueryState({ fitToScreen }).fitToScreen).toBeUndefined();
+    }
+  });
+
   it("does not impose an application-level 1,000-row limit", () => {
     expect(normalizeQueryState({ ...EMPTY_QUERY, limit: 10_000 }).limit).toBe(10_000);
   });
@@ -122,6 +141,30 @@ describe("normalizeQueryState", () => {
     expect(q.limit).toBe(EMPTY_QUERY.limit);
     expect(q.offset).toBe(0);
     expect(q.aggregations?.[0]?.diagnostics).toEqual(["Unsupported aggregate operation."]);
+  });
+});
+
+describe("fit-to-screen persistence", () => {
+  it("preserves the preference in last and named queries for both adapters", async () => {
+    const values = new Map<string, string>();
+    const local = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value); },
+      removeItem: (key: string) => { values.delete(key); },
+    };
+    const fitted = { ...EMPTY_QUERY, fitToScreen: true };
+    vi.stubGlobal("localStorage", local);
+    try {
+      for (const storage of [memoryStorageAdapter(), localStorageAdapter()]) {
+        await storage.saveLast("runs", fitted);
+        expect(await storage.loadLast("runs")).toEqual(fitted);
+        await storage.saveNamed("runs", "Fitted", fitted, 1);
+        expect((await storage.listSaved("runs"))[0]?.query).toEqual(fitted);
+      }
+      expect(await localStorageAdapter().loadLast("runs")).toEqual(fitted);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

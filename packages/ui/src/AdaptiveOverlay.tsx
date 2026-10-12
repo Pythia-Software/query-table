@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { useOverlayTheme } from "./overlayTheme";
 
 const MOBILE_QUERY =
   "(max-width: 760px), (pointer: coarse) and (max-height: 500px)";
@@ -33,37 +34,35 @@ export function ModalSurface({
   children,
   className = "qt-modal",
   chrome = true,
+  returnFocus,
+  backdropClassName,
+  initialFocus,
 }: {
   title: string;
   onClose: () => void;
   children?: ReactNode;
   className?: string;
   chrome?: boolean;
+  returnFocus?: HTMLElement | null | undefined;
+  backdropClassName?: string | undefined;
+  initialFocus?: string | undefined;
 }): ReactNode {
   const mobile = useMobileLayout();
   const titleId = useId();
   const surface = useRef<HTMLDivElement>(null);
   const themeAnchor = useRef<HTMLSpanElement>(null);
-  const [theme, setTheme] = useState<Record<string, string>>({});
+  const theme = useOverlayTheme(themeAnchor);
   const close = useRef(onClose);
   close.current = onClose;
+  const focusDestination = useRef(returnFocus);
+  focusDestination.current = returnFocus;
   const swipeStart = useRef<number | null>(null);
+  const backdropPress = useRef(false);
   const [swipeDistance, setSwipeDistance] = useState(0);
   const [viewport, setViewport] = useState<{
     top: number;
     height: number;
   } | null>(null);
-
-  useEffect(() => {
-    if (!mobile || !themeAnchor.current) return;
-    const styles = getComputedStyle(themeAnchor.current);
-    const inherited: Record<string, string> = { fontFamily: styles.fontFamily };
-    for (const property of Array.from(styles)) {
-      if (property.startsWith("--qt-"))
-        inherited[property] = styles.getPropertyValue(property);
-    }
-    setTheme(inherited);
-  }, [mobile]);
 
   useEffect(() => {
     if (!mobile || !window.visualViewport) return;
@@ -94,7 +93,7 @@ export function ModalSurface({
       document.body.style.overflow = "hidden";
     }
     modalStack.push(element);
-    element.focus();
+    (element.querySelector<HTMLElement>(initialFocus ?? ":not(*)") ?? element).focus();
     const isTop = () => modalStack[modalStack.length - 1] === element;
     const focusable = () =>
       Array.from(
@@ -167,13 +166,14 @@ export function ModalSurface({
       modalStack.splice(modalStack.indexOf(element), 1);
       if (modalStack.length === 0)
         document.body.style.overflow = originalOverflow;
-      if (previous?.isConnected) previous.focus();
+      const destination = focusDestination.current ?? previous;
+      if (destination?.isConnected) destination.focus({ preventScroll: true });
     };
   }, [mobile]);
 
   const content = (
     <div
-      className={`qt-modal-backdrop qt-overlay-backdrop${mobile ? " qt-overlay-backdrop--mobile" : ""}`}
+      className={`qt-modal-backdrop qt-overlay-backdrop${mobile ? " qt-overlay-backdrop--mobile" : ""}${backdropClassName ? ` ${backdropClassName}` : ""}`}
       style={
         mobile
           ? {
@@ -184,9 +184,13 @@ export function ModalSurface({
             }
           : undefined
       }
+      onPointerDown={(event) => { backdropPress.current = event.target === event.currentTarget; }}
       onClick={(event) => {
         event.stopPropagation();
-        if (event.target === event.currentTarget) onClose();
+        // A resize or drag can finish over the backdrop. Dismiss only when
+        // the gesture both began and ended there.
+        if (backdropPress.current && event.target === event.currentTarget) onClose();
+        backdropPress.current = false;
       }}
     >
       <div
@@ -257,7 +261,10 @@ export function ModalSurface({
       {createPortal(content, document.body)}
     </>
   ) : (
-    content
+    <>
+      <span ref={themeAnchor} hidden />
+      {content}
+    </>
   );
 }
 

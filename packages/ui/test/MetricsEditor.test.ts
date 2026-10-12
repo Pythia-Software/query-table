@@ -225,15 +225,8 @@ it("attaches preview resizing after first creation and after removing the last m
         host.querySelector<HTMLInputElement>('[aria-label="Preview height"]')!
           .value,
       ).toBe("250");
-      act(() =>
-        [
-          ...host.querySelectorAll<HTMLButtonElement>(
-            ".qt-metric-library button",
-          ),
-        ]
-          .find((b) => b.textContent === "Remove")!
-          .click(),
-      );
+      await act(async () => host.querySelector<HTMLButtonElement>(".qt-metric-library .qt-metric-actions > button")!.click());
+      act(() => Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find(b => b.textContent === "Remove")!.click());
       expect(observer!.targets).toHaveLength(0);
     }
   } finally {
@@ -527,9 +520,8 @@ it("keeps layout controls transactional and restores a removed metric in place",
     act(() => button("Metric list panel").click());
     await act(async () => vi.advanceTimersByTimeAsync(300));
     expect(preview).toHaveBeenCalledTimes(previewCalls);
-    const remove = Array.from(
-      host.querySelectorAll(".qt-metric-library li:first-child button"),
-    ).find((b) => b.textContent === "Remove") as HTMLButtonElement;
+    await act(async () => host.querySelector<HTMLButtonElement>(".qt-metric-library li:first-child .qt-metric-actions > button")!.click());
+    const remove = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find(b => b.textContent === "Remove")!;
     act(() => remove.click());
     expect(
       host.querySelector<HTMLSelectElement>('[aria-label="Editing metric"]')

@@ -1,8 +1,68 @@
-import type { MetricBucket, RenderingClause, MetricValue } from "./metricTypes";
-import { metricTimestamp } from "./metricFormat";
-export const metricGroupLabel = (b: MetricBucket): string =>
+import type {
+  MetricBucket,
+  RenderingClause,
+  MetricValue,
+  MetricValueFormat,
+} from "./metricTypes";
+import { metricTimestamp, formatMetricOutput } from "./metricFormat";
+/** Calendar group labels must describe the same local dates as the computation. */
+export function metricDateGroupFormat(
+  clause: RenderingClause,
+): MetricValueFormat | undefined {
+  const grouping = clause.dateGrouping;
+  // Scatter/histogram X formats survive display changes, but describe the
+  // measure axis. Only explicit calendar grouping gives them date-key meaning.
+  if (!grouping) return undefined;
+  const format = clause.display?.xFormat;
+  return {
+    kind: "date",
+    style: "custom",
+    pattern:
+      grouping.interval === "hour"
+        ? "MMM DD HH:mm Z"
+        : grouping.interval === "month"
+          ? "MMM YYYY"
+          : grouping.interval === "year"
+            ? "YYYY"
+            : "MMM DD",
+    ...(format && ["date", "time", "datetime"].includes(format.kind)
+      ? format
+      : {}),
+    sourceUnit: "iso",
+    timeZone: grouping.timeZone ?? "UTC",
+  };
+}
+export function metricGroupKeyLabel(
+  value: MetricValue | undefined,
+  axis: number,
+  clause?: RenderingClause,
+  locale?: string,
+  detailed = false,
+): string {
+  if (value == null) return "NULL";
+  if (axis !== 0 || !clause?.dateGrouping) return String(value);
+  const format = detailed
+    ? {
+        kind: "datetime" as const,
+        style: "custom" as const,
+        pattern: "YYYY-MM-DD HH:mm Z",
+        timeZone: clause.dateGrouping.timeZone ?? "UTC",
+      }
+    : metricDateGroupFormat(clause);
+  return formatMetricOutput(value, format, locale).text;
+}
+export const metricGroupLabel = (
+  b: MetricBucket,
+  clause?: RenderingClause,
+  locale?: string,
+  detailed = false,
+): string =>
   b.keys.length
-    ? b.keys.map((v) => (v === null ? "NULL" : String(v))).join(" / ")
+    ? b.keys
+        .map((v, axis) =>
+          metricGroupKeyLabel(v, axis, clause, locale, detailed),
+        )
+        .join(" / ")
     : "All rows";
 export const finiteMetricNumber = (v: MetricValue | undefined): v is number =>
   typeof v === "number" && Number.isFinite(v);
@@ -120,7 +180,8 @@ export function metricFraction(
 export function metricScale(
   values: readonly number[],
   options:
-    import("@pythia-software/query-table-core").MetricAxisScale | undefined,
+    | import("@pythia-software/query-table-core").MetricAxisScale
+    | undefined,
   zero = false,
 ) {
   const log = options?.mode === "log";

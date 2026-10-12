@@ -8,6 +8,40 @@
   number/percent, text, and labeled chips, with a shared searchable JSON inspector
   for native, serialized, encoded, and escaped values.
 
+- Add an isolated date metric demo prototype with calendar intervals, optional
+  empty buckets, explicit ranges, and count/sum versus average behavior.
+- Add date interval and empty-date settings to the existing metric editor,
+  persisted with metric definitions. Complete calendar buckets locally over
+  query, observed, or custom bounds, with an example at `/date-metrics-workbench`.
+  Server date grouping remains unsupported and reports an explicit error.
+- Add named timezones to metric date grouping (UTC by default), with local
+  calendar boundaries, custom date bounds, and matching graph/list/table labels.
+  Handle daylight-saving gaps, repeated hours, and fractional offset changes;
+  persist timezone settings with metric definitions and shared URLs.
+- Detail columns default to Modal and support configurable Page URL templates,
+  tab targets, and item toolbar sharing. Query history uses compact header icons
+  matching item views, with one-step undo/redo under React Strict Mode.
+
+- Add opt-in click popovers, resizable item modals and virtualized row expansion.
+  Item details is a draggable, resizable presentation column with configurable
+  buttons. Each modality has independent property views and named saves; item
+  links restore collection query, identity, modality and property layouts.
+  Property columns support saved widths, auto-fit/reset and raw-value clipboard copy. Property authoring uses a modal workbench
+  with live preview, and item cards start at the view toolbar.
+- Add read-only object property views with field selection/order, per-appearance
+  formats, transactional customization, named saves/defaults, and undo/redo.
+- Add explicit and discovered foreign-key relationships, cancellable batched
+  label/link resolution, and a driver-independent SQLite constraint reader.
+- Add an object inspector demo and integration guide for host-owned detail pages.
+- Give object inspectors a Query Table item card identity, shared SVG controls,
+  saved-view modal/sheet, and table-style property/value surfaces.
+- Export reusable menus, nested submenus, action groups, and form popovers with
+  shared theme inheritance, viewport positioning, keyboard navigation, focus
+  restoration, RTL support, and mobile sheets; add a themed menu playground.
+- Persist `fitToScreen` in saved queries and shared URLs so each viewer's table
+  fits its available area after loading and on viewport changes. Show the active
+  preference in the width menu and clear it on manual width changes while
+  preserving the displayed widths.
 - Add optional PostgreSQL `CompileCombinedMetrics` execution with shared input
   stages and compatible scalar reductions, preserving independent metric plans.
 - Export Go relative datetime resolution and SQLite `SaveIn` for host-owned
@@ -15,6 +49,10 @@
 
 ### Changed
 
+- Display cell-menu string-length comparisons with `>`, `≤`, `<`, `≥`, `=`,
+  and `≠` symbols in the paired keep/exclude actions.
+- Use the shared overlay system for table and metric actions, condition choices,
+  field/value pickers, auto-refresh settings, and tag filter editors.
 - Prune unused SQL bindings and stage-local inputs, and evaluate PostgreSQL
   SELECT-only and shown-row metric bindings after the ordered page window.
 - Reuse identical SQLite metric results and compatible reductions within one
@@ -26,6 +64,19 @@
 
 ### Fixed
 
+- Keep raw chart group labels when a scatter/histogram X format survives a
+  display change without calendar grouping.
+- Reuse the last date bucket's boundaries and ISO key for dense timestamp rows,
+  avoiding repeated timezone conversion while preserving DST boundaries,
+  out-of-order results, and evaluation limits.
+- Honor temporal `xFormat` on explicitly calendar-grouped labels so date axes can
+  display compact calendar labels while retaining raw grouping values.
+- Preserve parent palettes in submenus and let a second column-header click
+  dismiss its menu, including open submenus; avoid stale mobile filter editors
+  opening after a desktop viewport resize.
+- Align table-header sort indicators with their labels in the bundled theme.
+- Open column actions when clicking anywhere in a table header, including
+  padding and blank space, while preserving resize handle behavior.
 - Keep browser-only computed columns evaluating locally beside server sidecars,
   without browser-only revision edits blocking valid v2 pages.
 - Support raw PostgreSQL text-array SELECT while retaining expression and

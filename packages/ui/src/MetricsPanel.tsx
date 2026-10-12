@@ -31,7 +31,11 @@ import {
   type MetricTheme,
   type MetricClassNames,
 } from "./metricColors";
-import { metricScale } from "./metricChartHelpers";
+import {
+  metricScale,
+  metricGroupKeyLabel,
+  metricGroupLabel,
+} from "./metricChartHelpers";
 import { formatMetricOutput } from "./metricFormat";
 import type {
   MetricBucket as AggregationBucket,
@@ -284,12 +288,19 @@ export function MetricCard<Row>({
     body = <BigNumber bucket={buckets[0]!} fmt={fmt} />;
   else if (kind === "list" || (kind === "auto" && clause.groupBy.length === 1))
     body = (
-      <BarList clause={clause} theme={theme} buckets={buckets} fmt={fmt} />
+      <BarList
+        clause={clause}
+        theme={theme}
+        buckets={buckets}
+        fmt={fmt}
+        locale={locale}
+      />
     );
   else if (clause.groupBy.length === 2)
     body = (
       <Pivot
         clause={clause}
+        locale={locale}
         buckets={buckets}
         fmt={fmt}
         rowLabel={groupLabels[0]!}
@@ -299,6 +310,8 @@ export function MetricCard<Row>({
   else
     body = (
       <FlatTable
+        clause={clause}
+        locale={locale}
         buckets={buckets}
         fmt={fmt}
         groupLabels={groupLabels}
@@ -380,11 +393,13 @@ function BarList({
   fmt,
   clause,
   theme,
+  locale,
 }: {
   buckets: AggregationBucket[];
   fmt: (v: MetricValue) => ReactNode;
   clause: AggregationClause;
   theme: MetricTheme | undefined;
+  locale: string | undefined;
 }) {
   const colors = createMetricColorResolver(theme),
     options = clause.display?.list;
@@ -413,7 +428,10 @@ function BarList({
             }}
             key={`${keyText(b.keys[0])}-${i}`}
           >
-            <span className="qt-metric-bar-label" title={keyText(b.keys[0])}>
+            <span
+              className="qt-metric-bar-label"
+              title={metricGroupLabel(b, clause, locale, true)}
+            >
               {options?.useGroupColors && (
                 <span
                   className="qt-metric-swatch"
@@ -426,7 +444,7 @@ function BarList({
                   }}
                 />
               )}
-              {b.keys.map(keyText).join(" / ")}
+              {metricGroupLabel(b, clause, locale)}
             </span>
             {showBars && (
               <span className="qt-metric-bar-track">
@@ -466,12 +484,14 @@ function Pivot({
   rowLabel,
   colLabel,
   clause,
+  locale,
 }: {
   buckets: AggregationBucket[];
   fmt: (v: MetricValue) => ReactNode;
   rowLabel: string;
   colLabel: string;
   clause: AggregationClause;
+  locale: string | undefined;
 }) {
   const rowAxis = clause.display?.pivot?.swap ? 1 : 0,
     colAxis = 1 - rowAxis;
@@ -508,7 +528,7 @@ function Pivot({
             </th>
             {colKeys.map((c) => (
               <th key={typedMetricKey(c)} className="qt-metric-pivot-col">
-                {keyNode(c)}
+                {keyNode(c, colAxis, clause, locale)}
               </th>
             ))}
           </tr>
@@ -516,7 +536,9 @@ function Pivot({
         <tbody>
           {rowKeys.map((r) => (
             <tr key={typedMetricKey(r)}>
-              <th className="qt-metric-pivot-row">{keyNode(r)}</th>
+              <th className="qt-metric-pivot-row">
+                {keyNode(r, rowAxis, clause, locale)}
+              </th>
               {colKeys.map((c) => {
                 const v = cell.get(metricTupleKey([r, c]));
                 return (
@@ -544,11 +566,15 @@ function FlatTable({
   fmt,
   groupLabels,
   valueLabel,
+  clause,
+  locale,
 }: {
   buckets: AggregationBucket[];
   fmt: (v: MetricValue) => ReactNode;
   groupLabels: string[];
   valueLabel: string;
+  clause: AggregationClause;
+  locale: string | undefined;
 }) {
   return (
     <div className="qt-metric-pivot-wrap">
@@ -568,7 +594,7 @@ function FlatTable({
                   than the header (a malformed/partial result) must still leave the
                   value in the value column rather than sliding it left. */}
               {groupLabels.map((_, j) => (
-                <td key={j}>{keyNode(b.keys[j])}</td>
+                <td key={j}>{keyNode(b.keys[j], j, clause, locale)}</td>
               ))}
               <td className="qt-metric-flat-value">
                 {b.error ?? fmt(b.value)}
@@ -696,6 +722,15 @@ function keyText(k: MetricValue | undefined): string {
   return k == null ? NULL_KEY : String(k);
 }
 
-function keyNode(k: MetricValue | undefined): ReactNode {
-  return k == null ? <span className="qt-muted">{NULL_KEY}</span> : String(k);
+function keyNode(
+  k: MetricValue | undefined,
+  axis: number,
+  clause: AggregationClause,
+  locale?: string,
+): ReactNode {
+  return k == null ? (
+    <span className="qt-muted">{NULL_KEY}</span>
+  ) : (
+    metricGroupKeyLabel(k, axis, clause, locale)
+  );
 }

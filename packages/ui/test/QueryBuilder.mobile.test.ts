@@ -121,8 +121,8 @@ it("renders a smaller save star without reducing its button target", () => {
 it("distinguishes scheduled updates, immediate refresh, and resetting with icons", () => {
   expect(container.querySelector('.qt-auto-refresh > button [data-icon="clock"]')).not.toBeNull();
   const buttons = Array.from(container.querySelectorAll("button"));
-  expect(Array.from(container.querySelectorAll(".qt-qb-editor-stack button"), (button) => button.textContent)).toEqual(["Undo", "Redo", "Reset"]);
-  expect(container.querySelector('.qt-qb-editor-stack [data-icon="reset"]')).not.toBeNull();
+  expect(Array.from(container.querySelectorAll(".qt-qb-state-bar .qt-query-history button"), (button) => button.getAttribute("aria-label"))).toEqual(["Undo", "Redo", "Reset"]);
+  expect(container.querySelector('.qt-query-history [data-icon="reset"]')).not.toBeNull();
   expect(buttons.find((button) => button.textContent === "Run Now")?.querySelector('[data-icon="refresh"]')).not.toBeNull();
 });
 
@@ -328,7 +328,8 @@ it("deletes only the tapped sort or metric while retaining the other clauses", a
   await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Remove Name sort"]')!.click());
   expect(api.query.orderBy).toEqual([{ field: "status", dir: "desc" }]);
   await act(async () => container.querySelector<HTMLButtonElement>(".qt-qb-row--metrics .qt-chip")!.click());
-  await act(async () => Array.from(document.querySelectorAll<HTMLButtonElement>('.qt-metric-library .qt-metric-actions button')).find(b=>b.textContent==="Remove")!.click());
+  await act(async () => document.querySelector<HTMLButtonElement>('.qt-metric-library .qt-metric-actions > button')!.click());
+  await act(async () => Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find(b=>b.textContent==="Remove")!.click());
   await act(async()=>{await new Promise(resolve=>setTimeout(resolve,350));});
   await act(async()=>Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(b=>b.textContent==="Apply metrics")!.click());
   expect(api.aggregations.clauses).toHaveLength(1);

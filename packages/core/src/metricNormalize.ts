@@ -46,6 +46,29 @@ export function normalizeMetricOptions(
       groupLimit: "integer",
     }),
   );
+  if (raw.dateGrouping !== undefined) {
+    if (record(raw.dateGrouping)) {
+      const d = copy(raw.dateGrouping, {
+        field: "string",
+        interval: ["hour", "day", "week", "month", "year"],
+        timeZone: "string",
+        includeEmpty: "boolean",
+        range: ["query", "observed", "custom"],
+        start: "string",
+        end: "string",
+      });
+      if (
+        typeof d.field !== "string" ||
+        !d.field ||
+        d.field.length > 256 ||
+        !d.interval ||
+        typeof d.includeEmpty !== "boolean" ||
+        !d.range
+      )
+        diagnostics.push("Invalid metric date grouping.");
+      out.dateGrouping = d;
+    } else diagnostics.push("Invalid metric date grouping.");
+  }
   if (raw.display !== undefined) {
     if (record(raw.display)) {
       if (typeof raw.display.kind !== "string")

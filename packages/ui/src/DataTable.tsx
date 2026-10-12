@@ -1,3 +1,5 @@
+import { ItemDetailsActions, ItemDetailsPanel } from "./ItemDetails";
+import type { ItemDetailsApi } from "@pythia-software/query-table-react";
 import { Icon } from "./Icon";
 // DataTable — the table renderer.
 //
@@ -8,8 +10,8 @@ import { Icon } from "./Icon";
 // and emits intents through onQueryChange. Its props mirror a conventional
 // schema-driven table so adoption is mechanical.
 
-import { isComputedCellError } from "@pythia-software/query-table-core";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type SetStateAction } from "react";
+import { ITEM_DETAILS_COLUMN, isComputedCellError } from "@pythia-software/query-table-core";
+import { useId, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type SetStateAction } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { OrderByClause, QueryState, FieldDef, RowId, SelectColumn, WhereClause } from "@pythia-software/query-table-core";
 import { isSortable, readFieldValue } from "@pythia-software/query-table-core";
@@ -19,10 +21,14 @@ import type { TableClassNames } from "./classNames";
 import { CellMenu } from "./CellMenu";
 import { cellValueText } from "./jsonValue";
 import { formatRowCount, rowCountTitle } from "./formatRowCount";
-import { AdaptiveOverlay, useMobileLayout } from "./AdaptiveOverlay";
+import { Menu, MenuItem, MenuSeparator, MenuSubmenu } from "./Menu";
 import { equalWidths, fitContentWidths, fitScreenWidths, type ColumnWidthPreset } from "./columnWidths";
 
 export interface DataTableProps<Row> {
+  /** Built-in details from api.itemDetails; no render or route callbacks needed. */
+  itemDetails?: ItemDetailsApi<Row>;
+  /** Optional detail renderer overrides, layered over the table registry. */
+  itemRenderers?: RenderRegistry<Row>;
   /** Ordered visible fields (widths already resolved), from `api.visibleFields`. */
   fields: FieldDef<Row>[];
   rows: Row[];
@@ -74,11 +80,6 @@ const AUTOFIT_EXTRA_PX = 4;
 // Collapsed outer table border; keeps "fit to screen" from adding a scrollbar.
 const TABLE_BORDER_PX = 2;
 const TRAILING_WIDTH = 40;
-const MENU_WIDTH = 240;
-const MENU_ROW_HEIGHT = 32;
-const SUBMENU_WIDTH = 200;
-const WIDTH_SUBMENU_OVERHANG_ROWS = 5;
-const SUBMENU_CLOSE_DELAY_MS = 300;
 const COPY_FEEDBACK_MS = 900;
 const DEFAULT_MAX_HEIGHT = 600;
 const DEFAULT_ROW_HEIGHT = 37;
@@ -86,13 +87,15 @@ const DEFAULT_OVERSCAN = 8;
 const SELECTION_COLUMN = "__qt_selection__";
 type HeaderSortPlacement = "set" | "append" | "prepend";
 
-interface MenuState<Row> {
-  kind: "cell" | "header";
+type MenuState<Row> = {
   field: FieldDef<Row>;
-  value?: unknown;
+  trigger: HTMLElement;
+} & ({ kind: "header" } | {
+  kind: "cell";
+  value: unknown;
   x: number;
   y: number;
-}
+});
 
 export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
   const {
@@ -114,12 +117,19 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     classNames,
   } = props;
 
+  const details = props.itemDetails;
+  const detailRenderers = useMemo(() => props.itemRenderers ? { ...renderers, ...props.itemRenderers } : renderers, [renderers, props.itemRenderers]);
+  const expandedPanelId = useId();
+  const expandedRowIndex = details?.active?.mode === "expand" ? rows.findIndex((row) => rowId(row) === details.active?.id) : -1;
   const [menu, setMenu] = useState<MenuState<Row> | null>(null);
   const [selectionColumnWidth, setSelectionColumnWidth] = useState(DEFAULT_SELECTION_WIDTH);
   const [selectionColumnIndex, setSelectionColumnIndex] = useState(0);
   const [copiedCellKey, setCopiedCellKey] = useState<string | null>(null);
   const [headerHeight, setHeaderHeight] = useState(0);
   const [showHorizontalCue, setShowHorizontalCue] = useState(false);
+  // Responsive widths belong to this viewport, never to URL/storage/undo state.
+  const [screenWidths, setScreenWidths] = useState<Map<string, number>>(new Map());
+  const [screenViewportWidth, setScreenViewportWidth] = useState(0);
   const tableWrapRef = useRef<HTMLDivElement>(null);
   const tableHeadRef = useRef<HTMLTableSectionElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
@@ -149,18 +159,26 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     () => rowIds.map((id, index) => (id == null ? `index:${index}` : `${typeof id}:${String(id)}`)),
     [rowIds],
   );
-  const getVirtualRowKey = useCallback((index: number) => virtualRowKeys[index] ?? `index:${index}`, [virtualRowKeys]);
+  // Expanded details are measured as their own virtual row. Keeping them in
+  // the virtualizer's model avoids overlaps and jumpy padding on large tables.
+  const entries = useMemo(() => rows.flatMap((_, rowIndex) => rowIndex === expandedRowIndex
+    ? [{ rowIndex, detail: false }, { rowIndex, detail: true }]
+    : [{ rowIndex, detail: false }]), [rows, expandedRowIndex]);
+  const getVirtualRowKey = useCallback((index: number) => {
+    const entry = entries[index];
+    return entry ? `${entry.detail ? "detail:" : ""}${virtualRowKeys[entry.rowIndex]}` : `index:${index}`;
+  }, [virtualRowKeys, entries]);
   const normalizedEstimate = Number.isFinite(estimateRowHeight)
     ? Math.max(1, estimateRowHeight)
     : DEFAULT_ROW_HEIGHT;
   const normalizedOverscan = Number.isFinite(overscan)
     ? Math.max(0, Math.floor(overscan))
     : DEFAULT_OVERSCAN;
-  const estimateVirtualRow = useCallback(() => normalizedEstimate, [normalizedEstimate]);
+  const estimateVirtualRow = useCallback((index: number) => entries[index]?.detail ? 400 : normalizedEstimate, [normalizedEstimate, entries]);
   const initialViewportHeight = typeof maxHeight === "number" && maxHeight > 0 ? maxHeight : DEFAULT_MAX_HEIGHT;
   const initialRect = useMemo(() => ({ width: 0, height: initialViewportHeight }), [initialViewportHeight]);
   const rowVirtualizer = useVirtualizer<HTMLDivElement, HTMLTableRowElement>({
-    count: rows.length,
+    count: entries.length,
     getScrollElement: () => tableWrapRef.current,
     estimateSize: estimateVirtualRow,
     getItemKey: getVirtualRowKey,
@@ -172,6 +190,10 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     // Row refs measure during React's commit phase; schedule size updates normally.
     useFlushSync: false,
   });
+
+  useEffect(() => {
+    if (expandedRowIndex >= 0) rowVirtualizer.scrollToIndex(expandedRowIndex, { align: "start" });
+  }, [expandedRowIndex]);
 
   useEffect(() => {
     return () => {
@@ -279,6 +301,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     return col?.width ?? f.select?.width;
   }
   function resolvedWidthFor(name: string, f: FieldDef<Row>): number | undefined {
+    if (query.fitToScreen && screenWidths.has(name)) return screenWidths.get(name);
     return widthFor(name, f);
   }
   function resolvedColumnWidthFor(name: string, f?: FieldDef<Row>): number | undefined {
@@ -299,6 +322,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
   function commitColumnWidth(name: string, width: number) {
     if (name === SELECTION_COLUMN) {
       setSelectionColumnWidth(clampColumnWidth(name, width));
+      if (query.fitToScreen) setWidths(new Map());
       return;
     }
     setWidth(name, width);
@@ -306,9 +330,19 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
   function setWidth(name: string, width: number) {
     setWidths(new Map([[name, width]]));
   }
-  function setWidths(widths: Map<string, number>) {
+  function setWidths(widths: Map<string, number>, fitToScreen = false) {
     const px = new Map(Array.from(widths, ([name, width]) => [name, clampWidth(width)]));
-    onQueryChange((prev) => ({ ...prev, select: writeWidths(prev.select, fields, px) }));
+    onQueryChange((prev) => {
+      // Freeze the currently displayed widths when leaving responsive mode,
+      // including columns the user did not resize. Measurements can predate a
+      // column removal while loading or hidden; never restore those columns.
+      const fittedWidths = new Map([...screenWidths].filter(([name]) => fieldByName.has(name)));
+      const current = prev.fitToScreen ? writeWidths(prev.select, fields, fittedWidths) : prev.select;
+      const next = { ...prev, select: writeWidths(current, fields, px) };
+      if (fitToScreen) next.fitToScreen = true;
+      else delete next.fitToScreen;
+      return next;
+    });
   }
   function applyResizeGuide() {
     const preview = resizePreviewRef.current;
@@ -431,13 +465,17 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
       : preset === "equal"
         ? equalWidths(names.length, available)
         : fitScreenWidths(content, available);
-    setWidths(new Map(names.map((name, i) => [name, widths[i]!])));
+    setWidths(new Map(names.map((name, i) => [name, widths[i]!])), preset === "screen");
   }
-  const hasCustomWidths = selectionColumnWidth !== DEFAULT_SELECTION_WIDTH || query.select.some((c) => c.width != null);
+  const hasCustomWidths = query.fitToScreen === true || selectionColumnWidth !== DEFAULT_SELECTION_WIDTH || query.select.some((c) => c.width != null);
   function resetWidths() {
     setMenu(null);
     setSelectionColumnWidth(DEFAULT_SELECTION_WIDTH);
-    onQueryChange((prev) => ({ ...prev, select: prev.select.map((c) => ({ field: c.field })) }));
+    onQueryChange((prev) => {
+      const next = { ...prev, select: prev.select.map((c) => ({ field: c.field })) };
+      delete next.fitToScreen;
+      return next;
+    });
   }
   function resizeWithKeyboard(name: string, startWidth: number | undefined, e: React.KeyboardEvent<HTMLSpanElement>) {
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight" && e.key !== "Enter") return;
@@ -506,6 +544,41 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     if (index >= 0) setSelectionColumnIndex(index);
   }, [columnDrag.active, columnDrag.dropRevision, renderedColumnNames, fieldNames]);
 
+  useEffect(() => {
+    if (!query.fitToScreen) return;
+    const wrap = tableWrapRef.current;
+    if (!wrap) return;
+    const measureViewport = () => setScreenViewportWidth(wrap.clientWidth);
+    measureViewport();
+    window.addEventListener("resize", measureViewport);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measureViewport);
+    observer?.observe(wrap);
+    return () => {
+      window.removeEventListener("resize", measureViewport);
+      observer?.disconnect();
+    };
+  }, [query.fitToScreen]);
+
+  // Measure after rows render, including asynchronous loads and saved-query
+  // restoration. Refitting changes only local layout, so resize cannot rewrite
+  // the shared query or add undo entries.
+  useCommitLayoutEffect(() => {
+    if (!query.fitToScreen || loading || fieldNames.length === 0) return;
+    const available = (tableWrapRef.current?.clientWidth ?? 0)
+      - (showSel ? selectionColumnWidth : 0)
+      - (trailing ? TRAILING_WIDTH : 0)
+      - TABLE_BORDER_PX;
+    if (available <= 0) return; // Hidden/unlaid-out tables retry when their viewport appears.
+    const content = measureContentWidths(fieldNames).map((width, i) =>
+      width || widthFor(fieldNames[i]!, fields[i]!) || DEFAULT_WIDTH,
+    );
+    const widths = fitScreenWidths(content, available);
+    setScreenWidths((current) => {
+      if (current.size === fieldNames.length && fieldNames.every((name, i) => current.get(name) === widths[i])) return current;
+      return new Map(fieldNames.map((name, i) => [name, widths[i]!]));
+    });
+  }, [query.fitToScreen, query.select, fields, fieldNames, rows, loading, renderers, screenViewportWidth, showSel, selectionColumnWidth, trailing]);
+
 
   // ---- selection ----
   function toggleHeader() {
@@ -517,12 +590,15 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
   function openMenu(e: React.MouseEvent, f: FieldDef<Row>, row: Row) {
     if (isInteractiveTarget(e.target)) return;
     e.preventDefault();
-    setMenu({ kind: "cell", field: f, value: readFieldValue(f, row), x: e.clientX, y: e.clientY });
+    setMenu({ kind: "cell", field: f, value: readFieldValue(f, row), x: e.clientX, y: e.clientY, trigger: e.currentTarget as HTMLElement });
   }
   function openHeaderMenu(e: React.MouseEvent, f: FieldDef<Row>) {
     if (isInteractiveTarget(e.target)) return;
     e.preventDefault();
-    setMenu({ kind: "header", field: f, x: e.clientX, y: e.clientY });
+    const trigger = e.currentTarget as HTMLElement;
+    setMenu((current) => current?.kind === "header" && current.field.name === f.name
+      ? null
+      : { kind: "header", field: f, trigger });
   }
 
   function onTableWheel(e: React.WheelEvent<HTMLDivElement>) {
@@ -574,7 +650,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
   const tableWidth = renderedColumnNames.reduce((sum, name) => {
     const f = fieldByName.get(name);
     return sum + displayColumnWidthFor(name, f);
-  }, trailing ? TRAILING_WIDTH : 0);
+  }, (trailing ? TRAILING_WIDTH : 0));
   // A horizontal data grid is more useful than a card stack on small screens,
   // but overflow should be discoverable. Keep a lightweight cue visible only
   // while there is more content to the right.
@@ -743,7 +819,17 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                       dragSource === f.name && "qt-th--dragging",
                       classNames?.th,
                     )}
-                    style={f.select?.align ? { textAlign: f.select.align } : undefined}
+                    style={{ cursor: "pointer", textAlign: f.select?.align }}
+                    onClick={(e) => openHeaderMenu(e, f)}
+                    tabIndex={0}
+                    aria-haspopup="menu"
+                    aria-expanded={menu?.kind === "header" && menu.field.name === f.name}
+                    onKeyDown={(e) => {
+                      if (e.target !== e.currentTarget || !(["Enter", " ", "ArrowDown", "ContextMenu"].includes(e.key) || (e.shiftKey && e.key === "F10"))) return;
+                      e.preventDefault();
+                      setMenu({ kind: "header", field: f, trigger: e.currentTarget });
+                    }}
+                    title="Click to open column actions"
                     draggable
                     onDragStart={(e) => {
                       if (resizingFieldRef.current) {
@@ -781,12 +867,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                     }}
                     onDragEnd={() => columnDrag.end()}
                   >
-                    <span
-                      className="qt-th-label"
-                      onClick={(e) => openHeaderMenu(e, f)}
-                      style={{ cursor: "pointer" }}
-                      title="Click to open column actions"
-                    >
+                    <span className="qt-th-label">
                       {f.label}
                       {info && (
                         <span className="qt-sort-indicator">
@@ -816,14 +897,20 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
               </tr>
             )}
             {virtualRows.map((virtualRow) => {
-              const i = virtualRow.index;
+              const entry = entries[virtualRow.index]!;
+              const i = entry.rowIndex;
+              if (entry.detail && details) return (
+                <tr key={virtualRow.key} data-index={virtualRow.index} ref={rowVirtualizer.measureElement} className="qt-expanded-row">
+                  <td colSpan={totalCols}><div id={expandedPanelId}><ItemDetailsPanel api={details} query={query} renderers={detailRenderers} /></div></td>
+                </tr>
+              );
               const row = rows[i]!;
               const id = rowIds[i] ?? null;
               const selected = id != null && selection ? selection.isSelected(id) : false;
               return (
                 <tr
                   key={virtualRow.key}
-                  data-index={i}
+                  data-index={virtualRow.index}
                   ref={rowVirtualizer.measureElement}
                   className={cx("qt-row", selected && "qt-row--selected", classNames?.row, selected && classNames?.rowSelected)}
                 >
@@ -845,8 +932,14 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                             <input
                               type="checkbox"
                               checked={selected}
-                              // Shift-range select is handled inside selection.toggle.
-                              onClick={(e) => selection!.toggle(id, e.shiftKey)}
+                              onClick={(e) => selection!.toggle(id, e.shiftKey, e.ctrlKey || e.metaKey)}
+                              onKeyDown={(e) => {
+                                if (e.key !== " " || !e.shiftKey) return;
+                                // Handle Shift+Space directly: keyboard-generated
+                                // checkbox clicks do not reliably retain modifiers.
+                                e.preventDefault();
+                                if (!e.repeat) selection!.toggle(id, true, e.ctrlKey || e.metaKey);
+                              }}
                               onChange={() => {
                                 /* state owned by selection; onClick drives it */
                               }}
@@ -858,6 +951,10 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                     }
                     const f = fieldByName.get(name);
                     if (!f) return null;
+                    if (name === ITEM_DETAILS_COLUMN) return <td key={name} data-qt-field={name}
+                      className={cx("qt-cell", "qt-item-detail-column", dragSource === name && "qt-cell--dragging", classNames?.cell)}>
+                      {details && <ItemDetailsActions api={details} query={query} id={id} row={row} renderers={detailRenderers} expandedId={expandedPanelId} />}
+                    </td>;
                     const render = resolveRenderer(f, renderers);
                     const value = readFieldValue(f, row);
                     const key = cellKey(id, i, f.name);
@@ -866,6 +963,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                         key={f.name}
                         data-qt-field={f.name}
                         className={cx("qt-cell", dragSource === f.name && "qt-cell--dragging", classNames?.cell)}
+                        tabIndex={-1}
                         style={f.select?.align ? { textAlign: f.select.align } : undefined}
                         onClick={(e) => openMenu(e, f, row)}
                         onContextMenu={(e) => openMenu(e, f, row)}
@@ -912,6 +1010,8 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
           </tfoot>
         </table>
       </div>
+      {details?.active?.mode === "modal" && <ItemDetailsPanel api={details} query={query} renderers={detailRenderers} />}
+      {details?.active?.mode === "expand" && expandedRowIndex < 0 && <ItemDetailsPanel api={details} query={query} renderers={detailRenderers} outsidePage />}
       {menu && (
         menu.kind === "cell" ? (
           <CellMenu
@@ -919,6 +1019,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
             value={menu.value}
             x={menu.x}
             y={menu.y}
+            returnFocus={menu.trigger}
             onAddFilter={(clause: WhereClause) =>
               onQueryChange((prev) => ({ ...prev, offset: 0, where: [...prev.where, clause] }))
             }
@@ -926,14 +1027,15 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
           />
         ) : (
           <HeaderMenu
+            key={menu.field.name}
             field={menu.field}
-            x={menu.x}
-            y={menu.y}
+            anchor={menu.trigger}
             sortable={isSortable(menu.field)}
             canRemoveColumn={fields.length > 1}
             onSetSort={(placement, dir) => applyHeaderSort(menu.field, dir, placement)}
             onRemove={() => removeColumn(menu.field)}
             canResetWidths={hasCustomWidths}
+            fitToScreen={query.fitToScreen === true}
             onFitColumn={() => {
               setMenu(null);
               autofitColumn(menu.field.name);
@@ -949,25 +1051,15 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
 }
 
 function HeaderMenu<Row>({
-  field,
-  x,
-  y,
-  sortable,
-  canRemoveColumn,
-  canResetWidths,
-  onSetSort,
-  onRemove,
-  onFitColumn,
-  onWidthPreset,
-  onResetWidths,
-  onClose,
+  field, anchor, sortable, canRemoveColumn, canResetWidths,
+  fitToScreen, onSetSort, onRemove, onFitColumn, onWidthPreset, onResetWidths, onClose,
 }: {
   field: FieldDef<Row>;
-  x: number;
-  y: number;
+  anchor: HTMLElement;
   sortable: boolean;
   canRemoveColumn: boolean;
   canResetWidths: boolean;
+  fitToScreen: boolean;
   onSetSort: (placement: HeaderSortPlacement, dir: "asc" | "desc") => void;
   onRemove: () => void;
   onFitColumn: () => void;
@@ -975,151 +1067,31 @@ function HeaderMenu<Row>({
   onResetWidths: () => void;
   onClose: () => void;
 }) {
-  const mobile = useMobileLayout();
-  const [widthsOpen, setWidthsOpen] = useState(false);
-  const widthsTriggerRef = useRef<HTMLButtonElement>(null);
-  const widthsMenuRef = useRef<HTMLDivElement>(null);
-  const focusWidthsOnOpen = useRef(false);
-  // Closing on a short delay lets the pointer cut diagonally across sibling
-  // items on its way into the submenu without dismissing it.
-  const widthsCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const cancelWidthsClose = () => {
-    if (widthsCloseTimer.current) clearTimeout(widthsCloseTimer.current);
-    widthsCloseTimer.current = null;
-  };
-  useEffect(() => cancelWidthsClose, []);
-  useEffect(() => {
-    if (!widthsOpen || !focusWidthsOnOpen.current) return;
-    focusWidthsOnOpen.current = false;
-    widthsMenuRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
-  }, [widthsOpen]);
-  useEffect(() => {
-    if (mobile) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    function onDocClick() {
-      onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    const t = setTimeout(() => window.addEventListener("click", onDocClick), 0);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("click", onDocClick);
-      clearTimeout(t);
-    };
-  }, [onClose, mobile]);
-
-  const items: ReactNode[] = [];
-  const addSortItem = (placement: HeaderSortPlacement, dir: "asc" | "desc", label: string) =>
-    items.push(
-      <MenuItem key={`${placement}-${dir}`} disabled={!sortable} onClick={() => onSetSort(placement, dir)}>
-        {label}
-      </MenuItem>,
-    );
-
-  addSortItem("set", "asc", "Set Sort (Asc)");
-  addSortItem("set", "desc", "Set Sort (Desc)");
-  addSortItem("append", "asc", "Append Sort (Asc)");
-  addSortItem("append", "desc", "Append Sort (Desc)");
-  addSortItem("prepend", "asc", "Prepend Sort (Asc)");
-  addSortItem("prepend", "desc", "Prepend Sort (Desc)");
-
-  const vw = typeof window !== "undefined" ? window.innerWidth : 9999;
-  const vh = typeof window !== "undefined" ? window.innerHeight : 9999;
-  const left = Math.max(8, Math.min(x, vw - MENU_WIDTH - 8));
-  // Desktop submenu flies out to the right, or to the left near the edge.
-  const flipWidths = left + MENU_WIDTH + SUBMENU_WIDTH + 12 > vw;
-
-  items.push(<div key="sep" className="qt-cm-sep" />);
-  items.push(
-    <div
-      key="widths"
-      className="qt-cm-submenu-wrap"
-      onMouseEnter={mobile ? undefined : () => {
-        cancelWidthsClose();
-        setWidthsOpen(true);
-      }}
-      onMouseLeave={mobile ? undefined : () => {
-        cancelWidthsClose();
-        widthsCloseTimer.current = setTimeout(() => setWidthsOpen(false), SUBMENU_CLOSE_DELAY_MS);
-      }}
-    >
-      <button
-        ref={widthsTriggerRef}
-        type="button"
-        className={cx("qt-cm-item", "qt-cm-submenu-trigger", widthsOpen && "qt-cm-item--open")}
-        role="menuitem"
-        aria-haspopup="menu"
-        aria-expanded={widthsOpen}
-        // Desktop hover has already opened it, so a click must not toggle it
-        // shut under the pointer; the inline mobile sheet section toggles.
-        onClick={() => setWidthsOpen((open) => (mobile ? !open : true))}
-        onKeyDown={(e) => {
-          if (e.key !== "ArrowRight") return;
-          e.preventDefault();
-          focusWidthsOnOpen.current = true;
-          setWidthsOpen(true);
-        }}
-      >
-        Column Widths
-        <Icon name={mobile && widthsOpen ? "chevronDown" : "chevronRight"} />
-      </button>
-      {widthsOpen && (
-        <div
-          ref={widthsMenuRef}
-          className={cx("qt-cm-submenu", flipWidths && "qt-cm-submenu--left")}
-          style={mobile ? undefined : { width: SUBMENU_WIDTH }}
-          role="menu"
-          aria-label="Column widths"
-          onKeyDown={(e) => {
-            if (e.key !== "ArrowLeft") return;
-            e.preventDefault();
-            setWidthsOpen(false);
-            widthsTriggerRef.current?.focus();
-          }}
-        >
-          <MenuItem onClick={onFitColumn} title={`Size ${field.label} to its widest visible value`}>
-            Fit This Column
-          </MenuItem>
-          <div className="qt-cm-sep" />
-          {WIDTH_PRESETS.map(({ preset, label, hint }) => (
-            <MenuItem key={preset} onClick={() => onWidthPreset(preset)} title={hint}>
-              {label}
-            </MenuItem>
-          ))}
-          <div className="qt-cm-sep" />
-          <MenuItem disabled={!canResetWidths} onClick={onResetWidths} title="Back to the default column widths">
-            Reset Widths
-          </MenuItem>
-        </div>
-      )}
-    </div>,
-  );
-  items.push(
-    <MenuItem key="remove" disabled={!canRemoveColumn} onClick={onRemove}>
-      Remove Column
-    </MenuItem>,
-  );
-
-  // Leave room below for the widths submenu, which hangs past the last item.
-  const top = Math.max(8, Math.min(y, vh - MENU_ROW_HEIGHT * (items.length + WIDTH_SUBMENU_OVERHANG_ROWS) - 8));
-
   return (
-    <AdaptiveOverlay title={`${field.label} column`} onClose={onClose}>
-    <div
-      className="qt-cell-menu"
-      style={{ left, top, width: MENU_WIDTH }}
-      onClick={(e) => e.stopPropagation()}
-      onContextMenu={(e) => e.preventDefault()}
-      role="menu"
-    >
-      <div className="qt-cm-header">
-        <span className="qt-cm-field">{field.label}</span>
-      </div>
-      {items}
-    </div>
-    </AdaptiveOverlay>
+    <Menu label={`${field.label} column`} anchor={anchor} onClose={onClose}>
+      <div className="qt-cm-header"><span className="qt-cm-field">{field.label}</span></div>
+      {(["set", "append", "prepend"] as const).flatMap((placement) =>
+        (["asc", "desc"] as const).map((dir) => (
+          <MenuItem key={`${placement}-${dir}`} disabled={!sortable} onSelect={() => onSetSort(placement, dir)}>
+            {placement === "set" ? "Set" : placement === "append" ? "Append" : "Prepend"} Sort ({dir === "asc" ? "Asc" : "Desc"})
+          </MenuItem>
+        )),
+      )}
+      <MenuSeparator />
+      <MenuSubmenu label="Column Widths">
+        <MenuItem onSelect={onFitColumn} title={`Size ${field.label} to its widest visible value`}>Fit This Column</MenuItem>
+        <MenuSeparator />
+        {WIDTH_PRESETS.map(({ preset, label, hint }) => (
+          <MenuItem key={preset} onSelect={() => onWidthPreset(preset)} title={hint} checked={preset === "screen" ? fitToScreen : undefined}>
+            {label}
+          </MenuItem>
+        ))}
+        <MenuSeparator />
+        <MenuItem disabled={!canResetWidths} onSelect={onResetWidths} title="Back to the default column widths">Reset Widths</MenuItem>
+      </MenuSubmenu>
+      <MenuSeparator />
+      <MenuItem tone="danger" disabled={!canRemoveColumn} onSelect={onRemove}>Remove Column</MenuItem>
+    </Menu>
   );
 }
 
@@ -1128,31 +1100,6 @@ const WIDTH_PRESETS: Array<{ preset: ColumnWidthPreset; label: string; hint: str
   { preset: "screen", label: "Fit All to Screen", hint: "Fill the table width, trimming the widest columns first" },
   { preset: "equal", label: "Equal Widths", hint: "Split the table width evenly across columns" },
 ];
-
-function MenuItem({
-  children,
-  onClick,
-  disabled,
-  title,
-}: {
-  children: ReactNode;
-  onClick: () => void;
-  disabled?: boolean;
-  title?: string;
-}) {
-  return (
-    <button
-      type="button"
-      className="qt-cm-item"
-      onClick={onClick}
-      role="menuitem"
-      disabled={disabled}
-      title={title}
-    >
-      {children}
-    </button>
-  );
-}
 
 /** Header menu sort helper for set / append / prepend actions. */
 function nextHeaderOrderBy(

@@ -49,3 +49,15 @@ export { formatMetricOutput, validateMetricFormat, metricTimestamp } from "./met
 
 export { RequestActivity } from "./RequestActivity";
 export type { RequestActivityProps } from "./RequestActivity";
+export { ObjectProperties, formatPropertyValue } from "./ObjectProperties";
+export type { ObjectPropertiesProps } from "./ObjectProperties";
+export { PropertyViewEditor, PropertyViewControls } from "./PropertyViewEditor";
+export { ObjectInspector } from "./ObjectInspector";
+export { ItemDetailShare, itemDetailHref } from "./ItemDetails";
+export type { ObjectInspectorProps } from "./ObjectInspector";
+
+export { Menu, MenuButton, MenuGroup, MenuItem, MenuSubmenu, MenuSeparator } from "./Menu";
+export type { MenuAnchor, MenuProps, MenuItemProps, MenuSubmenuProps, MenuButtonProps, MenuGroupProps } from "./Menu";
+
+export { Popover } from "./Popover";
+export type { PopoverProps } from "./Popover";

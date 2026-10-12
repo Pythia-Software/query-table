@@ -41,6 +41,13 @@ import {
 } from "./metricDistributions";
 import { assertMetricNumber, checkedMetricResult } from "./metricPrecision";
 import { evaluationTime, type QueryEvaluationOptions } from "./relativeTime";
+import {
+  metricDateTime,
+  metricDateFloor,
+  metricDateNext,
+  metricDateRange,
+  validateDateGrouping,
+} from "./metricDates";
 const aggregates = new Set([
   "COUNT",
   "COUNT_DISTINCT",
@@ -400,6 +407,23 @@ export function validateMetric(
       if (!f || !isGroupable(f))
         throw new FormulaError(`Field ${key} cannot group metrics.`);
     }
+    if (c.dateGrouping) {
+      validateDateGrouping(c.dateGrouping);
+      const field =
+        resolveFieldName(schema, c.dateGrouping.field) ?? c.dateGrouping.field;
+      if (
+        field !==
+          (resolveFieldName(schema, c.groupBy[0] ?? "") ?? c.groupBy[0]) ||
+        schema.fields.find((f) => f.name === field)?.type !== "datetime"
+      )
+        throw new FormulaError(
+          "Date grouping must use the first grouping field, with a datetime type.",
+        );
+      if (distributionActive(c))
+        throw new FormulaError(
+          "Date grouping currently supports scalar metrics, not distributions.",
+        );
+    }
     if (
       c.groupLimit !== undefined &&
       (!Number.isInteger(c.groupLimit) ||
@@ -459,6 +483,7 @@ export function metricComputationKey(
         expressionY: c.display?.kind === "scatter" ? c.expressionY : undefined,
         scope: c.scope ?? "allMatching",
         groupBy: c.groupBy,
+        dateGrouping: c.dateGrouping,
         sort: c.sort,
         groupLimit: c.groupLimit,
         distribution: distributionActive(c) ? c.distribution : undefined,
@@ -510,6 +535,7 @@ export function toMetricQuery<Row>(
       distribution,
       expression,
       expressionY,
+      dateGrouping,
       ...rest
     } = c;
     return {
@@ -533,6 +559,15 @@ export function toMetricQuery<Row>(
       code: "invalid_metric",
     })),
   );
+  for (const c of q.aggregations ?? [])
+    if (c.dateGrouping)
+      diagnostics.push({
+        metricId: c.id,
+        code: "unsupported_date_grouping",
+        from: 0,
+        to: 1,
+        message: "Date grouping currently requires local metric execution.",
+      });
   try {
     assertMetricQueryState(raw, originalSchema);
   } catch (e) {
@@ -731,7 +766,8 @@ function assertMetricPopulation<Row>(
     throw Error("Shown-row ordering requires an authoritative committed page.");
 }
 export interface MetricEvaluationOptions<Row = unknown>
-  extends QueryEvaluationOptions, MetricReductionOptions {
+  extends QueryEvaluationOptions,
+    MetricReductionOptions {
   resolveComputed?: (name: string) => FormulaPlan | undefined;
   /** Called only for regex row ASTs, using cached results from a terminable worker. */
   evaluateInput?: (
@@ -883,6 +919,15 @@ export function evaluateMetrics<Row>(
           groupBytes = 256;
           groups.set("[]", { keys: [], rows: [] });
         }
+        // Retain only the most recent calendar interval. Dense timestamp rows
+        // share its boundaries and ISO key without repeating timezone work.
+        // The half-open interval also separates repeated/partial DST hours;
+        // out-of-order rows outside it always recompute the correct bucket.
+        let dateStart = Infinity,
+          dateEnd = -Infinity,
+          dateKey = "";
+        let dateInput: MetricValue | undefined,
+          dateTime = NaN;
         for (const row of inputRows) {
           tick();
           if (!c.groupBy.length) {
@@ -899,6 +944,29 @@ export function evaluateMetrics<Row>(
               ),
             ),
           );
+          if (c.dateGrouping && keys[0] !== null) {
+            const config = c.dateGrouping;
+            // Repeated date-only values would otherwise resolve local midnight
+            // through Temporal for every row as well.
+            if (keys[0] !== dateInput) {
+              dateTime = metricDateTime(keys[0]!, config.timeZone);
+              dateInput = keys[0];
+            }
+            if (dateTime < dateStart || dateTime >= dateEnd) {
+              dateStart = metricDateFloor(
+                dateTime,
+                config.interval,
+                config.timeZone,
+              );
+              dateEnd = metricDateNext(
+                dateStart,
+                config.interval,
+                config.timeZone,
+              );
+              dateKey = new Date(dateStart).toISOString();
+            }
+            keys[0] = dateKey;
+          }
           // Measure escaping without allocating a serialized key. Check BEFORE
           // stringify: shared source strings must not amplify into unbounded map keys. Charge source payload again
           // per group, even if shared, plus tuple slots, buckets and map overhead.
@@ -936,6 +1004,68 @@ export function evaluateMetrics<Row>(
           }
           groupBytes += 16;
           g.rows.push(row);
+        }
+        if (c.dateGrouping?.includeEmpty) {
+          const config = c.dateGrouping;
+          const observed: number[] = [];
+          const series = new Map<string, MetricValue[]>();
+          for (const group of groups.values())
+            if (group.keys[0] !== null) {
+              tick();
+              reserve(8);
+              groupBytes += 8;
+              observed.push(metricDateTime(group.keys[0]!));
+              const tuple = group.keys.slice(1);
+              const key = JSON.stringify(tuple);
+              if (!series.has(key)) {
+                const bytes = 128 + 16 * tuple.length + 2 * key.length;
+                reserve(bytes);
+                groupBytes += bytes;
+                series.set(key, tuple);
+              }
+            }
+          if (c.groupBy.length === 1 && !series.size) {
+            reserve(132);
+            groupBytes += 132;
+            series.set("[]", []);
+          }
+          const range = metricDateRange(
+            config,
+            q,
+            observed,
+            now,
+            (name) => resolveFieldName(schema, name) ?? name,
+          );
+          if (range)
+            for (let time = range[0]; time <= range[1]; ) {
+              tick();
+              for (const tuple of series.values()) {
+                tick();
+                const keys: MetricValue[] = [
+                  new Date(time).toISOString(),
+                  ...tuple,
+                ];
+                const key = JSON.stringify(keys);
+                if (key.length > keyLimit)
+                  throw Error("Metric grouping key length budget exceeded.");
+                if (!groups.has(key)) {
+                  if (groups.size >= (options.maxGroups ?? 10000))
+                    throw Error("Metric group budget exceeded.");
+                  const bytes = 256 + 16 * keys.length + 4 * key.length;
+                  reserve(bytes);
+                  groupBytes += bytes;
+                  groups.set(key, { keys, rows: [] });
+                }
+              }
+              const next = metricDateNext(
+                time,
+                config.interval,
+                config.timeZone,
+              );
+              if (!Number.isFinite(next) || next <= time)
+                throw Error("Date grouping exceeds calendar limits.");
+              time = next;
+            }
         }
         const inputs = (
           row: Row,
@@ -1035,6 +1165,16 @@ export function evaluateMetrics<Row>(
             }
             populations.set(bucket, values);
           } else {
+            if (c.dateGrouping && !g.rows.length) {
+              const empty = (p: FormulaPlan) =>
+                p.ast.kind === "call" &&
+                ["COUNT", "COUNT_DISTINCT", "SUM"].includes(p.ast.name)
+                  ? 0
+                  : null;
+              bucket.value = empty(ps[0]!);
+              if (ps[1]) bucket.y = empty(ps[1]);
+              return bucket;
+            }
             const inputErrors = new Set<number>();
             const x = reduce(ps[0]!, g.rows, inputErrors);
             bucket.value = scalar(x.value);
@@ -1079,7 +1219,9 @@ export function evaluateMetrics<Row>(
         }
         const ordering: MetricSort[] = c.sort?.length
           ? c.sort
-          : [{ key: "value", dir: "desc", nulls: "last" }];
+          : c.dateGrouping
+            ? [{ key: "group0", dir: "asc", nulls: "last" }]
+            : [{ key: "value", dir: "desc", nulls: "last" }];
         const target = (b: AggregationBucket, s: MetricSort): MetricValue =>
           s.key === "samples"
             ? b.count - (b.nullCount ?? 0) - (b.inputErrorCount ?? 0)

@@ -27,9 +27,11 @@ import {
   type MetricDisplay,
   type MetricLayout,
   type MetricValueFormat,
+  type MetricDateGrouping,
 } from "@pythia-software/query-table-core";
 import type { QueryTableApi } from "@pythia-software/query-table-react";
 import { ModalSurface } from "./AdaptiveOverlay";
+import { MenuButton, MenuItem, MenuSeparator } from "./Menu";
 import { ReorderList } from "./ReorderList";
 import { MetricCard, cardDecimals } from "./MetricsPanel";
 import { formatMetricOutput, validateMetricFormat } from "./metricFormat";
@@ -186,6 +188,9 @@ export function MetricsEditor<Row>({
   const workbench = useMetricWorkbench(view === "editor");
   const selected = drafts.find((c) => c.id === active);
   const chosen = selected?.display ?? { kind: "auto" as const };
+  const dateField = fields.find(
+    (f) => f.name === selected?.groupBy[0] && f.type === "datetime",
+  );
   const dirty = JSON.stringify(drafts) !== initialKey.current;
   const contextChanged =
     JSON.stringify(api.aggregations.clauses) !== initialKey.current;
@@ -511,7 +516,14 @@ export function MetricsEditor<Row>({
         ? []
         : [{ ...s, key: `group${index}` as `group${number}` }];
     });
-    patch(selected.id, { groupBy, ...(sort ? { sort } : {}) });
+    patch(selected.id, {
+      groupBy,
+      ...(sort ? { sort } : {}),
+      dateGrouping:
+        selected.dateGrouping?.field === groupBy[0]
+          ? selected.dateGrouping
+          : undefined,
+    });
   }
   function changeSize(key: keyof MetricLayout, raw: number) {
     if (!selected || !Number.isFinite(raw)) return;
@@ -705,67 +717,16 @@ export function MetricsEditor<Row>({
           : { format },
     );
   const menu = (c: AggregationClause, index: number) => (
-    <details
-      className="qt-metric-actions"
-      onKeyDown={(e) => {
-        if (e.key === "Escape" && e.currentTarget.open) {
-          e.preventDefault();
-          e.stopPropagation();
-          e.currentTarget.open = false;
-          e.currentTarget.querySelector("summary")?.focus();
-        }
-      }}
-    >
-      <summary aria-label={`Actions for ${titleOf(c, fields)}`}>⋯</summary>
-      <div
-        onClick={(e) => {
-          const details = e.currentTarget.closest("details");
-          if (details) {
-            details.open = false;
-            details.querySelector("summary")?.focus();
-          }
-        }}
-      >
-        {view === "dashboard" && (
-          <button
-            type="button"
-            onClick={() => {
-              navigate("editor", c.id);
-            }}
-          >
-            Edit metric
-          </button>
-        )}
-        <button
-          type="button"
-          disabled={drafts.length >= MAX_AGGREGATIONS}
-          onClick={() => duplicate(c)}
-        >
-          Duplicate
-        </button>
-        <button
-          type="button"
-          disabled={index === 0}
-          onClick={() => move(c.id, index - 1)}
-        >
-          Move up
-        </button>
-        <button
-          type="button"
-          disabled={index === drafts.length - 1}
-          onClick={() => move(c.id, index + 1)}
-        >
-          Move down
-        </button>
-        <button
-          type="button"
-          className="qt-metric-remove"
-          onClick={() => remove(c.id)}
-        >
-          Remove
-        </button>
-      </div>
-    </details>
+    <span className="qt-metric-actions">
+      <MenuButton label={`Actions for ${titleOf(c, fields)}`} width={200} trigger={<span aria-hidden>⋯</span>}>
+        {view === "dashboard" && <MenuItem onSelect={() => navigate("editor", c.id)}>Edit metric</MenuItem>}
+        <MenuItem disabled={drafts.length >= MAX_AGGREGATIONS} onSelect={() => duplicate(c)}>Duplicate</MenuItem>
+        <MenuItem disabled={index === 0} onSelect={() => move(c.id, index - 1)}>Move up</MenuItem>
+        <MenuItem disabled={index === drafts.length - 1} onSelect={() => move(c.id, index + 1)}>Move down</MenuItem>
+        <MenuSeparator />
+        <MenuItem tone="danger" onSelect={() => remove(c.id)}>Remove</MenuItem>
+      </MenuButton>
+    </span>
   );
   const sizeControls = selected && (
     <div className="qt-metric-size-controls">
@@ -1606,7 +1567,10 @@ export function MetricsEditor<Row>({
                           .map(
                             (g) => fields.find((f) => f.name === g)?.label ?? g,
                           )
-                          .join(" × ")
+                          .join(" × ") +
+                        (selected.dateGrouping
+                          ? ` · ${selected.dateGrouping.interval} · ${selected.dateGrouping.timeZone ?? "UTC"}${selected.dateGrouping.includeEmpty ? " · empty dates" : ""}`
+                          : "")
                       : "One value"
                   }
                 >
@@ -1621,7 +1585,7 @@ export function MetricsEditor<Row>({
                         onChange={(e) => {
                           const groupBy = [...selected.groupBy];
                           groupBy[index] = e.target.value;
-                          patch(selected.id, { groupBy });
+                          regroup(groupBy);
                         }}
                       >
                         {groupable.map((f) => (
@@ -1666,6 +1630,169 @@ export function MetricsEditor<Row>({
                       )}
                     </div>
                   ))}
+                  {dateField && (
+                    <div className="qt-metric-date-grouping">
+                      <label>
+                        Date interval
+                        <select
+                          aria-label="Date interval"
+                          value={selected.dateGrouping?.interval ?? "exact"}
+                          onChange={(e) => {
+                            if (e.target.value === "exact") {
+                              patch(selected.id, { dateGrouping: undefined });
+                              return;
+                            }
+                            const interval = e.target
+                              .value as MetricDateGrouping["interval"];
+                            patch(selected.id, {
+                              dateGrouping: {
+                                field: dateField.name,
+                                includeEmpty: false,
+                                range: "query",
+                                ...selected.dateGrouping,
+                                interval,
+                              },
+                            });
+                          }}
+                        >
+                          <option value="exact">Exact timestamp</option>
+                          <option value="hour">Hour</option>
+                          <option value="day">Day</option>
+                          <option value="week">Week</option>
+                          <option value="month">Month</option>
+                          <option value="year">Year</option>
+                        </select>
+                      </label>
+                      {selected.dateGrouping && (
+                        <label>
+                          Grouping timezone
+                          <input
+                            aria-label="Grouping timezone"
+                            list={`${titleId}-grouping-timezones`}
+                            maxLength={80}
+                            value={selected.dateGrouping.timeZone ?? "UTC"}
+                            placeholder="UTC or America/Denver"
+                            onChange={(e) =>
+                              patch(selected.id, {
+                                dateGrouping: {
+                                  ...selected.dateGrouping!,
+                                  timeZone: e.target.value,
+                                },
+                              })
+                            }
+                          />
+                          <datalist id={`${titleId}-grouping-timezones`}>
+                            {[
+                              "UTC",
+                              "America/Denver",
+                              "America/Los_Angeles",
+                              "America/New_York",
+                              "Europe/London",
+                              "Europe/Berlin",
+                              "Asia/Kolkata",
+                              "Asia/Tokyo",
+                              "Australia/Sydney",
+                              "Pacific/Auckland",
+                            ].map((zone) => (
+                              <option key={zone} value={zone} />
+                            ))}
+                          </datalist>
+                        </label>
+                      )}
+                      <label className="qt-metric-date-toggle">
+                        <input
+                          type="checkbox"
+                          aria-label="Include empty dates"
+                          disabled={!selected.dateGrouping}
+                          checked={selected.dateGrouping?.includeEmpty ?? false}
+                          onChange={(e) =>
+                            patch(selected.id, {
+                              dateGrouping: {
+                                ...selected.dateGrouping!,
+                                includeEmpty: e.target.checked,
+                              },
+                            })
+                          }
+                        />
+                        Include empty dates
+                      </label>
+                      <p className="qt-metric-help">
+                        Add a bucket for every interval, even when no rows
+                        match.
+                      </p>
+                      {selected.dateGrouping?.includeEmpty && (
+                        <>
+                          <label>
+                            Complete dates across
+                            <select
+                              aria-label="Complete dates across"
+                              value={selected.dateGrouping.range}
+                              onChange={(e) =>
+                                patch(selected.id, {
+                                  dateGrouping: {
+                                    ...selected.dateGrouping!,
+                                    range: e.target
+                                      .value as MetricDateGrouping["range"],
+                                  },
+                                })
+                              }
+                            >
+                              <option value="query">Query date range</option>
+                              <option value="observed">
+                                First to last observed date
+                              </option>
+                              <option value="custom">Custom date range</option>
+                            </select>
+                          </label>
+                          {selected.dateGrouping.range === "custom" && (
+                            <div className="qt-metric-date-bounds">
+                              <label>
+                                From
+                                <input
+                                  type="date"
+                                  aria-label="Empty dates start"
+                                  value={selected.dateGrouping.start ?? ""}
+                                  onChange={(e) =>
+                                    patch(selected.id, {
+                                      dateGrouping: {
+                                        ...selected.dateGrouping!,
+                                        start: e.target.value,
+                                      },
+                                    })
+                                  }
+                                />
+                              </label>
+                              <label>
+                                Through
+                                <input
+                                  type="date"
+                                  aria-label="Empty dates end"
+                                  value={selected.dateGrouping.end ?? ""}
+                                  onChange={(e) =>
+                                    patch(selected.id, {
+                                      dateGrouping: {
+                                        ...selected.dateGrouping!,
+                                        end: e.target.value,
+                                      },
+                                    })
+                                  }
+                                />
+                              </label>
+                            </div>
+                          )}
+                          <p className="qt-metric-help">
+                            Direct counts and sums use 0 for empty dates.
+                            Averages, ratios, and other expressions have no
+                            value.
+                          </p>
+                        </>
+                      )}
+                      <p className="qt-metric-help">
+                        Calendar boundaries and custom dates use the grouping
+                        timezone. Weeks begin Monday.
+                      </p>
+                    </div>
+                  )}
                   <select
                     aria-label="Add grouping"
                     value=""
