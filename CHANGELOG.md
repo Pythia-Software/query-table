@@ -4,6 +4,10 @@
 
 ### Added
 
+- Persist `fitToScreen` in saved queries and shared URLs so each viewer's table
+  fits its available area after loading and on viewport changes. Show the active
+  preference in the width menu and clear it on manual width changes while
+  preserving the displayed widths.
 - Add optional PostgreSQL `CompileCombinedMetrics` execution with shared input
   stages and compatible scalar reductions, preserving independent metric plans.
 - Export Go relative datetime resolution and SQLite `SaveIn` for host-owned

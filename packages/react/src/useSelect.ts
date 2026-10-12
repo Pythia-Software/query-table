@@ -41,11 +41,13 @@ export function useSelect<Row>(query: QueryState, setQuery: SetQuery, schema: Fi
   }, [schema, fields]);
 
   const writeSelect = useCallback(
-    (mutate: (cols: SelectColumn[]) => SelectColumn[]) => {
+    (mutate: (cols: SelectColumn[]) => SelectColumn[], clearFitToScreen = false) => {
       setQuery((prev) => {
         // Materialize current (resolved) columns the first time we diverge from defaults.
         const current = prev.select.length ? prev.select : visible;
-        return { ...prev, select: mutate([...current]) };
+        const next = { ...prev, select: mutate([...current]) };
+        if (clearFitToScreen) delete next.fitToScreen;
+        return next;
       });
     },
     [setQuery, visible],
@@ -66,7 +68,7 @@ export function useSelect<Row>(query: QueryState, setQuery: SetQuery, schema: Fi
   );
   const setWidth = useCallback(
     (field: string, width: number) =>
-      writeSelect((c) => c.map((x) => (x.field === field ? { ...x, width: Math.round(width) } : x))),
+      writeSelect((c) => c.map((x) => (x.field === field ? { ...x, width: Math.round(width) } : x)), true),
     [writeSelect],
   );
   const reset = useCallback(() => setQuery((prev) => ({ ...prev, select: [] })), [setQuery]);
