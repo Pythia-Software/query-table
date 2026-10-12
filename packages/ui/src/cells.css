@@ -1,0 +1,31 @@
+/* Built-in cell displays use the same theme contract as the table and sheets. */
+.qt-json-cell { display: block; min-width: 0; }
+.qt-json-preview { display: flex; align-items: center; gap: 8px; max-width: 100%; padding: 0; border: 0; color: inherit; background: transparent; font: inherit; cursor: pointer; }
+.qt-json-preview code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.qt-json-badge { flex: 0 0 auto; border: 1px solid var(--qt-border); background: var(--qt-header-bg); border-radius: 4px; padding: 1px 4px; font-size: 10px; color: var(--qt-muted); }
+.qt-json-preview--invalid .qt-json-badge, .qt-cell-format-error { color: var(--qt-warn-fg); }
+.qt-json-preview:focus-visible, .qt-json-toggle:focus-visible { outline: 2px solid var(--qt-accent); outline-offset: 3px; }
+.qt-json-inspector { width: min(840px, calc(100vw - 32px)); max-height: min(800px, 85vh); text-align: left; white-space: normal; font-size: var(--qt-font-size); }
+.qt-json-toolbar { padding: 16px; display: flex; flex-direction: column; gap: 12px; border-bottom: 1px solid var(--qt-border); flex-shrink: 0; }
+.qt-json-search { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.qt-json-search input { width: 100%; box-sizing: border-box; }
+.qt-json-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.qt-json-content { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 8px; }
+.qt-json-entry { display: flex; align-items: flex-start; gap: 8px; border-bottom: 1px solid var(--qt-border-subtle); padding: 8px; }
+.qt-json-entry:hover { background: var(--qt-cell-hover); }
+.qt-json-toggle { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 24px; width: 24px; height: 24px; border: 0; background: transparent; color: var(--qt-muted); cursor: pointer; }
+.qt-json-entry-data { display: grid; grid-template-columns: minmax(80px, 1fr) minmax(80px, 2fr); flex: 1; min-width: 0; gap: 4px 12px; }
+.qt-json-entry-data code { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+.qt-json-entry-data small { grid-column: 1 / -1; overflow-wrap: anywhere; font-size: 10px; }
+.qt-json-key { color: var(--qt-text); font-weight: 600; }
+.qt-json-value--string { color: var(--qt-pass-fg); }
+.qt-json-value--number, .qt-json-value--boolean { color: var(--qt-accent); }
+.qt-json-value--null, .qt-json-value--object, .qt-json-value--array { color: var(--qt-muted); }
+.qt-json-copy { flex-shrink: 0; }
+.qt-json-original { margin: 8px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; color: var(--qt-text); }
+.qt-json-notice { margin: 0; padding: 12px 16px; color: var(--qt-muted); white-space: normal; }
+.qt-json-more { margin: 12px; }
+@media (max-width: 760px) {
+  .qt-json-entry-data { grid-template-columns: minmax(0, 1fr); }
+  .qt-json-actions .qt-btn, .qt-json-toggle, .qt-json-copy { min-height: 32px; }
+}

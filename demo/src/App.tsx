@@ -22,6 +22,7 @@ import { DEMO_METRICS, DEMO_METRIC_THEME } from "./metrics";
 import { RUNS, type Run } from "./data";
 import { CollapsibleSection } from "./CollapsibleSection";
 import "./demo.css";
+import { CellDisplayDemo } from "./CellDisplayDemo";
 
 const schema = loadSchema<Run>(runsDoc);
 const storage = localStorageAdapter();
@@ -173,6 +174,7 @@ export function App() {
           emptyMessage="No runs match this query."
         />
       </CollapsibleSection>
+      <CellDisplayDemo />
     </main>
   );
 }

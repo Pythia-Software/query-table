@@ -4,6 +4,10 @@
 
 ### Added
 
+- Add typed, serializable field cell displays for JSON, date/time, duration,
+  number/percent, text, and labeled chips, with a shared searchable JSON inspector
+  for native, serialized, encoded, and escaped values.
+
 - Add optional PostgreSQL `CompileCombinedMetrics` execution with shared input
   stages and compatible scalar reductions, preserving independent metric plans.
 - Export Go relative datetime resolution and SQLite `SaveIn` for host-owned

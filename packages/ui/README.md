@@ -224,3 +224,12 @@ Use **Dialog size** for keyboard-editable pixel width/height controls; the nativ
 `MetricsPanel` renders values, lists, pivots/flat tables, bars, lines, pie/ring, scatter, box, and histogram cards through native SVG and accessible data tables/tooltips. Pass a `MetricTheme` as `metricTheme` to QueryBuilder and `theme` to MetricsPanel for consistent typed-category palette assignments. Labels, temporal units/patterns, legends, list styling, axis labels, and card dimensions are query-local. `MetricCard` and `MetricsEditor` are also exported for standalone integration.
 
 See [the production metrics guide](../../docs/metrics.md). Run `npm run test:metrics` against the demo for authoring/layout/persistence and chart interactions.
+
+## Cell displays
+
+Set `FieldDef.display` for built-in JSON, date/time, duration, number/percent,
+text, and chip presentation. JSON cells open a searchable tree with nested paths
+and original/decoded copying; objects, JSON strings and escaped strings share
+the same inspector. Custom `render` functions and registered keys take precedence.
+See the [cell display guide](../../docs/cell-displays.md) for typed configuration,
+units, examples, and inspection limits. `JsonCell` is also exported for standalone use.

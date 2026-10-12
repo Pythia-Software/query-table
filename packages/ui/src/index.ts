@@ -6,6 +6,10 @@ export type { CellContext, CellRenderer, RenderRegistry } from "./renderers";
 export { Icon } from "./Icon";
 export type { IconName, IconProps } from "./Icon";
 export { defaultRenderers, resolveRenderer, safeLinkHref } from "./renderers";
+export { JsonCell } from "./JsonCell";
+export type { JsonCellProps } from "./JsonCell";
+export { inspectJsonValue, searchJsonEntries } from "./jsonValue";
+export type { JsonInspection, JsonEntry } from "./jsonValue";
 
 export type { TableClassNames, QueryBuilderClassNames, MenuClassNames } from "./classNames";
 

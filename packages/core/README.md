@@ -110,3 +110,10 @@ PostgreSQL numeric and also conservatively bounds SUM's absolute population sum.
 Do not claim identical acceptance, intermediate overflow, or bit-for-bit numeric
 parity; negotiate the backend profile and compare supported floating results
 with tolerances. The host must enforce the negotiated profile and execution budgets.
+
+## Cell presentation
+
+`FieldDef.display` accepts the serializable `CellDisplay` union for JSON, temporal,
+duration, numeric, text, and chip presentation. It is independent of `FieldType`
+and backend query capabilities. `loadSchema` validates display options, and
+codegen preserves them in frontend schemas. See the [cell display guide](../../docs/cell-displays.md).

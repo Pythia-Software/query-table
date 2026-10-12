@@ -274,3 +274,10 @@ The SELECT editor supports column ordering, value-frequency browsing, and reusab
 Datetime comparisons can store signed duration operands such as `-1h` or
 `+8d2h10m`. The server resolves these against its execution time and binds the
 resulting timestamp using the existing operator. See [relative datetime operands](docs/relative-time.md).
+
+### Configurable cell displays
+
+Use `FieldDef.display` for built-in JSON inspection, explicit date/time and
+duration units, numeric formats, and labeled status/tag chips. JSON cells provide
+search across nested keys, paths and values, plus original and decoded copying.
+See the [cell display guide](docs/cell-displays.md).

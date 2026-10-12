@@ -12,6 +12,7 @@ import type { FieldDef, FilterOp, WhereClause } from "@pythia-software/query-tab
 import { NULLARY_OPS, negateClause, opsForField, opPairsForField, isFilterable } from "@pythia-software/query-table-core";
 import type { MenuClassNames } from "./classNames";
 import { AdaptiveOverlay, useMobileLayout } from "./AdaptiveOverlay";
+import { cellValueText } from "./jsonValue";
 
 export interface CellMenuProps<Row> {
   field: FieldDef<Row>;
@@ -63,9 +64,10 @@ export function CellMenu<Row>({ field, value, x, y, onAddFilter, onClose, classN
   const ops = isFilterable(field) ? opsForField(field) : [];
   const pairs = isFilterable(field) ? opPairsForField(field) : [];
   const hasNullity = pairs.some((p) => p.keep.op === "is_null");
-  const isArray = Array.isArray(value);
+  const json = field.display?.kind === "json" || field.render === "json";
+  const isArray = Array.isArray(value) && !json;
   const isNullish = value == null || (isArray && (value as unknown[]).length === 0);
-  const cellText = valueToString(value);
+  const cellText = json ? cellValueText(value) : valueToString(value);
 
   function applyClause(clause: WhereClause) {
     onAddFilter(clause);
@@ -125,7 +127,7 @@ export function CellMenu<Row>({ field, value, x, y, onAddFilter, onClose, classN
     >
       <div className="qt-cm-header">
         <span className="qt-cm-field">{field.label}</span>
-        <span className="qt-cm-value">{Array.isArray(value) ? value.map(v => <PresentedFilterValue key={String(v)} field={field.name} value={String(v)}/>) : <PresentedFilterValue field={field.name} value={String(value ?? "")}/>}</span>
+        <span className="qt-cm-value">{json ? cellText : Array.isArray(value) ? value.map(v => <PresentedFilterValue key={String(v)} field={field.name} value={String(v)}/>) : <PresentedFilterValue field={field.name} value={String(value ?? "")}/>}</span>
       </div>
       <MenuItem
         classNames={classNames}

@@ -42,6 +42,7 @@
     "test:dnd": "node demo/dnd-test.mjs",
     "test:mobile": "node demo/mobile-test.mjs",
     "test:feedback": "node demo/agentation-test.mjs",
+    "test:cells": "node demo/cell-display-test.mjs",
     "test:computed": "node demo/computed-test.mjs",
     "test:formula-editor": "node demo/formula-editor-test.mjs",
     "prepare": "husky",
