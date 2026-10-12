@@ -51,6 +51,12 @@ The fit-to-screen preference travels in the existing encoded `?q=` parameter
 column, another width preset, or resetting widths clears it. Set
 `fitToScreen: true` on an initial query to enable the same behavior directly.
 
+## Cell quick filters
+
+Click a text cell to open paired keep/exclude filters. Length comparisons use
+`length > / ≤`, `length < / ≥`, and `length = / ≠`, prefilled with the clicked
+value's Unicode code-point count.
+
 ## Reusable menus
 
 `Menu`, `MenuButton`, `MenuGroup`, `MenuItem`, `MenuSubmenu`, and `MenuSeparator`
