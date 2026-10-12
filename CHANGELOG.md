@@ -7,6 +7,9 @@
 - Add typed, serializable field cell displays for JSON, date/time, duration,
   number/percent, text, and labeled chips, with a shared searchable JSON inspector
   for native, serialized, encoded, and escaped values.
+- Embed the shared JSON inspector in item detail properties across popovers,
+  modals, and expanded rows. Inherit field display settings, add editable JSON
+  property options that persist in saves/share links, and export `JsonValueView`.
 
 - Add an isolated date metric demo prototype with calendar intervals, optional
   empty buckets, explicit ranges, and count/sum versus average behavior.

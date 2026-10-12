@@ -285,4 +285,6 @@ resulting timestamp using the existing operator. See [relative datetime operands
 Use `FieldDef.display` for built-in JSON inspection, explicit date/time and
 duration units, numeric formats, and labeled status/tag chips. JSON cells provide
 search across nested keys, paths and values, plus original and decoded copying.
+Item details embed that inspector directly and inherit field display settings;
+property overrides persist in saved views and shared item links. Try `/cells`.
 See the [cell display guide](docs/cell-displays.md).

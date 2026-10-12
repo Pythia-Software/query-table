@@ -21,12 +21,24 @@ export function JsonCell({ value, label = "JSON", display }: JsonCellProps): Rea
       <span className="qt-json-badge">{inspection.error ? "JSON?" : "JSON"}</span>
       <code>{inspection.preview}</code>
     </button>
-    {open && <JsonInspector inspection={inspection} label={label} display={display} onClose={() => setOpen(false)} />}
+    {open && <ModalSurface title={`${label} · JSON`} onClose={() => setOpen(false)} className="qt-modal qt-json-inspector">
+      <JsonValueContent inspection={inspection} label={label} display={display} />
+    </ModalSurface>}
   </div>;
 }
 
-function JsonInspector({ inspection, label, display, onClose }: {
-  inspection: JsonInspection; label: string; display?: JsonCellDisplay | undefined; onClose: () => void;
+/** The same searchable JSON value embedded in item details, pages or host cards. */
+export function JsonValueView({ value, label = "JSON", display }: JsonCellProps): ReactNode {
+  const inspection = useMemo(() => inspectJsonValue(value, display), [value, display]);
+  if (value == null || value === "") return <span className="qt-muted">—</span>;
+  // Reset local search/expansion when an item or its decoding settings change.
+  return <div className="qt-json-inline" data-qt-json-inline>
+    <JsonValueContent key={`${inspection.raw}\n${JSON.stringify(display)}`} inspection={inspection} label={label} display={display} />
+  </div>;
+}
+
+function JsonValueContent({ inspection, label, display }: {
+  inspection: JsonInspection; label: string; display?: JsonCellDisplay | undefined;
 }): ReactNode {
   const [search, setSearch] = useState("");
   const [raw, setRaw] = useState(Boolean(inspection.error));
@@ -50,14 +62,14 @@ function JsonInspector({ inspection, label, display, onClose }: {
     try { await navigator.clipboard.writeText(text); setCopyStatus(message); }
     catch { setCopyStatus("Copy failed. Select and copy the text manually."); }
   };
-  return <ModalSurface title={`${label} · JSON`} onClose={onClose} className="qt-modal qt-json-inspector">
+  return <section className="qt-json-value-view" aria-label={`${label} JSON value`}>
     <div className="qt-json-toolbar">
       <label className="qt-json-search">Search keys, paths and values
-        <input type="search" className="qt-input" value={search} disabled={raw || Boolean(inspection.error)}
+        <input type="search" className="qt-input" value={search} aria-label={`Search ${label} JSON`} disabled={raw || Boolean(inspection.error)}
           placeholder="e.g. customer, status, 42" onChange={(event) => { setSearch(event.target.value); setCopyStatus(""); setPageSize(200); }} />
       </label>
       <div className="qt-json-actions">
-        <button type="button" className="qt-btn" aria-pressed={raw} onClick={() => setRaw(!raw)}>{raw ? "Tree" : "Original"}</button>
+        <button type="button" className="qt-btn" aria-pressed={raw} disabled={Boolean(inspection.error)} onClick={() => setRaw(!raw)}>{raw ? "Tree" : "Original"}</button>
         <button type="button" className="qt-btn" onClick={() => copy(inspection.raw, "Original value copied")}><Icon name="copy" />Copy original</button>
         <button type="button" className="qt-btn" disabled={Boolean(inspection.error)} onClick={() => copy(inspection.formatted, "Formatted JSON copied")}>Copy JSON</button>
       </div>
@@ -82,5 +94,5 @@ function JsonInspector({ inspection, label, display, onClose }: {
         {visible.length > pageSize && <button type="button" className="qt-btn qt-json-more" onClick={() => setPageSize(pageSize + 200)}>Show more ({visible.length - pageSize} remaining)</button>}
       </>}
     </div>
-  </ModalSurface>;
+  </section>;
 }

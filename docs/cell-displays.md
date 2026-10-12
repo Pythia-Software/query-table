@@ -54,6 +54,9 @@ tooltip. Null and empty values show an em dash; zero and false are preserved.
 ## JSON inspector
 
 The compact cell button opens a dialog on desktop and a bottom sheet on mobile.
+In item details, the same inspector is embedded directly in the property value,
+including popovers, modals, expanded rows, and standalone `ObjectInspector`
+cards. Search and copy controls stay inside the details surface.
 The inspector provides expandable objects and arrays, typed values, literal
 case-insensitive search across keys, full paths, and values, and per-path copying.
 Searching includes descendants of collapsed containers. JSONPath bracket notation
@@ -76,7 +79,7 @@ original text and an error, and remains copyable.
 
 Inspection accepts up to 1,048,576 UTF-16 characters of source/formatted JSON and
 visits at most 5,000 entries and 64 nested levels. Tree traversal starts when the
-inspector opens, and rows are shown in batches of 200. A visible notice states
+inspector opens or a detail property mounts, and rows are shown in batches of 200. A visible notice states
 when inspection/search is partial; copying a valid decoded document still includes
 the full accepted value. Larger or unserializable values show an error. Very large
 original text is truncated in the viewer while Copy original retains the source.
@@ -84,12 +87,34 @@ Numbers outside JavaScript's safe integer precision keep the original text and
 disable decoded copying, preventing a silently rounded identifier.
 No HTML from a value is executed.
 
-For a standalone inspector:
+## Details defaults and overrides
+
+`FieldDef.display` also supplies the default presentation in object property
+views. Specify JSON decoding, timestamp units, duration units, or chip labels
+and tones once for the table and its details. Saved property `render`/`format`
+overrides and field `property` metadata take precedence; custom field renderers
+are retained. See [object property views](object-properties.md).
+
+Choose **json** in the properties editor to customize input encoding, decode
+passes, and initial expansion depth for that appearance. For example:
+
+```ts
+{ id: "response", field: "payload", format: {
+  kind: "json", encoding: "escaped", maxDecodeDepth: 6, expandDepth: 2,
+} }
+```
+
+The editor uses the same Apply/Cancel flow and live preview as other properties.
+These settings travel with named property views, query saves, and item-detail
+share links. Each detail modality retains its own appearance.
+
+For standalone compact or embedded inspectors:
 
 ```tsx
-import { JsonCell } from "@pythia-software/query-table-ui";
+import { JsonCell, JsonValueView } from "@pythia-software/query-table-ui";
 
 <JsonCell value={payload} label="Response" display={{ kind: "json", encoding: "auto" }} />
+<JsonValueView value={payload} label="Response" display={{ kind: "json", encoding: "auto" }} />
 ```
 
 `inspectJsonValue` and `searchJsonEntries` are exported for custom inspection
@@ -97,7 +122,9 @@ surfaces. Import `theme.css` for bundled styling, or provide equivalent styles f
 the `qt-json-*` and `qt-cell-format-error` classes. The inspector uses the existing
 modal focus trap, Escape dismissal, focus restoration, and mobile sheet behavior.
 
-The playground includes **Cell displays** with object, serialized, encoded,
+The `/cells` playground includes **Cell displays** with object, serialized, encoded,
 escaped, array, and malformed payload examples beside formatted timestamps,
-durations, and status chips. With `npm run demo` running, `npm run test:cells`
-checks desktop/mobile interactions and writes screenshots to `.context/`.
+durations, and status chips. Its Detail buttons open inline JSON properties in
+all three surfaces. With `npm run demo` running, `npm run test:cells` checks
+desktop/mobile interactions, property editing, and shared-link restoration,
+and writes screenshots to `.context/`.

@@ -225,10 +225,24 @@ of inheriting table truncation. Zero, false, and NULL are distinct. Format error
 retain the raw value with a diagnostic tooltip.
 
 Precedence is the saved appearance's `render` or `format`, then field `property`
-metadata, then the existing field renderer and type defaults. Hosts can register
+metadata, then custom field renderers, `FieldDef.display`, and type defaults. A
+field's display supplies the same JSON decoding, date/time or duration units,
+and configured chip labels/tones in table cells and detail properties.
+Hosts can register
 detail-specific renderers using `property.render`; they receive the existing
-renderer context, including the complete row. The view editor changes
+renderer context, including the complete row and `presentation: "property"`.
+The view editor changes
 presentation only and has no object update callback.
+
+JSON properties embed the searchable tree directly, including when using
+`render: "json"`. Native objects, serialized JSON, and encoded/escaped strings
+share key/path/value search and original, decoded, and per-path copying. The
+properties editor offers JSON encoding, decode-pass, and expansion settings;
+these persist in named views and item share links. A literal string can use
+`format: { kind: "json", encoding: "value" }`. Configured chips can use
+`format: { kind: "chip", labels: { ok: "Ready" }, tones: { ok: "success" } }`.
+See [cell displays](cell-displays.md) for options and inspection limits, or try
+the `/cells` demo. `JsonValueView` is exported for custom detail surfaces.
 
 If a fetched row is a projection, pass `loadedFields` as **catalogue field names**.
 An omitted field then displays “Not loaded”, while a loaded NULL displays a dash.

@@ -2,12 +2,14 @@ import type { ReactNode } from "react";
 import type { CellDisplay } from "@pythia-software/query-table-core";
 import type { CellContext } from "./renderers";
 import { formatMetricOutput } from "./metricFormat";
-import { JsonCell } from "./JsonCell";
+import { JsonCell, JsonValueView } from "./JsonCell";
 import { cellValueText } from "./jsonValue";
 
 /** Declarative formats share the metric formatter's strict units and UTC default. */
-export function renderCellDisplay({ value, field }: CellContext, display: CellDisplay): ReactNode {
-  if (display.kind === "json") return <JsonCell value={value} label={field.label} display={display} />;
+export function renderCellDisplay({ value, field, presentation }: CellContext, display: CellDisplay): ReactNode {
+  if (display.kind === "json") return presentation === "property"
+    ? <JsonValueView value={value} label={field.label} display={display} />
+    : <JsonCell value={value} label={field.label} display={display} />;
   if (value == null || value === "" || (Array.isArray(value) && value.length === 0)) return <span className="qt-muted">—</span>;
   if (display.kind === "text") {
     const text = cellValueText(value);

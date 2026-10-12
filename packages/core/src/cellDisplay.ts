@@ -65,5 +65,8 @@ export function parseCellDisplay(raw: unknown, context = "cell display"): CellDi
     } else if (typeof value !== rule) return fail(`${key} must be ${rule}`);
     if (key === "pattern" && (value as string).length > 160) return fail("pattern must be at most 160 characters");
   }
-  return { ...record } as CellDisplay;
+  return { ...record,
+    ...(record.labels ? { labels: { ...record.labels as Record<string, string> } } : {}),
+    ...(record.tones ? { tones: { ...record.tones as Record<string, string> } } : {}),
+  } as CellDisplay;
 }

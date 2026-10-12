@@ -1,6 +1,6 @@
 import type { FieldSchema } from "@pythia-software/query-table-core";
 import { useQueryTable } from "@pythia-software/query-table-react";
-import { DataTable, defaultRenderers } from "@pythia-software/query-table-ui";
+import { DataTable, QueryBuilder, defaultRenderers } from "@pythia-software/query-table-ui";
 
 interface Sample { id: number; shape: string; payload: unknown; started: number; elapsed: number; status: string; }
 const payload = { customer: { id: 42, name: "Ada", email: "ada@example.com" }, status: "ready", tags: ["priority", "export"], attempts: 2, enabled: true, error: null };
@@ -23,10 +23,12 @@ const schema: FieldSchema<Sample> = {
   ],
 };
 export function CellDisplayDemo() {
-  const api = useQueryTable({ schema, clientRows: rows });
+  const api = useQueryTable({ schema, clientRows: rows, syncUrl: true, itemDetails: { modes: ["hover", "modal", "expand"], defaultModes: ["hover", "modal", "expand"] } });
   return <section aria-label="Cell displays" style={{ marginTop: 32 }}>
-    <h2>Cell displays</h2>
-    <p>Open a payload to search keys, paths and values. The same inspector handles objects, JSON text and escaped JSON.</p>
-    <DataTable fields={api.visibleFields} rows={api.rows} query={api.query} onQueryChange={api.setQuery} renderers={defaultRenderers} rowId={(row) => row.id} total={api.total} />
+    <p><a href="/">← Main playground</a></p>
+    <h1>Cell displays</h1>
+    <p>Open a payload to search keys, paths and values, or use Detail to explore the same value inline in a popover, modal or expanded row.</p>
+    <QueryBuilder api={api} fields={schema.fields} total={api.total} />
+    <DataTable fields={api.visibleFields} rows={api.rows} query={api.query} onQueryChange={api.setQuery} renderers={defaultRenderers} rowId={(row) => row.id} total={api.total} {...(api.itemDetails ? { itemDetails: api.itemDetails } : {})} />
   </section>;
 }

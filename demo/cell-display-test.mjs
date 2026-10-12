@@ -10,7 +10,7 @@ try {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     const page = await context.newPage();
     const errors = []; page.on("pageerror", (error) => errors.push(error.message));
-    await page.goto(process.env.QT_DEMO_URL || "http://127.0.0.1:5179/");
+    await page.goto(process.env.QT_DEMO_URL || "http://127.0.0.1:5179/cells");
     const section = page.getByRole("region", { name: "Cell displays", exact: true });
     await section.scrollIntoViewIfNeeded();
     await section.getByRole("button", { name: "Inspect Payload", exact: true }).first().waitFor();
@@ -46,8 +46,46 @@ try {
     assert.equal(await invalid.getByRole("button", { name: "Copy JSON", exact: true }).isDisabled(), true);
     await page.keyboard.press("Escape");
     await page.screenshot({ path: `.context/cell-displays-${mobile ? "mobile" : "desktop"}.png` });
+    await section.getByRole("button", { name: "Expand item 1", exact: true }).click();
+    const expanded = section.getByRole("region", { name: "Expanded item 1", exact: true });
+    await expanded.getByRole("searchbox", { name: "Search Payload JSON" }).fill("ada");
+    assert.equal(await expanded.locator(".qt-json-entry").count(), 2); // name and email
+    assert.equal(await page.getByRole("dialog").count(), 0);
+    await expanded.getByRole("button", { name: "Collapse item 1", exact: true }).click();
+
+    await section.getByRole("button", { name: "Preview item 2", exact: true }).click();
+    const popover = page.getByRole("dialog", { name: "Item preview", exact: true });
+    await popover.getByRole("searchbox", { name: "Search Payload JSON" }).fill("ada");
+    assert.equal(await popover.locator(".qt-json-entry").count(), 2);
+    assert.equal(await page.getByRole("dialog").count(), 1);
+    await popover.getByRole("button", { name: "Close item preview", exact: true }).click();
+
+    await section.getByRole("button", { name: "Open item 3 in modal", exact: true }).click();
+    const details = page.getByRole("dialog", { name: "Item details", exact: true });
+    await details.getByRole("searchbox", { name: "Search Payload JSON" }).fill("ada");
+    assert.equal(await details.locator(".qt-json-entry").count(), 2);
+    assert.equal(await details.getByRole("button", { name: "Inspect Payload", exact: true }).count(), 0);
+    await details.getByRole("button", { name: "Copy JSON", exact: true }).click();
+    assert.equal(JSON.parse(await page.evaluate(() => navigator.clipboard.readText())).customer.name, "Ada");
+    await page.screenshot({ path: `.context/json-item-details-${mobile ? "mobile" : "desktop"}.png` });
+    await details.getByRole("button", { name: "Customize properties", exact: true }).click();
+    const editor = page.getByRole("dialog", { name: "Edit properties", exact: true });
+    await editor.locator(".qt-property-pick").filter({ hasText: "Payload" }).click();
+    await editor.locator('select[aria-label^="Display for"]').selectOption("json");
+    await editor.locator('select[aria-label^="JSON input for"]').selectOption("value");
+    await editor.locator('input[aria-label^="JSON decode passes for"]').fill("6");
+    await editor.getByRole("button", { name: "Apply properties", exact: true }).click();
+    await editor.waitFor({ state: "detached" });
+    assert.equal(await details.locator(".qt-json-value--string").count(), 1);
+    await details.getByRole("button", { name: "Share", exact: true }).click();
+    const shared = await page.evaluate(() => navigator.clipboard.readText());
+    await page.goto(shared);
+    const restored = page.getByRole("dialog", { name: "Item details", exact: true });
+    await restored.locator(".qt-json-value--string").waitFor();
+    assert.equal(await restored.locator(".qt-json-entry").count(), 1);
+    await restored.getByRole("button", { name: "Close item details", exact: true }).click();
     assert.deepEqual(errors, []);
     await context.close();
   }
-  console.log("Cell displays: desktop/mobile JSON decoding, search, copy, dismissal and formatting passed.");
+  console.log("Cell displays: desktop/mobile decoding, copy, inline item details, view editing and shared restoration passed.");
 } finally { await browser.close(); }

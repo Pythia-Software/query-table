@@ -23,6 +23,9 @@ import {
 import { formatMetricOutput, metricTimestamp } from "./metricFormat";
 import { createMetricColorResolver, type MetricTheme } from "./metricColors";
 import { Icon } from "./Icon";
+import { JsonValueView } from "./JsonCell";
+import { inspectJsonValue } from "./jsonValue";
+import { renderCellDisplay } from "./cellFormatting";
 
 export interface ObjectPropertiesProps<Row> {
   schema: FieldSchema<Row>;
@@ -52,8 +55,10 @@ export function formatPropertyValue(
       case "text":
       case "code":
         return { text: String(value) };
-      case "json":
-        return { text: JSON.stringify(value, null, 2) ?? String(value) };
+      case "json": {
+        const result = inspectJsonValue(value, format, false);
+        return { text: result.formatted, ...(result.error ? { error: result.error } : {}) };
+      }
       case "boolean":
         if (value !== true && value !== false && value !== 0 && value !== 1)
           throw Error("Expected a boolean.");
@@ -62,6 +67,11 @@ export function formatPropertyValue(
         return {
           text: Array.isArray(value) ? value.join(", ") : String(value),
         };
+      case "chip":
+        return { text: (Array.isArray(value) ? value : [value]).map(item => {
+          const key = String(item);
+          return format.labels && Object.prototype.hasOwnProperty.call(format.labels, key) ? format.labels[key] : key;
+        }).join(", ") };
       case "currency": {
         if (typeof value !== "number" || !Number.isFinite(value))
           throw Error("Expected a finite currency amount.");
@@ -162,6 +172,7 @@ function propertyContent<Row>(
       row: props.row,
       field,
       query: EMPTY_QUERY,
+      presentation: "property",
     });
   }
   // Preserve host renderers, but avoid table truncation and short date strings.
@@ -182,9 +193,18 @@ function propertyContent<Row>(
     return resolveRenderer(
       field,
       registry,
-    )({ value, row: props.row, field, query: EMPTY_QUERY });
+    )({ value, row: props.row, field, query: EMPTY_QUERY, presentation: "property" });
+  // A single field display supplies the default in both table cells and item
+  // properties. A saved appearance or detail-specific renderer/format still wins.
+  if (!format && field.display) return renderCellDisplay(
+    { value, row: props.row, field, query: EMPTY_QUERY, presentation: "property" }, field.display,
+  );
   const effective = format ?? defaultFormat(field)!;
   if (value == null) return <span className="qt-muted">—</span>;
+  if (effective.kind === "json") return <JsonValueView value={value} label={property.label ?? field.label} display={effective} />;
+  if (effective.kind === "chip") return renderCellDisplay(
+    { value, row: props.row, field, query: EMPTY_QUERY, presentation: "property" }, effective,
+  );
   if (effective.kind === "chips") {
     const values = Array.isArray(value) ? value : [value];
     const colors = createMetricColorResolver(props.theme);
@@ -219,7 +239,7 @@ function propertyContent<Row>(
   }
   const output = formatPropertyValue(value, effective, props.locale, now);
   const content =
-    effective.kind === "code" || effective.kind === "json" ? (
+    effective.kind === "code" ? (
       <pre className="qt-property-code">{output.text}</pre>
     ) : (
       <span>{output.text}</span>

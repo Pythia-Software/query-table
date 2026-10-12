@@ -177,3 +177,20 @@ describe("cell display contract", () => {
     expect(validate(doc(display))).toBe(false);
   });
 });
+
+describe("detail JSON display configuration", () => {
+  it("validates and projects the same JSON settings in display and property formats", () => {
+    const display = { kind: "json", encoding: "escaped", maxDecodeDepth: 5, expandDepth: 2 };
+    const configured = structuredClone(document);
+    configured.fields[0].display = display;
+    configured.fields[0].property = { format: display };
+    const metaSchema = JSON.parse(readFileSync(new URL("../../../schema/query-table.schema.json", import.meta.url), "utf8"));
+    const validate = new Ajv2020({ strict: false }).compile(metaSchema);
+    expect(validate(configured), JSON.stringify(validate.errors)).toBe(true);
+    const output = generateTypeScript(configured);
+    expect(output).toContain('"encoding": "escaped"');
+    expect(output).toContain('"property"');
+    configured.fields[0].property.format.maxDecodeDepth = 99;
+    expect(validate(configured)).toBe(false);
+  });
+});

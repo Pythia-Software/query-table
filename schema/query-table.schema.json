@@ -53,84 +53,93 @@
       }
     },
     "propertyFormat": {
-      "type": "object",
-      "required": [
-        "kind"
-      ],
-      "additionalProperties": false,
-      "properties": {
-        "kind": {
-          "enum": [
-            "text",
-            "code",
-            "json",
-            "boolean",
-            "chips",
-            "relative",
-            "currency",
-            "number",
-            "percent",
-            "duration",
-            "date",
-            "time",
-            "datetime"
-          ]
-        },
-        "decimals": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 20
-        },
-        "currency": {
-          "type": "string",
-          "pattern": "^[A-Z]{3}$"
-        },
-        "sourceUnit": {
-          "enum": [
-            "milliseconds",
-            "seconds",
-            "minutes",
-            "hours",
-            "days",
-            "iso",
-            "epochSeconds",
-            "epochMilliseconds",
-            "secondsOfDay",
-            "millisecondsOfDay"
-          ]
-        },
-        "style": {
-          "enum": [
-            "human",
-            "long",
-            "clock",
-            "custom",
-            "iso"
-          ]
-        },
-        "pattern": {
-          "type": "string",
-          "maxLength": 1000
-        },
-        "timeZone": {
-          "type": "string",
-          "maxLength": 256
-        }
-      },
-      "allOf": [
+      "oneOf": [
         {
-          "if": {
-            "properties": {
-              "kind": {
-                "const": "currency"
-              }
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "text",
+                "code",
+                "boolean",
+                "chips",
+                "relative",
+                "currency",
+                "number",
+                "percent",
+                "duration",
+                "date",
+                "time",
+                "datetime"
+              ]
+            },
+            "decimals": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 20
+            },
+            "currency": {
+              "type": "string",
+              "pattern": "^[A-Z]{3}$"
+            },
+            "sourceUnit": {
+              "enum": [
+                "milliseconds",
+                "seconds",
+                "minutes",
+                "hours",
+                "days",
+                "iso",
+                "epochSeconds",
+                "epochMilliseconds",
+                "secondsOfDay",
+                "millisecondsOfDay"
+              ]
+            },
+            "style": {
+              "enum": [
+                "human",
+                "long",
+                "clock",
+                "custom",
+                "iso"
+              ]
+            },
+            "pattern": {
+              "type": "string",
+              "maxLength": 1000
+            },
+            "timeZone": {
+              "type": "string",
+              "maxLength": 256
             }
           },
-          "then": {
-            "required": [
-              "currency"
-            ]
-          }
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "kind": {
+                    "const": "currency"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "currency"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "$ref": "#/$defs/jsonCellDisplay"
+        },
+        {
+          "$ref": "#/$defs/chipCellDisplay"
         }
       ]
     },
@@ -285,45 +294,79 @@
         }
       }
     },
+    "jsonCellDisplay": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "json"
+          ]
+        },
+        "encoding": {
+          "enum": [
+            "auto",
+            "value",
+            "json",
+            "escaped"
+          ]
+        },
+        "maxDecodeDepth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        },
+        "previewLength": {
+          "type": "integer",
+          "minimum": 20,
+          "maximum": 500
+        },
+        "expandDepth": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8
+        }
+      }
+    },
+    "chipCellDisplay": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "chip"
+          ]
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "tones": {
+          "type": "object",
+          "additionalProperties": {
+            "enum": [
+              "neutral",
+              "success",
+              "warning",
+              "danger"
+            ]
+          }
+        }
+      }
+    },
     "cellDisplay": {
       "description": "Built-in cell presentation. Query field types and backend bindings remain independent. An explicit registered render key or function overrides display.",
       "oneOf": [
         {
-          "type": "object",
-          "required": [
-            "kind"
-          ],
-          "additionalProperties": false,
-          "properties": {
-            "kind": {
-              "enum": [
-                "json"
-              ]
-            },
-            "encoding": {
-              "enum": [
-                "auto",
-                "value",
-                "json",
-                "escaped"
-              ]
-            },
-            "maxDecodeDepth": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 8
-            },
-            "previewLength": {
-              "type": "integer",
-              "minimum": 20,
-              "maximum": 500
-            },
-            "expandDepth": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 8
-            }
-          }
+          "$ref": "#/$defs/jsonCellDisplay"
         },
         {
           "type": "object",
@@ -468,35 +511,7 @@
           }
         },
         {
-          "type": "object",
-          "required": [
-            "kind"
-          ],
-          "additionalProperties": false,
-          "properties": {
-            "kind": {
-              "enum": [
-                "chip"
-              ]
-            },
-            "labels": {
-              "type": "object",
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
-            "tones": {
-              "type": "object",
-              "additionalProperties": {
-                "enum": [
-                  "neutral",
-                  "success",
-                  "warning",
-                  "danger"
-                ]
-              }
-            }
-          }
+          "$ref": "#/$defs/chipCellDisplay"
         },
         {
           "type": "object",
