@@ -328,7 +328,8 @@ it("deletes only the tapped sort or metric while retaining the other clauses", a
   await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Remove Name sort"]')!.click());
   expect(api.query.orderBy).toEqual([{ field: "status", dir: "desc" }]);
   await act(async () => container.querySelector<HTMLButtonElement>(".qt-qb-row--metrics .qt-chip")!.click());
-  await act(async () => Array.from(document.querySelectorAll<HTMLButtonElement>('.qt-metric-library .qt-metric-actions button')).find(b=>b.textContent==="Remove")!.click());
+  await act(async () => document.querySelector<HTMLButtonElement>('.qt-metric-library .qt-metric-actions > button')!.click());
+  await act(async () => Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find(b=>b.textContent==="Remove")!.click());
   await act(async()=>{await new Promise(resolve=>setTimeout(resolve,350));});
   await act(async()=>Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(b=>b.textContent==="Apply metrics")!.click());
   expect(api.aggregations.clauses).toHaveLength(1);

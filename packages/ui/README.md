@@ -32,6 +32,107 @@ The fit-to-screen preference travels in the existing encoded `?q=` parameter
 column, another width preset, or resetting widths clears it. Set
 `fitToScreen: true` on an initial query to enable the same behavior directly.
 
+## Reusable menus
+
+`Menu`, `MenuButton`, `MenuGroup`, `MenuItem`, `MenuSubmenu`, and `MenuSeparator`
+serve table header/cell actions, condition choices, and metric actions. They also
+work independently of a table.
+Mount a `Menu` while open, place it beneath your theme provider, and supply a
+trigger element or viewport `{ x, y }` coordinates as its `anchor`:
+
+```tsx
+import { useState } from "react";
+import { Menu, MenuItem, MenuSubmenu, MenuSeparator } from "@pythia-software/query-table-ui";
+
+function ViewActions() {
+  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
+  return <>
+    <button aria-haspopup="menu" aria-expanded={!!anchor}
+      onClick={event => { const trigger = event.currentTarget; setAnchor(previous => previous ? null : trigger); }}>
+      Actions
+    </button>
+    {anchor && <Menu label="View actions" anchor={anchor} onClose={() => setAnchor(null)}>
+      <MenuItem onSelect={() => copyView()}>Copy view</MenuItem>
+      <MenuSubmenu label="Export">
+        <MenuItem onSelect={() => exportCsv()}>CSV</MenuItem>
+        <MenuItem disabled>Image</MenuItem>
+      </MenuSubmenu>
+      <MenuSeparator />
+      <MenuItem tone="danger" onSelect={() => removeView()}>Remove view</MenuItem>
+    </Menu>}
+  </>;
+}
+```
+
+For a button trigger, `MenuButton` owns open/close state, click toggling, and
+ArrowDown/ArrowUp opening at the first/last enabled action:
+
+```tsx
+<MenuButton label="Metric actions" trigger="⋯" width={200}
+  buttonProps={{ className: "my-trigger" }}>
+  <MenuItem onSelect={duplicate}>Duplicate</MenuItem>
+  <MenuItem disabled={!canMove} onSelect={move}>Move up</MenuItem>
+  <MenuSeparator />
+  <MenuItem tone="danger" onSelect={remove}>Remove</MenuItem>
+</MenuButton>
+```
+
+`MenuGroup` adds a labeled group. Set `columns={2}` for paired actions: horizontal
+arrows move within a row, vertical arrows follow a column, disabled cells are
+skipped, and vertical boundaries continue to adjacent actions. Direct action
+children should follow visual row order. Set `checked` with
+`selectionType="radio"` for exclusive choices; the consumer owns selected state.
+
+Items accept `icon`, `shortcut`, `disabled`, and `textValue` for rich-content
+typeahead labels. Set `checked` for checkbox semantics and `closeOnSelect={false}`
+for toggles that should keep the menu open. Submenus can nest and accept `width`.
+Actions close the whole tree; Escape and the back arrow close one level. Up/Down,
+Home/End, typeahead, and direction-aware submenu arrows handle keyboard navigation.
+Desktop Tab closes the menu and continues from its trigger. `returnFocus` supplies
+a destination for coordinate menus; outside interactions keep their own focus.
+
+Desktop menus follow element anchors, flip/shift at viewport edges, scroll when
+long, and portal outside clipping containers. Within a dialog, they remain inside
+its focus trap. Coordinate menus dismiss on external scrolling. Mouse travel across
+submenu gaps uses a safe corridor; only one child submenu opens at each level.
+Phones use the shared focus-trapping sheet with expandable inline submenus.
+
+Scoped `--qt-*` variables, font family, color scheme, and text direction propagate
+through portals, including theme changes while open. Optional tokens are
+`--qt-menu-bg`, `--qt-menu-border`, `--qt-menu-radius`, `--qt-menu-shadow`, and
+`--qt-menu-hover`; defaults use the existing palette. `classNames` supports
+`popover`, `submenu`, `item`, and `separator`; existing `qt-cm-*` CSS hooks remain.
+Import `theme.css` for the standard visual and responsive behavior.
+
+Visit the demo's `/menus` playground for nested, themed, RTL, clipped, long, and
+dialog examples. With the demo running, `npm run test:menus` checks those behaviors
+in Chromium and WebKit (`QT_DEMO_URL` can point to a different server).
+
+### Forms and searchable pickers
+
+Use `Popover` for inputs and settings. It shares menu positioning, theme,
+dismissal, portals, and mobile sheets, with regular form Tab behavior and dialog
+semantics. Desktop focus starts at the first enabled control; `initialFocus` can
+supply a selector scoped to the surface. Escape restores the trigger, leaving
+focus dismisses the popover, and outside clicks retain the clicked destination.
+It accepts `anchor`, `label`, `onClose`, `returnFocus`, `width`, `placement`,
+`className`, and arbitrary children. Mount it only while open:
+
+```tsx
+{open && trigger.current && <Popover label="View settings" anchor={trigger.current}
+  placement="bottom-end" width={280} onClose={() => setOpen(false)}>
+  <label>Name <input value={name} onChange={event => setName(event.target.value)} /></label>
+  <button onClick={() => { save(name); setOpen(false); }}>Save</button>
+</Popover>}
+```
+
+Add column/filter/sort field pickers, rich filter-value pickers, and auto-refresh
+settings use this surface. `FieldPicker` accepts an optional `anchor` for floating
+use; omitting it preserves standalone inline usage. Tag multi-select editors and
+full workbenches use the shared modal/sheet foundation with Apply/Cancel and focus
+containment. Native selects, expandable sections, and formula autocomplete keep
+their respective form, disclosure, and combobox interactions.
+
 ## Tag/set filters
 
 Set `filter.editor: "set"` on a `textarray` field to use the native WHERE
@@ -127,6 +228,9 @@ consumer-owned bulk actions can call `selection.replace(ids)` or
 argument remain compatible.
 
 ## Icons
+
+The bundled theme aligns table-header sort arrows and priority indicators with
+their labels for both single-column and multi-column sorts.
 
 `Icon` is the shared, hand-drawn SVG set used throughout the UI and demo. Its
 24px grid, rounded 1.8px strokes, and `currentColor` styling keep controls

@@ -14,6 +14,9 @@
   calendar boundaries, custom date bounds, and matching graph/list/table labels.
   Handle daylight-saving gaps, repeated hours, and fractional offset changes;
   persist timezone settings with metric definitions and shared URLs.
+- Export reusable menus, nested submenus, action groups, and form popovers with
+  shared theme inheritance, viewport positioning, keyboard navigation, focus
+  restoration, RTL support, and mobile sheets; add a themed menu playground.
 - Persist `fitToScreen` in saved queries and shared URLs so each viewer's table
   fits its available area after loading and on viewport changes. Show the active
   preference in the width menu and clear it on manual width changes while
@@ -25,6 +28,8 @@
 
 ### Changed
 
+- Use the shared overlay system for table and metric actions, condition choices,
+  field/value pickers, auto-refresh settings, and tag filter editors.
 - Prune unused SQL bindings and stage-local inputs, and evaluate PostgreSQL
   SELECT-only and shown-row metric bindings after the ordered page window.
 - Reuse identical SQLite metric results and compatible reductions within one
@@ -43,6 +48,10 @@
   out-of-order results, and evaluation limits.
 - Honor temporal `xFormat` on explicitly calendar-grouped labels so date axes can
   display compact calendar labels while retaining raw grouping values.
+- Preserve parent palettes in submenus and let a second column-header click
+  dismiss its menu, including open submenus; avoid stale mobile filter editors
+  opening after a desktop viewport resize.
+- Align table-header sort indicators with their labels in the bundled theme.
 - Open column actions when clicking anywhere in a table header, including
   padding and blank space, while preserving resize handle behavior.
 - Keep browser-only computed columns evaluating locally beside server sidecars,

@@ -45,3 +45,9 @@ export { formatMetricOutput, validateMetricFormat, metricTimestamp } from "./met
 
 export { RequestActivity } from "./RequestActivity";
 export type { RequestActivityProps } from "./RequestActivity";
+
+export { Menu, MenuButton, MenuGroup, MenuItem, MenuSubmenu, MenuSeparator } from "./Menu";
+export type { MenuAnchor, MenuProps, MenuItemProps, MenuSubmenuProps, MenuButtonProps, MenuGroupProps } from "./Menu";
+
+export { Popover } from "./Popover";
+export type { PopoverProps } from "./Popover";

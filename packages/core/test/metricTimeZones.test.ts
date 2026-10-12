@@ -60,6 +60,8 @@ const evaluate = (
   ).metrics[0]!;
 const iso = (time: number) => new Date(time).toISOString();
 describe("metric grouping timezones", () => {
+  // The uncached reference calculation spans 25 timezone/interval combinations;
+  // allow it to finish while the full suite runs in parallel.
   it("reuses calendar boundaries for dense rows across DST and fractional offsets", () => {
     for (const [timeZone, start, end] of [
       ["America/Denver", "2026-03-07T06:00:00Z", "2026-03-09T09:00:00Z"],
@@ -104,7 +106,7 @@ describe("metric grouping timezones", () => {
         }
       }
     }
-  });
+  }, 20000);
   it("recomputes out-of-order buckets and treats their ends as exclusive", () => {
     const result = evaluate({ interval: "hour", includeEmpty: false }, [
       "2026-11-01T07:59:59.999Z",

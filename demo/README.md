@@ -67,6 +67,24 @@ check the editor, preview, persistence, shared URLs, and mobile layout. Set
 Run `node demo/date-metrics-timezone-test.mjs` for timezone editing, local labels,
 custom bounds, validation, persistence, and a timezone workbench screenshot.
 
+## Menu playground and regression checks
+
+Visit http://localhost:5179/menus to try the reusable menu components with light,
+dark, and warm themes, nested submenus, RTL navigation, long scrollable lists,
+clipped containers, viewport edges, context menus, dialogs, and mobile sheets.
+It also includes paired radio actions, searchable field/value pickers, and forms.
+
+```bash
+npx playwright install chromium webkit
+npm run demo                     # leave running in another shell
+npm run test:menus
+```
+
+The browser suite checks theme inheritance and live updates, diagonal mouse travel,
+keyboard focus and dismissal, scrolling, viewport bounds, clipping, RTL, dialogs,
+phone sheets, and real table/query/metric consumers, including tag filters.
+Set `QT_DEMO_URL` to test another local server or built preview.
+
 ## Component-specific feedback
 
 The development playground includes Agentation. Use the toolbar in the

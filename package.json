@@ -41,6 +41,7 @@
     "demo": "npm run dev --workspace @pythia-software/query-table-demo",
     "test:dnd": "node demo/dnd-test.mjs",
     "test:mobile": "node demo/mobile-test.mjs",
+    "test:menus": "node demo/menu-test.mjs",
     "test:feedback": "node demo/agentation-test.mjs",
     "test:computed": "node demo/computed-test.mjs",
     "test:formula-editor": "node demo/formula-editor-test.mjs",
