@@ -97,6 +97,22 @@ current query, including a saved default query. Configure `useQueryTable` with
 `syncUrl: true` so recipients load shared query URLs. Query tokens are encoded,
 not encrypted, and may contain raw filter values.
 
+Pass `selection={table.selection}` to enable row checkboxes with editable ranges:
+
+- Click a checkbox to toggle it and start a new range, preserving prior checks.
+- Shift-click to grow or shrink the range from its fixed starting row. Starting
+  by unchecking a row makes Shift-click uncheck the range instead.
+- Ctrl/Cmd-click toggles one checkbox; Ctrl/Cmd+Shift-click adds the span while
+  preserving every existing check.
+- Space toggles the focused checkbox; Shift+Space adjusts the range, with
+  Ctrl/Cmd+Shift+Space available for an additive span.
+
+For example, click 2, Shift-click 4, click 8, Shift-click 12, then Shift-click 10
+to select rows 2–4 and 8–10. Shrinking an overlapping range preserves checks that
+existed before it began. Ranges follow the current page's displayed order,
+including virtualized rows, and reset when that order changes. The header
+checkbox selects or clears the current page and starts a fresh range context.
+
 `SelectionToolbar` action callbacks receive `(selectedIds, selection)`, so
 consumer-owned bulk actions can call `selection.replace(ids)` or
 `selection.retain(ids)` atomically. Existing callbacks that use only the first

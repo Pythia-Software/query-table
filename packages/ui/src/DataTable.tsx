@@ -844,8 +844,14 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                             <input
                               type="checkbox"
                               checked={selected}
-                              // Shift-range select is handled inside selection.toggle.
-                              onClick={(e) => selection!.toggle(id, e.shiftKey)}
+                              onClick={(e) => selection!.toggle(id, e.shiftKey, e.ctrlKey || e.metaKey)}
+                              onKeyDown={(e) => {
+                                if (e.key !== " " || !e.shiftKey) return;
+                                // Handle Shift+Space directly: keyboard-generated
+                                // checkbox clicks do not reliably retain modifiers.
+                                e.preventDefault();
+                                if (!e.repeat) selection!.toggle(id, true, e.ctrlKey || e.metaKey);
+                              }}
                               onChange={() => {
                                 /* state owned by selection; onClick drives it */
                               }}

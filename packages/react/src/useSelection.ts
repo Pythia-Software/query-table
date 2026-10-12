@@ -1,20 +1,21 @@
 // useSelection — row selection for paged and re-sortable datasets.
 //
-//   - Shift-click range select, anchored by ROW ID (not index) so a
-//     range survives re-sort / re-filter / paging. Index anchors break the moment
-//     the data reorders; id anchors don't.
+//   - Editable Shift-click ranges with a fixed row-ID anchor and a snapshot of
+//     the selection before the range, so earlier selections survive resizing.
+//   - Display-order changes commit the selection and reset the active range.
 //   - Indeterminate header checkbox + select-all-on-page.
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { RowId } from "@pythia-software/query-table-core";
 
 export interface SelectionApi {
   selected: Set<RowId>;
   isSelected: (id: RowId) => boolean;
-  /** Toggle one row. With `shiftKey`, extend from the last-toggled anchor to `id`
-   *  across the *currently displayed* order (falls back to a plain toggle if the
-   *  anchor row is no longer present). */
-  toggle: (id: RowId, shiftKey?: boolean) => void;
+  /** Toggle one row and start an editable range. With `shiftKey`, resize that
+   *  range in the current page's order, checking or unchecking according to the
+   *  anchor's toggle. `additive` + Shift adds a span to the current selection.
+   *  Missing anchors or changed display order fall back to a plain toggle. */
+  toggle: (id: RowId, shiftKey?: boolean, additive?: boolean) => void;
   /** Select / clear every row currently on the page. */
   setPage: (ids: RowId[], selected: boolean) => void;
   /** Atomically replace the complete selection with arbitrary stable row ids. */
@@ -27,65 +28,93 @@ export interface SelectionApi {
   count: number;
 }
 
+interface SelectionRange {
+  anchor: RowId;
+  baseline: Set<RowId>;
+  selecting: boolean;
+  displayedIds: RowId[];
+}
+
+interface SelectionState {
+  selected: Set<RowId>;
+  range: SelectionRange | null;
+}
+
+function sameOrder(left: RowId[], right: RowId[]): boolean {
+  return left.length === right.length && left.every((id, index) => id === right[index]);
+}
+
 /** `displayedIds` is the page's id list in display order; the hook uses it to
  *  resolve shift-ranges and header tri-state against what the user sees. */
 export function useSelection(displayedIds: RowId[]): SelectionApi {
-  const [selected, setSelected] = useState<Set<RowId>>(() => new Set());
-  const anchor = useRef<RowId | null>(null);
+  const [{ selected }, setState] = useState<SelectionState>(() => ({
+    selected: new Set(),
+    range: null,
+  }));
+
+  useEffect(() => {
+    setState((prev) => prev.range && !sameOrder(prev.range.displayedIds, displayedIds)
+      ? { selected: prev.selected, range: null }
+      : prev);
+  }, [displayedIds]);
 
   const toggle = useCallback(
-    (id: RowId, shiftKey = false) => {
-      setSelected((prev) => {
-        const next = new Set(prev);
-        const a = anchor.current;
-        if (shiftKey && a != null) {
-          const i = displayedIds.indexOf(a);
+    (id: RowId, shiftKey = false, additive = false) => {
+      setState((prev) => {
+        const range = prev.range;
+        if (shiftKey && range && sameOrder(range.displayedIds, displayedIds)) {
+          const i = displayedIds.indexOf(range.anchor);
           const j = displayedIds.indexOf(id);
           if (i !== -1 && j !== -1) {
             const [lo, hi] = i <= j ? [i, j] : [j, i];
-            const span = displayedIds.slice(lo, hi + 1);
-            const allChecked = span.every((rowId) => prev.has(rowId));
-            for (const rowId of span) {
-              if (allChecked) next.delete(rowId);
-              else next.add(rowId);
+            // Additive gestures commit the current range before adding another
+            // span. Ordinary Shift gestures always rebuild from its baseline.
+            const activeRange = additive
+              ? { ...range, baseline: prev.selected, selecting: true }
+              : range;
+            const next = new Set(activeRange.baseline);
+            for (const rowId of displayedIds.slice(lo, hi + 1)) {
+              if (activeRange.selecting) next.add(rowId);
+              else next.delete(rowId);
             }
-            anchor.current = id;
-            return next;
+            return { selected: next, range: activeRange };
           }
         }
-        if (next.has(id)) next.delete(id);
-        else next.add(id);
-        anchor.current = id;
-        return next;
+        const next = new Set(prev.selected);
+        const selecting = !next.has(id);
+        if (selecting) next.add(id);
+        else next.delete(id);
+        return {
+          selected: next,
+          range: { anchor: id, baseline: prev.selected, selecting, displayedIds: [...displayedIds] },
+        };
       });
     },
     [displayedIds],
   );
 
   const setPage = useCallback((ids: RowId[], select: boolean) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
+    setState((prev) => {
+      const next = new Set(prev.selected);
       for (const id of ids) {
         if (select) next.add(id);
         else next.delete(id);
       }
-      return next;
+      return { selected: next, range: null };
     });
   }, []);
 
   const replace = useCallback((ids: Iterable<RowId>) => {
     const next = new Set(ids);
-    anchor.current = null;
-    setSelected(next);
+    setState({ selected: next, range: null });
   }, []);
 
   const retain = useCallback((ids: Iterable<RowId>) => {
     const allowed = new Set(ids);
-    anchor.current = null;
-    setSelected((prev) => {
+    setState((prev) => {
       const next = new Set<RowId>();
-      for (const id of prev) if (allowed.has(id)) next.add(id);
-      return next;
+      for (const id of prev.selected) if (allowed.has(id)) next.add(id);
+      return { selected: next, range: null };
     });
   }, []);
 
@@ -100,8 +129,7 @@ export function useSelection(displayedIds: RowId[]): SelectionApi {
   );
 
   const clear = useCallback(() => {
-    anchor.current = null;
-    setSelected(new Set());
+    setState({ selected: new Set(), range: null });
   }, []);
 
   return useMemo<SelectionApi>(
