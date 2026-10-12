@@ -62,10 +62,10 @@ function pressEnter(input: HTMLInputElement) {
 
 function openNewTagFilter(method: "keyboard" | "pointer" = "keyboard") {
   click("Add filter");
-  const search = container.querySelector<HTMLInputElement>(".qt-picker-input")!;
+  const search = document.querySelector<HTMLInputElement>(".qt-picker-input")!;
   inputValue(search, "tags");
   if (method === "keyboard") pressEnter(search);
-  else act(() => container.querySelector<HTMLButtonElement>(".qt-picker-item[title=tags]")!.click());
+  else act(() => document.querySelector<HTMLButtonElement>(".qt-picker-item[title=tags]")!.click());
 }
 
 describe("native tag set editing", () => {
@@ -127,15 +127,14 @@ describe("native tag set editing", () => {
     expect(container.querySelector(".qt-set-selected")?.textContent).toBe("");
   });
 
-  it.each(["keyboard", "pointer"] as const)("anchors new filters to the persistent add button and restores focus after %s selection", async (method) => {
+  it.each(["keyboard", "pointer"] as const)("uses the shared dialog and restores the persistent add button focus after %s selection", async (method) => {
     await mount(EMPTY_QUERY);
     const trigger = container.querySelector<HTMLButtonElement>('[aria-label="Add filter"]')!;
-    vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue(new DOMRect(180, 88, 120, 24));
     openNewTagFilter(method);
     const dialog = container.querySelector<HTMLElement>("[role=dialog]")!;
     expect(trigger.isConnected).toBe(true);
-    expect(dialog.style.top).toBe("120px");
-    expect(dialog.style.left).toBe("180px");
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(dialog.classList.contains("qt-modal-surface")).toBe(true);
     click("Cancel");
     expect(document.activeElement).toBe(trigger);
     openNewTagFilter(method);
@@ -144,16 +143,14 @@ describe("native tag set editing", () => {
     expect(document.activeElement).toBe(trigger);
   });
 
-  it("anchors clicked existing filters explicitly even when clicking does not move focus", async () => {
+  it("restores clicked existing filter focus even when clicking did not move focus", async () => {
     await mount({ ...EMPTY_QUERY, where: createSetFilter("tags", "any", ["a"], "editor") });
     const trigger = container.querySelector<HTMLButtonElement>("[aria-label='Edit Tags tag filter']")!;
-    vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue(new DOMRect(240, 64, 100, 24));
     const unrelated = container.querySelector<HTMLButtonElement>('[aria-label="Add filter"]')!;
     unrelated.focus();
     click("Edit Tags tag filter");
     const dialog = container.querySelector<HTMLElement>("[role=dialog]")!;
-    expect(dialog.style.top).toBe("96px");
-    expect(dialog.style.left).toBe("240px");
+    expect(dialog.getAttribute("aria-label")).toBe("Filter Tags");
     act(() => dialog.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
     expect(document.activeElement).toBe(trigger);
   });
@@ -174,7 +171,7 @@ describe("native tag set editing", () => {
   it("adds a multi-select from the field picker, searching display names and stable keys", async () => {
     await mount(EMPTY_QUERY);
     click("Add filter");
-    const fieldSearch = container.querySelector<HTMLInputElement>(".qt-picker-input")!;
+    const fieldSearch = document.querySelector<HTMLInputElement>(".qt-picker-input")!;
     inputValue(fieldSearch, "tags");
     act(() => fieldSearch.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
     const search = container.querySelector<HTMLInputElement>("[aria-label='Search Tags tags']")!;

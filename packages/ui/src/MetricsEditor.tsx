@@ -30,6 +30,7 @@ import {
 } from "@pythia-software/query-table-core";
 import type { QueryTableApi } from "@pythia-software/query-table-react";
 import { ModalSurface } from "./AdaptiveOverlay";
+import { MenuButton, MenuItem, MenuSeparator } from "./Menu";
 import { ReorderList } from "./ReorderList";
 import { MetricCard, cardDecimals } from "./MetricsPanel";
 import { formatMetricOutput, validateMetricFormat } from "./metricFormat";
@@ -705,67 +706,16 @@ export function MetricsEditor<Row>({
           : { format },
     );
   const menu = (c: AggregationClause, index: number) => (
-    <details
-      className="qt-metric-actions"
-      onKeyDown={(e) => {
-        if (e.key === "Escape" && e.currentTarget.open) {
-          e.preventDefault();
-          e.stopPropagation();
-          e.currentTarget.open = false;
-          e.currentTarget.querySelector("summary")?.focus();
-        }
-      }}
-    >
-      <summary aria-label={`Actions for ${titleOf(c, fields)}`}>⋯</summary>
-      <div
-        onClick={(e) => {
-          const details = e.currentTarget.closest("details");
-          if (details) {
-            details.open = false;
-            details.querySelector("summary")?.focus();
-          }
-        }}
-      >
-        {view === "dashboard" && (
-          <button
-            type="button"
-            onClick={() => {
-              navigate("editor", c.id);
-            }}
-          >
-            Edit metric
-          </button>
-        )}
-        <button
-          type="button"
-          disabled={drafts.length >= MAX_AGGREGATIONS}
-          onClick={() => duplicate(c)}
-        >
-          Duplicate
-        </button>
-        <button
-          type="button"
-          disabled={index === 0}
-          onClick={() => move(c.id, index - 1)}
-        >
-          Move up
-        </button>
-        <button
-          type="button"
-          disabled={index === drafts.length - 1}
-          onClick={() => move(c.id, index + 1)}
-        >
-          Move down
-        </button>
-        <button
-          type="button"
-          className="qt-metric-remove"
-          onClick={() => remove(c.id)}
-        >
-          Remove
-        </button>
-      </div>
-    </details>
+    <span className="qt-metric-actions">
+      <MenuButton label={`Actions for ${titleOf(c, fields)}`} width={200} trigger={<span aria-hidden>⋯</span>}>
+        {view === "dashboard" && <MenuItem onSelect={() => navigate("editor", c.id)}>Edit metric</MenuItem>}
+        <MenuItem disabled={drafts.length >= MAX_AGGREGATIONS} onSelect={() => duplicate(c)}>Duplicate</MenuItem>
+        <MenuItem disabled={index === 0} onSelect={() => move(c.id, index - 1)}>Move up</MenuItem>
+        <MenuItem disabled={index === drafts.length - 1} onSelect={() => move(c.id, index + 1)}>Move down</MenuItem>
+        <MenuSeparator />
+        <MenuItem tone="danger" onSelect={() => remove(c.id)}>Remove</MenuItem>
+      </MenuButton>
+    </span>
   );
   const sizeControls = selected && (
     <div className="qt-metric-size-controls">

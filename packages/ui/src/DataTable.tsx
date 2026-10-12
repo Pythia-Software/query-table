@@ -18,7 +18,7 @@ import { resolveRenderer, type RenderRegistry } from "./renderers";
 import type { TableClassNames } from "./classNames";
 import { CellMenu } from "./CellMenu";
 import { formatRowCount, rowCountTitle } from "./formatRowCount";
-import { AdaptiveOverlay, useMobileLayout } from "./AdaptiveOverlay";
+import { Menu, MenuItem, MenuSeparator, MenuSubmenu } from "./Menu";
 import { equalWidths, fitContentWidths, fitScreenWidths, type ColumnWidthPreset } from "./columnWidths";
 
 export interface DataTableProps<Row> {
@@ -73,11 +73,6 @@ const AUTOFIT_EXTRA_PX = 4;
 // Collapsed outer table border; keeps "fit to screen" from adding a scrollbar.
 const TABLE_BORDER_PX = 2;
 const TRAILING_WIDTH = 40;
-const MENU_WIDTH = 240;
-const MENU_ROW_HEIGHT = 32;
-const SUBMENU_WIDTH = 200;
-const WIDTH_SUBMENU_OVERHANG_ROWS = 5;
-const SUBMENU_CLOSE_DELAY_MS = 300;
 const COPY_FEEDBACK_MS = 900;
 const DEFAULT_MAX_HEIGHT = 600;
 const DEFAULT_ROW_HEIGHT = 37;
@@ -85,13 +80,15 @@ const DEFAULT_OVERSCAN = 8;
 const SELECTION_COLUMN = "__qt_selection__";
 type HeaderSortPlacement = "set" | "append" | "prepend";
 
-interface MenuState<Row> {
-  kind: "cell" | "header";
+type MenuState<Row> = {
   field: FieldDef<Row>;
-  value?: unknown;
+  trigger: HTMLElement;
+} & ({ kind: "header" } | {
+  kind: "cell";
+  value: unknown;
   x: number;
   y: number;
-}
+});
 
 export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
   const {
@@ -570,12 +567,15 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
   function openMenu(e: React.MouseEvent, f: FieldDef<Row>, row: Row) {
     if (isInteractiveTarget(e.target)) return;
     e.preventDefault();
-    setMenu({ kind: "cell", field: f, value: readFieldValue(f, row), x: e.clientX, y: e.clientY });
+    setMenu({ kind: "cell", field: f, value: readFieldValue(f, row), x: e.clientX, y: e.clientY, trigger: e.currentTarget as HTMLElement });
   }
   function openHeaderMenu(e: React.MouseEvent, f: FieldDef<Row>) {
     if (isInteractiveTarget(e.target)) return;
     e.preventDefault();
-    setMenu({ kind: "header", field: f, x: e.clientX, y: e.clientY });
+    const trigger = e.currentTarget as HTMLElement;
+    setMenu((current) => current?.kind === "header" && current.field.name === f.name
+      ? null
+      : { kind: "header", field: f, trigger });
   }
 
   function onTableWheel(e: React.WheelEvent<HTMLDivElement>) {
@@ -798,6 +798,14 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                     )}
                     style={{ cursor: "pointer", textAlign: f.select?.align }}
                     onClick={(e) => openHeaderMenu(e, f)}
+                    tabIndex={0}
+                    aria-haspopup="menu"
+                    aria-expanded={menu?.kind === "header" && menu.field.name === f.name}
+                    onKeyDown={(e) => {
+                      if (e.target !== e.currentTarget || !(["Enter", " ", "ArrowDown", "ContextMenu"].includes(e.key) || (e.shiftKey && e.key === "F10"))) return;
+                      e.preventDefault();
+                      setMenu({ kind: "header", field: f, trigger: e.currentTarget });
+                    }}
                     title="Click to open column actions"
                     draggable
                     onDragStart={(e) => {
@@ -922,6 +930,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                         key={f.name}
                         data-qt-field={f.name}
                         className={cx("qt-cell", dragSource === f.name && "qt-cell--dragging", classNames?.cell)}
+                        tabIndex={-1}
                         style={f.select?.align ? { textAlign: f.select.align } : undefined}
                         onClick={(e) => openMenu(e, f, row)}
                         onContextMenu={(e) => openMenu(e, f, row)}
@@ -975,6 +984,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
             value={menu.value}
             x={menu.x}
             y={menu.y}
+            returnFocus={menu.trigger}
             onAddFilter={(clause: WhereClause) =>
               onQueryChange((prev) => ({ ...prev, offset: 0, where: [...prev.where, clause] }))
             }
@@ -982,9 +992,9 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
           />
         ) : (
           <HeaderMenu
+            key={menu.field.name}
             field={menu.field}
-            x={menu.x}
-            y={menu.y}
+            anchor={menu.trigger}
             sortable={isSortable(menu.field)}
             canRemoveColumn={fields.length > 1}
             onSetSort={(placement, dir) => applyHeaderSort(menu.field, dir, placement)}
@@ -1006,23 +1016,11 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
 }
 
 function HeaderMenu<Row>({
-  field,
-  x,
-  y,
-  sortable,
-  canRemoveColumn,
-  canResetWidths,
-  fitToScreen,
-  onSetSort,
-  onRemove,
-  onFitColumn,
-  onWidthPreset,
-  onResetWidths,
-  onClose,
+  field, anchor, sortable, canRemoveColumn, canResetWidths,
+  fitToScreen, onSetSort, onRemove, onFitColumn, onWidthPreset, onResetWidths, onClose,
 }: {
   field: FieldDef<Row>;
-  x: number;
-  y: number;
+  anchor: HTMLElement;
   sortable: boolean;
   canRemoveColumn: boolean;
   canResetWidths: boolean;
@@ -1034,156 +1032,31 @@ function HeaderMenu<Row>({
   onResetWidths: () => void;
   onClose: () => void;
 }) {
-  const mobile = useMobileLayout();
-  const [widthsOpen, setWidthsOpen] = useState(false);
-  const widthsTriggerRef = useRef<HTMLButtonElement>(null);
-  const widthsMenuRef = useRef<HTMLDivElement>(null);
-  const focusWidthsOnOpen = useRef(false);
-  // Closing on a short delay lets the pointer cut diagonally across sibling
-  // items on its way into the submenu without dismissing it.
-  const widthsCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const cancelWidthsClose = () => {
-    if (widthsCloseTimer.current) clearTimeout(widthsCloseTimer.current);
-    widthsCloseTimer.current = null;
-  };
-  useEffect(() => cancelWidthsClose, []);
-  useEffect(() => {
-    if (!widthsOpen || !focusWidthsOnOpen.current) return;
-    focusWidthsOnOpen.current = false;
-    widthsMenuRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
-  }, [widthsOpen]);
-  useEffect(() => {
-    if (mobile) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    function onDocClick() {
-      onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    const t = setTimeout(() => window.addEventListener("click", onDocClick), 0);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("click", onDocClick);
-      clearTimeout(t);
-    };
-  }, [onClose, mobile]);
-
-  const items: ReactNode[] = [];
-  const addSortItem = (placement: HeaderSortPlacement, dir: "asc" | "desc", label: string) =>
-    items.push(
-      <MenuItem key={`${placement}-${dir}`} disabled={!sortable} onClick={() => onSetSort(placement, dir)}>
-        {label}
-      </MenuItem>,
-    );
-
-  addSortItem("set", "asc", "Set Sort (Asc)");
-  addSortItem("set", "desc", "Set Sort (Desc)");
-  addSortItem("append", "asc", "Append Sort (Asc)");
-  addSortItem("append", "desc", "Append Sort (Desc)");
-  addSortItem("prepend", "asc", "Prepend Sort (Asc)");
-  addSortItem("prepend", "desc", "Prepend Sort (Desc)");
-
-  const vw = typeof window !== "undefined" ? window.innerWidth : 9999;
-  const vh = typeof window !== "undefined" ? window.innerHeight : 9999;
-  const left = Math.max(8, Math.min(x, vw - MENU_WIDTH - 8));
-  // Desktop submenu flies out to the right, or to the left near the edge.
-  const flipWidths = left + MENU_WIDTH + SUBMENU_WIDTH + 12 > vw;
-
-  items.push(<div key="sep" className="qt-cm-sep" />);
-  items.push(
-    <div
-      key="widths"
-      className="qt-cm-submenu-wrap"
-      onMouseEnter={mobile ? undefined : () => {
-        cancelWidthsClose();
-        setWidthsOpen(true);
-      }}
-      onMouseLeave={mobile ? undefined : () => {
-        cancelWidthsClose();
-        widthsCloseTimer.current = setTimeout(() => setWidthsOpen(false), SUBMENU_CLOSE_DELAY_MS);
-      }}
-    >
-      <button
-        ref={widthsTriggerRef}
-        type="button"
-        className={cx("qt-cm-item", "qt-cm-submenu-trigger", widthsOpen && "qt-cm-item--open")}
-        role="menuitem"
-        aria-haspopup="menu"
-        aria-expanded={widthsOpen}
-        // Desktop hover has already opened it, so a click must not toggle it
-        // shut under the pointer; the inline mobile sheet section toggles.
-        onClick={() => setWidthsOpen((open) => (mobile ? !open : true))}
-        onKeyDown={(e) => {
-          if (e.key !== "ArrowRight") return;
-          e.preventDefault();
-          focusWidthsOnOpen.current = true;
-          setWidthsOpen(true);
-        }}
-      >
-        Column Widths
-        <Icon name={mobile && widthsOpen ? "chevronDown" : "chevronRight"} />
-      </button>
-      {widthsOpen && (
-        <div
-          ref={widthsMenuRef}
-          className={cx("qt-cm-submenu", flipWidths && "qt-cm-submenu--left")}
-          style={mobile ? undefined : { width: SUBMENU_WIDTH }}
-          role="menu"
-          aria-label="Column widths"
-          onKeyDown={(e) => {
-            if (e.key !== "ArrowLeft") return;
-            e.preventDefault();
-            setWidthsOpen(false);
-            widthsTriggerRef.current?.focus();
-          }}
-        >
-          <MenuItem onClick={onFitColumn} title={`Size ${field.label} to its widest visible value`}>
-            Fit This Column
-          </MenuItem>
-          <div className="qt-cm-sep" />
-          {WIDTH_PRESETS.map(({ preset, label, hint }) => (
-            <MenuItem
-              key={preset}
-              onClick={() => onWidthPreset(preset)}
-              title={hint}
-              checked={preset === "screen" ? fitToScreen : undefined}
-            >
-              {label}
-            </MenuItem>
-          ))}
-          <div className="qt-cm-sep" />
-          <MenuItem disabled={!canResetWidths} onClick={onResetWidths} title="Back to the default column widths">
-            Reset Widths
-          </MenuItem>
-        </div>
-      )}
-    </div>,
-  );
-  items.push(
-    <MenuItem key="remove" disabled={!canRemoveColumn} onClick={onRemove}>
-      Remove Column
-    </MenuItem>,
-  );
-
-  // Leave room below for the widths submenu, which hangs past the last item.
-  const top = Math.max(8, Math.min(y, vh - MENU_ROW_HEIGHT * (items.length + WIDTH_SUBMENU_OVERHANG_ROWS) - 8));
-
   return (
-    <AdaptiveOverlay title={`${field.label} column`} onClose={onClose}>
-    <div
-      className="qt-cell-menu"
-      style={{ left, top, width: MENU_WIDTH }}
-      onClick={(e) => e.stopPropagation()}
-      onContextMenu={(e) => e.preventDefault()}
-      role="menu"
-    >
-      <div className="qt-cm-header">
-        <span className="qt-cm-field">{field.label}</span>
-      </div>
-      {items}
-    </div>
-    </AdaptiveOverlay>
+    <Menu label={`${field.label} column`} anchor={anchor} onClose={onClose}>
+      <div className="qt-cm-header"><span className="qt-cm-field">{field.label}</span></div>
+      {(["set", "append", "prepend"] as const).flatMap((placement) =>
+        (["asc", "desc"] as const).map((dir) => (
+          <MenuItem key={`${placement}-${dir}`} disabled={!sortable} onSelect={() => onSetSort(placement, dir)}>
+            {placement === "set" ? "Set" : placement === "append" ? "Append" : "Prepend"} Sort ({dir === "asc" ? "Asc" : "Desc"})
+          </MenuItem>
+        )),
+      )}
+      <MenuSeparator />
+      <MenuSubmenu label="Column Widths">
+        <MenuItem onSelect={onFitColumn} title={`Size ${field.label} to its widest visible value`}>Fit This Column</MenuItem>
+        <MenuSeparator />
+        {WIDTH_PRESETS.map(({ preset, label, hint }) => (
+          <MenuItem key={preset} onSelect={() => onWidthPreset(preset)} title={hint} checked={preset === "screen" ? fitToScreen : undefined}>
+            {label}
+          </MenuItem>
+        ))}
+        <MenuSeparator />
+        <MenuItem disabled={!canResetWidths} onSelect={onResetWidths} title="Back to the default column widths">Reset Widths</MenuItem>
+      </MenuSubmenu>
+      <MenuSeparator />
+      <MenuItem tone="danger" disabled={!canRemoveColumn} onSelect={onRemove}>Remove Column</MenuItem>
+    </Menu>
   );
 }
 
@@ -1192,35 +1065,6 @@ const WIDTH_PRESETS: Array<{ preset: ColumnWidthPreset; label: string; hint: str
   { preset: "screen", label: "Fit All to Screen", hint: "Fill the table width, trimming the widest columns first" },
   { preset: "equal", label: "Equal Widths", hint: "Split the table width evenly across columns" },
 ];
-
-function MenuItem({
-  children,
-  onClick,
-  disabled,
-  title,
-  checked,
-}: {
-  children: ReactNode;
-  onClick: () => void;
-  disabled?: boolean;
-  title?: string;
-  checked?: boolean | undefined;
-}) {
-  return (
-    <button
-      type="button"
-      className="qt-cm-item"
-      onClick={onClick}
-      role={checked == null ? "menuitem" : "menuitemcheckbox"}
-      aria-checked={checked}
-      disabled={disabled}
-      title={title}
-    >
-      {checked && <Icon name="check" />}
-      {children}
-    </button>
-  );
-}
 
 /** Header menu sort helper for set / append / prepend actions. */
 function nextHeaderOrderBy(

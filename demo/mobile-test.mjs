@@ -438,7 +438,7 @@ for (const [name, engine] of [
       sheet = await checkSheet(page);
       assert.equal(await sheet.locator(".qt-auto-refresh-select").count(), 2);
       await sheet
-        .getByRole("button", { name: "Close Auto-update", exact: true })
+        .getByRole("button", { name: "Close Auto-refresh settings", exact: true })
         .click();
 
       const cell = page

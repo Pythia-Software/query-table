@@ -168,8 +168,8 @@ try {
   );
   const card = cards.nth(3);
   await card.hover();
-  await card.locator("summary").filter({ hasText: "⋯" }).first().click();
-  await card.getByRole("button", { name: "Edit metric", exact: true }).click();
+  await card.locator(".qt-metric-actions > button").first().click();
+  await page.getByRole("menuitem", { name: "Edit metric", exact: true }).click();
   assert.equal(await page.getByLabel("Workbench view").inputValue(), "editor");
   assert.equal(
     await page.getByLabel("Metric name", { exact: true }).inputValue(),
