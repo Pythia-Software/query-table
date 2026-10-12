@@ -120,6 +120,7 @@ describe("DataTable column width presets", () => {
     chooseWidthPreset(table, "Fit All to Screen");
 
     const update = onQueryChange.mock.calls[0]![0] as (previous: QueryState) => QueryState;
+    expect(update(query).fitToScreen).toBe(true);
     const [a = 0, b = 0] = update(query).select.map((c) => c.width ?? 0);
     expect(a + b).toBe(600);
     expect(a).toBeGreaterThan(b * 3);

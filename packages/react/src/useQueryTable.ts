@@ -294,6 +294,7 @@ function cloneQueryState(q: QueryState): QueryState {
     limit: q.limit,
     offset: q.offset,
   };
+  if (q.fitToScreen) clone.fitToScreen = true;
   if (q.aggregations)
     clone.aggregations = JSON.parse(
       JSON.stringify(q.aggregations),

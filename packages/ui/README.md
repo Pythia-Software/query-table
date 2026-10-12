@@ -18,11 +18,17 @@ Click a header and open **Column Widths** to resize in one step:
 - **Fit This Column** sizes the clicked column to its widest rendered value.
 - **Fit All to Content** does the same for every column.
 - **Fit All to Screen** fills the viewport; when content overflows, narrow
-  columns keep their content width and only the widest ones are trimmed.
+  columns keep their content width and only the widest ones are trimmed. It
+  sets `query.fitToScreen`, so shared links and saved queries fit each viewer's
+  available table area after loading and when that area changes.
 - **Equal Widths** splits the viewport evenly.
 - **Reset Widths** drops explicit widths back to schema defaults.
 
 Widths live in `query.select`, so presets are shareable and undoable.
+The fit-to-screen preference travels in the existing encoded `?q=` parameter
+(`fs: true` in its compact payload). Manual column resizing, fitting a single
+column, another width preset, or resetting widths clears it. Set
+`fitToScreen: true` on an initial query to enable the same behavior directly.
 
 ## Tag/set filters
 

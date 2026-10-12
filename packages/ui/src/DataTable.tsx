@@ -119,6 +119,9 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
   const [copiedCellKey, setCopiedCellKey] = useState<string | null>(null);
   const [headerHeight, setHeaderHeight] = useState(0);
   const [showHorizontalCue, setShowHorizontalCue] = useState(false);
+  // Responsive widths belong to this viewport, never to URL/storage/undo state.
+  const [screenWidths, setScreenWidths] = useState<Map<string, number>>(new Map());
+  const [screenViewportWidth, setScreenViewportWidth] = useState(0);
   const tableWrapRef = useRef<HTMLDivElement>(null);
   const tableHeadRef = useRef<HTMLTableSectionElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
@@ -278,6 +281,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     return col?.width ?? f.select?.width;
   }
   function resolvedWidthFor(name: string, f: FieldDef<Row>): number | undefined {
+    if (query.fitToScreen && screenWidths.has(name)) return screenWidths.get(name);
     return widthFor(name, f);
   }
   function resolvedColumnWidthFor(name: string, f?: FieldDef<Row>): number | undefined {
@@ -298,6 +302,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
   function commitColumnWidth(name: string, width: number) {
     if (name === SELECTION_COLUMN) {
       setSelectionColumnWidth(clampColumnWidth(name, width));
+      if (query.fitToScreen) setWidths(new Map());
       return;
     }
     setWidth(name, width);
@@ -305,9 +310,17 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
   function setWidth(name: string, width: number) {
     setWidths(new Map([[name, width]]));
   }
-  function setWidths(widths: Map<string, number>) {
+  function setWidths(widths: Map<string, number>, fitToScreen = false) {
     const px = new Map(Array.from(widths, ([name, width]) => [name, clampWidth(width)]));
-    onQueryChange((prev) => ({ ...prev, select: writeWidths(prev.select, fields, px) }));
+    onQueryChange((prev) => {
+      // Freeze the currently displayed widths when leaving responsive mode,
+      // including columns the user did not resize.
+      const current = prev.fitToScreen ? writeWidths(prev.select, fields, screenWidths) : prev.select;
+      const next = { ...prev, select: writeWidths(current, fields, px) };
+      if (fitToScreen) next.fitToScreen = true;
+      else delete next.fitToScreen;
+      return next;
+    });
   }
   function applyResizeGuide() {
     const preview = resizePreviewRef.current;
@@ -430,13 +443,17 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
       : preset === "equal"
         ? equalWidths(names.length, available)
         : fitScreenWidths(content, available);
-    setWidths(new Map(names.map((name, i) => [name, widths[i]!])));
+    setWidths(new Map(names.map((name, i) => [name, widths[i]!])), preset === "screen");
   }
-  const hasCustomWidths = selectionColumnWidth !== DEFAULT_SELECTION_WIDTH || query.select.some((c) => c.width != null);
+  const hasCustomWidths = query.fitToScreen === true || selectionColumnWidth !== DEFAULT_SELECTION_WIDTH || query.select.some((c) => c.width != null);
   function resetWidths() {
     setMenu(null);
     setSelectionColumnWidth(DEFAULT_SELECTION_WIDTH);
-    onQueryChange((prev) => ({ ...prev, select: prev.select.map((c) => ({ field: c.field })) }));
+    onQueryChange((prev) => {
+      const next = { ...prev, select: prev.select.map((c) => ({ field: c.field })) };
+      delete next.fitToScreen;
+      return next;
+    });
   }
   function resizeWithKeyboard(name: string, startWidth: number | undefined, e: React.KeyboardEvent<HTMLSpanElement>) {
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight" && e.key !== "Enter") return;
@@ -504,6 +521,41 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     const index = preview.indexOf(SELECTION_COLUMN);
     if (index >= 0) setSelectionColumnIndex(index);
   }, [columnDrag.active, columnDrag.dropRevision, renderedColumnNames, fieldNames]);
+
+  useEffect(() => {
+    if (!query.fitToScreen) return;
+    const wrap = tableWrapRef.current;
+    if (!wrap) return;
+    const measureViewport = () => setScreenViewportWidth(wrap.clientWidth);
+    measureViewport();
+    window.addEventListener("resize", measureViewport);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measureViewport);
+    observer?.observe(wrap);
+    return () => {
+      window.removeEventListener("resize", measureViewport);
+      observer?.disconnect();
+    };
+  }, [query.fitToScreen]);
+
+  // Measure after rows render, including asynchronous loads and saved-query
+  // restoration. Refitting changes only local layout, so resize cannot rewrite
+  // the shared query or add undo entries.
+  useCommitLayoutEffect(() => {
+    if (!query.fitToScreen || loading || fieldNames.length === 0) return;
+    const available = (tableWrapRef.current?.clientWidth ?? 0)
+      - (showSel ? selectionColumnWidth : 0)
+      - (trailing ? TRAILING_WIDTH : 0)
+      - TABLE_BORDER_PX;
+    if (available <= 0) return; // Hidden/unlaid-out tables retry when their viewport appears.
+    const content = measureContentWidths(fieldNames).map((width, i) =>
+      width || widthFor(fieldNames[i]!, fields[i]!) || DEFAULT_WIDTH,
+    );
+    const widths = fitScreenWidths(content, available);
+    setScreenWidths((current) => {
+      if (current.size === fieldNames.length && fieldNames.every((name, i) => current.get(name) === widths[i])) return current;
+      return new Map(fieldNames.map((name, i) => [name, widths[i]!]));
+    });
+  }, [query.fitToScreen, query.select, fields, fieldNames, rows, loading, renderers, screenViewportWidth, showSel, selectionColumnWidth, trailing]);
 
 
   // ---- selection ----
@@ -933,6 +985,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
             onSetSort={(placement, dir) => applyHeaderSort(menu.field, dir, placement)}
             onRemove={() => removeColumn(menu.field)}
             canResetWidths={hasCustomWidths}
+            fitToScreen={query.fitToScreen === true}
             onFitColumn={() => {
               setMenu(null);
               autofitColumn(menu.field.name);
@@ -954,6 +1007,7 @@ function HeaderMenu<Row>({
   sortable,
   canRemoveColumn,
   canResetWidths,
+  fitToScreen,
   onSetSort,
   onRemove,
   onFitColumn,
@@ -967,6 +1021,7 @@ function HeaderMenu<Row>({
   sortable: boolean;
   canRemoveColumn: boolean;
   canResetWidths: boolean;
+  fitToScreen: boolean;
   onSetSort: (placement: HeaderSortPlacement, dir: "asc" | "desc") => void;
   onRemove: () => void;
   onFitColumn: () => void;
@@ -1083,7 +1138,12 @@ function HeaderMenu<Row>({
           </MenuItem>
           <div className="qt-cm-sep" />
           {WIDTH_PRESETS.map(({ preset, label, hint }) => (
-            <MenuItem key={preset} onClick={() => onWidthPreset(preset)} title={hint}>
+            <MenuItem
+              key={preset}
+              onClick={() => onWidthPreset(preset)}
+              title={hint}
+              checked={preset === "screen" ? fitToScreen : undefined}
+            >
               {label}
             </MenuItem>
           ))}
@@ -1133,21 +1193,25 @@ function MenuItem({
   onClick,
   disabled,
   title,
+  checked,
 }: {
   children: ReactNode;
   onClick: () => void;
   disabled?: boolean;
   title?: string;
+  checked?: boolean | undefined;
 }) {
   return (
     <button
       type="button"
       className="qt-cm-item"
       onClick={onClick}
-      role="menuitem"
+      role={checked == null ? "menuitem" : "menuitemcheckbox"}
+      aria-checked={checked}
       disabled={disabled}
       title={title}
     >
+      {checked && <Icon name="check" />}
       {children}
     </button>
   );

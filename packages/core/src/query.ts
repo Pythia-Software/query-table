@@ -159,6 +159,9 @@ export interface AggregationClause {
 export interface QueryState {
   /** Ordered SELECT list + per-column widths. Empty = the schema's default columns. */
   select: SelectColumn[];
+  /** Refit columns to each viewer's table viewport after loading. Manual width
+   *  changes clear this view preference; omitted/false uses stored widths. */
+  fitToScreen?: boolean;
   /** WHERE in conjunctive normal form: the AND of these terms, each a single
    *  predicate or an OR group. A flat list of literals (no groups) is the common
    *  case and the legacy shape, decoded unchanged. */
@@ -365,6 +368,8 @@ export function normalizeQueryState(input: unknown, fallback: QueryState = EMPTY
     offset: boundedInteger(raw.offset, fallback.offset, 0, MAX_QUERY_OFFSET),
   };
 
+  if (raw.fitToScreen === true) out.fitToScreen = true;
+
   if (Array.isArray(raw.aggregations)) {
     const aggregations: AggregationClause[] = [];
     for (const item of raw.aggregations.slice(0, MAX_AGGREGATIONS)) {
@@ -403,6 +408,7 @@ export function normalizeQueryState(input: unknown, fallback: QueryState = EMPTY
 export function queriesEqual(a: QueryState, b: QueryState): boolean {
   if (a === b) return true;
   if (a.limit !== b.limit || a.offset !== b.offset) return false;
+  if ((a.fitToScreen === true) !== (b.fitToScreen === true)) return false;
   if (!sameArray(a.where, b.where)) return false;
   if (!sameArray(a.orderBy, b.orderBy)) return false;
   if (!sameArray(a.select, b.select)) return false;
