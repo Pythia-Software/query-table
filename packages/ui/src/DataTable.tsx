@@ -314,8 +314,10 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     const px = new Map(Array.from(widths, ([name, width]) => [name, clampWidth(width)]));
     onQueryChange((prev) => {
       // Freeze the currently displayed widths when leaving responsive mode,
-      // including columns the user did not resize.
-      const current = prev.fitToScreen ? writeWidths(prev.select, fields, screenWidths) : prev.select;
+      // including columns the user did not resize. Measurements can predate a
+      // column removal while loading or hidden; never restore those columns.
+      const fittedWidths = new Map([...screenWidths].filter(([name]) => fieldByName.has(name)));
+      const current = prev.fitToScreen ? writeWidths(prev.select, fields, fittedWidths) : prev.select;
       const next = { ...prev, select: writeWidths(current, fields, px) };
       if (fitToScreen) next.fitToScreen = true;
       else delete next.fitToScreen;

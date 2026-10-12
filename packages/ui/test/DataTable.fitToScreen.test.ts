@@ -161,4 +161,35 @@ describe("persistent fit to screen", () => {
     expect(widths()[0]).toBeGreaterThan(widths()[1]! * 3);
     expect(onQueryChange).not.toHaveBeenCalled();
   });
+
+  it.each(["loading", "hidden"])("does not restore a removed column when freezing stale widths while %s", (paused) => {
+    let query = fitted;
+    let loading = false;
+    const onQueryChange = vi.fn((update: QueryState | ((previous: QueryState) => QueryState)) => {
+      query = typeof update === "function" ? update(query) : update;
+    });
+    const render = () => act(() => root.render(createElement(DataTable<Row>, {
+      fields: schema.fields.filter((field) => query.select.some((column) => column.field === field.name)),
+      rows, loading, query, onQueryChange, renderers, rowId,
+    })));
+    render();
+    const displayed = widths();
+    expect(displayed.reduce((a, b) => a + b)).toBe(600);
+
+    // Remove B using the header menu, then suspend fitting during the refetch
+    // or while the viewport is hidden. The local widths still contain B.
+    act(() => container.querySelector<HTMLElement>('th[data-qt-field="b"] .qt-th-label')!.click());
+    act(() => Array.from(container.querySelectorAll<HTMLButtonElement>(".qt-cm-item"))
+      .find((button) => button.textContent === "Remove Column")!.click());
+    expect(query.select.map((column) => column.field)).toEqual(["a"]);
+    if (paused === "loading") loading = true;
+    else viewport = 0;
+    render();
+    expect(container.querySelector('col[data-qt-column="b"]')).toBeNull();
+    act(() => container.querySelector<HTMLElement>('[aria-label="Resize A column"]')!
+      .dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })));
+
+    expect(query.fitToScreen).toBeUndefined();
+    expect(query.select).toEqual([{ field: "a", width: displayed[0]! + 10 }]);
+  });
 });
