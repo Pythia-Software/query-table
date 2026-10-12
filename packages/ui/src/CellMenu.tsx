@@ -163,6 +163,14 @@ function predicateSymbol(clause: WhereClause): string {
   if (clause.value === "0" && clause.op === "length_gt" && !clause.negated) {
     return "exclude empty strings";
   }
+  switch (clause.op) {
+    case "length_gt":
+      return clause.negated ? "length ≤" : "length >";
+    case "length_lt":
+      return clause.negated ? "length ≥" : "length <";
+    case "length_eq":
+      return clause.negated ? "length ≠" : "length =";
+  }
   const base = opSymbol(clause.op);
   return clause.negated ? `not ${base}` : base;
 }
@@ -183,12 +191,6 @@ function opSymbol(op: FilterOp): string {
       return "matches";
     case "not_matches_regex":
       return "not matches";
-    case "length_eq":
-      return "length equals";
-    case "length_gt":
-      return "length above";
-    case "length_lt":
-      return "length below";
     case "is_null":
       return "is null";
     case "is_not_null":

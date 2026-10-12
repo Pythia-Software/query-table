@@ -35,6 +35,8 @@
 
 ### Changed
 
+- Display cell-menu string-length comparisons with `>`, `≤`, `<`, `≥`, `=`,
+  and `≠` symbols in the paired keep/exclude actions.
 - Use the shared overlay system for table and metric actions, condition choices,
   field/value pickers, auto-refresh settings, and tag filter editors.
 - Prune unused SQL bindings and stage-local inputs, and evaluate PostgreSQL
