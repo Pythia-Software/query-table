@@ -24,6 +24,20 @@ function Orders({ schema, rows }) {
 }
 ```
 
+Row selection supports editable ranges. `selection.toggle(id)` toggles a row
+and starts a range; `selection.toggle(id, true)` grows or shrinks it from that
+fixed anchor, preserving earlier selections. If the anchor was unchecked,
+the range unchecks rows instead, restoring their previous checks when shrunk.
+`selection.toggle(id, true, true)` adds the span to the current selection and
+commits existing checks before subsequent range adjustments. The existing
+one- and two-argument calls remain supported.
+
+Ranges use the current page's complete displayed order, including virtualized
+rows outside the viewport. Changes to that order or page reset the active range
+while retaining selected IDs; refreshing the same ordered IDs retains it.
+Page-wide selection changes, `clear`, `replace`, and `retain` reset the range.
+Shift without a valid anchor behaves like an ordinary toggle.
+
 `table.selection.replace(ids)` atomically makes any iterable of stable row IDs
 the complete selection, including IDs outside the displayed page.
 `table.selection.retain(ids)` atomically intersects the current selection with

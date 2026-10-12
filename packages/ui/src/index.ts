@@ -51,3 +51,9 @@ export { PropertyViewEditor, PropertyViewControls } from "./PropertyViewEditor";
 export { ObjectInspector } from "./ObjectInspector";
 export { ItemDetailShare, itemDetailHref } from "./ItemDetails";
 export type { ObjectInspectorProps } from "./ObjectInspector";
+
+export { Menu, MenuButton, MenuGroup, MenuItem, MenuSubmenu, MenuSeparator } from "./Menu";
+export type { MenuAnchor, MenuProps, MenuItemProps, MenuSubmenuProps, MenuButtonProps, MenuGroupProps } from "./Menu";
+
+export { Popover } from "./Popover";
+export type { PopoverProps } from "./Popover";

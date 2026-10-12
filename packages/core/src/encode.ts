@@ -50,6 +50,7 @@ function fromBase64Url(s: string): string {
 // Keys are short to keep `?q=` small; any field at its default is omitted.
 //   s = select (as [field] or [field, width] tuples)
 //   w = where, o = orderBy, l = limit, f = offset
+//   fs = fit to the viewer's screen
 
 interface CompactQuery {
   s?: Array<[string] | [string, number]> | string[]; // string[] = legacy
@@ -60,6 +61,7 @@ interface CompactQuery {
   g?: AggregationClause[]; // aggregation metrics (omitted when none)
   d?: QueryState["itemDetails"];
   c?: string[]; // legacy alias for select column names
+  fs?: boolean;
 }
 
 /** QueryState → base64url token (omitting defaults). All-default query → "". */
@@ -74,6 +76,7 @@ export function encodeQuery(q: QueryState): string {
   if (q.offset) c.f = q.offset;
   if (q.aggregations?.length) c.g = q.aggregations;
   if (q.itemDetails) c.d = q.itemDetails;
+  if (q.fitToScreen) c.fs = true;
   if (Object.keys(c).length === 0) return "";
   return toBase64Url(JSON.stringify(c));
 }
@@ -93,6 +96,7 @@ export function decodeQuery(token: string): QueryState {
       offset: c.f,
       aggregations: c.g,
       itemDetails: c.d,
+      fitToScreen: c.fs,
     });
     return out;
   } catch {

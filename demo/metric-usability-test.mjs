@@ -254,7 +254,7 @@ for (const engine of [chromium, webkit]) {
       .evaluateAll((els) => els.map((el) => el.dataset.reorderId));
     const first = list.locator("li").first();
     await first.getByLabel("Actions for Runs in scope").click();
-    await first.getByRole("button", { name: "Remove", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Remove", exact: true }).click();
     assert.equal(await selected.inputValue(), "pass-rate");
     await page
       .getByRole("button", { name: "Undo remove", exact: true })

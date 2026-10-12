@@ -6,9 +6,13 @@
 import { useMemo, useState, type ReactNode } from "react";
 import type { FieldDef, FieldStats } from "@pythia-software/query-table-core";
 import { AdaptiveOverlay, useMobileLayout } from "./AdaptiveOverlay";
+import { Popover } from "./Popover";
+import type { MenuAnchor } from "./Menu";
 
 export interface FieldPickerProps<Row> {
   fields: FieldDef<Row>[];
+  /** Supply a trigger for a floating picker; omit for standalone inline use. */
+  anchor?: MenuAnchor | undefined;
   /** Already-shown field names, so the picker can mark/hide them. */
   excluded?: string[];
   /** Stats keyed by field name (optional). */
@@ -23,6 +27,7 @@ const UNGROUPED = "other";
 
 export function FieldPicker<Row>({
   fields,
+  anchor,
   excluded,
   stats,
   gateOnDistinct,
@@ -50,15 +55,14 @@ export function FieldPicker<Row>({
 
   const grouped = useMemo(() => groupByGroup(matched), [matched]);
 
-  const firstEnabled = matched.find((f) => isEnabled(f, stats, gateOnDistinct));
+  const firstEnabled = grouped.flatMap(([, fields]) => fields).find((f) => isEnabled(f, stats, gateOnDistinct));
 
-  return (
-    <AdaptiveOverlay title="Choose a field" onClose={() => onClose?.()} enabled={Boolean(onClose)}>
+  const content = (
     <div className="qt-picker" onBlur={(event) => {
-      if (!mobile && !event.currentTarget.contains(event.relatedTarget as Node | null)) onClose?.();
+      if (!anchor && !mobile && !event.currentTarget.contains(event.relatedTarget as Node | null)) onClose?.();
     }}>
       <input
-        autoFocus={!mobile}
+        autoFocus={!mobile && !anchor}
         aria-label="Search fields"
         type="text"
         className="qt-picker-input"
@@ -66,8 +70,9 @@ export function FieldPicker<Row>({
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Escape") onClose?.();
-          if (e.key === "Enter" && firstEnabled) {
+          if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onClose?.(); }
+          if (e.key === "Enter" && !e.nativeEvent.isComposing && firstEnabled) {
+            e.preventDefault();
             onPick(firstEnabled);
             setSearch("");
           }
@@ -124,8 +129,9 @@ export function FieldPicker<Row>({
         )}
       </div>
     </div>
-    </AdaptiveOverlay>
   );
+  return anchor ? <Popover label="Choose a field" anchor={anchor} width={300} className="qt-field-picker-popover" onClose={() => onClose?.()}>{content}</Popover> :
+    <AdaptiveOverlay title="Choose a field" onClose={() => onClose?.()} enabled={Boolean(onClose)}>{content}</AdaptiveOverlay>;
 }
 
 function isEnabled(f: FieldDef, stats: FieldPickerProps<any>["stats"], gate: boolean | undefined): boolean {
