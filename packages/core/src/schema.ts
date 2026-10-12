@@ -18,6 +18,7 @@
 //      the `render` function — kept apart from the config so the two don't mix.
 
 import type { AggOp, FilterOp, OrderByClause, SelectColumn } from "./query";
+import { normalizePropertyFormat, type PropertyFieldConfig, type FieldOrigin, type FieldRelationship } from "./properties";
 
 export type FieldType =
   | "text"
@@ -148,6 +149,10 @@ export interface FieldDef<Row = any, V = unknown> {
 
   // presentation (the only code-bearing field): registry key or inline fn
   render?: string | CellRenderer<Row, V>;
+  property?: PropertyFieldConfig;
+  /** Structured provenance for relationship discovery; never SQL text. */
+  origin?: FieldOrigin;
+  relationship?: FieldRelationship;
 }
 
 /** The frontend's loaded schema for one dataset. */
@@ -315,6 +320,30 @@ function projectField<Row>(raw: any, i: number): FieldDef<Row> {
   if (!raw || typeof raw.name !== "string") throw new Error(`schema: field[${i}] missing \`name\``);
   if (typeof raw.label !== "string") throw new Error(`schema: field ${raw.name} missing \`label\``);
   if (typeof raw.type !== "string") throw new Error(`schema: field ${raw.name} missing \`type\``);
+  if (raw.property !== undefined) {
+    const property = raw.property;
+    if (!property || typeof property !== "object" || Array.isArray(property)
+      || (property.enabled !== undefined && typeof property.enabled !== "boolean")
+      || (property.default !== undefined && typeof property.default !== "boolean")
+      || (property.render !== undefined && (typeof property.render !== "string" || !property.render))) {
+      throw new Error(`schema: field ${raw.name} has invalid property metadata`);
+    }
+    if (property.format !== undefined && !normalizePropertyFormat(property.format)) {
+      throw new Error(`schema: field ${raw.name} has an invalid property format`);
+    }
+  }
+  if (raw.origin !== undefined && (!raw.origin
+    || typeof raw.origin.table !== "string" || !raw.origin.table
+    || typeof raw.origin.column !== "string" || !raw.origin.column)) {
+    throw new Error(`schema: field ${raw.name} has an invalid origin`);
+  }
+  if (raw.relationship !== undefined && (!raw.relationship
+    || typeof raw.relationship.objectType !== "string" || !raw.relationship.objectType
+    || !raw.relationship.key || typeof raw.relationship.key !== "object"
+    || Array.isArray(raw.relationship.key) || Object.keys(raw.relationship.key).length === 0
+    || Object.entries(raw.relationship.key).some(([key, value]) => !key || typeof value !== "string" || !value))) {
+    throw new Error(`schema: field ${raw.name} has an invalid relationship`);
+  }
 
   // `source` accepts a string shorthand ("backend"|"derived") or an object.
   const rs = raw.source ?? (raw.bindings ? "backend" : "derived");
@@ -340,6 +369,9 @@ function projectField<Row>(raw: any, i: number): FieldDef<Row> {
     alias: raw.alias,
     aliases: normalizeAliases(raw.aliases, raw.alias),
     render: raw.render, // string key from JSON; consumer may override with a fn
+    property: raw.property ? { ...raw.property, format: raw.property.format === undefined ? undefined : normalizePropertyFormat(raw.property.format) } : undefined,
+    origin: raw.origin,
+    relationship: raw.relationship,
   };
 }
 

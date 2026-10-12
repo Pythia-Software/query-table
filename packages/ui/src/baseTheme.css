@@ -304,14 +304,6 @@
   flex: 1;
   min-width: 0;
 }
-.qt-qb-editor-stack {
-  display: inline-flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.qt-qb-editor-stack .qt-btn {
-  width: 100%;
-}
 .qt-qb-run-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .qt-qb-run-metric { color: var(--qt-muted); font-size: 12px; }
 .qt-qb-run-metric--strong { font-weight: 700; color: var(--qt-text); }
@@ -948,18 +940,6 @@
     font-weight: 700;
   }
 
-  .qt-qb-editor-stack {
-    width: 100%;
-    min-width: 0;
-    flex-direction: row;
-    gap: 8px;
-  }
-
-  .qt-qb-editor-stack .qt-btn {
-    flex: 1;
-    min-width: 0;
-  }
-
   .qt-chip {
     height: auto;
     min-height: 40px;
@@ -1503,7 +1483,6 @@
   .qt-qb-editor-bar { padding: 8px; gap: 8px; }
   .qt-qb-editor-bar .qt-qb-body { gap: 0; }
   .qt-qb-editor-bar .qt-qb-row { gap: 6px; }
-  .qt-qb-editor-stack { gap: 6px; }
   .qt-qb .qt-chip { padding: 0 6px; gap: 4px; }
   .qt-qb-run-bar { padding: 10px 8px; }
   .qt-qb-run-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }

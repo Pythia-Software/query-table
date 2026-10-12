@@ -153,6 +153,9 @@ export function App({ dateExample = false }: { dateExample?: boolean }) {
             </a>
           </p>
           <p className="qt-demo-intro">
+            <a href="/objects">Customize and save views of individual objects</a>
+          </p>
+          <p className="qt-demo-intro">
             <a href="/date-metrics">
               Try date grouping with empty dates in a metric definition
             </a>

@@ -1,5 +1,24 @@
 # @pythia-software/query-table-ui
 
+`ObjectInspector`, `ObjectProperties`, `PropertyViewControls`, and
+`PropertyViewEditor` provide customizable read-only object details. See
+[object property views](../../docs/object-properties.md) for setup and composition.
+
+`ObjectInspector` supplies a compact card with a saved-view toolbar, property/value
+rows, and a read-only footer. The host owns visible identity. Its property editor
+opens a modal workbench with an ordered list, display settings and a live preview.
+
+Enable `useQueryTable({ schema, itemDetails: true })` and pass
+`itemDetails={api.itemDetails}` to `DataTable` for click popovers, resizable item modals
+and row expansion. Detail is a regular draggable/resizable column, defaulting to Modal. Page links
+support URL templates and same-tab/new-tab navigation. Item toolbars include Share. Each
+modality has independent saved property views; shared links carry the query,
+typed item ID, modality and layouts. Property label widths are saved with the
+view; values support double click or focused Enter to copy raw data.
+The Detail chip's right caret opens its settings in the column selector.
+Popovers use compact icon controls and scroll properties within the card;
+expanded rows keep Collapse in the card toolbar. Mode labels appear only in
+the properties editor's context strip.
 Opinionated, themeable React components for query-table, including the data
 table, query builder, field picker, metrics panel, saved queries, cell menus,
 and selection toolbar.

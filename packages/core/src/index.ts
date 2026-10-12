@@ -11,9 +11,15 @@ export type {
   AggOp,
   AggregationClause,
   QueryState,
+  ItemDetailMode,
+  ItemPropertyMode,
+  ItemPageOptions,
+  ItemDetailsState,
   RowId,
 } from "./query";
+export { itemPageFields, validateItemPageTemplate, renderItemPageTemplate } from "./itemPage";
 export {
+  ITEM_DETAILS_COLUMN,
   EMPTY_QUERY,
   MAX_QUERY_LIMIT,
   MAX_QUERY_OFFSET,
@@ -104,3 +110,5 @@ export * from "./metricTypes";
 export * from "./metrics";
 export * from "./metricDistributions";
 export * from "./execution";
+export * from "./properties";
+export * from "./propertyStorage";

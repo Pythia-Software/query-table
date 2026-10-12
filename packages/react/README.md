@@ -3,6 +3,10 @@
 Headless React hooks for query-table: query state, fetching, URL/storage sync,
 selection, saved queries, aggregations, and column interactions.
 
+`usePropertyView` controls saved read-only presentations per object type;
+`useObjectReferences` batches cancellable relationship lookups. See
+[object property views](../../docs/object-properties.md).
+
 ## Install
 
 ```bash
