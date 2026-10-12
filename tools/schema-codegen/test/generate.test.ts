@@ -11,6 +11,24 @@ const documentPath = fileURLToPath(
 const document = JSON.parse(readFileSync(documentPath, "utf8"));
 
 describe("schema code generation", () => {
+  it("validates and preserves object property and relationship metadata", () => {
+    const configured = structuredClone(document);
+    const field = configured.fields[0];
+    field.property = { default: true, format: { kind: "currency", currency: "USD", decimals: 4 } };
+    field.origin = { table: "runs", column: "id" };
+    field.relationship = { objectType: "runs", key: { id: "id" } };
+    const metaSchema = JSON.parse(readFileSync(new URL("../../../schema/query-table.schema.json", import.meta.url), "utf8"));
+    const validate = new Ajv2020({ strict: false }).compile(metaSchema);
+    expect(validate(configured), JSON.stringify(validate.errors)).toBe(true);
+    const generated = generateTypeScript(configured);
+    expect(generated).toContain('"currency": "USD"');
+    expect(generated).toContain('"table": "runs"');
+    expect(generated).toContain('"objectType": "runs"');
+    expect(generated).not.toContain('"bindings"');
+    delete field.property.format.currency;
+    expect(validate(configured)).toBe(false);
+    expect(() => generateTypeScript(configured)).toThrow("invalid property format");
+  });
   it("generates a frontend schema without backend SQL bindings", () => {
     const output = generateTypeScript(document);
     expect(output).toContain("export const RUNS_SCHEMA: FieldSchema");

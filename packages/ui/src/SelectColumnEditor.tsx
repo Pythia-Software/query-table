@@ -8,10 +8,13 @@ import {
   useState,
 } from "react";
 import { ModalSurface, useMobileLayout } from "./AdaptiveOverlay";
+import { ItemDetailChoices } from "./ItemDetails";
+import { validateItemPageTemplate, type ItemDetailMode, type ItemPageOptions } from "@pythia-software/query-table-core";
 import { ReorderList } from "./ReorderList";
 import { Icon } from "./Icon";
 import type { QueryTableApi } from "@pythia-software/query-table-react";
 import {
+  ITEM_DETAILS_COLUMN,
   computedFieldName,
   isComputedField,
   isSelectable,
@@ -38,19 +41,33 @@ const display = (v: unknown) =>
 export interface SelectColumnEditorProps<Row> {
   api: QueryTableApi<Row>;
   onClose: () => void;
+  /** Jump directly to this column's settings when opening the editor. */
+  initialField?: string;
 }
 export function SelectColumnEditor<Row>({
   api,
   onClose,
+  initialField,
 }: SelectColumnEditorProps<Row>) {
   const titleId = useId();
+  const [detailModes, setDetailModes] = useState<ItemDetailMode[]>(api.itemDetails?.modes ?? []);
+  const [detailPage, setDetailPage] = useState<ItemPageOptions>(api.itemDetails?.page ?? { urlTemplate: "", target: "_blank" });
+  const templateInput = useRef<HTMLInputElement>(null);
+  const pageError = detailModes.includes("page") && api.itemDetails ? validateItemPageTemplate(detailPage.urlTemplate, api.itemDetails.pageSchema) : null;
+  function insertToken(token: string) {
+    const input = templateInput.current;
+    const start = input?.selectionStart ?? detailPage.urlTemplate.length;
+    const end = input?.selectionEnd ?? start;
+    setDetailPage(previous => ({ ...previous, urlTemplate: previous.urlTemplate.slice(0, start) + token + previous.urlTemplate.slice(end) }));
+    requestAnimationFrame(() => { input?.focus(); input?.setSelectionRange(start + token.length, start + token.length); });
+  }
   const mobile = useMobileLayout();
-  const [mobilePanel, setMobilePanel] = useState("selected");
+  const [mobilePanel, setMobilePanel] = useState(initialField ? "preview" : "selected");
   const [columns, setColumns] = useState<SelectColumn[]>(() =>
     api.select.visible.map((c) => ({ ...c })),
   );
   const [search, setSearch] = useState(""),
-    [active, setActive] = useState<string>(api.select.visible[0]?.field ?? "");
+    [active, setActive] = useState<string>(initialField ?? api.select.visible[0]?.field ?? "");
   const [editing, setEditing] = useState(false),
     [id, setId] = useState(""),
     [revision, setRevision] = useState<string | null>(null);
@@ -69,9 +86,11 @@ export function SelectColumnEditor<Row>({
   const [fieldStats, setFieldStats] = useState<Record<string, FieldStats>>({});
   const drag = useRef<string | null>(null);
   const [inspection, setInspection] = useState<RegexInspection | null>(null);
-  const catalogue = api.computed.catalogue.filter(isSelectable);
+  const detailField = api.itemDetails ? [...api.select.fields, ...api.select.hidden].find(field => field.name === ITEM_DETAILS_COLUMN) : undefined;
+  const catalogue = [...api.computed.catalogue.filter(isSelectable), ...(detailField ? [detailField] : [])];
   const chosen = catalogue.find((f) => f.name === active);
-  const expression = editing ? source : active ? fieldExpression(active) : "";
+  const editingDetails = !editing && active === ITEM_DETAILS_COLUMN;
+  const expression = editing ? source : active && !editingDetails ? fieldExpression(active) : "";
   const validation = useMemo(() => {
     if (!expression)
       return { error: "Choose a column or create a computed column." };
@@ -97,7 +116,7 @@ export function SelectColumnEditor<Row>({
     const ac = new AbortController();
     void fieldStatsRequest
       .current(
-        catalogue.map((field) => field.name),
+        catalogue.filter(field => field.name !== ITEM_DETAILS_COLUMN).map((field) => field.name),
         ac.signal,
       )
       .then((result) => {
@@ -461,7 +480,26 @@ export function SelectColumnEditor<Row>({
             </button>
           </aside>
           <section className="qt-column-workbench">
-            {editing ? (
+            {editingDetails && api.itemDetails ? <>
+              <div className="qt-editor-title"><h3><Icon name="panelList" />Detail</h3></div>
+              <p className="qt-muted">A presentation column with detail buttons. Drag it anywhere in the selected list or table.</p>
+              <ItemDetailChoices available={api.itemDetails.availableModes} modes={detailModes} onChange={setDetailModes} />
+              {detailModes.includes("page") && <div className="qt-item-page-settings">
+                <label>URL template<input ref={templateInput} aria-label="Page URL template" value={detailPage.urlTemplate}
+                  placeholder="/items/{id}?q={query}" maxLength={8000} aria-invalid={Boolean(pageError)}
+                  onChange={event => setDetailPage(previous => ({ ...previous, urlTemplate: event.target.value }))} /></label>
+                <label>Insert into URL<select aria-label="Insert URL placeholder" value="" onChange={event => { if (event.target.value) insertToken(event.target.value); }}>
+                  <option value="">Choose a value…</option><option value="{id}">Item ID</option><option value="{query}">Query state</option>
+                  {api.itemDetails.pageSchema.fields.filter(field => !/[{}]/.test(field.name)).map(field => <option key={field.name} value={`{field:${field.name}}`}>{field.label}</option>)}
+                </select></label>
+                <label>Open page<select aria-label="Page link target" value={detailPage.target} onChange={event => setDetailPage(previous => ({ ...previous, target: event.target.value as ItemPageOptions["target"] }))}>
+                  <option value="_blank">In a new tab</option><option value="_self">In the same tab</option>
+                </select></label>
+                <p className="qt-muted">Leave the template empty to open this table's shareable item view. Values are URL-encoded; use {"{id}"}, {"{query}"}, or {"{field:field_name}"} in your own route.</p>
+                {pageError && <p role="alert">{pageError}</p>}
+              </div>}
+              <p className="qt-muted">Popover, Modal, and Row expand each have their own property view. Customize it by opening an item in that display.</p>
+            </> : editing ? (
               <>
                 <div className="qt-editor-title">
                   <h3>
@@ -568,6 +606,7 @@ export function SelectColumnEditor<Row>({
                 )}
               </div>
             )}
+            {!editingDetails && <>
             <div className="qt-preview-controls">
               <label>
                 Rows to process{" "}
@@ -768,6 +807,7 @@ export function SelectColumnEditor<Row>({
                 )}
               </>
             )}
+            </>}
           </section>
         </div>
         <footer className="qt-select-editor-footer">
@@ -780,9 +820,14 @@ export function SelectColumnEditor<Row>({
           <button
             type="button"
             className="qt-btn qt-primary"
-            disabled={!columns.length || columns.length > 200}
+            disabled={!columns.length || columns.length > 200 || Boolean(pageError)}
             onClick={() => {
-              api.setQuery((q) => ({ ...q, select: columns }));
+              api.setQuery((q) => {
+                if (!api.itemDetails) return { ...q, select: columns };
+                const itemDetails = { ...q.itemDetails, modes: detailModes, page: detailPage };
+                if (itemDetails.active && !detailModes.includes(itemDetails.active.mode)) delete itemDetails.active;
+                return { ...q, select: columns, itemDetails };
+              });
               onClose();
             }}
           >

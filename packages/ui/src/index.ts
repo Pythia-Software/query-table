@@ -45,3 +45,9 @@ export { formatMetricOutput, validateMetricFormat, metricTimestamp } from "./met
 
 export { RequestActivity } from "./RequestActivity";
 export type { RequestActivityProps } from "./RequestActivity";
+export { ObjectProperties, formatPropertyValue } from "./ObjectProperties";
+export type { ObjectPropertiesProps } from "./ObjectProperties";
+export { PropertyViewEditor, PropertyViewControls } from "./PropertyViewEditor";
+export { ObjectInspector } from "./ObjectInspector";
+export { ItemDetailShare, itemDetailHref } from "./ItemDetails";
+export type { ObjectInspectorProps } from "./ObjectInspector";

@@ -11,6 +11,10 @@ One schema drives both the frontend (column rendering, which operators are
 offered, what's sortable) and the backend (the exact SQL it's allowed to emit).
 Define it once; both ends consume it.
 
+The same catalogue can display individual objects with ordered, formatted,
+read-only properties and multiple saved views per object type. See
+[object property views](docs/object-properties.md) and the `/objects` demo.
+
 > Naming: the package family is **`query-table`**. Use `query_table` where
 > dashes are illegal (Go identifiers), and `querytable` where neither is allowed.
 

@@ -109,7 +109,9 @@ describe("adaptive mobile sheets", () => {
     pointer(handle, "pointerdown", 100);
     pointer(handle, "pointerup", 200);
     expect(close).toHaveBeenCalledTimes(1);
-    act(() => (document.querySelector(".qt-overlay-backdrop") as HTMLElement).click());
+    const scrim = document.querySelector<HTMLElement>(".qt-overlay-backdrop")!;
+    pointer(scrim, "pointerdown", 0);
+    act(() => scrim.click());
     expect(close).toHaveBeenCalledTimes(2);
   });
 

@@ -1,3 +1,4 @@
+import { normalizePropertyView, type PropertyViewState } from "./properties";
 import type { MetricDisplay, MetricLayout, MetricDistribution, MetricSort, MetricScope } from "./metricTypes";
 import { normalizeMetricOptions } from "./metricNormalize";
 import { isComputedField } from "./computed";
@@ -156,7 +157,28 @@ export interface AggregationClause {
   label?: string;
 }
 
+/** Detail affordances are presentation state, never backend SELECT fields. */
+export type ItemPropertyMode = "hover" | "modal" | "expand";
+export type ItemDetailMode = ItemPropertyMode | "page";
+export interface ItemPageOptions {
+  /** Empty uses the current page with the item modal and query state. */
+  urlTemplate: string;
+  target: "_blank" | "_self";
+}
+/** Reserved presentation column; never sent to a data source. */
+export const ITEM_DETAILS_COLUMN = "__qt_item_details__";
+export interface ItemDetailsState {
+  modes: ItemDetailMode[];
+  /** A self-contained view travels with shared links; saved-view IDs are device-local. */
+  view?: PropertyViewState;
+  /** Independent layouts for each modality. Legacy view is the fallback. */
+  views?: Partial<Record<ItemPropertyMode, PropertyViewState>>;
+  page?: ItemPageOptions;
+  active?: { id: RowId; mode: "modal" | "expand" };
+}
+
 export interface QueryState {
+  itemDetails?: ItemDetailsState;
   /** Ordered SELECT list + per-column widths. Empty = the schema's default columns. */
   select: SelectColumn[];
   /** WHERE in conjunctive normal form: the AND of these terms, each a single
@@ -395,6 +417,37 @@ export function normalizeQueryState(input: unknown, fallback: QueryState = EMPTY
     out.aggregations = normalizeQueryState({ aggregations: fallback.aggregations }).aggregations!;
   }
 
+  if (isRecord(raw.itemDetails) && Array.isArray(raw.itemDetails.modes)) {
+    const modes = [...new Set(raw.itemDetails.modes.filter(
+      (mode): mode is ItemDetailMode => typeof mode === "string" && ["hover", "modal", "expand", "page"].includes(mode),
+    ))];
+    const details: ItemDetailsState = { modes };
+    if (isRecord(raw.itemDetails.page) && typeof raw.itemDetails.page.urlTemplate === "string"
+      && raw.itemDetails.page.urlTemplate.length <= 8000) {
+      details.page = { urlTemplate: raw.itemDetails.page.urlTemplate,
+        target: raw.itemDetails.page.target === "_self" ? "_self" : "_blank" };
+    }
+    if (raw.itemDetails.view !== undefined) {
+      try { details.view = normalizePropertyView(raw.itemDetails.view); } catch { /* Ignore malformed view snapshots. */ }
+    }
+    if (isRecord(raw.itemDetails.views)) {
+      const views: NonNullable<ItemDetailsState["views"]> = {};
+      for (const mode of ["hover", "modal", "expand"] as const) {
+        try {
+          if (raw.itemDetails.views[mode] !== undefined) views[mode] = normalizePropertyView(raw.itemDetails.views[mode]);
+        } catch { /* Ignore malformed modality snapshots. */ }
+      }
+      if (Object.keys(views).length) details.views = views;
+    }
+    const active = raw.itemDetails.active;
+    if (isRecord(active) && (active.mode === "modal" || active.mode === "expand") && modes.includes(active.mode)
+      && ((typeof active.id === "string" && active.id.length > 0 && active.id.length <= 1000)
+        || (typeof active.id === "number" && Number.isFinite(active.id)))) {
+      details.active = { id: active.id as RowId, mode: active.mode };
+    }
+    out.itemDetails = details;
+  }
+
   return out;
 }
 
@@ -407,6 +460,7 @@ export function queriesEqual(a: QueryState, b: QueryState): boolean {
   if (!sameArray(a.orderBy, b.orderBy)) return false;
   if (!sameArray(a.select, b.select)) return false;
   if (!sameArray(a.aggregations ?? [], b.aggregations ?? [])) return false;
+  if (JSON.stringify(a.itemDetails) !== JSON.stringify(b.itemDetails)) return false;
   return true;
 }
 

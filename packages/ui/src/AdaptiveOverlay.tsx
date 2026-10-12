@@ -48,6 +48,7 @@ export function ModalSurface({
   const close = useRef(onClose);
   close.current = onClose;
   const swipeStart = useRef<number | null>(null);
+  const backdropPress = useRef(false);
   const [swipeDistance, setSwipeDistance] = useState(0);
   const [viewport, setViewport] = useState<{
     top: number;
@@ -184,9 +185,13 @@ export function ModalSurface({
             }
           : undefined
       }
+      onPointerDown={(event) => { backdropPress.current = event.target === event.currentTarget; }}
       onClick={(event) => {
         event.stopPropagation();
-        if (event.target === event.currentTarget) onClose();
+        // A resize or drag can finish over the backdrop. Dismiss only when
+        // the gesture both began and ended there.
+        if (backdropPress.current && event.target === event.currentTarget) onClose();
+        backdropPress.current = false;
       }}
     >
       <div

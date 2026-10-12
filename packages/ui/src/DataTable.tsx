@@ -1,3 +1,5 @@
+import { ItemDetailsActions, ItemDetailsPanel } from "./ItemDetails";
+import type { ItemDetailsApi } from "@pythia-software/query-table-react";
 import { Icon } from "./Icon";
 // DataTable — the table renderer.
 //
@@ -8,8 +10,8 @@ import { Icon } from "./Icon";
 // and emits intents through onQueryChange. Its props mirror a conventional
 // schema-driven table so adoption is mechanical.
 
-import { isComputedCellError } from "@pythia-software/query-table-core";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type SetStateAction } from "react";
+import { ITEM_DETAILS_COLUMN, isComputedCellError } from "@pythia-software/query-table-core";
+import { useId, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type SetStateAction } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { OrderByClause, QueryState, FieldDef, RowId, SelectColumn, WhereClause } from "@pythia-software/query-table-core";
 import { isSortable, readFieldValue } from "@pythia-software/query-table-core";
@@ -22,6 +24,10 @@ import { AdaptiveOverlay, useMobileLayout } from "./AdaptiveOverlay";
 import { equalWidths, fitContentWidths, fitScreenWidths, type ColumnWidthPreset } from "./columnWidths";
 
 export interface DataTableProps<Row> {
+  /** Built-in details from api.itemDetails; no render or route callbacks needed. */
+  itemDetails?: ItemDetailsApi<Row>;
+  /** Optional detail renderer overrides, layered over the table registry. */
+  itemRenderers?: RenderRegistry<Row>;
   /** Ordered visible fields (widths already resolved), from `api.visibleFields`. */
   fields: FieldDef<Row>[];
   rows: Row[];
@@ -113,6 +119,10 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     classNames,
   } = props;
 
+  const details = props.itemDetails;
+  const detailRenderers = useMemo(() => props.itemRenderers ? { ...renderers, ...props.itemRenderers } : renderers, [renderers, props.itemRenderers]);
+  const expandedPanelId = useId();
+  const expandedRowIndex = details?.active?.mode === "expand" ? rows.findIndex((row) => rowId(row) === details.active?.id) : -1;
   const [menu, setMenu] = useState<MenuState<Row> | null>(null);
   const [selectionColumnWidth, setSelectionColumnWidth] = useState(DEFAULT_SELECTION_WIDTH);
   const [selectionColumnIndex, setSelectionColumnIndex] = useState(0);
@@ -148,18 +158,26 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     () => rowIds.map((id, index) => (id == null ? `index:${index}` : `${typeof id}:${String(id)}`)),
     [rowIds],
   );
-  const getVirtualRowKey = useCallback((index: number) => virtualRowKeys[index] ?? `index:${index}`, [virtualRowKeys]);
+  // Expanded details are measured as their own virtual row. Keeping them in
+  // the virtualizer's model avoids overlaps and jumpy padding on large tables.
+  const entries = useMemo(() => rows.flatMap((_, rowIndex) => rowIndex === expandedRowIndex
+    ? [{ rowIndex, detail: false }, { rowIndex, detail: true }]
+    : [{ rowIndex, detail: false }]), [rows, expandedRowIndex]);
+  const getVirtualRowKey = useCallback((index: number) => {
+    const entry = entries[index];
+    return entry ? `${entry.detail ? "detail:" : ""}${virtualRowKeys[entry.rowIndex]}` : `index:${index}`;
+  }, [virtualRowKeys, entries]);
   const normalizedEstimate = Number.isFinite(estimateRowHeight)
     ? Math.max(1, estimateRowHeight)
     : DEFAULT_ROW_HEIGHT;
   const normalizedOverscan = Number.isFinite(overscan)
     ? Math.max(0, Math.floor(overscan))
     : DEFAULT_OVERSCAN;
-  const estimateVirtualRow = useCallback(() => normalizedEstimate, [normalizedEstimate]);
+  const estimateVirtualRow = useCallback((index: number) => entries[index]?.detail ? 400 : normalizedEstimate, [normalizedEstimate, entries]);
   const initialViewportHeight = typeof maxHeight === "number" && maxHeight > 0 ? maxHeight : DEFAULT_MAX_HEIGHT;
   const initialRect = useMemo(() => ({ width: 0, height: initialViewportHeight }), [initialViewportHeight]);
   const rowVirtualizer = useVirtualizer<HTMLDivElement, HTMLTableRowElement>({
-    count: rows.length,
+    count: entries.length,
     getScrollElement: () => tableWrapRef.current,
     estimateSize: estimateVirtualRow,
     getItemKey: getVirtualRowKey,
@@ -171,6 +189,10 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     // Row refs measure during React's commit phase; schedule size updates normally.
     useFlushSync: false,
   });
+
+  useEffect(() => {
+    if (expandedRowIndex >= 0) rowVirtualizer.scrollToIndex(expandedRowIndex, { align: "start" });
+  }, [expandedRowIndex]);
 
   useEffect(() => {
     return () => {
@@ -573,7 +595,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
   const tableWidth = renderedColumnNames.reduce((sum, name) => {
     const f = fieldByName.get(name);
     return sum + displayColumnWidthFor(name, f);
-  }, trailing ? TRAILING_WIDTH : 0);
+  }, (trailing ? TRAILING_WIDTH : 0));
   // A horizontal data grid is more useful than a card stack on small screens,
   // but overflow should be discoverable. Keep a lightweight cue visible only
   // while there is more content to the right.
@@ -815,14 +837,20 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
               </tr>
             )}
             {virtualRows.map((virtualRow) => {
-              const i = virtualRow.index;
+              const entry = entries[virtualRow.index]!;
+              const i = entry.rowIndex;
+              if (entry.detail && details) return (
+                <tr key={virtualRow.key} data-index={virtualRow.index} ref={rowVirtualizer.measureElement} className="qt-expanded-row">
+                  <td colSpan={totalCols}><div id={expandedPanelId}><ItemDetailsPanel api={details} query={query} renderers={detailRenderers} /></div></td>
+                </tr>
+              );
               const row = rows[i]!;
               const id = rowIds[i] ?? null;
               const selected = id != null && selection ? selection.isSelected(id) : false;
               return (
                 <tr
                   key={virtualRow.key}
-                  data-index={i}
+                  data-index={virtualRow.index}
                   ref={rowVirtualizer.measureElement}
                   className={cx("qt-row", selected && "qt-row--selected", classNames?.row, selected && classNames?.rowSelected)}
                 >
@@ -857,6 +885,10 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                     }
                     const f = fieldByName.get(name);
                     if (!f) return null;
+                    if (name === ITEM_DETAILS_COLUMN) return <td key={name} data-qt-field={name}
+                      className={cx("qt-cell", "qt-item-detail-column", dragSource === name && "qt-cell--dragging", classNames?.cell)}>
+                      {details && <ItemDetailsActions api={details} query={query} id={id} row={row} renderers={detailRenderers} expandedId={expandedPanelId} />}
+                    </td>;
                     const render = resolveRenderer(f, renderers);
                     const value = readFieldValue(f, row);
                     const key = cellKey(id, i, f.name);
@@ -911,6 +943,8 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
           </tfoot>
         </table>
       </div>
+      {details?.active?.mode === "modal" && <ItemDetailsPanel api={details} query={query} renderers={detailRenderers} />}
+      {details?.active?.mode === "expand" && expandedRowIndex < 0 && <ItemDetailsPanel api={details} query={query} renderers={detailRenderers} outsidePage />}
       {menu && (
         menu.kind === "cell" ? (
           <CellMenu

@@ -58,6 +58,7 @@ interface CompactQuery {
   l?: number;
   f?: number;
   g?: AggregationClause[]; // aggregation metrics (omitted when none)
+  d?: QueryState["itemDetails"];
   c?: string[]; // legacy alias for select column names
 }
 
@@ -72,6 +73,7 @@ export function encodeQuery(q: QueryState): string {
   c.l = q.limit;
   if (q.offset) c.f = q.offset;
   if (q.aggregations?.length) c.g = q.aggregations;
+  if (q.itemDetails) c.d = q.itemDetails;
   if (Object.keys(c).length === 0) return "";
   return toBase64Url(JSON.stringify(c));
 }
@@ -90,6 +92,7 @@ export function decodeQuery(token: string): QueryState {
       limit: c.l,
       offset: c.f,
       aggregations: c.g,
+      itemDetails: c.d,
     });
     return out;
   } catch {
