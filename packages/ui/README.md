@@ -13,7 +13,9 @@ npm install @pythia-software/query-table-core @pythia-software/query-table-react
 ## Column widths
 
 Drag a header edge to resize one column (arrow keys nudge, Enter auto-fits).
-Click a header and open **Column Widths** to resize in one step:
+Click anywhere in a column header to open its actions menu, including padding
+and blank space. Resize handles remain dedicated to resizing.
+Open **Column Widths** to resize in one step:
 
 - **Fit This Column** sizes the clicked column to its widest rendered value.
 - **Fit All to Content** does the same for every column.

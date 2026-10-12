@@ -22,6 +22,8 @@
 
 ### Fixed
 
+- Open column actions when clicking anywhere in a table header, including
+  padding and blank space, while preserving resize handle behavior.
 - Keep browser-only computed columns evaluating locally beside server sidecars,
   without browser-only revision edits blocking valid v2 pages.
 - Support raw PostgreSQL text-array SELECT while retaining expression and
