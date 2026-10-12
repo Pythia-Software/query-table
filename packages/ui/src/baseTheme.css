@@ -153,7 +153,7 @@
   border: 1px dashed var(--qt-accent);
   box-sizing: border-box;
 }
-.qt-th-label:hover { color: var(--qt-accent); }
+.qt-th:hover > .qt-th-label { color: var(--qt-accent); }
 .qt-sort-indicator { display: inline-flex; align-items: center; margin-left: 3px; color: var(--qt-accent); }
 .qt-sort-priority { font-size: 9px; margin-left: 1px; }
 .qt-table-wrap--resizing { cursor: col-resize; }

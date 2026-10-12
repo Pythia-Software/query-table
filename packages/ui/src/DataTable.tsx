@@ -742,7 +742,9 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                       dragSource === f.name && "qt-th--dragging",
                       classNames?.th,
                     )}
-                    style={f.select?.align ? { textAlign: f.select.align } : undefined}
+                    style={{ cursor: "pointer", textAlign: f.select?.align }}
+                    onClick={(e) => openHeaderMenu(e, f)}
+                    title="Click to open column actions"
                     draggable
                     onDragStart={(e) => {
                       if (resizingFieldRef.current) {
@@ -780,12 +782,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                     }}
                     onDragEnd={() => columnDrag.end()}
                   >
-                    <span
-                      className="qt-th-label"
-                      onClick={(e) => openHeaderMenu(e, f)}
-                      style={{ cursor: "pointer" }}
-                      title="Click to open column actions"
-                    >
+                    <span className="qt-th-label">
                       {f.label}
                       {info && (
                         <span className="qt-sort-indicator">
