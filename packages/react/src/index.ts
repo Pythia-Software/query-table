@@ -23,3 +23,8 @@ export { createFormulaWorker, evaluateFormulaRows } from "./formulaWorker";
 export type { FormulaWorkerFactory } from "./formulaWorker";
 
 export type { RequestActivityApi, RequestActivityEntry } from "./useRequestActivity";
+export { usePropertyView } from "./usePropertyView";
+export type { PropertyViewApi, UsePropertyViewOptions } from "./usePropertyView";
+export { useObjectReferences } from "./useObjectReferences";
+
+export type { ItemDetailsApi, ItemDetailsOptions, ItemDetailRecord } from "./useItemDetails";

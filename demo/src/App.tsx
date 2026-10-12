@@ -123,6 +123,7 @@ export function App() {
       </p>
 
       <p className="qt-demo-intro"><a href="/postgres">Explore 500,000 PostgreSQL rows with the Go backend and adjustable latency</a></p>
+      <p className="qt-demo-intro"><a href="/objects">Customize and save views of individual objects</a></p>
 
       <QueryBuilder
         api={api}

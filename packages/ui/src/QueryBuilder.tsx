@@ -38,6 +38,7 @@ import type {
 } from "@pythia-software/query-table-core";
 import {
   NULLARY_OPS,
+  ITEM_DETAILS_COLUMN,
   MAX_WHERE_CLAUSES,
   encodeQuery,
   filterValues as filterValuesFor,
@@ -716,6 +717,20 @@ export function QueryBuilder<Row>({
           Saved
           {api.saved.items.length > 0 ? ` (${api.saved.items.length})` : ""}
         </button>
+        <div className="qt-property-history qt-query-history" role="group" aria-label="Query history">
+          <button type="button" className={cx("qt-link-btn", "qt-property-icon-button", classNames?.button)}
+            aria-label="Undo" title="Undo query change" disabled={!api.canUndo || isBusy} onClick={api.undo}>
+            <Icon name="undo" size={14} />
+          </button>
+          <button type="button" className={cx("qt-link-btn", "qt-property-icon-button", classNames?.button)}
+            aria-label="Redo" title="Redo query change" disabled={!api.canRedo || isBusy} onClick={api.redo}>
+            <Icon name="redo" size={14} />
+          </button>
+          <button type="button" className={cx("qt-link-btn", "qt-property-icon-button", classNames?.button)}
+            aria-label="Reset" title="Reset query" disabled={isBusy} onClick={api.resetAll}>
+            <Icon name="reset" size={14} />
+          </button>
+        </div>
         <button
           type="button"
           className={cx("qt-btn", "qt-qb-collapse-btn", classNames?.button)}
@@ -776,35 +791,7 @@ export function QueryBuilder<Row>({
               locale={metricLocale}
             />
           </div>
-          <div className="qt-qb-editor-stack">
-            <button
-              type="button"
-              className={cx("qt-btn", classNames?.button)}
-              onClick={api.undo}
-              disabled={!api.canUndo || isBusy}
-            >
-              <Icon name="undo" />
-              Undo
-            </button>
-            <button
-              type="button"
-              className={cx("qt-btn", classNames?.button)}
-              onClick={api.redo}
-              disabled={!api.canRedo || isBusy}
-            >
-              <Icon name="redo" />
-              Redo
-            </button>
-            <button
-              type="button"
-              className={cx("qt-btn", classNames?.button)}
-              onClick={api.resetAll}
-              disabled={isBusy}
-            >
-              <Icon name="reset" />
-              Reset
-            </button>
-          </div>
+
         </div>
       ) : null}
 
@@ -1003,6 +990,16 @@ function SelectRow<Row>({
   const { select, columnDrag } = api;
   const mobile = useMobileLayout();
   const [editingColumns, setEditingColumns] = useState(false);
+  const [editingField, setEditingField] = useState<string | undefined>();
+  function openColumnEditor(field?: string) {
+    setEditingField(field);
+    setEditingColumns(true);
+  }
+  const detailSettingsButton = (field: string) => field === ITEM_DETAILS_COLUMN && api.itemDetails ? (
+    <button type="button" className="qt-chip-op-btn" aria-label="Configure Detail column" title="Configure Detail column"
+      aria-haspopup="dialog" aria-expanded={editingColumns && editingField === field} disabled={disabled}
+      onClick={() => openColumnEditor(field)}><Icon name="chevronRight" size={18} /></button>
+  ) : null;
   const [adding, setAdding] = useState(false);
   const addColumnRef = useRef<HTMLButtonElement>(null);
   const fieldLabelByName = useMemo(
@@ -1050,7 +1047,7 @@ function SelectRow<Row>({
           aria-haspopup="dialog"
           aria-expanded={editingColumns}
           disabled={disabled}
-          onClick={() => setEditingColumns(true)}
+          onClick={() => openColumnEditor()}
         >
           <Icon name="chevronRight" size={18} />
         </button>
@@ -1079,6 +1076,7 @@ function SelectRow<Row>({
       {editingColumns && (
         <SelectColumnEditor
           api={api}
+          {...(editingField ? { initialField: editingField } : {})}
           onClose={() => setEditingColumns(false)}
         />
       )}
@@ -1096,6 +1094,7 @@ function SelectRow<Row>({
           renderItem={(item) => (
             <>
               <span className="qt-chip-field">{item.label}</span>
+              {detailSettingsButton(item.id)}
               <button
                 type="button"
                 className="qt-chip-x"
@@ -1169,6 +1168,7 @@ function SelectRow<Row>({
                 <Icon name="grip" />
               </span>
               <span className="qt-chip-field">{label}</span>
+              {detailSettingsButton(name)}
               <button
                 type="button"
                 className="qt-chip-x"

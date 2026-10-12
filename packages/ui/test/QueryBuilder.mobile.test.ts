@@ -121,8 +121,8 @@ it("renders a smaller save star without reducing its button target", () => {
 it("distinguishes scheduled updates, immediate refresh, and resetting with icons", () => {
   expect(container.querySelector('.qt-auto-refresh > button [data-icon="clock"]')).not.toBeNull();
   const buttons = Array.from(container.querySelectorAll("button"));
-  expect(Array.from(container.querySelectorAll(".qt-qb-editor-stack button"), (button) => button.textContent)).toEqual(["Undo", "Redo", "Reset"]);
-  expect(container.querySelector('.qt-qb-editor-stack [data-icon="reset"]')).not.toBeNull();
+  expect(Array.from(container.querySelectorAll(".qt-qb-state-bar .qt-query-history button"), (button) => button.getAttribute("aria-label"))).toEqual(["Undo", "Redo", "Reset"]);
+  expect(container.querySelector('.qt-query-history [data-icon="reset"]')).not.toBeNull();
   expect(buttons.find((button) => button.textContent === "Run Now")?.querySelector('[data-icon="refresh"]')).not.toBeNull();
 });
 

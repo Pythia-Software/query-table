@@ -3,6 +3,10 @@
 Framework-agnostic query state, schema contracts, filtering, sorting,
 aggregation, serialization, and transport/storage interfaces for query-table.
 
+Also exports object property view definitions, normalization/defaults, separate
+property storage adapters, and foreign-key relationship mapping contracts. See
+[object property views](../../docs/object-properties.md).
+
 ## Install
 
 ```bash
