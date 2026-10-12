@@ -3,6 +3,17 @@ import type { AggregationClause, OrderByClause, WhereTerm } from "./query";
 export type MetricValue = number | string | boolean | null;
 export type MetricKey = MetricValue;
 export type MetricScope = "allMatching" | "shownRows";
+/** Calendar grouping, currently executed over complete local populations. */
+export interface MetricDateGrouping {
+  field: string;
+  interval: "hour" | "day" | "week" | "month" | "year";
+  /** IANA timezone identifier; omitted settings retain UTC behavior. */
+  timeZone?: string;
+  includeEmpty: boolean;
+  range: "query" | "observed" | "custom";
+  start?: string;
+  end?: string;
+}
 export interface MetricValueFormat {
   kind: "number" | "percent" | "duration" | "date" | "time" | "datetime";
   decimals?: number;

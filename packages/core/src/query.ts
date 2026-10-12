@@ -1,4 +1,4 @@
-import type { MetricDisplay, MetricLayout, MetricDistribution, MetricSort, MetricScope } from "./metricTypes";
+import type { MetricDisplay, MetricLayout, MetricDistribution, MetricSort, MetricScope, MetricDateGrouping } from "./metricTypes";
 import { normalizeMetricOptions } from "./metricNormalize";
 import { isComputedField } from "./computed";
 // query.ts — the canonical query state shape.
@@ -133,6 +133,7 @@ export type AggOp = "count" | "count_distinct" | "sum" | "avg" | "min" | "max";
  *  page. Lives inside QueryState so it round-trips through `?q=`, saved queries,
  *  and undo/redo for free — a saved query is a saved dashboard. */
 export interface AggregationClause {
+  dateGrouping?: MetricDateGrouping;
   expression?: string;
   expressionY?: string;
   scope?: MetricScope;

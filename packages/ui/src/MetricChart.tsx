@@ -19,6 +19,7 @@ import {
   finiteMetricNumber,
   metricScale,
   metricGroupLabel,
+  metricDateGroupFormat,
   metricPieSlices,
 } from "./metricChartHelpers";
 import type {
@@ -92,8 +93,10 @@ export function MetricChart({
     b.keys.length
       ? colors.color(clause.groupBy[0] ?? "", b.keys[0] ?? null)
       : colors.token("accent");
+  const groupLabel = (b: MetricBucket) => metricGroupLabel(b, clause, locale);
+  const groupFormat = metricDateGroupFormat(clause);
   const detail = (b: MetricBucket) =>
-    `${metricGroupLabel(b)}\n${b.error ?? fmt(b.value, kind === "scatter" ? display.xFormat : display.format)}${kind === "scatter" ? ` / ${b.yError ?? fmt(b.y, display.yFormat)}` : ""}\n${b.count.toLocaleString(locale)} rows`;
+    `${metricGroupLabel(b, clause, locale, true)}\n${b.error ?? fmt(b.value, kind === "scatter" ? display.xFormat : display.format)}${kind === "scatter" ? ` / ${b.yError ?? fmt(b.y, display.yFormat)}` : ""}\n${b.count.toLocaleString(locale)} rows`;
   const interaction = (
     b: MetricBucket,
     label = detail(b),
@@ -209,7 +212,7 @@ export function MetricChart({
       const end = angle,
         large = end - start > Math.PI ? 1 : 0,
         color = s.other ? colors.token("other") : shade(s.bucket),
-        label = `${s.other ? "Other (combined remainder)" : metricGroupLabel(s.bucket)}: ${fmt(s.value, display.format)} (${percent(s.value / pie.total)} of ${fmt(pie.total, display.format)})`;
+        label = `${s.other ? "Other (combined remainder)" : groupLabel(s.bucket)}: ${fmt(s.value, display.format)} (${percent(s.value / pie.total)} of ${fmt(pie.total, display.format)})`;
       return (
         <g key={i} {...interaction(s.bucket, label, !s.other)}>
           {s.value === pie.total ? (
@@ -236,7 +239,7 @@ export function MetricChart({
     });
     legend = pie.slices.map((s, i) => ({
       key: String(i),
-      label: `${s.other ? "Other (remainder)" : metricGroupLabel(s.bucket)} · ${fmt(s.value, display.format)} · ${percent(s.value / pie.total)}`,
+      label: `${s.other ? "Other (remainder)" : groupLabel(s.bucket)} · ${fmt(s.value, display.format)} · ${percent(s.value / pie.total)}`,
       color: s.other ? colors.token("other") : shade(s.bucket),
     }));
     note = `Exact additive denominator: ${fmt(pie.total, display.format)}. Other combines remaining groups; Hover a slice for its value.`;
@@ -264,11 +267,11 @@ export function MetricChart({
         y = top + step * (i + 0.5),
         color = shade(b);
       const label = s
-        ? `${metricGroupLabel(b)}\nMin ${fmt(s.min, display.format)} · Q1 ${fmt(s.q1, display.format)} · Median ${fmt(s.median, display.format)} · Q3 ${fmt(s.q3, display.format)} · Max ${fmt(s.max, display.format)} · Mean ${fmt(s.mean, display.format)}\nWhiskers ${fmt(s.low, display.format)} – ${fmt(s.high, display.format)}\n${s.n} samples · ${b.nullCount ?? 0} NULL · ${s.outlierCount} outliers (${s.outliers.length} markers returned)`
+        ? `${groupLabel(b)}\nMin ${fmt(s.min, display.format)} · Q1 ${fmt(s.q1, display.format)} · Median ${fmt(s.median, display.format)} · Q3 ${fmt(s.q3, display.format)} · Max ${fmt(s.max, display.format)} · Mean ${fmt(s.mean, display.format)}\nWhiskers ${fmt(s.low, display.format)} – ${fmt(s.high, display.format)}\n${s.n} samples · ${b.nullCount ?? 0} NULL · ${s.outlierCount} outliers (${s.outliers.length} markers returned)`
         : detail(b);
       return (
         <g key={i}>
-          {text(left - 8, y + 4, metricGroupLabel(b), "end")}
+          {text(left - 8, y + 4, groupLabel(b), "end")}
           {!s || b.error || !axis.accepts(s.min) ? (
             text(
               (left + right) / 2,
@@ -431,7 +434,7 @@ export function MetricChart({
               binWidth = Math.max(1, binRight - binLeft),
               x = binLeft + (j * binWidth) / series.length,
               w = binWidth / series.length;
-            const label = `${metricGroupLabel(b)}\n${fmt(edges[i], display.xFormat)} ≤ value ${i === bins - 1 ? "≤" : "<"} ${fmt(edges[i + 1], display.xFormat)}\n${n} rows · ${b.distribution?.kind === "histogram" ? b.distribution.n : 0} numeric samples · ${b.nullCount ?? 0} NULL`;
+            const label = `${groupLabel(b)}\n${fmt(edges[i], display.xFormat)} ≤ value ${i === bins - 1 ? "≤" : "<"} ${fmt(edges[i + 1], display.xFormat)}\n${n} rows · ${b.distribution?.kind === "histogram" ? b.distribution.n : 0} numeric samples · ${b.nullCount ?? 0} NULL`;
             return (
               <g key={`${j}-${i}`} {...interaction(b, label)}>
                 <rect
@@ -455,7 +458,7 @@ export function MetricChart({
     );
     legend = series.map((b, i) => ({
       key: String(i),
-      label: metricGroupLabel(b),
+      label: groupLabel(b),
       color: shade(b),
     }));
     if (series.length < buckets.length)
@@ -537,6 +540,10 @@ export function MetricChart({
             display.xScale,
           ),
           tx = (v: number) => left + timeAxis.fraction(v) * plotW;
+        const timeLabel = (b: MetricBucket) =>
+          groupFormat
+            ? formatMetricOutput(b.keys[0], groupFormat, locale).text
+            : String(b.keys[0]);
         const series = new Map<string, typeof ordered>();
         for (const point of ordered) {
           const key = metricTupleKey(point.bucket.keys.slice(1));
@@ -620,8 +627,20 @@ export function MetricChart({
                   i === ordered.length - 1,
               )
               .filter(({ time }) => timeAxis.accepts(time))
+              .filter(({ bucket, time }, i, points) => {
+                // Reserve room for the final date instead of overlapping its
+                // label with the preceding sampled tick on narrow cards.
+                const last = points[points.length - 1]!;
+                return (
+                  i === points.length - 1 ||
+                  tx(last.time) - tx(time) >
+                    (timeLabel(bucket).length + timeLabel(last.bucket).length) *
+                      3 +
+                      12
+                );
+              })
               .map(({ bucket: b, time }, i) => (
-                <g key={i}>{text(tx(time), bottom + 18, String(b.keys[0]))}</g>
+                <g key={i}>{text(tx(time), bottom + 18, timeLabel(b))}</g>
               ))}
           </>
         );
@@ -656,7 +675,9 @@ export function MetricChart({
               text(
                 horizontal ? left - 7 : center,
                 horizontal ? center + 4 : bottom + 18,
-                metricGroupLabel(b),
+                !horizontal && groupFormat && b.keys.length === 1
+                  ? formatMetricOutput(b.keys[0], groupFormat, locale).text
+                  : groupLabel(b),
                 horizontal ? "end" : "middle",
               )}
             {valid ? (

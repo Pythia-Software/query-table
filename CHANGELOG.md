@@ -4,6 +4,16 @@
 
 ### Added
 
+- Add an isolated date metric demo prototype with calendar intervals, optional
+  empty buckets, explicit ranges, and count/sum versus average behavior.
+- Add date interval and empty-date settings to the existing metric editor,
+  persisted with metric definitions. Complete calendar buckets locally over
+  query, observed, or custom bounds, with an example at `/date-metrics-workbench`.
+  Server date grouping remains unsupported and reports an explicit error.
+- Add named timezones to metric date grouping (UTC by default), with local
+  calendar boundaries, custom date bounds, and matching graph/list/table labels.
+  Handle daylight-saving gaps, repeated hours, and fractional offset changes;
+  persist timezone settings with metric definitions and shared URLs.
 - Persist `fitToScreen` in saved queries and shared URLs so each viewer's table
   fits its available area after loading and on viewport changes. Show the active
   preference in the width menu and clear it on manual width changes while
@@ -26,6 +36,13 @@
 
 ### Fixed
 
+- Keep raw chart group labels when a scatter/histogram X format survives a
+  display change without calendar grouping.
+- Reuse the last date bucket's boundaries and ISO key for dense timestamp rows,
+  avoiding repeated timezone conversion while preserving DST boundaries,
+  out-of-order results, and evaluation limits.
+- Honor temporal `xFormat` on explicitly calendar-grouped labels so date axes can
+  display compact calendar labels while retaining raw grouping values.
 - Open column actions when clicking anywhere in a table header, including
   padding and blank space, while preserving resize handle behavior.
 - Keep browser-only computed columns evaluating locally beside server sidecars,

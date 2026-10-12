@@ -126,3 +126,61 @@ The stopwatch beside Auto-Update toggles request activity in `QueryBuilder`. The
 Chart settings under Display → Scale & bounds configure `display.xScale` and `display.yScale` with `{ mode: "linear" | "log", min?: number, max?: number }`. Bounds are expressed in raw result units, independent of label formatting. Scatter, line and histogram support both axes; horizontal bars, box plots and list bars use X, vertical bars use Y. Pie/ring proportions and categorical axes do not have numerical scales. Omitted bounds follow the returned data. Log axes use positive values only, report omitted nonpositive values, and break lines at omitted points. A box containing nonpositive samples is omitted as a whole on a log axis; histogram intervals with nonpositive endpoints are omitted. Configured bounds clip plotted marks without changing aggregates, bin edges, counts or tooltip values. Settings persist with the query and do not change the computation sent to the backend.
 
 Scatter X/Y formats and histogram X formats are independent of the main value format retained from other displays. Set `xFormat`/`yFormat` explicitly to format these coordinates. Custom Time patterns default to `HH:mm:ss`; duration labels omit a negative sign when the displayed units are all zero.
+
+With explicit `dateGrouping`, calendar group labels honor temporal `xFormat`
+options, such as `{ kind: "date", style: "custom", pattern: "MMM DD" }`.
+Without calendar grouping, group labels show raw keys; a retained scatter or
+histogram X format does not apply to these keys. Coordinates retain raw values.
+
+When the first grouping field is a groupable `datetime`, Grouping settings offer
+an optional calendar interval (hour/day/week/month/year) and **Include empty
+dates**. The definition stores `dateGrouping`, for example:
+
+```ts
+dateGrouping: {
+  field: "enqueued_at", interval: "day", timeZone: "America/Denver",
+  includeEmpty: true, range: "query",
+}
+```
+
+Calendar boundaries use `timeZone`, an explicit IANA timezone (UTC by default);
+weeks begin Monday. Timestamp values retain their absolute instants, while
+date-only values represent local calendar dates. For example, `2026-10-02T02:00:00Z`
+groups into October 1 in America/Denver. Calendar progression follows local
+boundaries across daylight-saving changes: days can be 23 or 25 hours, missing
+hours are skipped, and repeated hours have distinct instant keys. Fractional
+offset changes can create partial-hour buckets. The local engine uses the
+side-effect-free `temporal-polyfill` dependency for timezone calendar operations.
+
+Query range completion requires conjunctive lower and upper date filters on
+this field. Query filters retain their absolute timestamp semantics, including
+UTC interpretation of date-only filter values; grouping does not rewrite them.
+An exclusive upper bound exactly at a local boundary does not create the next
+bucket; partial local intervals are included. Observed range completes from the
+first to last populated interval. Custom range uses inclusive `start` and `end`
+ISO dates/timestamps and must contain all observed buckets; use query filters to
+narrow the population. Date-only custom bounds use the grouping timezone, and a
+date-only custom end includes the whole local day, also
+for hourly groups. Single date groupings can fill an entirely empty bounded
+range. Additional grouping fields complete each observed series.
+
+Calendar group labels on charts, lists, and metric tables use the grouping
+timezone, overriding any retained `xFormat.timeZone` so labels match the
+computation. Other temporal `xFormat` options still apply; hourly defaults and
+line/bar tooltips include UTC offsets to distinguish repeated hours. Output
+formatting timezone controls for measures remain independent of grouping.
+Grouping requires an explicit named zone; `local` is not accepted because saved
+definitions must compute the same buckets for every viewer.
+
+Direct COUNT, COUNT_DISTINCT, and SUM use zero for generated empty buckets. AVG,
+extrema, and composed expressions (including ratios) have null values there.
+Populated buckets retain their existing null/error semantics. Completion runs
+before result sorting and limits, within the normal metric budgets, and does
+not add records to the table. Clearing or changing the first grouping field
+clears its date settings.
+
+This iteration executes locally on complete client datasets or committed shown
+rows. All-matching server execution rejects date grouping explicitly; version 1
+projection throws and version 2 projection returns an unsupported diagnostic.
+Backend calendar grouping and completion are not implemented yet. Settings are
+serialized with the query and participate in metric computation identity.

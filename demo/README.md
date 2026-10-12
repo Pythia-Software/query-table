@@ -23,6 +23,50 @@ Then open http://localhost:5179. You can:
 
 The current view is encoded in the `?q=` URL, so reloads and bookmarks restore it.
 
+## Date metric prototype
+
+Open http://localhost:5179/date-metrics for an isolated metric-definition prototype.
+The complete fixture contains 96 orders on seven of fourteen days (October 1–14,
+2026). Toggle **Include empty dates**, switch Day/Week/Month, choose query,
+observed, or custom bounds, and compare count, revenue, and average order value.
+Line, bars, and table displays use the real `MetricCard` renderer. Empty count/sum
+buckets are zero; empty averages are null. The empty-population scenario shows
+how an explicit range can still produce buckets. Weeks start on Monday in UTC.
+
+Apply/Cancel operate on this isolated example's in-memory metric definition.
+Custom bounds restrict this fixture's metric population, and generated calendars
+are capped at 400 buckets.
+
+Run `npx vitest run demo/test/dateMetricsPrototype.test.ts` for calendar and
+empty-value checks, or `node demo/date-metrics-test.mjs` with the dev server
+running for interaction checks and screenshots in `.context/date-metrics/`.
+
+## Empty dates in the existing metric workbench
+
+Open http://localhost:5179/date-metrics-workbench to use the real `QueryBuilder`,
+metric editor, dashboard, and record table over 96 runs in October 1–14, 2026.
+Choose **Edit metrics → Runs by day → Grouping**. Date interval, Grouping timezone,
+Include empty dates, and range settings live in the metric definition and persist through
+Apply/Cancel, saved queries, and shared URLs. The count chart has seven zero
+dates; Average duration by day leaves those dates blank.
+
+Calendar grouping runs in the local metric engine. Complete client datasets and
+committed shown rows are supported; all-matching metric servers report that date
+grouping is unsupported. Calendar intervals use the named grouping timezone
+(UTC by default), with Monday weeks and daylight-saving transitions. Custom
+date bounds and calendar labels use that zone; query filters retain their
+absolute instants. Try America/Denver with a custom October 1–14 range, or
+Pacific/Auckland to see noon UTC runs move to the following calendar day.
+Custom ranges must include observed buckets; query filters control the metric population.
+Completion respects the engine's group, memory, and operation limits. The main
+record table continues to show only actual runs.
+
+Run `node demo/date-metrics-workbench-test.mjs` with the dev server running to
+check the editor, preview, persistence, shared URLs, and mobile layout. Set
+`QT_DEMO_URL` to use a different server origin.
+Run `node demo/date-metrics-timezone-test.mjs` for timezone editing, local labels,
+custom bounds, validation, persistence, and a timezone workbench screenshot.
+
 ## Component-specific feedback
 
 The development playground includes Agentation. Use the toolbar in the
