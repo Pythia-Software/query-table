@@ -94,6 +94,8 @@
 
 ### Fixed
 
+- Preserve grouped rows and metric results during column resizing/reordering,
+  and retain default key columns when adding a group key to an empty SELECT.
 - Retain grouped rows during refresh, normalize saved grouping safely, and show
   validation failures without unmounting editors. Restore hidden computed
   columns, discard removed aggregate drafts, and respect contextual panel

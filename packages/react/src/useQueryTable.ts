@@ -505,12 +505,14 @@ export function useQueryTable<Row>(
   const executionQuery = useMemo(() => withoutGrouping(query), [query]);
   const byName = useMemo(() => new Map(schema.fields.map(field => [field.name, field])), [schema]);
   const detailsEnabled = Boolean(opts.itemDetails) && !query.grouping;
+  // Normalization clones grouping even for presentation edits. Only a change
+  // in its content should invalidate row and metric execution.
   const validateExecution = useCallback((q: QueryState) => {
     if (prepared?.error) throw prepared.error;
     // Previews carry draft metrics in q. Reattach the source stage without
     // replacing those drafts with the currently committed dashboard.
     opts.validateQuery?.(query.grouping ? { ...q, grouping: query.grouping } : q);
-  }, [prepared?.error, opts.validateQuery, query.grouping]);
+  }, [prepared?.error, opts.validateQuery, groupKey]);
   const [committedRows, setRows] = useState<Row[]>([]);
   const [serverComputed, setServerComputed] = useState<
     Map<RowId, RowComputedValues>

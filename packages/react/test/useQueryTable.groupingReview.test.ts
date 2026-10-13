@@ -97,6 +97,61 @@ describe("group key validation stays outside React updates", () => {
   });
 });
 
+describe("grouped column presentation", () => {
+  it.each(["resize", "reorder"] as const)("keeps rows and both metric scopes stable on column %s", async kind => {
+    const initial = grouped();
+    initial.where = [{ field: "n", op: ">", value: "0" }];
+    initial.orderBy = [{ field: "n", dir: "desc" }];
+    initial.limit = 1;
+    const validateQuery = vi.fn();
+    const current = mount({ initialQuery: initial, validateQuery }); await settle();
+    const beforeRows = current.api.rows;
+    const beforeMetrics = current.api.aggregations.results;
+    expect(beforeMetrics?.metrics.map(metric => metric.buckets[0]?.value)).toEqual([2, 2]);
+    validateQuery.mockClear();
+
+    act(() => {
+      if (kind === "resize") current.api.select.setWidth("n", 240);
+      else current.api.select.move("n", 0);
+    });
+    await settle();
+    if (kind === "resize") expect(current.api.select.visible.find(column => column.field === "n")?.width).toBe(240);
+    else expect(current.api.select.visible.map(column => column.field)).toEqual(["n", "team"]);
+    expect(current.api.rows).toBe(beforeRows);
+    expect(current.api.aggregations.results).toBe(beforeMetrics);
+    expect(validateQuery).not.toHaveBeenCalled();
+
+    // A real source change still recomputes and validates the updated stage.
+    const filter = { field: "team", op: "=" as const, value: "a" };
+    act(() => current.api.grouping!.source.addFilter(filter)); await settle();
+    expect(current.api.rows).not.toBe(beforeRows);
+    expect(current.api.aggregations.results?.metrics.map(metric => metric.buckets[0]?.value)).toEqual([1, 2]);
+    expect(validateQuery).toHaveBeenCalledWith(expect.objectContaining({
+      grouping: expect.objectContaining({ source: expect.objectContaining({ where: [filter] }) }),
+    }));
+  });
+
+  it("preserves default key columns when adding a key to an empty SELECT", async () => {
+    const initial = { ...grouped(), select: [] };
+    const current = mount({ initialQuery: initial }); await settle();
+    expect(current.api.select.visible).toEqual([{ field: "team" }]);
+    act(() => current.api.grouping!.changeKeys(["team", "region"])); await settle();
+    expect(current.api.select.visible).toEqual([{ field: "region" }, { field: "team" }]);
+    expect(current.api.query.grouping!.keys).toEqual(["team", "region"]);
+    expect(current.api.rows).toHaveLength(3);
+    act(() => current.api.undo()); await settle();
+    expect(current.api.query.select).toEqual([]);
+    expect(current.api.select.visible).toEqual([{ field: "team" }]);
+  });
+
+  it("retains explicit column order, widths and hidden keys when adding a group key", async () => {
+    const initial = { ...grouped(), select: [{ field: "n", width: 240 }] };
+    const current = mount({ initialQuery: initial }); await settle();
+    act(() => current.api.grouping!.changeKeys(["team", "region"])); await settle();
+    expect(current.api.select.visible).toEqual([{ field: "region" }, { field: "n", width: 240 }]);
+  });
+});
+
 describe("grouped refresh continuity", () => {
   it.each(["refresh", "auto refresh", "source WHERE", "clientRows"] as const)("retains rows throughout %s debounce", async kind => {
     const current = mount(); await settle();

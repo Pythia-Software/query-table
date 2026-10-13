@@ -117,6 +117,11 @@ export function useGroupingController<Row>(
       }
       const grouping = { ...before, keys };
       const removed = new Set(before.keys.filter((key) => !keys.includes(key)));
+      // An empty SELECT shows the existing keys by default. Materialize them
+      // before adding keys so introducing an explicit SELECT keeps those columns.
+      const columns = current.select.length
+        ? current.select
+        : before.keys.map((field) => ({ field }));
       return {
         ...current,
         grouping,
@@ -126,7 +131,7 @@ export function useGroupingController<Row>(
           ...keys
             .filter((key) => !before.keys.includes(key))
             .map((field) => ({ field })),
-          ...current.select.filter((c) => !removed.has(c.field)),
+          ...columns.filter((c) => !removed.has(c.field)),
         ],
         where: current.where.filter(
           (term) => !predicatesOf(term).some((p) => removed.has(p.field)),
