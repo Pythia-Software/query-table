@@ -8,10 +8,19 @@ import {
 } from "@pythia-software/query-table-core";
 import type { PropertyViewApi } from "@pythia-software/query-table-react";
 import { FieldPicker } from "./FieldPicker";
-import { Icon } from "./Icon";
-import { ModalSurface } from "./AdaptiveOverlay";
+import { Icon, type IconName } from "./Icon";
+import { ModalSurface, useMobileLayout } from "./AdaptiveOverlay";
+import { EditorModal, EditorPanelSeparator, EditorPanelToggle } from "./EditorModal";
+import { EditorPaneTitle } from "./EditorParts";
+import { useEditorWorkbench } from "./useEditorWorkbench";
 import { ReorderList } from "./ReorderList";
 import { ObjectProperties, type ObjectPropertiesProps } from "./ObjectProperties";
+
+const propertyPanes = [
+  { id: "properties", label: "Properties", icon: "panelList", width: 360, minWidth: 310 },
+  { id: "definition", label: "Display", icon: "panelDefinition", width: 320, minWidth: 240 },
+  { id: "preview", label: "Preview", icon: "panelPreview", width: 580, minWidth: 280 },
+] satisfies Array<{ id: string; label: string; icon: IconName; width: number; minWidth: number }>;
 
 const formatChoices = [
   "auto",
@@ -56,9 +65,12 @@ export function PropertyViewEditor<Row>({
 }): ReactNode {
   const [draft, setDraft] = useState(() => normalizePropertyView(view));
   const [base] = useState(() => JSON.stringify(view));
-  const [picker, setPicker] = useState(false);
+  const [picker, setPicker] = useState<HTMLButtonElement | null>(null);
   const [active, setActive] = useState(draft.properties[0]?.id ?? "");
   const [pane, setPane] = useState("properties");
+  const workbench = useEditorWorkbench(propertyPanes);
+  const mobile = useMobileLayout();
+  const panelId = useId();
   const selected = draft.properties.find((item) => item.id === active) ?? draft.properties[0];
   const dirty = base !== JSON.stringify(draft);
   const moveById = (id: string, position: number) => setDraft((previous) => {
@@ -95,24 +107,69 @@ export function PropertyViewEditor<Row>({
       }),
     }));
   }
+  function panelToggle(index: number, collapse = false) {
+    const panel = propertyPanes[index]!;
+    return <EditorPanelToggle
+      workbench={workbench}
+      index={index}
+      label={panel.label}
+      icon={panel.icon}
+      paneId={`${panelId}-${index}`}
+      collapse={collapse}
+    />;
+  }
+  function paneProps(index: number) {
+    return {
+      id: `${panelId}-${index}`,
+      hidden: mobile ? pane !== propertyPanes[index]!.id : !workbench.visiblePanes[index],
+    };
+  }
+  function separator(index: number) {
+    if (mobile) return null;
+    return <EditorPanelSeparator
+      workbench={workbench}
+      index={index}
+      label={`Resize property panels ${index + 1} and ${(workbench.nextPane(index) ?? index) + 1}`}
+      controls={`${panelId}-${index} ${panelId}-${workbench.nextPane(index)}`}
+    />;
+  }
+  function editProperty(id: string) {
+    setActive(id);
+    setPane("definition");
+    workbench.showPane(1);
+  }
   return (
-    <ModalSurface title="Edit properties" className="qt-modal qt-property-editor" chrome={false} onClose={onClose}>
-      <header className="qt-property-editor-header">
-        <h2>Edit properties</h2>
-        <button type="button" className="qt-link-btn" aria-label="Close property editor" onClick={onClose}><Icon name="close" /></button>
-      </header>
+    <EditorModal
+      title="Edit properties"
+      className="qt-property-editor"
+      closeLabel="Close property editor"
+      onClose={onClose}
+      workbench={workbench}
+      panelControls={!mobile && <div className="qt-metric-panel-tools" role="group" aria-label="Visible property panels">
+        <span>Panels</span>
+        {propertyPanes.map((panel, index) => <span key={panel.id}>{panelToggle(index)}</span>)}
+      </div>}
+    >
       <div className="qt-property-editor-context">
         <span><b>{draft.properties.length}</b> selected properties</span>
         <span>Applies to every item of this type{scope ? ` · ${scope} only` : ""}</span>
       </div>
-      <div className="qt-property-editor-tabs" role="tablist" aria-label="Property editor panels">
-        {[["properties", "panelList", "Properties"], ["definition", "pencil", "Display"], ["preview", "panelPreview", "Preview"]].map(([id, icon, label]) => (
-          <button type="button" key={id} className="qt-btn" role="tab" aria-selected={pane === id} onClick={() => setPane(id!)}><Icon name={icon as "panelList"} />{label}</button>
+      {mobile && <div className="qt-property-editor-tabs" role="tablist" aria-label="Property editor panels">
+        {propertyPanes.map(({ id, icon, label }, index) => (
+          <button type="button" key={id} className="qt-btn" role="tab" aria-selected={pane === id} aria-controls={`${panelId}-${index}`} onClick={() => { setPane(id); workbench.showPane(index); }}><Icon name={icon} />{label}</button>
         ))}
-      </div>
-      <div className={`qt-property-workspace qt-property-workspace--${pane}`}>
-        <aside className="qt-property-editor-library" aria-label="Selected properties">
-          <h3><Icon name="panelList" />Properties</h3>
+      </div>}
+      <div
+        ref={workbench.root}
+        className="qt-property-workspace"
+        style={mobile ? undefined : { gridTemplateColumns: workbench.visibleIndices.map((i) => `${workbench.widths[i]}px`).join(" 6px ") }}
+      >
+        <aside className="qt-property-editor-library" aria-label="Selected properties" {...paneProps(0)}>
+          <EditorPaneTitle actions={<>
+            <button type="button" className="qt-add" disabled={draft.properties.length >= 200} aria-haspopup="dialog" aria-expanded={Boolean(picker)} onClick={(event) => setPicker(picker ? null : event.currentTarget)}><Icon name="add" />Add property</button>
+            {!mobile && panelToggle(0, true)}
+          </>}><Icon name="panelList" />Properties</EditorPaneTitle>
+          <div className="qt-property-editor-scroll">
           <ReorderList
             className="qt-property-editor-list" showHint={false}
             items={draft.properties.map((property) => ({ id: property.id, label: property.label ?? schema.fields.find((field) => field.name === property.field)?.label ?? property.field }))}
@@ -120,7 +177,7 @@ export function PropertyViewEditor<Row>({
             itemClassName={(item) => item.id === selected?.id ? "is-active" : ""}
             renderItem={(item, index) => (
               <>
-                <button type="button" className="qt-property-pick" aria-pressed={item.id === selected?.id} onClick={() => { setActive(item.id); setPane("definition"); }}>
+                <button type="button" className="qt-property-pick" aria-pressed={item.id === selected?.id} onClick={() => editProperty(item.id)}>
                   <strong>{item.label}</strong><small>{draft.properties[index]?.field}</small>
                 </button>
                 <button type="button" className="qt-link-btn qt-property-icon-button" disabled={index === 0} aria-label={`Move ${item.label} up`} onClick={() => moveById(item.id, index - 1)}><Icon name="arrowUp" size={14} /></button>
@@ -130,10 +187,11 @@ export function PropertyViewEditor<Row>({
             )}
           />
           {!draft.properties.length && <p className="qt-muted">No properties selected.</p>}
-          <button type="button" className="qt-add" disabled={draft.properties.length >= 200} onClick={() => setPicker(true)}><Icon name="add" />Add property</button>
+          </div>
         </aside>
-        <section className="qt-property-editor-definition" aria-label="Property display settings">
-          <h3><Icon name="pencil" />Display</h3>
+        {separator(0)}
+        <section className="qt-property-editor-definition" aria-label="Property display settings" {...paneProps(1)}>
+          <EditorPaneTitle actions={!mobile && panelToggle(1, true)}><Icon name="pencil" />Display</EditorPaneTitle>
           {selected ? (() => {
             const property = selected;
             const field = schema.fields.find((field) => field.name === property.field);
@@ -355,8 +413,9 @@ export function PropertyViewEditor<Row>({
             </>;
           })() : <p className="qt-muted">Add a property to configure its display.</p>}
         </section>
-        <section className="qt-property-editor-preview" aria-label="Live property preview">
-          <h3><Icon name="panelPreview" />Live preview</h3>
+        {separator(1)}
+        <section className="qt-property-editor-preview" aria-label="Live property preview" {...paneProps(2)}>
+          <EditorPaneTitle actions={!mobile && panelToggle(2, true)}><Icon name="panelPreview" />Live preview</EditorPaneTitle>
           <p className="qt-muted">Changes stay in this draft until applied.</p>
           {preview ? <div className="qt-object-inspector"><ObjectProperties {...preview} schema={schema} view={draft} onViewChange={setDraft} /></div> : <p className="qt-muted">Open an item to preview its values.</p>}
         </section>
@@ -366,20 +425,21 @@ export function PropertyViewEditor<Row>({
       <footer className="qt-property-editor-footer">
         <span className="qt-muted">{dirty ? "Unsaved changes" : "Choose, order, and format properties."}</span>
         <button type="button" className="qt-btn" onClick={onClose}>Cancel</button>
-        <button type="button" className="qt-btn qt-btn--primary" disabled={conflict || Boolean(validationError)} onClick={() => { onApply(normalizePropertyView(draft)); onClose(); }}><Icon name="check" />Apply properties</button>
+        <button type="button" className="qt-btn qt-btn-primary" disabled={conflict || Boolean(validationError)} onClick={() => { onApply(normalizePropertyView(draft)); onClose(); }}><Icon name="check" />Apply properties</button>
       </footer>
       {picker && <FieldPicker
+        anchor={picker}
         fields={schema.fields.filter((field) => field.property?.enabled !== false)}
         onPick={(field) => {
           let index = draft.properties.length;
           while (draft.properties.some((property) => property.id === `property-${index}`)) index++;
           const id = `property-${index}`;
           setDraft((previous) => ({ ...previous, properties: [...previous.properties, { id, field: field.name }] }));
-          setActive(id); setPicker(false); setPane("definition");
+          setPicker(null); editProperty(id);
         }}
-        onClose={() => setPicker(false)}
+        onClose={() => setPicker(null)}
       />}
-    </ModalSurface>
+    </EditorModal>
   );
 }
 

@@ -1,3 +1,6 @@
+import { useQueryFilters } from "./useQueryFilters";
+import { useGroupingController, type GroupingApi, type GroupingSourceApi } from "./useGrouping";
+import { createGroupingModel, prepareGrouping, withoutGrouping } from "@pythia-software/query-table-core";
 import { ITEM_DETAILS_COLUMN, itemPageFields } from "@pythia-software/query-table-core";
 import { useItemDetails, initialDetailModes, type ItemDetailsApi, type ItemDetailsOptions } from "./useItemDetails";
 // useQueryTable — the one hook that owns everything.
@@ -80,6 +83,8 @@ export interface UseQueryTableOptions<Row> {
   /** Reject an entire query before rows or metrics execute. Errors retain editable query state. */
   validateQuery?: (query: QueryState) => void;
 
+  /** Disable row-producing grouping for this instance. Enabled for complete client datasets by default. */
+  grouping?: boolean;
   schema: FieldSchema<Row>;
   /** Data access. Omit for a purely client-side table driven by `clientRows`. */
   transport?: Transport<Row>;
@@ -180,6 +185,10 @@ export interface AggregationsApi {
 }
 
 export interface QueryTableApi<Row> {
+  /** Row-producing GROUP BY controls and source stage, when supported. */
+  grouping?: GroupingApi<Row>;
+  /** Current result schema; changes when entering or leaving grouping. */
+  schema?: FieldSchema<Row>;
   links: QueryLinksApi;
   /** Built-in item details, enabled by the instance creator. */
   itemDetails?: ItemDetailsApi<Row>;
@@ -320,6 +329,7 @@ function cloneQueryState(q: QueryState): QueryState {
     clone.aggregations = JSON.parse(
       JSON.stringify(q.aggregations),
     ) as AggregationClause[];
+  if (q.grouping) clone.grouping = normalizeQueryState(q).grouping!;
   if (q.itemDetails) clone.itemDetails = JSON.parse(JSON.stringify(q.itemDetails)) as NonNullable<QueryState["itemDetails"]>;
   return clone;
 }
@@ -424,9 +434,9 @@ export function useQueryTable<Row>(
   opts: UseQueryTableOptions<Row>,
 ): QueryTableApi<Row> {
   const {
-    schema,
+    schema: sourceSchema,
     transport: sourceTransport,
-    clientRows,
+    clientRows: sourceRows,
     initialQuery,
     syncUrl = false,
     debounceMs = 200,
@@ -438,31 +448,72 @@ export function useQueryTable<Row>(
     [opts.storage],
   );
   const parameter = typeof opts.itemDetails === "object" ? opts.itemDetails.queryParameter ?? "q" : "q";
-  const linkService = useMemo(() => createQueryLinkService(schema.name, storage.snapshots, opts.links),
-    [schema.name, storage.snapshots, opts.links?.cache, opts.links?.maxUrlBytes]);
+  const linkService = useMemo(() => createQueryLinkService(sourceSchema.name, storage.snapshots, opts.links),
+    [sourceSchema.name, storage.snapshots, opts.links?.cache, opts.links?.maxUrlBytes]);
   const now = opts.now ?? Date.now;
   const nowRef = useRef(now);
   const onRefreshRef = useRef(opts.onRefresh);
-  const defaults = useMemo(() => defaultsFor(schema, Boolean(opts.itemDetails)), [schema, Boolean(opts.itemDetails)]);
-  const byName = useMemo(
-    () => new Map(schema.fields.map((f) => [f.name, f])),
-    [schema],
-  );
+  const defaults = useMemo(() => defaultsFor(sourceSchema, Boolean(opts.itemDetails)), [sourceSchema, Boolean(opts.itemDetails)]);
 
   const initRef = useRef(resolveInitial(opts));
   const [restoration, setRestoration] = useState<{ loading: boolean; error: Error | null }>({ loading: initRef.current.fromUrl, error: null });
   const [storageReady, setStorageReady] = useState(Boolean(initialQuery));
   const manualQueryEpoch = useRef(0);
   const aggIdRef = useRef(0);
+  // A null baseline follows current host defaults. Explicit views keep their
+  // snapshot, scoped to the source so reset cannot restore another table.
+  const savedBaseline = useRef<{ source: string; query: QueryState } | null>(
+    initRef.current.q.grouping
+      ? { source: sourceSchema.name, query: cloneQueryState(initRef.current.q) }
+      : null,
+  );
+  const viewRevision = useRef(0);
   const [queryHistory, setQueryHistory] = useState<{ query: QueryState; past: QueryState[]; future: QueryState[] }>(
     () => ({ query: initRef.current.q, past: [], future: [] }),
   );
   const storedQuery = queryHistory.query;
+  const [nonce, setNonce] = useState(0);
   const query = useMemo(
     () => opts.canonicalizeQuery?.(storedQuery) ?? storedQuery,
     [storedQuery, opts.canonicalizeQuery],
   );
-  const [rows, setRows] = useState<Row[]>([]);
+  const groupingModel = useMemo(() => createGroupingModel(sourceSchema), [sourceSchema]);
+  const groupingSupported = !sourceTransport && sourceRows !== undefined && opts.grouping !== false;
+  const groupKey = JSON.stringify(query.grouping ?? null);
+  // Capture the grouped evaluation clock with its population. Debounced rows,
+  // metric previews and committed metrics must use the same relative bounds.
+  const groupingNow = useMemo(() => query.grouping ? Date.now() : undefined,
+    [sourceRows, sourceSchema, groupingSupported, groupKey, nonce]);
+  const prepared = useMemo(() => {
+    if (!query.grouping) return null;
+    try {
+      if (!groupingSupported) throw new Error("Row grouping requires complete client rows; this table's data source does not support grouped queries.");
+      return { ...prepareGrouping(sourceRows!, sourceSchema, query.grouping, { now: groupingNow! }), error: null };
+    } catch (error) {
+      return { inputs: [] as Row[], rows: [], error: error as Error };
+    }
+  }, [sourceRows, sourceSchema, groupingModel, groupingSupported, groupKey, nonce, groupingNow]);
+  // Result fields depend on the projection, not the current population. Keep
+  // their identity across refresh/WHERE changes so committed rows stay visible
+  // during debounce, while real shape changes still invalidate them below.
+  const projectionKey = JSON.stringify(query.grouping
+    ? [query.grouping.keys, query.grouping.summaries] : null);
+  const schema = useMemo(() => (query.grouping
+    ? groupingModel.resultSchema(query.grouping.keys, query.grouping.summaries)
+    : sourceSchema) as FieldSchema<Row>, [sourceSchema, groupingModel, projectionKey]);
+  const clientRows = (prepared?.rows ?? sourceRows) as Row[] | undefined;
+  const executionQuery = useMemo(() => withoutGrouping(query), [query]);
+  const byName = useMemo(() => new Map(schema.fields.map(field => [field.name, field])), [schema]);
+  const detailsEnabled = Boolean(opts.itemDetails) && !query.grouping;
+  // Normalization clones grouping even for presentation edits. Only a change
+  // in its content should invalidate row and metric execution.
+  const validateExecution = useCallback((q: QueryState) => {
+    if (prepared?.error) throw prepared.error;
+    // Previews carry draft metrics in q. Reattach the source stage without
+    // replacing those drafts with the currently committed dashboard.
+    opts.validateQuery?.(query.grouping ? { ...q, grouping: query.grouping } : q);
+  }, [prepared?.error, opts.validateQuery, groupKey]);
+  const [committedRows, setRows] = useState<Row[]>([]);
   const [serverComputed, setServerComputed] = useState<
     Map<RowId, RowComputedValues>
   >(new Map());
@@ -473,13 +524,15 @@ export function useQueryTable<Row>(
   const [total, setTotal] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
-  const [nonce, setNonce] = useState(0);
   const [committedPage, setCommittedPage] = useState<string | null>(null);
   const [committedSource, setCommittedSource] = useState<{
     schema: FieldSchema<Row>;
     transport: Transport<Row> | undefined;
     clientRows: Row[] | undefined;
   } | null>(null);
+  // A schema transition changes row shape and identity. Never render records
+  // from the previous result shape while the next page is being prepared.
+  const rows = useMemo(() => committedSource?.schema === schema ? committedRows : [], [committedSource?.schema, schema, committedRows]);
   const [autoRefreshStatus, setAutoRefreshStatus] =
     useState<AutoRefreshStatus | null>(null);
 
@@ -510,6 +563,16 @@ export function useQueryTable<Row>(
     [defaults],
   );
 
+  const sourceQuery = query.grouping?.source ?? query;
+  const setSourceQuery = useCallback<QueryTableApi<Row>["setQuery"]>((next) => {
+    setQuery(current => {
+      const previous = current.grouping?.source ?? current;
+      const source = withoutGrouping(typeof next === "function" ? next(previous) : next);
+      return current.grouping ? { ...current, offset: 0, grouping: { ...current.grouping, source } } : source;
+    });
+  }, [setQuery]);
+  const sourceFilters = useQueryFilters(sourceSchema, setSourceQuery);
+
   // Track only this table's URL parameter, including duplicates. Host routes,
   // anchors and unrelated history.state changes do not restore table state.
   const observedQueryUrl = useRef<string | null>(null);
@@ -537,10 +600,17 @@ export function useQueryTable<Row>(
         setRestoration({ loading: true, error: null });
       try {
         const fromUrl = syncUrl && typeof window !== "undefined" ? await linkService.resolve(window.location.href, parameter, controller.signal) : null;
-        const defaultSaved = fromUrl ? null : await storage.loadDefaultSaved?.(schema.name);
-        const restored = fromUrl ?? defaultSaved?.query ?? (navigation ? defaults : await storage.loadLast(schema.name));
+        const defaultSaved = fromUrl ? null : await storage.loadDefaultSaved?.(sourceSchema.name);
+        const restored = fromUrl ?? defaultSaved?.query ?? (navigation ? defaults : await storage.loadLast(sourceSchema.name));
         if (!cancelled && run === generation && epoch === manualQueryEpoch.current) {
-          if (restored) setQueryHistory({ query: normalizeQueryState(restored, defaults), past: [], future: [] });
+          if (restored) {
+            const normalized = normalizeQueryState(restored, defaults);
+            savedBaseline.current = defaultSaved || fromUrl?.grouping
+              ? { source: sourceSchema.name, query: cloneQueryState(normalized) }
+              : null;
+            viewRevision.current++;
+            setQueryHistory({ query: normalized, past: [], future: [] });
+          }
           setStorageReady(true);
           setRestoration(previous => !previous.loading && !previous.error ? previous : { loading: false, error: null });
         }
@@ -571,11 +641,11 @@ export function useQueryTable<Row>(
       cancelled = true; controller.abort();
       if (syncUrl && typeof window !== "undefined") window.removeEventListener("popstate", navigate);
     };
-  }, [schema.name, syncUrl, parameter, recordQueryUrl]);
+  }, [sourceSchema.name, syncUrl, parameter, recordQueryUrl]);
 
   const { api: computed, displaySchema } = useComputedColumns({
     schema,
-    query,
+    query: executionQuery,
     rows,
     serverComputed,
     ...(serverExecution ? { serverExecution } : {}),
@@ -626,8 +696,8 @@ export function useQueryTable<Row>(
     const pageFields = pageEnabled ? itemPageFields(page?.urlTemplate ?? "") : [];
     // Page templates can use fields outside the visible projection. Ask the
     // transport for those dependencies through its usual SELECT planning.
-    const requestQuery = pageFields.length ? { ...query, select: [...(query.select.length ? query.select : defaults.select),
-      ...pageFields.filter(name => displaySchema.fields.some(field => field.name === name)).map(field => ({ field }))] } : query;
+    const requestQuery = pageFields.length ? { ...executionQuery, select: [...(query.select.length ? query.select : defaults.select),
+      ...pageFields.filter(name => displaySchema.fields.some(field => field.name === name)).map(field => ({ field }))] } : executionQuery;
     const v2Request =
       execution && transport?.fetchRowsV2
         ? toServerQueryV2(requestQuery, displaySchema, execution)
@@ -715,7 +785,7 @@ export function useQueryTable<Row>(
       setLoading(true);
       setError(null);
       try {
-        opts.validateQuery?.(query);
+        validateExecution(query);
         if (transport) {
           const useV2 = "version" in serverRowQuery && transport.fetchRowsV2;
           if (
@@ -762,7 +832,8 @@ export function useQueryTable<Row>(
             setCommittedSource({ schema, transport, clientRows });
           }
         } else {
-          const res = applyQuery(clientRows ?? [], query, schema);
+          const res = applyQuery(clientRows ?? [], executionQuery, schema,
+            groupingNow !== undefined ? { now: groupingNow } : {});
           if (!cancelled) {
             setRows(res.rows);
             setTotal(res.total);
@@ -797,17 +868,18 @@ export function useQueryTable<Row>(
     schema,
     debounceMs,
     nonce,
-    opts.validateQuery,
+    validateExecution,
     executionKey,
+    groupingNow,
     restoration,
   ]);
 
   // Persist last query (debounced).
   useEffect(() => {
     if (!storageReady || restoration.loading || restoration.error) return;
-    const t = setTimeout(() => void storage.saveLast(schema.name, query), 400);
+    const t = setTimeout(() => void storage.saveLast(sourceSchema.name, query), 400);
     return () => clearTimeout(t);
-  }, [queryKey, storage, schema.name, query, restoration, storageReady]);
+  }, [queryKey, storage, sourceSchema.name, query, restoration, storageReady]);
 
   // Resolved id accessor.
   const idField = useMemo(
@@ -829,17 +901,31 @@ export function useQueryTable<Row>(
     [rows, rowId],
   );
   const selection = useSelection(displayedIds);
-  const columnSchema = useMemo(() => detailColumnSchema(displaySchema, Boolean(opts.itemDetails)), [displaySchema, Boolean(opts.itemDetails)]);
+  const identityScope = JSON.stringify([sourceSchema.name, query.grouping?.keys ?? null]);
+  useEffect(() => { selection.clear(); }, [identityScope, selection.clear]);
+  const columnSchema = useMemo(() => detailColumnSchema(displaySchema, detailsEnabled), [displaySchema, detailsEnabled]);
+  const resultDefaults = useMemo(() => query.grouping ? defaultsFor(schema) : defaults, [Boolean(query.grouping), schema, defaults]);
   const select = useSelect(query, setQuery, columnSchema);
   const columnDrag = useColumnDrag();
-  const saved = useSavedQueries(
-    schema.name,
+  const savedQueries = useSavedQueries(
+    sourceSchema.name,
     query,
-    (q) => setQuery(q),
+    (q) => {
+      const normalized = normalizeQueryState(q, defaults);
+      savedBaseline.current = { source: sourceSchema.name, query: cloneQueryState(normalized) };
+      viewRevision.current++;
+      setQuery(normalized);
+    },
     storage,
     now,
     links.snapshot,
   );
+  const saved: SavedQueriesApi = { ...savedQueries, save: async name => {
+    const item = await savedQueries.save(name);
+    savedBaseline.current = { source: sourceSchema.name, query: cloneQueryState(normalizeQueryState(item.query, defaults)) };
+    viewRevision.current++;
+    return item;
+  } };
   const pageReady =
     committedPage === pageContext &&
     committedSource?.schema === schema &&
@@ -852,14 +938,15 @@ export function useQueryTable<Row>(
     [schema, transport, clientRows, nonce, definitionKey, executionKey],
   );
   const aggState = useAggregations(
-    query,
+    executionQuery,
     schema,
     transport,
     clientRows,
     debounceMs,
     nonce,
-    opts.validateQuery,
+    validateExecution,
     {
+      ...(groupingNow !== undefined ? { now: groupingNow, strictLocalMetrics: true } : {}),
       shownRows: rows,
       rowsReady: pageReady,
       rowsError: error,
@@ -928,127 +1015,15 @@ export function useQueryTable<Row>(
     [setQuery],
   );
 
-  const addFilter = useCallback(
-    (clause: WhereClause) =>
-      setQuery((q) => ({ ...q, offset: 0, where: [...q.where, clause] })),
-    [setQuery],
-  );
-  const updateFilter = useCallback(
-    (index: number, clause: WhereClause) =>
-      setQuery((q) => ({
-        ...q,
-        offset: 0,
-        where: q.where.map((t, i) => (i === index ? clause : t)),
-      })),
-    [setQuery],
-  );
-  const removeFilter = useCallback(
-    (index: number) =>
-      setQuery((q) => ({
-        ...q,
-        offset: 0,
-        where: q.where.filter((_, i) => i !== index),
-      })),
-    [setQuery],
-  );
-  const clearFilters = useCallback(
-    () => setQuery((q) => ({ ...q, offset: 0, where: [] })),
-    [setQuery],
-  );
+  const { addFilter, updateFilter, removeFilter, clearFilters, updatePredicate, removePredicate, negatePredicate, reorderFilters, mergeFilters } = useQueryFilters(schema, setQuery);
 
-  const updatePredicate = useCallback<QueryTableApi<Row>["updatePredicate"]>(
-    (termIndex, predIndex, clause) =>
-      setQuery((q) => ({
-        ...q,
-        offset: 0,
-        where: q.where.map((term, i) => {
-          if (i !== termIndex) return term;
-          if (isOrGroup(term))
-            return {
-              any: term.any.map((c, j) => (j === predIndex ? clause : c)),
-            };
-          return clause;
-        }),
-      })),
-    [setQuery],
-  );
-  const removePredicate = useCallback<QueryTableApi<Row>["removePredicate"]>(
-    (termIndex, predIndex) =>
-      setQuery((q) => {
-        const where: WhereTerm[] = [];
-        q.where.forEach((term, i) => {
-          if (i !== termIndex) {
-            where.push(term);
-            return;
-          }
-          if (isOrGroup(term)) {
-            const members = term.any.filter((_, j) => j !== predIndex);
-            if (members.length === 1) where.push(members[0]!);
-            else if (members.length > 1) where.push({ any: members });
-            return; // 0 members → drop the term
-          }
-          // literal term → removing its predicate drops the whole term
-        });
-        return { ...q, offset: 0, where };
-      }),
-    [setQuery],
-  );
-  const negateOne = useCallback(
-    (clause: WhereClause): WhereClause => {
-      const field = byName.get(clause.field);
-      return negateClause(clause, field ? opsForField(field) : undefined);
-    },
-    [byName],
-  );
-  const negatePredicate = useCallback<QueryTableApi<Row>["negatePredicate"]>(
-    (termIndex, predIndex) =>
-      setQuery((q) => ({
-        ...q,
-        offset: 0,
-        where: q.where.map((term, i) => {
-          if (i !== termIndex) return term;
-          if (isOrGroup(term))
-            return {
-              any: term.any.map((c, j) => (j === predIndex ? negateOne(c) : c)),
-            };
-          return negateOne(term);
-        }),
-      })),
-    [setQuery, negateOne],
-  );
-  const reorderFilters = useCallback<QueryTableApi<Row>["reorderFilters"]>(
-    (fromIndex, toIndex) =>
-      setQuery((q) => {
-        if (fromIndex < 0 || fromIndex >= q.where.length) return q;
-        const where = [...q.where];
-        const [moved] = where.splice(fromIndex, 1);
-        where.splice(Math.max(0, Math.min(toIndex, where.length)), 0, moved!);
-        return { ...q, offset: 0, where };
-      }),
-    [setQuery],
-  );
-  const mergeFilters = useCallback<QueryTableApi<Row>["mergeFilters"]>(
-    (sourceIndex, targetIndex) =>
-      setQuery((q) => {
-        if (sourceIndex === targetIndex) return q;
-        const source = q.where[sourceIndex];
-        const target = q.where[targetIndex];
-        if (!source || !target) return q;
-        const merged: WhereTerm = {
-          any: [...predicatesOf(target), ...predicatesOf(source)],
-        };
-        const where: WhereTerm[] = [];
-        q.where.forEach((term, i) => {
-          if (i === sourceIndex) return; // remove the dragged term
-          where.push(i === targetIndex ? merged : term);
-        });
-        return { ...q, offset: 0, where };
-      }),
-    [setQuery],
-  );
   const resetAll = useCallback(
-    () => setQuery(() => cloneQueryState(defaults)),
-    [setQuery, defaults],
+    () => {
+      const baseline = savedBaseline.current;
+      viewRevision.current++;
+      setQuery(cloneQueryState(baseline?.source === sourceSchema.name ? baseline.query : defaults));
+    },
+    [setQuery, defaults, sourceSchema.name],
   );
 
   // ---- aggregation metric mutators (don't touch paging — scope is the whole set) ----
@@ -1322,17 +1297,26 @@ export function useQueryTable<Row>(
     ],
   );
 
+  const sourceRowId = useCallback((row: Row): RowId | null => {
+    const field = sourceSchema.fields.find(f => f.name === sourceSchema.idField);
+    const value = field ? readFieldValue(field, row) : (row as Record<string, unknown>)[sourceSchema.idField];
+    return typeof value === "string" || (typeof value === "number" && Number.isFinite(value)) ? value : null;
+  }, [sourceSchema]);
+
   const itemDetails = useItemDetails({
-    schema: displaySchema, query, setQuery, options: opts.itemDetails,
-    rows, clientRows, rowId, transport, refreshKey: nonce, links,
+    schema: query.grouping ? sourceSchema : displaySchema,
+    query: sourceQuery, setQuery: setSourceQuery, options: opts.itemDetails,
+    rows: query.grouping ? sourceRows ?? [] : rows, clientRows: sourceRows,
+    rowId: sourceRowId, transport, refreshKey: nonce, links,
     queryReady: storageReady && !restoration.loading && !restoration.error,
   });
 
-  return {
+  const api: QueryTableApi<Row> = {
     links,
-    ...(itemDetails ? { itemDetails } : {}),
+    schema: columnSchema,
+    ...(itemDetails && detailsEnabled ? { itemDetails } : {}),
     query,
-    defaults,
+    defaults: resultDefaults,
     setQuery,
     rows,
     total,
@@ -1372,6 +1356,26 @@ export function useQueryTable<Row>(
     columnDrag,
     visibleFields,
     rowId,
+  };
+  const sourceApi: GroupingSourceApi<Row> = {
+    ...sourceFilters, loading, rowId: sourceRowId, query: sourceQuery, setQuery: setSourceQuery,
+    ...(itemDetails ? { itemDetails } : {}),
+    schema: sourceSchema,
+    filterValues: async (name, search) => {
+      const field = groupingModel.sourceField(name);
+      return field && sourceRows ? { ...distinctValuesFromRows(field, sourceRows, search), hasNull: fieldHasNullInRows(field, sourceRows) } : { values: [], hasMore: false };
+    },
+    fieldStats: async (names) => Object.fromEntries(names.flatMap(name => {
+      const field = groupingModel.sourceField(name);
+      return field && sourceRows ? [[name, { distinct: new Set(sourceRows.map(row => JSON.stringify(readFieldValue(field, row)))).size }]] : [];
+    })),
+  };
+  const grouping = useGroupingController(api, sourceApi, groupingModel, prepared?.inputs ?? sourceRows ?? [], groupingSupported, viewRevision.current);
+  return {
+    ...api,
+    ...(groupingSupported || query.grouping ? { grouping } : {}),
+    select: { ...select, hide: field => query.grouping?.keys.includes(field)
+      ? grouping.changeKeys(query.grouping.keys.filter(key => key !== field)) : select.hide(field) },
   };
 }
 

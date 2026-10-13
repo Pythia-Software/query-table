@@ -6,12 +6,16 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
-import { ModalSurface, useMobileLayout } from "./AdaptiveOverlay";
+import { useMobileLayout } from "./AdaptiveOverlay";
+import { EditorModal, EditorPanelSeparator, EditorPanelToggle } from "./EditorModal";
+import { EditorPaneTitle } from "./EditorParts";
+import { useEditorWorkbench } from "./useEditorWorkbench";
 import { ItemDetailChoices } from "./ItemDetails";
 import { validateItemPageTemplate, type ItemDetailMode, type ItemPageOptions } from "@pythia-software/query-table-core";
 import { ReorderList } from "./ReorderList";
-import { Icon } from "./Icon";
+import { Icon, type IconName } from "./Icon";
 import type { QueryTableApi } from "@pythia-software/query-table-react";
 import {
   ITEM_DETAILS_COLUMN,
@@ -29,6 +33,11 @@ import {
   type PreviewSortKey,
 } from "./previewOrdering";
 const FormulaEditor = lazy(() => import("./FormulaEditor"));
+const panes = [
+  { id: "catalogue", label: "Column catalogue", icon: "panelReference", width: 280, minWidth: 220 },
+  { id: "selected", label: "Selected", icon: "panelList", width: 260, minWidth: 200 },
+  { id: "preview", label: "Preview", icon: "panelPreview", width: 700, minWidth: 300 },
+] satisfies Array<{ id: string; label: string; icon: IconName; width: number; minWidth: number }>;
 const fieldExpression = (name: string) => `[${name.replace(/\]/g, "]]")}]`;
 const display = (v: unknown) =>
   v === null
@@ -43,11 +52,14 @@ export interface SelectColumnEditorProps<Row> {
   onClose: () => void;
   /** Jump directly to this column's settings when opening the editor. */
   initialField?: string;
+  /** Context for the result fields being selected, e.g. a grouped-row schema. */
+  notice?: ReactNode;
 }
 export function SelectColumnEditor<Row>({
   api,
   onClose,
   initialField,
+  notice: contextNotice,
 }: SelectColumnEditorProps<Row>) {
   const titleId = useId();
   const [detailModes, setDetailModes] = useState<ItemDetailMode[]>(api.itemDetails?.modes ?? []);
@@ -62,6 +74,7 @@ export function SelectColumnEditor<Row>({
     requestAnimationFrame(() => { input?.focus(); input?.setSelectionRange(start + token.length, start + token.length); });
   }
   const mobile = useMobileLayout();
+  const workbench = useEditorWorkbench(panes);
   const [mobilePanel, setMobilePanel] = useState(initialField ? "preview" : "selected");
   const [columns, setColumns] = useState<SelectColumn[]>(() =>
     api.select.visible.map((c) => ({ ...c })),
@@ -187,6 +200,7 @@ export function SelectColumnEditor<Row>({
   function browse(field: string) {
     setActive(field);
     setMobilePanel("preview");
+    workbench.showPane(2);
     setEditing(false);
     setNotice("");
   }
@@ -201,6 +215,7 @@ export function SelectColumnEditor<Row>({
     );
     setEditing(true);
     setMobilePanel("preview");
+    workbench.showPane(2);
     setNotice("");
   }
   async function save() {
@@ -307,35 +322,114 @@ export function SelectColumnEditor<Row>({
       </button>
     );
   };
+  function panelToggle(index: number, collapse = false) {
+    const pane = panes[index]!;
+    return <EditorPanelToggle
+      workbench={workbench}
+      index={index}
+      label={pane.label}
+      icon={pane.icon}
+      paneId={`${titleId}-pane-${index}`}
+      collapse={collapse}
+    />;
+  }
+  function paneProps(index: number) {
+    return {
+      id: `${titleId}-pane-${index}`,
+      hidden: mobile ? mobilePanel !== panes[index]!.id : !workbench.visiblePanes[index],
+    };
+  }
+  function separator(index: number) {
+    if (mobile) return null;
+    return <EditorPanelSeparator
+      workbench={workbench}
+      index={index}
+      label={`Resize column panels ${index + 1} and ${(workbench.nextPane(index) ?? index) + 1}`}
+      controls={`${titleId}-pane-${index} ${titleId}-pane-${workbench.nextPane(index)}`}
+    />;
+  }
   return (
-    <ModalSurface title="Select columns" onClose={onClose} className={`qt-select-editor qt-select-editor--${mobilePanel}`} chrome={false}>
-        <header className="qt-select-editor-header">
-          <div>
-            <h2 id={titleId}>Select columns</h2>
-            <p>
-              Arrange your view, explore values, and create reusable computed
-              columns.
-            </p>
-          </div>
-          <button
-            type="button"
-            className="qt-btn"
-            onClick={onClose}
-            aria-label="Close column editor"
-          >
-            <Icon name="close" />
-          </button>
-        </header>
-        <nav className="qt-editor-mobile-nav" aria-label="Column editor sections">
-          {[["selected", `Selected (${columns.length})`], ["catalogue", "Catalogue"], ["preview", "Preview"]].map(([panel, name]) => (
-            <button key={panel} type="button" className="qt-btn" aria-pressed={mobilePanel === panel} onClick={() => setMobilePanel(panel!)}>{name}</button>
+    <EditorModal
+      title="Select columns"
+      titleId={titleId}
+      closeLabel="Close column editor"
+      onClose={onClose}
+      className={`qt-select-editor qt-select-editor--${mobilePanel}`}
+      workbench={workbench}
+      panelControls={!mobile && <div className="qt-metric-panel-tools" role="group" aria-label="Visible column panels">
+        <span>Panels</span>
+        {panes.map((pane, index) => <span key={pane.id}>{panelToggle(index)}</span>)}
+      </div>}
+    >
+        {contextNotice}
+        {mobile && <nav className="qt-editor-mobile-nav" aria-label="Column editor sections">
+          {panes.map((panel, index) => (
+            <button key={panel.id} type="button" className="qt-btn" aria-pressed={mobilePanel === panel.id} aria-controls={`${titleId}-pane-${index}`} onClick={() => { setMobilePanel(panel.id); workbench.showPane(index); }}>{panel.id === "selected" ? `Selected (${columns.length})` : panel.id === "catalogue" ? "Catalogue" : panel.label}</button>
           ))}
-        </nav>
-        <div className={`qt-select-editor-body qt-select-editor-body--${mobilePanel}`}>
-          <aside className="qt-selected-panel">
-            <h3>
+        </nav>}
+        <div
+          ref={workbench.root}
+          className="qt-select-editor-body"
+          style={mobile ? undefined : { gridTemplateColumns: workbench.visibleIndices.map((i) => `${workbench.widths[i]}px`).join(" 6px ") }}
+        >
+          <aside className="qt-catalogue-panel" {...paneProps(0)}>
+            <EditorPaneTitle actions={!mobile && panelToggle(0, true)}>Column catalogue</EditorPaneTitle>
+            <input
+              className="qt-input"
+              aria-label="Search columns"
+              placeholder="Search name or type…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <button
+              type="button"
+              className="qt-btn qt-create-computed"
+              onClick={() => edit()}
+            >
+              <Icon name="add" />Computed column
+            </button>
+            {api.computed.loading && <p role="status">Loading definitions…</p>}
+            {api.computed.error && <p role="alert">{api.computed.error}</p>}
+            <div className="qt-catalogue-list">
+              {catalogueResults.map((f) => {
+                const distinct = fieldStats[f.name]?.distinct;
+                return (
+                  <div
+                    className={`qt-catalogue-item ${active === f.name && !editing ? "is-active" : ""} ${distinct != null && distinct <= 1 ? "is-low-cardinality" : ""}`}
+                    key={f.name}
+                  >
+                    <input
+                      type="checkbox"
+                      aria-label={`Include ${f.label}`}
+                      checked={columns.some((c) => c.field === f.name)}
+                      onChange={() => toggle(f.name)}
+                    />
+                    <button type="button" onClick={() => browse(f.name)}>
+                      <strong>{f.label}</strong>
+                      <small>
+                        {isComputedField(f.name) ? "Computed · " : ""}
+                        {f.type} · {f.group ?? f.name}
+                        {distinct != null &&
+                          ` · ${distinct.toLocaleString()} distinct`}
+                      </small>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            <button
+              type="button"
+              className="qt-link-btn"
+              onClick={() => void api.computed.reload()}
+            >
+              Reload shared definitions
+            </button>
+          </aside>
+          {separator(0)}
+          <aside className="qt-selected-panel" {...paneProps(1)}>
+            <EditorPaneTitle actions={!mobile && panelToggle(1, true)}>
               Selected <span className="qt-muted">{columns.length}</span>
-            </h3>
+            </EditorPaneTitle>
             {mobile ? (
               <ReorderList
                 className="qt-editor-columns"
@@ -426,62 +520,10 @@ export function SelectColumnEditor<Row>({
               Use default columns
             </button>
           </aside>
-          <aside className="qt-catalogue-panel">
-            <h3>Column catalogue</h3>
-            <input
-              className="qt-input"
-              aria-label="Search columns"
-              placeholder="Search name or type…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            <button
-              type="button"
-              className="qt-btn qt-create-computed"
-              onClick={() => edit()}
-            >
-              <Icon name="add" />Computed column
-            </button>
-            {api.computed.loading && <p role="status">Loading definitions…</p>}
-            {api.computed.error && <p role="alert">{api.computed.error}</p>}
-            <div className="qt-catalogue-list">
-              {catalogueResults.map((f) => {
-                const distinct = fieldStats[f.name]?.distinct;
-                return (
-                  <div
-                    className={`qt-catalogue-item ${active === f.name && !editing ? "is-active" : ""} ${distinct != null && distinct <= 1 ? "is-low-cardinality" : ""}`}
-                    key={f.name}
-                  >
-                    <input
-                      type="checkbox"
-                      aria-label={`Include ${f.label}`}
-                      checked={columns.some((c) => c.field === f.name)}
-                      onChange={() => toggle(f.name)}
-                    />
-                    <button type="button" onClick={() => browse(f.name)}>
-                      <strong>{f.label}</strong>
-                      <small>
-                        {isComputedField(f.name) ? "Computed · " : ""}
-                        {f.type} · {f.group ?? f.name}
-                        {distinct != null &&
-                          ` · ${distinct.toLocaleString()} distinct`}
-                      </small>
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-            <button
-              type="button"
-              className="qt-link-btn"
-              onClick={() => void api.computed.reload()}
-            >
-              Reload shared definitions
-            </button>
-          </aside>
-          <section className="qt-column-workbench">
+          {separator(1)}
+          <section className="qt-column-workbench" {...paneProps(2)}>
             {editingDetails && api.itemDetails ? <>
-              <div className="qt-editor-title"><h3><Icon name="panelList" />Detail</h3></div>
+              <EditorPaneTitle actions={!mobile && panelToggle(2, true)}><Icon name="panelList" />Detail</EditorPaneTitle>
               <p className="qt-muted">A presentation column with detail buttons. Drag it anywhere in the selected list or table.</p>
               <ItemDetailChoices available={api.itemDetails.availableModes} modes={detailModes} onChange={setDetailModes} />
               {detailModes.includes("page") && <div className="qt-item-page-settings">
@@ -501,16 +543,16 @@ export function SelectColumnEditor<Row>({
               <p className="qt-muted">Popover, Modal, and Row expand each have their own property view. Customize it by opening an item in that display.</p>
             </> : editing ? (
               <>
-                <div className="qt-editor-title">
-                  <h3>
-                    {revision
-                      ? "Edit shared computed column"
-                      : "New computed column"}
-                  </h3>
+                <EditorPaneTitle actions={<div className="qt-select-pane-actions">
                   <span className="qt-type-badge">
                     {validation.plan?.type ?? "Check formula"}
                   </span>
-                </div>
+                  {!mobile && panelToggle(2, true)}
+                </div>}>
+                    {revision
+                      ? "Edit shared computed column"
+                      : "New computed column"}
+                </EditorPaneTitle>
                 <label className="qt-editor-label">
                   Column name
                   <input
@@ -568,13 +610,8 @@ export function SelectColumnEditor<Row>({
                 </p>
               </>
             ) : (
-              <div className="qt-editor-title">
-                <div>
-                  <h3>{chosen?.label ?? "Explore a column"}</h3>
-                  <p className="qt-muted">
-                    {chosen?.name} {chosen ? `· ${chosen.type}` : ""}
-                  </p>
-                </div>
+              <>
+                <EditorPaneTitle actions={<div className="qt-select-pane-actions">
                 {chosen && isComputedField(chosen.name) && (
                   <>
                     <button
@@ -604,7 +641,14 @@ export function SelectColumnEditor<Row>({
                     </button>
                   </>
                 )}
-              </div>
+                  {!mobile && panelToggle(2, true)}
+                </div>}>
+                  {chosen?.label ?? "Explore a column"}
+                </EditorPaneTitle>
+                <p className="qt-muted">
+                  {chosen?.name} {chosen ? `· ${chosen.type}` : ""}
+                </p>
+              </>
             )}
             {!editingDetails && <>
             <div className="qt-preview-controls">
@@ -819,7 +863,7 @@ export function SelectColumnEditor<Row>({
           </button>
           <button
             type="button"
-            className="qt-btn qt-primary"
+            className="qt-btn qt-btn-primary"
             disabled={!columns.length || columns.length > 200 || Boolean(pageError)}
             onClick={() => {
               api.setQuery((q) => {
@@ -834,6 +878,6 @@ export function SelectColumnEditor<Row>({
             Apply columns
           </button>
         </footer>
-    </ModalSurface>
+    </EditorModal>
   );
 }

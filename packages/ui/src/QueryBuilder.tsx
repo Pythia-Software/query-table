@@ -1,3 +1,5 @@
+import type { QueryFilterApi } from "@pythia-software/query-table-react";
+import { useGroupingPresentation } from "./grouping/GroupingControls";
 import {
   PresentedFilterValue,
   PresentedValueInput,
@@ -16,6 +18,7 @@ import { MetricsEditor } from "./MetricsEditor";
 import type { MetricTheme } from "./metricColors";
 import { SelectColumnEditor } from "./SelectColumnEditor";
 import { SortExtractionEditor } from "./SortExtractionEditor";
+import { SortPicker } from "./SortPicker";
 import { SetFilterEditor } from "./SetFilterEditor";
 import {
   Fragment,
@@ -35,6 +38,7 @@ import type {
   WhereClause,
   WhereTerm,
   SetFilterMetadata,
+  SavedQuery,
 } from "@pythia-software/query-table-core";
 import {
   NULLARY_OPS,
@@ -55,6 +59,7 @@ import {
 } from "@pythia-software/query-table-core";
 import type { QueryTableApi } from "@pythia-software/query-table-react";
 import type { QueryBuilderClassNames } from "./classNames";
+import { PickerAnchor } from "./PickerAnchor";
 import { FieldPicker } from "./FieldPicker";
 import { SavedQueriesModal } from "./SavedQueriesModal";
 import { formatRowCount, rowCountTitle } from "./formatRowCount";
@@ -68,6 +73,18 @@ import { MenuButton, MenuGroup, MenuItem } from "./Menu";
 import { Popover } from "./Popover";
 
 export interface QueryBuilderProps<Row> {
+  /** Collect unused clauses into a compact row of add actions. */
+  compact?: boolean;
+  /** Additional clauses, inserted after WHERE and before ORDER BY. */
+  clauses?: ReactNode;
+  /** Replace WHERE when its inputs belong to a different result stage. */
+  whereRow?: ReactNode;
+  /** Host-owned summary shown when the editor is collapsed. */
+  summary?: ReactNode;
+  selectPresentation?: SelectPresentation;
+  /** Match/share the entire host definition when it contains more than QueryState. */
+  matchesSavedQuery?: (saved: SavedQuery) => boolean;
+  shareUrl?: string;
   /** Additional diagnostics shown inside request activity. */
   requestActivityDetails?: ReactNode;
   /** The controller; QueryBuilder drives it through the intent helpers. */
@@ -87,6 +104,16 @@ export interface QueryBuilderProps<Row> {
   defaultCollapsed?: boolean;
   metricTheme?: MetricTheme;
   metricLocale?: string;
+}
+
+export interface SelectPresentation {
+  /** Replaces a chip's label; existing drag and remove controls are retained. */
+  renderChip?: (field: string, label: string) => ReactNode;
+  /** Replaces the add-column picker; call onClose after a selection or dismissal. */
+  renderPicker?: (onClose: () => void) => ReactNode;
+  renderEditor?: (onClose: () => void) => ReactNode;
+  hint?: ReactNode;
+  editorNotice?: ReactNode;
 }
 
 const cx = (...parts: Array<string | undefined | false>): string =>
@@ -144,7 +171,7 @@ function formatStatusTime(ms: number | null): string {
 }
 
 function useFieldHasNull<Row>(
-  api: QueryTableApi<Row>,
+  api: QueryFilterApi<Row>,
   fieldName: string | undefined,
 ): boolean | undefined {
   const [hasNull, setHasNull] = useState<boolean | undefined>(undefined);
@@ -296,10 +323,25 @@ export function QueryBuilder<Row>({
   collapsed,
   onCollapsedChange,
   defaultCollapsed = false,
+  compact,
   metricTheme,
   metricLocale,
   requestActivityDetails,
+  clauses,
+  whereRow,
+  summary,
+  selectPresentation,
+  matchesSavedQuery,
+  shareUrl,
 }: QueryBuilderProps<Row>): ReactNode {
+  const groupingUI = useGroupingPresentation(api, clauses === undefined);
+  const activeGrouping = api.query.grouping !== undefined && clauses === undefined;
+  if (activeGrouping && api.schema) fields = api.schema.fields;
+  compact ??= activeGrouping;
+  clauses ??= groupingUI.clauses;
+  whereRow ??= groupingUI.whereRow;
+  summary ??= groupingUI.summary;
+  selectPresentation ??= groupingUI.selectPresentation;
   const mobile = useMobileLayout();
   const UNSAVED_QUERY_EDIT_ID = "__qt-unsaved-query__";
   const [showSaved, setShowSaved] = useState(false);
@@ -333,8 +375,10 @@ export function QueryBuilder<Row>({
     [fields],
   );
   const activeSavedQuery = useMemo(
-    () => api.saved.items.find((item) => queriesEqual(item.query, api.query)),
-    [api.query, api.saved.items],
+    () => api.saved.items.find((item) =>
+      matchesSavedQuery ? matchesSavedQuery(item) : queriesEqual(item.query, api.query),
+    ),
+    [api.query, api.saved.items, matchesSavedQuery],
   );
   const lastSavedQuery = useMemo(
     () => api.saved.items.find((item) => item.id === lastSavedId) ?? null,
@@ -565,7 +609,7 @@ export function QueryBuilder<Row>({
   async function shareQuery() {
     if (typeof window === "undefined") return;
     let url: URL;
-    try { url = new URL((await api.links.create()).url); }
+    try { url = new URL(shareUrl ?? (await api.links.create()).url); }
     catch (error) { saveFailed(error); return; }
 
     if (mobile && navigator.share) {
@@ -598,7 +642,8 @@ export function QueryBuilder<Row>({
   }
 
   return (
-    <div className={cx("qt-qb", classNames?.root)}>
+    <div className={cx("qt-qb",
+          api.grouping && "qt-qb--groupable", compact && "qt-qb--compact", classNames?.root)}>
       <div className="qt-qb-bar qt-qb-state-bar qt-qb-row">
         <span className="qt-qb-state-main">
           <span className="qt-qb-saved">
@@ -669,12 +714,16 @@ export function QueryBuilder<Row>({
           {isCollapsed ? (
             <span
               className="qt-qb-summary qt-truncate"
-              title={collapsedSummary}
+              title={summary ? undefined : collapsedSummary}
             >
-              <span className="qt-qb-summary-kw">WHERE</span>{" "}
-              <strong>{collapsedWhereText}</strong>{" "}
-              <span className="qt-qb-summary-kw">ORDER BY</span>{" "}
-              <strong>{collapsedOrderText}</strong>
+              {summary ?? (
+                <>
+                  <span className="qt-qb-summary-kw">WHERE</span>{" "}
+                  <strong>{collapsedWhereText}</strong>{" "}
+                  <span className="qt-qb-summary-kw">ORDER BY</span>{" "}
+                  <strong>{collapsedOrderText}</strong>
+                </>
+              )}
             </span>
           ) : null}
         </span>
@@ -756,14 +805,18 @@ export function QueryBuilder<Row>({
               fields={fields}
               classNames={classNames}
               disabled={isBusy}
+              presentation={selectPresentation}
             />
-            <WhereRow
-              api={api}
-              byName={byName}
-              fields={fields}
-              classNames={classNames}
-              disabled={isBusy}
-            />
+            {whereRow ?? (
+              <WhereRow
+                api={api}
+                byName={byName}
+                fields={fields}
+                classNames={classNames}
+                disabled={isBusy}
+              />
+            )}
+            {clauses}
             <OrderRow
               api={api}
               fields={fields}
@@ -773,13 +826,13 @@ export function QueryBuilder<Row>({
             <WindowRow
               api={api}
               total={total}
+              compact={compact}
               classNames={classNames}
               disabled={isBusy}
             />
             <MetricsRow
               api={api}
               fields={fields}
-              classNames={classNames}
               theme={metricTheme}
               locale={metricLocale}
             />
@@ -951,12 +1004,13 @@ export function QueryBuilder<Row>({
         </span>
       </div>
 
+      {groupingUI.overlays}
       {showActivity && (
         <RequestActivity id={activityId} activity={api.requestActivity}>
           {requestActivityDetails}
         </RequestActivity>
       )}
-      {!isCollapsed && showSaved ? (
+      {showSaved ? (
         <SavedQueriesModal
           saved={api.saved}
           onClose={() => setShowSaved(false)}
@@ -974,13 +1028,23 @@ function SelectRow<Row>({
   fields,
   classNames,
   disabled,
+  presentation,
 }: {
   api: QueryTableApi<Row>;
   fields: FieldDef<Row>[];
   classNames: QueryBuilderClassNames | undefined;
   disabled: boolean | undefined;
+  presentation: SelectPresentation | undefined;
 }) {
   const { select, columnDrag } = api;
+  function removeColumn(field: string) {
+    try {
+      select.hide(field);
+    } catch (error) {
+      if (!api.grouping) throw error;
+      api.grouping.setNotice(error instanceof Error ? error.message : String(error));
+    }
+  }
   const mobile = useMobileLayout();
   const [editingColumns, setEditingColumns] = useState(false);
   const [editingField, setEditingField] = useState<string | undefined>();
@@ -1018,16 +1082,20 @@ function SelectRow<Row>({
 
   const actions = (
     <>
+      <PickerAnchor>
       <span className="qt-split-btn" role="group" aria-label="Column actions">
         <button
           type="button"
           className="qt-add"
           aria-label="Add column"
           ref={addColumnRef}
-          aria-haspopup="dialog"
           aria-expanded={adding}
-          onClick={() => setAdding(previous => !previous)}
-          disabled={disabled || select.hidden.length === 0}
+          aria-haspopup="dialog"
+          onClick={() => setAdding(!adding)}
+          disabled={
+            disabled ||
+            (!presentation?.renderPicker && select.hidden.length === 0)
+          }
         >
           <Icon name="add" />
           {mobile ? "Add" : "add column"}
@@ -1045,6 +1113,20 @@ function SelectRow<Row>({
           <Icon name="chevronRight" size={18} />
         </button>
       </span>
+      {adding ? presentation?.renderPicker ? (
+        presentation.renderPicker(() => setAdding(false))
+      ) : (
+          <FieldPicker
+            anchor={addColumnRef.current ?? undefined}
+            fields={select.hidden.filter(isSelectable)}
+            onPick={(f) => {
+              select.show(f.name);
+              setAdding(false);
+            }}
+            onClose={() => setAdding(false)}
+          />
+      ) : null}
+      </PickerAnchor>
       <button
         type="button"
         className="qt-link-btn"
@@ -1066,11 +1148,12 @@ function SelectRow<Row>({
         </span>
         {mobile && actions}
       </div>
-      {editingColumns && (
+      {editingColumns && (presentation?.renderEditor ? presentation.renderEditor(() => setEditingColumns(false)) :
         <SelectColumnEditor
           api={api}
           {...(editingField ? { initialField: editingField } : {})}
           onClose={() => setEditingColumns(false)}
+          notice={presentation?.editorNotice}
         />
       )}
       {mobile ? (
@@ -1086,12 +1169,14 @@ function SelectRow<Row>({
           disabled={disabled}
           renderItem={(item) => (
             <>
-              <span className="qt-chip-field">{item.label}</span>
+              {presentation?.renderChip?.(item.id, item.label) ?? (
+                <span className="qt-chip-field">{item.label}</span>
+              )}
               {detailSettingsButton(item.id)}
               <button
                 type="button"
                 className="qt-chip-x"
-                onClick={() => select.hide(item.id)}
+                onClick={() => removeColumn(item.id)}
                 disabled={disabled}
                 aria-label={`Remove ${item.label} column`}
               >
@@ -1160,12 +1245,14 @@ function SelectRow<Row>({
               <span aria-hidden className="qt-chip-grip">
                 <Icon name="grip" />
               </span>
-              <span className="qt-chip-field">{label}</span>
+              {presentation?.renderChip?.(name, label) ?? (
+                <span className="qt-chip-field">{label}</span>
+              )}
               {detailSettingsButton(name)}
               <button
                 type="button"
                 className="qt-chip-x"
-                onClick={() => select.hide(name)}
+                onClick={() => removeColumn(name)}
                 disabled={disabled}
                 aria-label={`Remove ${label} column`}
               >
@@ -1176,22 +1263,38 @@ function SelectRow<Row>({
         })
       )}
       {!mobile && actions}
-      {adding ? (
-        <FieldPicker
-          anchor={addColumnRef.current ?? undefined}
-          fields={select.hidden.filter(isSelectable)}
-          onPick={(f) => {
-            select.show(f.name);
-            setAdding(false);
-          }}
-          onClose={() => setAdding(false)}
-        />
-      ) : null}
+      {presentation?.hint}
     </div>
   );
 }
 
 // ---- WHERE ----------------------------------------------------------------
+
+/** Reuse the same typed predicates for a host's source or result filter stage. */
+export function QueryFilterRow<Row>({
+  api,
+  fields,
+  label = "where",
+}: {
+  api: QueryFilterApi<Row>;
+  fields: FieldDef<Row>[];
+  label?: "where" | "having";
+}) {
+  const byName = useMemo(
+    () => new Map(fields.map(field => [field.name, field])),
+    [fields],
+  );
+  return (
+    <WhereRow
+      api={api}
+      fields={fields}
+      byName={byName}
+      label={label}
+      classNames={undefined}
+      disabled={api.loading}
+    />
+  );
+}
 
 /** Where a drop lands relative to the hovered term chip: reorder before/after
  *  it, or drop onto its center to OR the two together. */
@@ -1220,12 +1323,14 @@ function WhereRow<Row>({
   fields,
   classNames,
   disabled,
+  label = "where",
 }: {
-  api: QueryTableApi<Row>;
+  api: QueryFilterApi<Row>;
   byName: Map<string, FieldDef<Row>>;
   fields: FieldDef<Row>[];
   classNames: QueryBuilderClassNames | undefined;
   disabled: boolean | undefined;
+  label?: "where" | "having";
 }) {
   const [adding, setAdding] = useState(false);
   const mobile = useMobileLayout();
@@ -1347,18 +1452,19 @@ function WhereRow<Row>({
 
   const actions = (
     <>
+      <PickerAnchor>
       <button
         ref={addFilterButton}
         type="button"
         className="qt-add"
-        aria-label="Add filter"
         aria-haspopup="dialog"
+        aria-label={label === "having" ? "Add HAVING filter" : "Add filter"}
         aria-expanded={adding}
-        onClick={() => setAdding(previous => !previous)}
+        onClick={() => setAdding(!adding)}
         disabled={disabled}
       >
         <Icon name="add" />
-        add filter
+        {label === "having" ? "having" : "add filter"}
       </button>
       {adding && (
         <FieldPicker
@@ -1369,6 +1475,7 @@ function WhereRow<Row>({
           onClose={() => setAdding(false)}
         />
       )}
+      </PickerAnchor>
       {where.length > 0 && (
         <button
           type="button"
@@ -1384,10 +1491,10 @@ function WhereRow<Row>({
   );
 
   return (
-    <div className="qt-qb-row qt-qb-row--filters">
+    <div className={cx("qt-qb-row qt-qb-row--filters", where.length === 0 && "qt-qb-row--unused")} data-clause={label}>
       <div className="qt-qb-section-header">
-        <span className="qt-qb-kw" data-mobile-label="Filters">
-          where
+        <span className="qt-qb-kw" data-mobile-label={label === "having" ? "Having" : "Filters"}>
+          {label}
         </span>
         {mobile && actions}
       </div>
@@ -1548,7 +1655,7 @@ function TermChip<Row>({
   editorOpen,
   onEditorChange,
 }: {
-  api: QueryTableApi<Row>;
+  api: QueryFilterApi<Row>;
   term: WhereTerm;
   index: number;
   byName: Map<string, FieldDef<Row>>;
@@ -1659,7 +1766,7 @@ function MobileFilter<Row>({
   open,
   onOpenChange,
 }: {
-  api: QueryTableApi<Row>;
+  api: QueryFilterApi<Row>;
   term: WhereTerm;
   index: number;
   byName: Map<string, FieldDef<Row>>;
@@ -1902,7 +2009,7 @@ function PredicateEditor<Row>({
   onRemove,
   showField = true,
 }: {
-  api: QueryTableApi<Row>;
+  api: QueryFilterApi<Row>;
   field: FieldDef<Row> | undefined;
   clause: WhereClause;
   classNames: QueryBuilderClassNames | undefined;
@@ -2024,7 +2131,7 @@ function ValueInput<Row>({
   classNames,
   onChange,
 }: {
-  api: QueryTableApi<Row>;
+  api: QueryFilterApi<Row>;
   field: FieldDef<Row> | undefined;
   value: string;
   forceFreeform?: boolean;
@@ -2116,7 +2223,7 @@ function AutocompleteInput<Row>({
   classNames,
   onChange,
 }: {
-  api: QueryTableApi<Row>;
+  api: QueryFilterApi<Row>;
   field: FieldDef<Row>;
   value: string;
   classNames: QueryBuilderClassNames | undefined;
@@ -2436,21 +2543,17 @@ function OrderTermChip<Row>({
           <Icon name={term.dir === "asc" ? "arrowUp" : "arrowDown"} />
           {term.dir === "asc" ? "asc" : "desc"}
         </button>
-        <button
+        {term.extract && <button
           type="button"
           className="qt-chip-op-btn"
-          title={
-            term.extract
-              ? `Regex: ${term.extract.regex}`
-              : "Sort by text extracted with a regular expression"
-          }
+          title={`Regex: ${term.extract.regex}`}
           aria-label={`Configure regex extract for ${label}`}
           disabled={disabled}
           onClick={() => setExtractOpen(true)}
         >
-          <Icon name={term.extract ? "pencil" : "add"} />
-          {term.extract ? "regex extraction" : "regex extract"}
-        </button>
+          <Icon name="pencil" />
+          regex extraction
+        </button>}
         {(term.extract != null || fieldHasNull !== false) && (
           <button
             type="button"
@@ -2505,9 +2608,9 @@ function OrderRow<Row>({
     overIndex: number;
   } | null>(null);
   const [adding, setAdding] = useState(false);
-  const addSortRef = useRef<HTMLButtonElement>(null);
   // Field chosen in the "sort with regex extraction" configurator (split-button caret).
   const [regexField, setRegexField] = useState<FieldDef<Row> | null>(null);
+  const [regexDirection, setRegexDirection] = useState<OrderByClause["dir"]>("desc");
 
   const [editingSort, setEditingSort] = useState<string | null>(null);
 
@@ -2530,21 +2633,19 @@ function OrderRow<Row>({
     setEditingSort(null);
     setOrderBy(orderBy.filter((_, k) => k !== i));
   }
-  function addTerm(f: FieldDef<Row>, extract?: OrderByClause["extract"]) {
+  function addTerm(f: FieldDef<Row>, dir: OrderByClause["dir"], extract?: OrderByClause["extract"]) {
     const field = f.sort?.field ?? f.name;
     const nextOrderBy: OrderByClause[] = [
       ...orderBy,
-      { field, dir: "desc", ...(extract ? { extract } : {}) },
+      { field, dir, ...(extract ? { extract } : {}) },
     ];
 
     const existing = orderBy.findIndex((o) => o.field === field);
     if (existing >= 0) {
-      if (extract) updateTerm(existing, { extract });
+      updateTerm(existing, { dir, ...(extract ? { extract } : {}) });
       setAdding(false);
       return;
     }
-
-    if (!extract) setEditingSort(field);
 
     const hasSelectColumn = api.select.visible.some((c) => c.field === field);
     if (hasSelectColumn) {
@@ -2602,14 +2703,19 @@ function OrderRow<Row>({
   const rendered = previewFields();
   const sortable = fields.filter(isSortable);
   const sortKey = (f: FieldDef<Row>) => f.sort?.field ?? f.name;
-  function openRegexConfigurator() {
+  function selectRegexField(field: FieldDef<Row> | null) {
+    setRegexField(field);
+    setRegexDirection(field ? termByField.get(sortKey(field))?.dir ?? "desc" : "desc");
+  }
+  function openRegexConfigurator(field?: FieldDef<Row>) {
     const unsorted = sortable.filter((f) => !termFields.includes(sortKey(f)));
-    setRegexField(
+    const chosen = field ??
       unsorted.find((f) => f.type === "text") ??
         unsorted[0] ??
         sortable[0] ??
-        null,
-    );
+        null;
+    selectRegexField(chosen);
+    setAdding(false);
   }
   const renderTerm = (name: string, position: number) => {
     const term = termByField.get(name)!;
@@ -2654,12 +2760,12 @@ function OrderRow<Row>({
 
   const actions = (
     <>
+      <PickerAnchor>
       <span className="qt-split-btn" role="group" aria-label="Sort actions">
         <button
           type="button"
           className="qt-add"
           aria-label="Add sort"
-          ref={addSortRef}
           aria-haspopup="dialog"
           aria-expanded={adding}
           onClick={() => setAdding(previous => !previous)}
@@ -2676,11 +2782,20 @@ function OrderRow<Row>({
           aria-haspopup="dialog"
           aria-expanded={regexField != null}
           disabled={disabled || sortable.length === 0}
-          onClick={openRegexConfigurator}
+          onClick={() => openRegexConfigurator()}
         >
           <Icon name="chevronRight" size={18} />
         </button>
       </span>
+      {adding && (
+        <SortPicker
+          fields={sortable}
+          onPick={addTerm}
+          onRegex={openRegexConfigurator}
+          onClose={() => setAdding(false)}
+        />
+      )}
+      </PickerAnchor>
       {!isDefaultOrderBy && (
         <button
           type="button"
@@ -2695,7 +2810,7 @@ function OrderRow<Row>({
   );
 
   return (
-    <div className="qt-qb-row qt-qb-row--sort">
+    <div className={cx("qt-qb-row qt-qb-row--sort", orderBy.length === 0 && "qt-qb-row--unused")}>
       <div className="qt-qb-section-header">
         <span className="qt-qb-kw" data-mobile-label="Sort">
           order by
@@ -2728,26 +2843,22 @@ function OrderRow<Row>({
         rendered.map(renderTerm)
       )}
       {!mobile && actions}
-      {adding && (
-        <FieldPicker
-          anchor={addSortRef.current ?? undefined}
-          fields={sortable}
-          onPick={(field) => addTerm(field)}
-          onClose={() => setAdding(false)}
-        />
-      )}
       {regexField && (
         <SortExtractionEditor
           api={api}
           field={sortKey(regexField)}
           label={regexField.label}
+          initialPattern={termByField.get(sortKey(regexField))?.extract?.regex}
+          direction={regexDirection}
+          onDirectionChange={setRegexDirection}
           fieldOptions={sortable.map((f) => ({
             name: sortKey(f),
             label: f.label,
           }))}
-          onFieldChange={(name) =>
-            setRegexField(sortable.find((f) => sortKey(f) === name) ?? null)
-          }
+          onFieldChange={(name) => {
+            const next = sortable.find((f) => sortKey(f) === name);
+            if (next) selectRegexField(next);
+          }}
           title="Sort with regex extraction"
           applyLabel={
             termFields.includes(sortKey(regexField))
@@ -2756,10 +2867,13 @@ function OrderRow<Row>({
           }
           disabled={disabled}
           onApply={(regex) => {
-            addTerm(regexField, { regex });
+            addTerm(regexField, regexDirection, { regex });
             setRegexField(null);
           }}
-          onRemove={() => setRegexField(null)}
+          onRemove={() => {
+            clearExtract(orderBy.findIndex((term) => term.field === sortKey(regexField)));
+            setRegexField(null);
+          }}
           onClose={() => setRegexField(null)}
         />
       )}
@@ -2774,21 +2888,31 @@ function WindowRow<Row>({
   total,
   classNames,
   disabled,
+  compact,
 }: {
   api: QueryTableApi<Row>;
   total: number | null;
+  compact?: boolean;
   classNames: QueryBuilderClassNames | undefined;
   disabled: boolean | undefined;
 }) {
   const { query } = api;
   const offsetId = useId();
+  const [addingOffset, setAddingOffset] = useState(false);
+  const offsetInput = useRef<HTMLInputElement>(null);
   const [limitDraft, setLimitDraft] = useState(String(query.limit));
   const [offsetDraft, setOffsetDraft] = useState(String(query.offset));
   useEffect(() => setLimitDraft(String(query.limit)), [query.limit]);
   useEffect(() => setOffsetDraft(String(query.offset)), [query.offset]);
-  const hasLimitDefault = query.limit === api.defaults.limit;
-  const hasOffsetDefault = query.offset === api.defaults.offset;
-  const hasWindowDefault = hasLimitDefault && hasOffsetDefault;
+  useEffect(() => {
+    if (query.offset > 0) setAddingOffset(false);
+  }, [query.offset]);
+  useEffect(() => {
+    if (addingOffset) {
+      offsetInput.current?.focus();
+      offsetInput.current?.select();
+    }
+  }, [addingOffset]);
 
   function commitLimit() {
     api.setLimit(Math.max(1, Number(limitDraft) || query.limit));
@@ -2814,7 +2938,7 @@ function WindowRow<Row>({
           onKeyDown={(e) => e.key === "Enter" && commitLimit()}
         />
       </label>
-      <div className="qt-qb-window-field">
+      {(!compact || query.offset > 0 || addingOffset) ? <div className="qt-qb-window-field">
         <label
           className="qt-qb-kw"
           htmlFor={offsetId}
@@ -2824,6 +2948,7 @@ function WindowRow<Row>({
         </label>
         <span className="qt-qb-num-combo">
           <input
+            ref={offsetInput}
             id={offsetId}
             className={cx("qt-qb-num", classNames?.input)}
             type="number"
@@ -2859,21 +2984,8 @@ function WindowRow<Row>({
             +{query.limit}
           </button>
         </span>
-      </div>
-      {!hasWindowDefault && (
-        <button
-          type="button"
-          className="qt-link-btn"
-          onClick={() => {
-            api.setLimit(api.defaults.limit);
-            api.setOffset(api.defaults.offset);
-          }}
-          disabled={disabled}
-          title="Reset limit and offset"
-        >
-          reset
-        </button>
-      )}
+        {compact && <button type="button" className="qt-chip-x" aria-label="Clear offset" disabled={disabled} onClick={() => { setAddingOffset(false); api.setOffset(0); }}><Icon name="close" /></button>}
+      </div> : <button type="button" className="qt-add" aria-label="Add offset" disabled={disabled} onClick={() => setAddingOffset(true)}><Icon name="add" />add offset</button>}
     </div>
   );
 }
@@ -2882,17 +2994,15 @@ function WindowRow<Row>({
 function MetricsRow<Row>({
   api,
   fields,
-  classNames,
   theme,
   locale,
 }: {
   api: QueryTableApi<Row>;
   fields: FieldDef<Row>[];
-  classNames: QueryBuilderClassNames | undefined;
   theme: MetricTheme | undefined;
   locale: string | undefined;
 }) {
-  const [editing, setEditing] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
   const allFields = useMemo(
     () => [
       ...fields,
@@ -2903,42 +3013,36 @@ function MetricsRow<Row>({
     [fields, api.computed.catalogue],
   );
   return (
-    <div className="qt-qb-row qt-qb-row--metrics">
-      <div className="qt-qb-section-header">
-        <span className="qt-qb-kw" data-mobile-label="Metrics">
-          metrics
-        </span>
-        <button
-          type="button"
-          className="qt-add"
-          aria-label="Edit metrics"
-          onClick={() => setEditing("")}
-        >
-          <Icon name="pencil" />
-          Edit metrics
-        </button>
-      </div>
-      {api.aggregations.clauses.map((clause) => (
-        <button
-          type="button"
-          key={clause.id}
-          className={cx("qt-chip", "qt-chip--agg", classNames?.chip)}
-          onClick={() => setEditing(clause.id)}
-        >
-          {clause.label ??
-            `${clause.op.toUpperCase()} ${clause.field ?? "rows"}`}
-        </button>
-      ))}
-      {editing !== null && (
+    <>
+      {api.aggregations.clauses.length === 0 && (
+        <div className="qt-qb-row qt-qb-row--metrics qt-qb-row--unused">
+          <div className="qt-qb-section-header">
+            <span className="qt-qb-kw" data-mobile-label="Metrics">
+              metrics
+            </span>
+            <button
+              type="button"
+              className="qt-add qt-metrics-open"
+              aria-label="Add metric"
+              aria-haspopup="dialog"
+              onClick={() => setEditing(true)}
+            >
+              <Icon name="add" />
+              add metric
+              <Icon name="arrowRight" size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+      {editing && (
         <MetricsEditor
           api={api}
           fields={allFields}
-          onClose={() => setEditing(null)}
-          {...(editing ? { initialMetricId: editing } : {})}
+          onClose={() => setEditing(false)}
           {...(theme ? { theme } : {})}
           {...(locale ? { locale } : {})}
         />
       )}
-    </div>
+    </>
   );
 }

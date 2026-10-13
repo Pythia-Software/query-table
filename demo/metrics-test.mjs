@@ -306,7 +306,8 @@ try {
     .click();
   await authoring.getByLabel("Reference library").selectOption("functions");
   await authoring.getByLabel("Function concept").selectOption("aggregate");
-  assert.equal(await authoring.locator(".qt-metric-reference-item").count(), 6);
+  assert.equal(await authoring.locator(".qt-metric-reference-item").count(), 7);
+  assert.equal(await authoring.locator(".qt-metric-reference-item").filter({ hasText: "MEDIAN" }).count(), 1);
   const expression = authoring.getByRole("textbox", {
     name: "Metric expression",
     exact: true,

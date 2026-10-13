@@ -53,7 +53,8 @@ async function checkSheet(page) {
 }
 
 async function reorderFirst(page, root, browserName) {
-  await root.scrollIntoViewIfNeeded();
+  // Fixed gesture coordinates need both endpoints away from edge auto-scroll.
+  await root.evaluate((element) => element.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" }));
   const handles = root.locator(".qt-reorder-handle");
   if (page.viewportSize().height <= 600) {
     await handles.first().focus();
@@ -409,7 +410,7 @@ for (const [name, engine] of [
         )
         .all()) {
         const add = await section
-          .locator(":scope > .qt-split-btn, :scope > .qt-add")
+          .locator(".qt-split-btn, .qt-add")
           .first()
           .boundingBox();
         const header = await section.boundingBox();
@@ -463,8 +464,8 @@ for (const [name, engine] of [
           await row.evaluate(
             (element) => getComputedStyle(element).borderTopStyle,
           ),
-          "solid",
-          "Clauses have visible horizontal separators",
+          "none",
+          "Clauses have no divider lines",
         );
         assert.equal(
           await row.evaluate((element) => getComputedStyle(element).paddingTop),
@@ -657,8 +658,8 @@ for (const [name, engine] of [
         await row.evaluate(
           (element) => getComputedStyle(element).borderTopStyle,
         ),
-        "solid",
-        "Desktop clauses also have horizontal separators",
+        "none",
+        "Desktop clauses have no divider lines",
       );
     }
     await desktop
@@ -674,7 +675,7 @@ for (const [name, engine] of [
         .count(),
       1,
     );
-    await desktop.locator(".qt-chip--agg").first().click();
+    await desktop.getByRole("button", { name: "Edit metrics", exact: true }).click();
     const metricEditor = desktop.getByRole("dialog", {
       name: "Edit metrics",
       exact: true,
@@ -698,21 +699,18 @@ for (const [name, engine] of [
       0,
       "Desktop editing does not open mobile sheets",
     );
-    await desktop
-      .getByRole("button", {
-        name: "Configure regex extract for Job",
-        exact: true,
-      })
-      .click();
+    await desktop.getByRole("button", { name: "Add sort", exact: true }).click();
+    await desktop.locator('.qt-picker-item[title="job_name"]').click();
+    await desktop.getByRole("button", { name: "Regex extraction", exact: true }).click();
     const regexDialog = desktop.getByRole("dialog", {
-      name: "Regex extraction for Job",
+      name: "Sort with regex extraction",
       exact: true,
     });
     await regexDialog
       .getByLabel("Regex extract for Job", { exact: true })
       .fill("^(.)");
     await regexDialog
-      .getByRole("button", { name: "Apply extraction", exact: true })
+      .getByRole("button", { name: "Update sort", exact: true })
       .waitFor();
     await desktop.waitForFunction(
       () =>
@@ -729,7 +727,7 @@ for (const [name, engine] of [
       .fill("[");
     assert(
       await regexDialog
-        .getByRole("button", { name: "Apply extraction", exact: true })
+        .getByRole("button", { name: "Update sort", exact: true })
         .isDisabled(),
       "Invalid regexes cannot be committed",
     );
@@ -770,6 +768,8 @@ for (const [name, engine] of [
         "Desktop picker search has focus before selecting",
       );
       await desktop.locator(`.qt-picker-item[title="${field}"]`).click();
+      if (await desktop.getByRole("group", { name: "Sort direction" }).count())
+        await desktop.getByRole("button", { name: "Descending", exact: true }).click();
       assert.equal(
         await result.count(),
         before + 1,

@@ -16,8 +16,8 @@ export type { TableClassNames, QueryBuilderClassNames, MenuClassNames } from "./
 export type { DataTableProps } from "./DataTable";
 export { DataTable } from "./DataTable";
 
-export type { QueryBuilderProps } from "./QueryBuilder";
-export { QueryBuilder } from "./QueryBuilder";
+export type { QueryBuilderProps, SelectPresentation } from "./QueryBuilder";
+export { QueryBuilder, QueryFilterRow } from "./QueryBuilder";
 
 export type { MetricsPanelProps } from "./MetricsPanel";
 export { MetricsPanel, MetricCard } from "./MetricsPanel";
@@ -61,3 +61,17 @@ export type { MenuAnchor, MenuProps, MenuItemProps, MenuSubmenuProps, MenuButton
 
 export { Popover } from "./Popover";
 export type { PopoverProps } from "./Popover";
+
+export { PickerAnchor, PickerSurface } from "./PickerAnchor";
+export { EditorContext, EditorPaneTitle, EditorChoice } from "./EditorParts";
+export { ModalSurface, useMobileLayout } from "./AdaptiveOverlay";
+export { ReorderList } from "./ReorderList";
+
+export { EditorModal, EditorPanelToggle, EditorPanelSeparator, type EditorWorkbench } from "./EditorModal";
+export { useEditorWorkbench, type EditorPaneSize } from "./useEditorWorkbench";
+
+export { default as FormulaEditor, type FormulaEditorProps, type FormulaEditorActions } from "./FormulaEditor";
+export { FormulaFunctionBrowser } from "./FormulaFunctionBrowser";
+export { ColumnRoleBadge, type ColumnRole } from "./ColumnRoleBadge";
+
+export { GroupedColumnsEditor } from "./grouping/GroupedColumnsEditor";

@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 
-import { act, createElement } from "react";
+import { act, createElement, Fragment } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useQueryTable, type QueryTableApi } from "@pythia-software/query-table-react";
 import { decodeQuery, type FieldSchema, type QueryState } from "@pythia-software/query-table-core";
 import { QueryBuilder } from "../src/QueryBuilder";
+import { MetricsPanel } from "../src/MetricsPanel";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -38,7 +39,10 @@ let api: QueryTableApi<Row>;
 const emptyRows:Row[]=[];
 function Fixture({ running = false, total, filterValues }: { running?: boolean; total?: number; filterValues?: QueryTableApi<Row>["filterValues"] }) {
   api = useQueryTable<Row>({ schema, initialQuery, clientRows: emptyRows, debounceMs: 0 });
-  return createElement(QueryBuilder<Row>, { api: filterValues ? { ...api, filterValues } : api, fields: schema.fields, total: total ?? api.total, running });
+  return createElement(Fragment, null,
+    createElement(QueryBuilder<Row>, { api: filterValues ? { ...api, filterValues } : api, fields: schema.fields, total: total ?? api.total, running }),
+    createElement(MetricsPanel<Row>, { api, aggregations: api.aggregations, fields: schema.fields }),
+  );
 }
 
 beforeEach(async () => {
@@ -110,7 +114,7 @@ it("omits placeholders for empty filters and metrics", async () => {
   expect(container.querySelector(".qt-qb-row--filters .qt-qb-hint")).toBeNull();
   expect(container.querySelector(".qt-qb-row--metrics .qt-qb-hint")).toBeNull();
   expect(container.querySelector('[aria-label="Add filter"]')).not.toBeNull();
-  expect(container.querySelector('[aria-label="Edit metrics"]')).not.toBeNull();
+  expect(container.querySelector('[aria-label="Add metric"]')).not.toBeNull();
 });
 
 it("renders a smaller save star without reducing its button target", () => {
@@ -216,12 +220,16 @@ it("puts mobile section actions before their summaries in keyboard and document 
   }
 });
 
-it("opens a new sort directly and edits direction, null placement, and optional extraction", async () => {
+it("chooses direction before adding a sort, then edits its null placement and extraction", async () => {
   await act(async () => container.querySelector<HTMLButtonElement>(".qt-qb-row--sort .qt-add")!.click());
   const name = Array.from(document.querySelectorAll<HTMLButtonElement>(".qt-picker-item")).find((button) => button.querySelector(".qt-picker-label")?.textContent === "Name")!;
   await act(async () => name.click());
   expect(document.querySelector('[aria-modal="true"]')?.textContent).toContain("Sort by Name");
-  await changeSelect(".qt-mobile-form select", "asc");
+  expect(api.query.orderBy).toEqual([]);
+  await act(async () => Array.from(document.querySelectorAll<HTMLButtonElement>('.qt-sort-direction-grid button')).find(button => button.textContent?.trim() === "Ascending")!.click());
+  expect(api.query.orderBy).toEqual([{ field: "name", dir: "asc" }]);
+  expect(document.querySelector('[aria-modal="true"]')).toBeNull();
+  await act(async () => container.querySelector<HTMLButtonElement>('.qt-qb-row--sort .qt-mobile-filter')!.click());
   const regex = Array.from(document.querySelectorAll<HTMLButtonElement>(".qt-mobile-form button")).find((button) => button.textContent === "regex extract")!;
   await act(async () => regex.click());
   expect(document.querySelectorAll('[aria-modal="true"]')).toHaveLength(2);
@@ -242,7 +250,7 @@ it("opens a new sort directly and edits direction, null placement, and optional 
 });
 
 it("opens the metrics workbench and commits a complete draft with one undo", async () => {
-  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Edit metrics"]')!.click());
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Add metric"]')!.click());
   expect(document.querySelectorAll('[aria-modal="true"]')).toHaveLength(1);
   await act(async () => Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(b=>b.textContent==="+ Create metric")!.click());
   await changeSelect('[aria-label="Measure field"]', "duration");
@@ -255,8 +263,15 @@ it("opens the metrics workbench and commits a complete draft with one undo", asy
   await act(async()=>apply.click());
   expect(api.aggregations.clauses[0]).toMatchObject({op:"avg",field:"duration",groupBy:["status"]});
   expect(document.querySelector('[aria-modal="true"]')).toBeNull();
+  expect(container.querySelector('.qt-qb-row--metrics')).toBeNull();
+  expect(container.querySelector('.qt-metrics-edit')?.textContent).toBe("Edit");
+  await act(async () => container.querySelector<HTMLButtonElement>('.qt-metrics-edit')!.click());
+  expect(document.querySelector<HTMLInputElement>('[aria-label="Workbench view"]')?.value).toBe("editor");
+  await act(async () => Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(b => b.textContent === "Cancel")!.click());
   await act(async()=>api.undo());
   expect(api.aggregations.clauses).toEqual([]);
+  expect(container.querySelector('[aria-label="Add metric"]')).not.toBeNull();
+  expect(container.querySelector('.qt-metrics-edit')).toBeNull();
 });
 
 it("omits duplicate single-filter headings and hides value controls for nullary conditions", async () => {
@@ -327,7 +342,7 @@ it("deletes only the tapped sort or metric while retaining the other clauses", a
   await act(async () => container.querySelector<HTMLButtonElement>(".qt-qb-row--sort .qt-mobile-filter")!.click());
   await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Remove Name sort"]')!.click());
   expect(api.query.orderBy).toEqual([{ field: "status", dir: "desc" }]);
-  await act(async () => container.querySelector<HTMLButtonElement>(".qt-qb-row--metrics .qt-chip")!.click());
+  await act(async () => container.querySelector<HTMLButtonElement>(".qt-metric-edit")!.click());
   await act(async () => document.querySelector<HTMLButtonElement>('.qt-metric-library .qt-metric-actions > button')!.click());
   await act(async () => Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find(b=>b.textContent==="Remove")!.click());
   await act(async()=>{await new Promise(resolve=>setTimeout(resolve,350));});

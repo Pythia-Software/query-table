@@ -1032,13 +1032,15 @@ describe("independent core review regressions", () => {
       { ...rows[1]!, id: 9 },
       { ...rows[1]!, id: 2 },
     ];
+    // Local tables preserve input order for ties. Shown-row metrics must not
+    // silently add an ID tie-breaker that changes which row is summarized.
     expect(
       evaluateMetrics(
         tied,
         query(metric("SUM([id])", { scope: "shownRows" }), { limit: 1 }),
         schema,
       ).metrics[0]?.buckets[0]?.value,
-    ).toBe(2);
+    ).toBe(9);
   });
   it("keeps legacy aliases working alongside modern siblings", () => {
     const schema: FieldSchema = {
@@ -1134,4 +1136,66 @@ it("normalizes Date grouping values to the same ISO key as datetime text", () =>
   expect(result.buckets).toEqual([
     { keys: [date.toISOString()], count: 2, value: 2 },
   ]);
+});
+
+describe("MEDIAN aggregate expressions", () => {
+  const schema: FieldSchema = {
+    name: "median",
+    idField: "id",
+    fields: [
+      { name: "id", label: "ID", type: "number", source: { kind: "backend" } },
+      {
+        name: "n",
+        label: "Number",
+        type: "number",
+        source: { kind: "backend" },
+      },
+      {
+        name: "text",
+        label: "Text",
+        type: "text",
+        source: { kind: "backend" },
+      },
+    ],
+  };
+  it("handles odd/even populations, nulls, composition and errors", () => {
+    for (const [values, expected] of [
+      [[10, 2, 5], 5],
+      [[10, 2, null], 6],
+      [[null], null],
+      [[], null],
+    ] as const) {
+      const data = values.map((n, id) => ({ id, n }));
+      const output = evaluateMetrics(data, query(metric("MEDIAN([n])")), schema)
+        .metrics[0]!;
+      expect(output.error).toBeUndefined();
+      expect(output.buckets[0]?.value ?? null).toBe(expected);
+    }
+    expect(
+      evaluateMetrics(
+        [
+          { id: 1, n: 2 },
+          { id: 2, n: 6 },
+        ],
+        query(metric("MEDIAN([n]) / AVG([n])")),
+        schema,
+      ).metrics[0]!.buckets[0]?.value,
+    ).toBe(1);
+    expect(
+      evaluateMetrics([{ id: 1, n: 2 }], query(metric("MEDIAN([n]/0)")), schema)
+        .metrics[0]!.buckets[0]?.error,
+    ).toBeTruthy();
+  });
+  it("rejects nested, non-numeric, and disallowed inputs", () => {
+    expect(() => compileMetric("MEDIAN([text])", schema)).toThrow(/numeric/);
+    expect(() => compileMetric("MEDIAN(SUM([n]))", schema)).toThrow(/Nested/);
+    expect(() =>
+      compileMetric("MEDIAN([n])", {
+        ...schema,
+        fields: schema.fields.map((f) =>
+          f.name === "n" ? { ...f, aggregate: { ops: ["sum"] } } : f,
+        ),
+      }),
+    ).toThrow(/does not allow/);
+  });
 });

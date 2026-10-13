@@ -6,6 +6,12 @@ import {
 
 export const FUNCTION_CATEGORIES = [
   {
+    id: "aggregates",
+    label: "Aggregate functions",
+    description: "Combine values from the rows in each group.",
+    keywords: "aggregate summary group median average count sum",
+  },
+  {
     id: "strings",
     label: "String functions",
     description: "Slice, combine, format, and clean text.",
@@ -70,6 +76,12 @@ export function functionResultLabel(result: FormulaType | "branch"): string {
 
 /** Concept is separate from return type: LENGTH is a string operation returning a number. */
 export function functionCategory(fn: FormulaFunction): FunctionCategory {
+  if (
+    ["COUNT", "COUNT_DISTINCT", "SUM", "AVG", "MIN", "MAX", "MEDIAN"].includes(
+      fn.name,
+    )
+  )
+    return "aggregates";
   if (fn.name.startsWith("TO_")) return "conversion";
   if (
     fn.name.startsWith("REGEX_") ||
@@ -117,10 +129,11 @@ export function findFormulaFunctions(
   search: string,
   category: FunctionCategory | "all" = "all",
   result: FormulaFunction["result"] | "all" = "all",
+  catalogue: readonly FormulaFunction[] = FORMULA_FUNCTIONS,
 ): FormulaFunction[] {
   const query = normalize(search);
   const terms = query.split(/\s+/).filter(Boolean);
-  const functions = FORMULA_FUNCTIONS.filter((fn) => {
+  const functions = catalogue.filter((fn) => {
     const concept = functionCategory(fn);
     if (
       (category !== "all" && concept !== category) ||

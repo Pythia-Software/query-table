@@ -1,0 +1,90 @@
+/* Base palettes copied from Pharos internal/archive/assets/ui.py at d797511.
+ * The query-table mapping below is a proposed adapter for this demo, not a
+ * change to Pharos. Neither the palette nor role colors enter saved queries. */
+.qt-grouping-page {
+  min-height: 100vh;
+  background: var(--qt-demo-bg, #f7f9fc);
+  color: var(--qt-text);
+  font-family: var(--qt-demo-font, inherit);
+}
+.qt-group-palette {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  color: var(--qt-muted);
+}
+.qt-group-palette select {
+  padding: 4px 6px;
+  font: inherit;
+  color: var(--qt-text);
+  background: var(--qt-bg, #fff);
+  border: 1px solid var(--qt-border);
+  border-radius: var(--qt-radius);
+}
+
+.qt-grouping-page[data-theme="pharos-cream"] {
+  color-scheme: light;
+  --pharos-bg: #eee7d8;
+  --pharos-panel: #fffaf0;
+  --pharos-ink: #2c2821;
+  --pharos-muted: #756c5f;
+  --pharos-accent: #315845;
+  --pharos-accent-deep: #203f31;
+  --pharos-sea: #315845;
+  --pharos-gold: #ad823b;
+  --pharos-line: #d5c8b3;
+  --pharos-warn: #98601d;
+  --pharos-bad: #9c3d36;
+  --pharos-heat-2: #a43687;
+}
+
+.qt-grouping-page[data-theme="pharos-forest"] {
+  color-scheme: dark;
+  --pharos-bg: #10241b;
+  --pharos-panel: #183529;
+  --pharos-ink: #f3ebdc;
+  --pharos-muted: #b5ab93;
+  --pharos-accent: #d8ae5e;
+  --pharos-accent-deep: #f1d690;
+  --pharos-sea: #8cc6a0;
+  --pharos-gold: #f0cf7e;
+  --pharos-line: #2d4f40;
+  --pharos-warn: #f0955a;
+  --pharos-bad: #ef8c84;
+  --pharos-heat-2: #e882c8;
+}
+
+.qt-grouping-page[data-theme^="pharos-"] {
+  --qt-demo-bg: var(--pharos-bg);
+  --qt-demo-font: "Avenir Next", Avenir, -apple-system, sans-serif;
+  --qt-bg: var(--pharos-panel);
+  --qt-header-bg: color-mix(in srgb, var(--pharos-bg) 76%, var(--pharos-panel));
+  --qt-bg-muted: var(--qt-header-bg);
+  --qt-text: var(--pharos-ink);
+  --qt-fg: var(--pharos-ink);
+  --qt-muted: var(--pharos-muted);
+  --qt-border: var(--pharos-line);
+  --qt-border-subtle: color-mix(in srgb, var(--pharos-line) 62%, transparent);
+  --qt-accent: var(--pharos-accent);
+  --qt-accent-hover: var(--pharos-accent-deep);
+  --qt-accent-fg: var(--pharos-panel);
+  --qt-accent-bg: color-mix(in srgb, var(--pharos-accent) 12%, var(--pharos-panel));
+  --qt-cell-hover: color-mix(in srgb, var(--pharos-gold) 8%, transparent);
+  --qt-row-selected-bg: var(--qt-accent-bg);
+  --qt-pass-fg: var(--pharos-sea);
+  --qt-pass-bg: color-mix(in srgb, var(--pharos-sea) 12%, var(--pharos-panel));
+  --qt-fail-fg: var(--pharos-bad);
+  --qt-fail-bg: color-mix(in srgb, var(--pharos-bad) 12%, var(--pharos-panel));
+  --qt-warn-fg: var(--pharos-warn);
+  --qt-warn-bg: color-mix(in srgb, var(--pharos-warn) 12%, var(--pharos-panel));
+  --qt-error: var(--pharos-bad);
+  --qt-radius: 4px;
+  /* Foreground colors and surfaces can be chosen separately. Darkening the
+     cream palette's gold keeps small KEY labels readable on cream surfaces. */
+  --qt-column-key-color: color-mix(in srgb, var(--pharos-gold) 70%, var(--pharos-ink));
+  --qt-column-key-bg: color-mix(in srgb, var(--pharos-gold) 10%, var(--pharos-panel));
+  --qt-column-aggregate-color: var(--pharos-heat-2);
+  --qt-column-row-color: var(--pharos-sea);
+}
+.qt-grouping-page a { color: var(--qt-accent); }

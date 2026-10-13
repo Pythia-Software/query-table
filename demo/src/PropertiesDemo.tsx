@@ -141,6 +141,7 @@ const relationships: RelationshipAdapter = {
 export function PropertiesDemo() {
   const [index, setIndex] = useState(0);
   const table = useQueryTable({ schema, clientRows: rows, syncUrl: true, itemDetails: { storage, relationships } });
+  const sourceTable = table.grouping?.source ?? table;
   return (
     <main className="qt-demo qt-object-demo">
       <header className="qt-demo-header">
@@ -164,11 +165,11 @@ export function PropertiesDemo() {
           query={table.query}
           onQueryChange={table.setQuery}
           renderers={defaultRenderers}
-          rowId={(row) => String(row.id)}
+          rowId={table.rowId}
           total={table.total}
           maxHeight={table.itemDetails?.active?.mode === "expand" ? 620 : 230}
           loading={table.loading}
-          itemDetails={table.itemDetails!}
+          {...(table.itemDetails ? { itemDetails: table.itemDetails } : {})}
           columnDrag={table.columnDrag}
         />
         <p className="qt-object-demo-note">Open a modal from Detail. Select columns adds popovers, row expansion, or a Page link with your own URL template. Share an item with its query and property view.</p>
@@ -188,8 +189,8 @@ export function PropertiesDemo() {
       <ObjectInspector
         schema={schema}
         row={rows[index]!}
-        propertyApi={table.itemDetails!.properties} viewScope="Modal"
-        shareAction={<ItemDetailShare api={table.itemDetails!} query={table.query} id={String(rows[index]!.id)} />}
+        propertyApi={sourceTable.itemDetails!.properties} viewScope="Modal"
+        shareAction={<ItemDetailShare api={sourceTable.itemDetails!} query={sourceTable.query} id={String(rows[index]!.id)} />}
         relationships={relationships}
         typeLabel="Tool call"
         title={String(rows[index]!.tool_name)}

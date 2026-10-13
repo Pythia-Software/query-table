@@ -4,6 +4,14 @@
 
 ### Added
 
+- Add row-producing GROUP BY for complete client datasets, with source filters,
+  HAVING, result sorting and paging, custom aggregate formulas including MEDIAN,
+  and one representative row chosen by configurable ordering. Preserve grouping
+  in saved views, URLs and history, and evaluate metrics over matching or shown
+  groups. Backend transports explicitly reject grouped-row queries.
+- Export shared resizable, closable editor panels and customizable column-role
+  theme tokens for group keys, aggregate values and representative-row fields;
+  add grouping integration documentation and themed playground examples.
 - Add compact compressed query URLs and a bounded FIFO browser cache for
   oversized views. Explicit Save/Share promotes immutable link codes through
   an optional snapshot store; query editing never writes snapshots remotely.
@@ -67,6 +75,10 @@
 
 ### Changed
 
+- Unify column, metric and property editors around shared panels, field-first
+  selection and contextual formula libraries. Compact optional query controls,
+  keep sort direction in the picker, and improve property-list density,
+  scrolling, add-property placement and live previews.
 - Display cell-menu string-length comparisons with `>`, `≤`, `<`, `≥`, `=`,
   and `≠` symbols in the paired keep/exclude actions.
 - Use the shared overlay system for table and metric actions, condition choices,
@@ -82,6 +94,14 @@
 
 ### Fixed
 
+- Preserve grouped rows and metric results during column resizing/reordering,
+  and retain default key columns when adding a group key to an empty SELECT.
+- Retain grouped rows during refresh, normalize saved grouping safely, and show
+  validation failures without unmounting editors. Restore hidden computed
+  columns, discard removed aggregate drafts, and respect contextual panel
+  defaults when resetting editor layouts.
+- Preserve inline standalone field pickers and dismissible mobile sheets,
+  including consistent grouping layouts on landscape touch screens.
 - Exclude invisible JSON container summaries from search, preserve manual
   scrolling when toggling sections during search, and apply the precision guard
   to source integer literals while accepting large floats and native numbers.

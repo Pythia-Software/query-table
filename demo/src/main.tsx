@@ -18,6 +18,7 @@ const DateMetricsPrototype = lazy(() =>
     default: module.DateMetricsPrototype,
   })),
 );
+const GroupingDemo = lazy(() => import("./grouping/GroupingDemo").then(module => ({ default: module.GroupingDemo })));
 
 const PlaygroundFeedback = import.meta.env.DEV
   ? lazy(() =>
@@ -29,7 +30,11 @@ const PlaygroundFeedback = import.meta.env.DEV
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    {window.location.pathname.startsWith("/cells") ? (
+    {window.location.pathname.startsWith("/grouping") ? (
+      <Suspense fallback={<p>Loading grouping playground…</p>}>
+        <GroupingDemo />
+      </Suspense>
+    ) : window.location.pathname.startsWith("/cells") ? (
       <Suspense fallback={<p>Loading cell displays…</p>}><main className="qt-demo"><CellDisplayDemo /></main></Suspense>
     ) : window.location.pathname.startsWith("/objects") ? (
       <Suspense fallback={<p>Loading object playground…</p>}>

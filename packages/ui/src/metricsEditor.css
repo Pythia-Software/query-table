@@ -67,13 +67,12 @@
 .qt-metrics-editor .qt-btn-primary {
   background: var(--qt-accent, #0969da);
   border-color: var(--qt-accent, #0969da);
-  color: #fff;
+  color: var(--qt-accent-fg, #fff);
   font-weight: 600;
 }
 .qt-metrics-editor .qt-btn-primary:hover:not(:disabled) {
-  background: var(--qt-accent, #0969da);
-  border-color: var(--qt-accent, #0969da);
-  filter: brightness(0.9);
+  background: var(--qt-accent-hover, color-mix(in srgb, var(--qt-accent, #0969da) 82%, #000));
+  border-color: var(--qt-accent-hover, color-mix(in srgb, var(--qt-accent, #0969da) 82%, #000));
 }
 .qt-metrics-editor
   :is(
@@ -661,6 +660,9 @@
 .qt-metric-reset-layout {
   margin-inline-start: auto;
 }
+.qt-metrics-editor-header .qt-metric-panel-tools + .qt-metric-reset-layout {
+  margin-inline-start: 0;
+}
 .qt-metric-discard-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1031,6 +1033,12 @@
   }
   .qt-metrics-editor-header .qt-metric-close {
     min-height: 34px;
+    order: 2;
+    margin-inline-start: auto;
+  }
+  .qt-metrics-editor-header > .qt-metric-panel-tools {
+    order: 3;
+    flex-basis: 100%;
   }
   .qt-metrics-editor-context {
     gap: 12px;

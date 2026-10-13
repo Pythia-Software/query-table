@@ -3,3 +3,7 @@
 @import "./metrics.css";
 @import "./metricsEditor.css";
 @import "./properties.css";
+@import "./editorParts.css";
+@import "./columnRoles.css";
+
+@import "./grouping.css";

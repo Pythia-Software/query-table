@@ -111,6 +111,8 @@ export function useAggregations<Row>(
   const dependencyKey = JSON.stringify([
     options.revisions ?? {},
     options.execution ?? null,
+    options.now,
+    options.strictLocalMetrics,
   ]);
   useEffect(() => {
     if (!enabled || !latest.current.query.aggregations?.length) {

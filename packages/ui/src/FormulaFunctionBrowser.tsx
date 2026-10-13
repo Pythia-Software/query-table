@@ -7,12 +7,19 @@ import {
   functionResultLabel,
   type FunctionCategory,
 } from "./formulaFunctionCatalogue";
-import type { FormulaFunction } from "@pythia-software/query-table-core";
+import {
+  FORMULA_FUNCTIONS,
+  type FormulaFunction,
+} from "@pythia-software/query-table-core";
 
 export function FormulaFunctionBrowser({
   onInsert,
+  functions = FORMULA_FUNCTIONS,
+  variant = "card",
 }: {
-  onInsert: (name: string) => void;
+  onInsert?: (name: string) => void;
+  functions?: readonly FormulaFunction[];
+  variant?: "card" | "panel";
 }) {
   const id = useId();
   const list = useRef<HTMLDivElement>(null);
@@ -22,7 +29,7 @@ export function FormulaFunctionBrowser({
     "all",
   );
   const [active, setActive] = useState(0);
-  const matches = findFormulaFunctions(search, category, result);
+  const matches = findFormulaFunctions(search, category, result, functions);
   const concept = FUNCTION_CATEGORIES.find((item) => item.id === category);
 
   useEffect(() => {
@@ -41,9 +48,16 @@ export function FormulaFunctionBrowser({
   }, [active, search, category, result]);
 
   return (
-    <aside className="qt-function-library" aria-labelledby={`${id}-title`}>
-      <h4 id={`${id}-title`}>Function library</h4>
-      <p className="qt-muted">Find a function by name or what it does.</p>
+    <aside
+      className={`qt-function-library qt-function-library--${variant}`}
+      aria-label="Function library"
+    >
+      {variant === "card" && (
+        <>
+          <h4>Function library</h4>
+          <p className="qt-muted">Find a function by name or what it does.</p>
+        </>
+      )}
       <label className="qt-function-search">
         Search functions
         <input
@@ -82,7 +96,7 @@ export function FormulaFunctionBrowser({
             } else if (event.key === "Enter") {
               event.preventDefault();
               const fn = matches[active];
-              if (fn) onInsert(fn.name);
+              if (fn) onInsert?.(fn.name);
             }
           }}
         />
@@ -98,7 +112,9 @@ export function FormulaFunctionBrowser({
             }}
           >
             <option value="all">All functions</option>
-            {FUNCTION_CATEGORIES.map((item) => (
+            {FUNCTION_CATEGORIES.filter((item) =>
+              functions.some((fn) => functionCategory(fn) === item.id),
+            ).map((item) => (
               <option key={item.id} value={item.id}>
                 {item.label}
               </option>
@@ -143,10 +159,11 @@ export function FormulaFunctionBrowser({
             id={`${id}-${fn.name}`}
             key={fn.name}
             aria-selected={index === active}
-            aria-label={`Insert ${fn.name}`}
+            aria-label={onInsert ? `Insert ${fn.name}` : fn.name}
+            disabled={!onInsert}
             onMouseDown={(event) => event.preventDefault()}
             onFocus={() => setActive(index)}
-            onClick={() => onInsert(fn.name)}
+            onClick={() => onInsert?.(fn.name)}
           >
             <span className="qt-function-card-title">
               <strong>{fn.name}</strong>
@@ -171,8 +188,9 @@ export function FormulaFunctionBrowser({
         </p>
       )}
       <p className="qt-function-insert-hint">
-        Click a function or use ↑↓ and Enter in search to insert it at the
-        cursor. Select formula text first to wrap it.
+        {onInsert
+          ? "Click a function or use ↑↓ and Enter in search to insert it at the cursor. Select formula text first to wrap it."
+          : "Select a formula column to insert a function."}
       </p>
     </aside>
   );

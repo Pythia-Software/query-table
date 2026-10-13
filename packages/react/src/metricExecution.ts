@@ -29,6 +29,10 @@ import {
 
 export interface MetricExecutionContext<Row> {
   schema: FieldSchema<Row>;
+  /** One clock shared by source grouping, HAVING, rows and local metrics. */
+  now?: number;
+  /** Group projections use typed semantics even for shorthand metric clauses. */
+  strictLocalMetrics?: boolean;
   transport?: Transport<Row> | undefined;
   clientRows?: Row[] | undefined;
   shownRows?: Row[] | undefined;
@@ -56,6 +60,7 @@ async function localMetrics<Row>(
   const originalClauses = query.aggregations ?? [];
   const advanced = (query.aggregations ?? []).filter(
     (c) =>
+      context.strictLocalMetrics ||
       c.dateGrouping ||
       isComputedField(c.field ?? "") ||
       c.groupBy.some(isComputedField) ||
@@ -74,6 +79,7 @@ async function localMetrics<Row>(
         originalClauses.length)
   )
     return evaluateMetrics(rows, query, context.schema, {
+      ...(context.now !== undefined ? { now: context.now } : {}),
       ...(signal ? { signal } : {}),
       ...(context.resolveComputed
         ? { resolveComputed: context.resolveComputed }
@@ -87,12 +93,14 @@ async function localMetrics<Row>(
     { ...query, aggregations: legacy },
     context.schema,
     {
+      ...(context.now !== undefined ? { now: context.now } : {}),
       ...(signal ? { signal } : {}),
     },
   );
   if (!advanced.length) return compatible;
   query = { ...query, aggregations: advanced };
   const options = {
+    ...(context.now !== undefined ? { now: context.now } : {}),
     ...(context.resolveComputed
       ? { resolveComputed: context.resolveComputed }
       : {}),
