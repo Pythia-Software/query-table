@@ -53,84 +53,93 @@
       }
     },
     "propertyFormat": {
-      "type": "object",
-      "required": [
-        "kind"
-      ],
-      "additionalProperties": false,
-      "properties": {
-        "kind": {
-          "enum": [
-            "text",
-            "code",
-            "json",
-            "boolean",
-            "chips",
-            "relative",
-            "currency",
-            "number",
-            "percent",
-            "duration",
-            "date",
-            "time",
-            "datetime"
-          ]
-        },
-        "decimals": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 20
-        },
-        "currency": {
-          "type": "string",
-          "pattern": "^[A-Z]{3}$"
-        },
-        "sourceUnit": {
-          "enum": [
-            "milliseconds",
-            "seconds",
-            "minutes",
-            "hours",
-            "days",
-            "iso",
-            "epochSeconds",
-            "epochMilliseconds",
-            "secondsOfDay",
-            "millisecondsOfDay"
-          ]
-        },
-        "style": {
-          "enum": [
-            "human",
-            "long",
-            "clock",
-            "custom",
-            "iso"
-          ]
-        },
-        "pattern": {
-          "type": "string",
-          "maxLength": 1000
-        },
-        "timeZone": {
-          "type": "string",
-          "maxLength": 256
-        }
-      },
-      "allOf": [
+      "oneOf": [
         {
-          "if": {
-            "properties": {
-              "kind": {
-                "const": "currency"
-              }
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "text",
+                "code",
+                "boolean",
+                "chips",
+                "relative",
+                "currency",
+                "number",
+                "percent",
+                "duration",
+                "date",
+                "time",
+                "datetime"
+              ]
+            },
+            "decimals": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 20
+            },
+            "currency": {
+              "type": "string",
+              "pattern": "^[A-Z]{3}$"
+            },
+            "sourceUnit": {
+              "enum": [
+                "milliseconds",
+                "seconds",
+                "minutes",
+                "hours",
+                "days",
+                "iso",
+                "epochSeconds",
+                "epochMilliseconds",
+                "secondsOfDay",
+                "millisecondsOfDay"
+              ]
+            },
+            "style": {
+              "enum": [
+                "human",
+                "long",
+                "clock",
+                "custom",
+                "iso"
+              ]
+            },
+            "pattern": {
+              "type": "string",
+              "maxLength": 1000
+            },
+            "timeZone": {
+              "type": "string",
+              "maxLength": 256
             }
           },
-          "then": {
-            "required": [
-              "currency"
-            ]
-          }
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "kind": {
+                    "const": "currency"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "currency"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "$ref": "#/$defs/jsonCellDisplay"
+        },
+        {
+          "$ref": "#/$defs/chipCellDisplay"
         }
       ]
     },
@@ -232,6 +241,7 @@
         "group": { "type": "string", "description": "Field-picker grouping bucket." },
         "alias": { "type": "string", "description": "Single alternative search term (legacy alias support)." },
         "aliases": { "type": "array", "items": { "type": "string" }, "description": "Extra search terms for the picker." },
+        "display": { "$ref": "#/$defs/cellDisplay" },
         "render": { "type": "string", "description": "Render-registry key resolved on the frontend (code, not data — only the key is stored)." },
         "property": {
           "$ref": "#/$defs/propertyField"
@@ -283,6 +293,244 @@
           "properties": { "postgres": { "$ref": "#/$defs/sqlBinding" }, "sqlite": { "$ref": "#/$defs/sqliteBinding" } }
         }
       }
+    },
+    "jsonCellDisplay": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "json"
+          ]
+        },
+        "encoding": {
+          "enum": [
+            "auto",
+            "value",
+            "json",
+            "escaped"
+          ]
+        },
+        "maxDecodeDepth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        },
+        "previewLength": {
+          "type": "integer",
+          "minimum": 20,
+          "maximum": 500
+        },
+        "expandDepth": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8
+        }
+      }
+    },
+    "chipCellDisplay": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "chip"
+          ]
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "tones": {
+          "type": "object",
+          "additionalProperties": {
+            "enum": [
+              "neutral",
+              "success",
+              "warning",
+              "danger"
+            ]
+          }
+        }
+      }
+    },
+    "cellDisplay": {
+      "description": "Built-in cell presentation. Query field types and backend bindings remain independent. An explicit registered render key or function overrides display.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/jsonCellDisplay"
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "date",
+                "datetime"
+              ]
+            },
+            "style": {
+              "enum": [
+                "human",
+                "iso",
+                "custom"
+              ]
+            },
+            "pattern": {
+              "type": "string",
+              "maxLength": 160
+            },
+            "timeZone": {
+              "type": "string"
+            },
+            "locale": {
+              "type": "string"
+            },
+            "sourceUnit": {
+              "enum": [
+                "iso",
+                "epochSeconds",
+                "epochMilliseconds"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "time"
+              ]
+            },
+            "style": {
+              "enum": [
+                "human",
+                "iso",
+                "custom"
+              ]
+            },
+            "pattern": {
+              "type": "string",
+              "maxLength": 160
+            },
+            "timeZone": {
+              "type": "string"
+            },
+            "locale": {
+              "type": "string"
+            },
+            "sourceUnit": {
+              "enum": [
+                "iso",
+                "epochSeconds",
+                "epochMilliseconds",
+                "secondsOfDay",
+                "millisecondsOfDay"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "duration"
+              ]
+            },
+            "sourceUnit": {
+              "enum": [
+                "milliseconds",
+                "seconds",
+                "minutes",
+                "hours",
+                "days"
+              ]
+            },
+            "style": {
+              "enum": [
+                "human",
+                "long",
+                "clock",
+                "custom"
+              ]
+            },
+            "pattern": {
+              "type": "string",
+              "maxLength": 160
+            },
+            "decimals": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 20
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "number",
+                "percent"
+              ]
+            },
+            "decimals": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 20
+            },
+            "locale": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/chipCellDisplay"
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "text"
+              ]
+            },
+            "truncate": {
+              "type": "boolean"
+            }
+          }
+        }
+      ]
     },
     "filterValues": {
       "description": "How filter-value candidates are offered. Default everywhere is autocomplete (backend distinct-value search, refined per keystroke).",

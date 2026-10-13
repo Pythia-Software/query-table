@@ -44,6 +44,17 @@ Query state is bounded whenever it crosses the library's URL, storage, or
 server-projection boundaries. SQL expressions remain trusted server-side schema
 configuration; request values are never SQL fragments.
 
+## Compact URLs and query snapshots
+
+`encodeQuery` chooses versioned JSON or raw-DEFLATE tokens, packs intact set
+filters once, and shares identical property layouts. `decodeQueryStrict` reports
+invalid/unsupported/oversized links; `decodeQuery` is the tolerant convenience
+decoder. `createQueryLinkService` keeps fitting views inline and oversized views
+in a bounded FIFO browser cache. Its explicit `durable`/`snapshot` calls promote
+immutable codes through an injected `QuerySnapshotStore`; ordinary `local` calls
+never write to the server. `httpQuerySnapshotStore` implements the host REST
+contract. See [URL state and saved-search links](../../docs/url-state-and-saved-search-design.md).
+
 Text filters include `matches_regex` / `not_matches_regex`. An order term may
 set `extract: { regex: "..." }` to compare the first capture group (or the whole
 match when there is no capture group); non-matches sort as nulls.
@@ -114,3 +125,10 @@ PostgreSQL numeric and also conservatively bounds SUM's absolute population sum.
 Do not claim identical acceptance, intermediate overflow, or bit-for-bit numeric
 parity; negotiate the backend profile and compare supported floating results
 with tolerances. The host must enforce the negotiated profile and execution budgets.
+
+## Cell presentation
+
+`FieldDef.display` accepts the serializable `CellDisplay` union for JSON, temporal,
+duration, numeric, text, and chip presentation. It is independent of `FieldType`
+and backend query capabilities. `loadSchema` validates display options, and
+codegen preserves them in frontend schemas. See the [cell display guide](../../docs/cell-displays.md).

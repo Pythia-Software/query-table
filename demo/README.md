@@ -23,6 +23,18 @@ Then open http://localhost:5179. You can:
 
 The current view is encoded in the `?q=` URL, so reloads and bookmarks restore it.
 
+## Cell displays and item details
+
+Open http://localhost:5179/cells to explore native, serialized, encoded, escaped,
+array, and malformed JSON alongside explicit timestamp/duration units and status
+chips. Open a payload for its searchable inspector, or use the Detail buttons
+for inline JSON in a popover, modal, or expanded row. Customize properties to
+change JSON decoding and expansion; Share restores the item and its appearance.
+
+With the dev server running, `npm run test:cells` checks desktop/mobile search,
+copying, detail surfaces, property editing, and shared-link restoration, and
+writes screenshots to `.context/`.
+
 ## Date metric prototype
 
 Open http://localhost:5179/date-metrics for an isolated metric-definition prototype.

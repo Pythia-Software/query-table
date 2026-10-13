@@ -102,3 +102,22 @@ describe("loadSchema", () => {
     expect(() => loadSchema({ name: "x" })).toThrow(/idField/);
   });
 });
+
+describe("declarative display schema", () => {
+  const doc = (display: unknown) => ({ name: "values", idField: "value", fields: [{ name: "value", label: "Value", type: "text", source: "backend", display }] });
+  it("preserves display settings independently of query type and capabilities", () => {
+    const display = { kind: "json", encoding: "escaped", maxDecodeDepth: 6, previewLength: 100 };
+    const field = loadSchema(doc(display)).fields[0]!;
+    expect(field.display).toEqual(display);
+    expect(field.type).toBe("text");
+    expect(isFilterable(field)).toBe(true);
+  });
+  it.each([
+    { kind: "json", maxDecodeDepth: 20 }, { kind: "json", encoding: "loose" },
+    { kind: "duration", sourceUnit: "iso" }, { kind: "number", decimals: -1 },
+    { kind: "date", sourceUnit: "secondsOfDay" }, { kind: "chip", tones: { ok: "green" } },
+    { kind: "text", truncate: "yes" }, { kind: "unknown" }, { kind: "json", unexpected: true }, null,
+  ])("rejects malformed display config: %j", (display) => {
+    expect(() => loadSchema(doc(display))).toThrow("field value display");
+  });
+});

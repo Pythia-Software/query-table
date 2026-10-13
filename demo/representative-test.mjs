@@ -48,7 +48,9 @@ const pick = (name) =>
     })
     .click();
 const snapshot = async () => {
+  await page.evaluate(() => { delete window.__shared; });
   await button("Share").click();
+  await page.waitForFunction(() => typeof window.__shared === "string");
   const query = decodeQuery(new URL(await page.evaluate(() => window.__shared)).searchParams.get("q"));
   const { grouping, ...result } = query;
   return { version: 2, mode: grouping ? "groups" : "rows", keys: grouping?.keys ?? [], summaries: grouping?.summaries ?? [], representative: grouping?.representative ?? null, input: grouping?.source ?? result, result };

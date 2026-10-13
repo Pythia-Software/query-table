@@ -101,6 +101,7 @@ try {
       // Explicit old links still work after migration, independent of storage.
       await page.goto(`${origin}/grouping?view=${encodeURIComponent(JSON.stringify(shared))}`);
       await page.waitForURL(url => decodeQuery(url.searchParams.get("q")).grouping?.keys[0] === "platform");
+      assert.equal(new URL(page.url()).searchParams.has("view"), false, "discard imported legacy URL state before sharing");
       await page.getByRole("columnheader", { name: /Platform/ }).waitFor();
       assert.equal(await notice.count(), 0);
       await page.goto(`${origin}/grouping?view=${encodeURIComponent("{corrupt")}`);

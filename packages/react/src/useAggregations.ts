@@ -33,6 +33,7 @@ export function useAggregations<Row>(
     MetricExecutionContext<Row>,
     "schema" | "transport" | "clientRows"
   > = {},
+  enabled = true,
 ): AggregationsApiState {
   const [results, setResults] = useState<AggregationResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -44,6 +45,7 @@ export function useAggregations<Row>(
     clientRows,
     options,
     validateQuery,
+    enabled,
   });
   latest.current = {
     query,
@@ -52,10 +54,12 @@ export function useAggregations<Row>(
     clientRows,
     options,
     validateQuery,
+    enabled,
   };
   const preview = useCallback(
     async (clauses: AggregationClause[], signal?: AbortSignal) => {
       const current = latest.current;
+      if (!current.enabled) throw Error("Resolve the query link before previewing metrics.");
       const draft = { ...current.query, aggregations: clauses };
       current.validateQuery?.(draft);
       return executeMetrics(
@@ -111,7 +115,7 @@ export function useAggregations<Row>(
     options.strictLocalMetrics,
   ]);
   useEffect(() => {
-    if (!latest.current.query.aggregations?.length) {
+    if (!enabled || !latest.current.query.aggregations?.length) {
       setResults(null);
       setLoading(false);
       setError(null);
@@ -166,6 +170,7 @@ export function useAggregations<Row>(
     debounceMs,
     nonce,
     validateQuery,
+    enabled,
     dependencyKey,
     localPage,
     localPage ? options.shownRows : undefined,

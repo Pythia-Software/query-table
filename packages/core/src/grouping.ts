@@ -188,6 +188,7 @@ export function createGroupingModel<InputRow>(
             ? { sort: { enabled: field.sort.enabled } }
             : {}),
           ...(typeof field.render === "string" ? { render: field.render } : {}),
+          ...(field.display ? { display: field.display } : {}),
           group: "Group keys",
         }];
       }),
@@ -233,6 +234,7 @@ export function createGroupingModel<InputRow>(
         ...(typeof input?.render === "string" && !counting
           ? { render: input.render }
           : {}),
+        ...(input?.display && !counting ? { display: input.display } : {}),
       });
     }
     return {

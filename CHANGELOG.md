@@ -12,6 +12,28 @@
 - Export shared resizable, closable editor panels and customizable column-role
   theme tokens for group keys, aggregate values and representative-row fields;
   add grouping integration documentation and themed playground examples.
+- Add compact compressed query URLs and a bounded FIFO browser cache for
+  oversized views. Explicit Save/Share promotes immutable link codes through
+  an optional snapshot store; query editing never writes snapshots remotely.
+  Add HTTP and Go PostgreSQL/SQLite snapshot storage, fresh-session restoration,
+  missing-link errors, and browser back/forward resolution.
+
+- Display JSON as collapsible, pretty-printed code with branch-preserving search
+  in the upper-right toolbar and whole-object/per-value copying. Align its
+  resizable modal, Close control, footer, and mobile sheet with item details.
+- Add typed, serializable field cell displays for JSON, date/time, duration,
+  number/percent, text, and labeled chips, with a shared searchable JSON inspector
+  for native, serialized, encoded, and escaped values.
+- Embed the shared JSON inspector in item detail properties across popovers,
+  modals, and expanded rows. Inherit field display settings, add editable JSON
+  property options that persist in saves/share links, and export `JsonValueView`.
+- Keep JSON property trees initially collapsed without nested scrolling, with
+  hidden-key/value counts and a viewer button beside the property label. In the
+  full viewer, open the root and small containers by default, bucket long arrays
+  into ranges of 20, and offer filter/highlight search with match navigation.
+  Preserve standard cell click/copy behavior and add Open in JSON Viewer to
+  JSON cell menus.
+
 - Add an isolated date metric demo prototype with calendar intervals, optional
   empty buckets, explicit ranges, and count/sum versus average behavior.
 - Add date interval and empty-date settings to the existing metric editor,
@@ -78,6 +100,9 @@
   defaults when resetting editor layouts.
 - Preserve inline standalone field pickers and dismissible mobile sheets,
   including consistent grouping layouts on landscape touch screens.
+- Exclude invisible JSON container summaries from search, preserve manual
+  scrolling when toggling sections during search, and apply the precision guard
+  to source integer literals while accepting large floats and native numbers.
 - Keep raw chart group labels when a scatter/histogram X format survives a
   display change without calendar grouping.
 - Reuse the last date bucket's boundaries and ISO key for dense timestamp rows,

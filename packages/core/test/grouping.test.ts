@@ -116,6 +116,21 @@ function query(): QueryState {
 }
 
 describe("standard grouping model", () => {
+  it("preserves host cell displays for keys and values while leaving counts unformatted", () => {
+    const model = createGroupingModel<GroupedRow>({
+      ...schema,
+      fields: schema.fields.map(field => ({ ...field, display: { kind: "text", truncate: false } })),
+    });
+    const projected = model.resultSchema(["customer"], [
+      { id: "value", op: "row", field: "region" },
+      { id: "smallest", op: "min", field: "region" },
+      { id: "count", op: "count", field: "region" },
+    ]);
+    for (const name of ["customer", "value", "smallest"])
+      expect(projected.fields.find(field => field.name === name)?.display).toEqual({ kind: "text", truncate: false });
+    expect(projected.fields.find(field => field.name === "count")?.display).toBeUndefined();
+  });
+
   it.each([undefined, null])("treats grouping: %s as an ordinary row query", async grouping => {
     const plain = normalizeQueryState({ select: [{ field: "customer" }], limit: 2, offset: 1 });
     const q = normalizeQueryState({ ...plain, grouping });

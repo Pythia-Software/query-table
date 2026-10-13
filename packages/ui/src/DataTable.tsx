@@ -20,6 +20,7 @@ import { useColumnDrag, type SelectionApi, type ColumnDragApi } from "@pythia-so
 import { resolveRenderer, type RenderRegistry } from "./renderers";
 import type { TableClassNames } from "./classNames";
 import { CellMenu } from "./CellMenu";
+import { cellValueText } from "./jsonValue";
 import { formatRowCount, rowCountTitle } from "./formatRowCount";
 import { Menu, MenuItem, MenuSeparator, MenuSubmenu } from "./Menu";
 import { equalWidths, fitContentWidths, fitScreenWidths, type ColumnWidthPreset } from "./columnWidths";
@@ -263,7 +264,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     setMenu(null);
     try {
       if (navigator.clipboard) {
-        await navigator.clipboard.writeText(valueToString(value));
+        await navigator.clipboard.writeText(f.display?.kind === "json" || f.render === "json" ? cellValueText(value) : valueToString(value));
       }
     } catch {
       /* clipboard denial is non-fatal */

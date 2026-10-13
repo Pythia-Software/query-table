@@ -233,6 +233,7 @@ export function PropertyViewEditor<Row>({
                         Custom renderer: {property.render}
                       </option>
                     ) : null}
+                    {format?.kind === "chip" ? <option value="chip">Configured chips</option> : null}
                     {formatChoices.map((kind) => (
                       <option key={kind} value={kind}>
                         {kind === "auto" ? "Schema default" : kind}
@@ -240,6 +241,23 @@ export function PropertyViewEditor<Row>({
                     ))}
                   </select>
                 </label>
+                {format?.kind === "json" && <>
+                  <label>JSON input
+                    <select aria-label={`JSON input for ${property.id}`} value={format.encoding ?? "auto"}
+                      onChange={(event) => update(property.id, { format: { ...format, encoding: event.target.value } as PropertyFormat })}>
+                      <option value="auto">Auto decode</option><option value="value">Native value / literal string</option>
+                      <option value="json">Parse JSON once</option><option value="escaped">Encoded / escaped JSON</option>
+                    </select>
+                  </label>
+                  <label>Decode passes
+                    <input aria-label={`JSON decode passes for ${property.id}`} type="number" min={1} max={8} value={format.maxDecodeDepth ?? 4}
+                      onChange={(event) => update(property.id, { format: { ...format, maxDecodeDepth: Number(event.target.value) } })} />
+                  </label>
+                  <label>Expand levels
+                    <input aria-label={`JSON expand levels for ${property.id}`} type="number" min={0} max={8} value={format.expandDepth ?? 1}
+                      onChange={(event) => update(property.id, { format: { ...format, expandDepth: Number(event.target.value) } })} />
+                  </label>
+                </>}
                 {format &&
                 ["number", "percent", "currency", "duration"].includes(
                   format.kind,

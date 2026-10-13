@@ -155,3 +155,42 @@ describe("schema code generation", () => {
     ).toThrow(/invalid Go import path/);
   });
 });
+
+describe("cell display contract", () => {
+  const metaSchema = JSON.parse(readFileSync(new URL("../../../schema/query-table.schema.json", import.meta.url), "utf8"));
+  const validate = new Ajv2020({ strict: false }).compile(metaSchema);
+  const doc = (display: unknown) => ({ name: "values", idField: "value", fields: [{ name: "value", label: "Value", type: "text", source: "backend", display, bindings: { postgres: { expr: "v.value" } } }] });
+  it.each([
+    { kind: "json", encoding: "escaped", expandDepth: 2 },
+    { kind: "datetime", sourceUnit: "epochSeconds", timeZone: "UTC" },
+    { kind: "time", sourceUnit: "secondsOfDay", style: "iso" },
+    { kind: "duration", sourceUnit: "seconds", style: "clock" },
+    { kind: "chip", labels: { ok: "Ready" }, tones: { ok: "success" } },
+    { kind: "number", decimals: 3, locale: "en-US" }, { kind: "text", truncate: true },
+  ])("validates and preserves frontend config %j without changing SQL", (display) => {
+    expect(validate(doc(display)), JSON.stringify(validate.errors)).toBe(true);
+    expect(generateTypeScript(doc(display))).toContain(JSON.stringify(display.kind));
+    expect(generateTypeScript(doc(display))).toContain('"display"');
+    expect(generateGo(doc(display), { packageName: "catalog" })).not.toContain("display");
+  });
+  it.each([{ kind: "json", expandDepth: 10 }, { kind: "time", sourceUnit: "days" }, { kind: "chip", tones: { ok: "green" } }, { kind: "duration", unexpected: true }])("rejects invalid schema config %j", (display) => {
+    expect(validate(doc(display))).toBe(false);
+  });
+});
+
+describe("detail JSON display configuration", () => {
+  it("validates and projects the same JSON settings in display and property formats", () => {
+    const display = { kind: "json", encoding: "escaped", maxDecodeDepth: 5, expandDepth: 2 };
+    const configured = structuredClone(document);
+    configured.fields[0].display = display;
+    configured.fields[0].property = { format: display };
+    const metaSchema = JSON.parse(readFileSync(new URL("../../../schema/query-table.schema.json", import.meta.url), "utf8"));
+    const validate = new Ajv2020({ strict: false }).compile(metaSchema);
+    expect(validate(configured), JSON.stringify(validate.errors)).toBe(true);
+    const output = generateTypeScript(configured);
+    expect(output).toContain('"encoding": "escaped"');
+    expect(output).toContain('"property"');
+    configured.fields[0].property.format.maxDecodeDepth = 99;
+    expect(validate(configured)).toBe(false);
+  });
+});

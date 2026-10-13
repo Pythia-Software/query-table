@@ -10,6 +10,8 @@ import { Icon } from "./Icon";
 import type { ReactNode } from "react";
 import { createElement } from "react";
 import type { FieldDef, QueryState } from "@pythia-software/query-table-core";
+import { renderCellDisplay } from "./cellFormatting";
+import { JsonCell, JsonValueView } from "./JsonCell";
 
 export interface CellContext<Row = any, V = unknown> {
   value: V;
@@ -17,6 +19,8 @@ export interface CellContext<Row = any, V = unknown> {
   field: FieldDef<Row, V>;
   /** Current query — lets renderers reflect active state (e.g. highlight matches). */
   query: QueryState;
+  /** Detail surfaces can embed richer content directly instead of opening another dialog. */
+  presentation?: "cell" | "property";
 }
 
 export type CellRenderer<Row = any, V = unknown> = (ctx: CellContext<Row, V>) => ReactNode;
@@ -52,6 +56,9 @@ export function safeLinkHref(value: unknown): string | null {
 /** Generic, domain-free renderers shipped with the package. Keys are stable and
  *  referenced from FieldDef.render. Consumers spread these and add their own. */
 export const defaultRenderers: RenderRegistry = {
+  json({ value, field, presentation }) {
+    return createElement(presentation === "property" ? JsonValueView : JsonCell, { value, label: field.label, display: field.display?.kind === "json" ? field.display : undefined });
+  },
   // String(value), em-dash for null/empty
   text({ value }) {
     if (isEmpty(value)) return muted(EMPTY);
@@ -132,7 +139,7 @@ export const defaultRenderers: RenderRegistry = {
 };
 
 /** Resolve a FieldDef's renderer: inline fn wins, else registry lookup, else
- *  the `text` fallback. */
+ *  declarative display, else the `text` fallback. */
 export function resolveRenderer<Row>(
   field: FieldDef<Row>,
   registry: RenderRegistry<Row>,
@@ -146,6 +153,7 @@ export function resolveRenderer<Row>(
     const found = registry[r];
     if (found) return found;
   }
+  if (field.display) return (ctx) => renderCellDisplay(ctx, field.display!);
   // text fallback always exists (consumers spread defaultRenderers in).
   return (registry["text"] ?? defaultRenderers["text"]) as CellRenderer<Row>;
 }

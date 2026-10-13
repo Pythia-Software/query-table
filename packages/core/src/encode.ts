@@ -1,4 +1,6 @@
 import type { MetricKey, MetricValue, MetricScope, MetricDistributionResult, MetricDiagnostic } from "./metricTypes";
+import { deflateSync, Inflate } from "fflate";
+import { createSetFilter, readSetFilter } from "./setFilter";
 // encode.ts — URL serialization + the server-bound query subset.
 //
 // Two distinct serializations, deliberately kept apart:
@@ -19,7 +21,7 @@ import type { MetricKey, MetricValue, MetricScope, MetricDistributionResult, Met
 
 import { EMPTY_QUERY, MAX_QUERY_TOKEN_LENGTH, normalizeQueryState, predicatesOf } from "./query";
 import { stripSetFilter } from "./setFilter";
-import type { QueryState, WhereTerm, OrderByClause, SelectColumn, AggregationClause } from "./query";
+import type { QueryState, WhereTerm, OrderByClause, SelectColumn, AggregationClause, SetFilterMode } from "./query";
 import type { FieldSchema, FieldDef } from "./schema";
 import { indexFields, isFilterable, isPushdownFilter, isSortable, resolveFieldName, selectedFields } from "./schema";
 
@@ -65,8 +67,8 @@ interface CompactQuery {
   b?: QueryState["grouping"];
 }
 
-/** QueryState → base64url token (omitting defaults). All-default query → "". */
-export function encodeQuery(q: QueryState): string {
+/** Canonical query projected into the URL wire form. */
+function compactQuery(q: QueryState): CompactQuery {
   q = normalizeQueryState(q);
   const c: CompactQuery = {};
   if (q.select.length)
@@ -79,17 +81,143 @@ export function encodeQuery(q: QueryState): string {
   if (q.itemDetails) c.d = q.itemDetails;
   if (q.fitToScreen) c.fs = true;
   if (q.grouping) c.b = q.grouping;
-  if (Object.keys(c).length === 0) return "";
-  return toBase64Url(JSON.stringify(c));
+  return c;
+}
+
+export const MAX_QUERY_STATE_BYTES = 4 * 1024 * 1024;
+export class QueryDecodeError extends Error {
+  constructor(public readonly code: "invalid" | "too_large" | "unsupported_version", message: string) {
+    super(message); this.name = "QueryDecodeError";
+  }
+}
+
+// v2 keeps execution state unchanged, but represents intact set editors once.
+// Equal property layouts share one entry rather than repeating every modality.
+function packQuery(c: CompactQuery): Record<string, unknown> {
+  const packed: Record<string, unknown> = { ...c };
+  if (c.l === EMPTY_QUERY.limit) delete packed.l;
+  if (c.w) {
+    const terms: unknown[] = [];
+    for (let i = 0; i < c.w.length; i++) {
+      const set = readSetFilter(c.w, i);
+      if (set) {
+        terms.push(["set", set.field, set.metadata.mode, set.metadata.values, set.metadata.id]);
+        i += set.count - 1;
+      } else terms.push(c.w[i]);
+    }
+    packed.w = terms;
+  }
+  if (c.d?.views) {
+    const pool: unknown[] = [];
+    const refs: Record<string, number> = {};
+    for (const [mode, view] of Object.entries(c.d.views)) {
+      let index = pool.findIndex(v => JSON.stringify(v) === JSON.stringify(view));
+      if (index < 0) { index = pool.length; pool.push(view); }
+      refs[mode] = index;
+    }
+    packed.d = { ...c.d, views: { pool, refs } };
+  }
+  return packed;
+}
+
+function unpackQuery(c: Record<string, unknown>): CompactQuery {
+  if (Array.isArray(c.w)) c.w = c.w.flatMap((term: unknown) => {
+    if (!Array.isArray(term)) return [term];
+    if (term.length !== 5 || term[0] !== "set" || typeof term[1] !== "string" ||
+      typeof term[2] !== "string" || !["any", "all", "none", "empty"].includes(term[2]) || !Array.isArray(term[3]) ||
+      term[3].length > 100 || !term[3].every((v: unknown) => typeof v === "string" && v.length <= 10000) || typeof term[4] !== "string")
+      throw new QueryDecodeError("invalid", "Invalid set filter in query link.");
+    return createSetFilter(term[1], term[2] as SetFilterMode, term[3] as string[], term[4]);
+  });
+  const details = c.d;
+  const views = details && typeof details === "object" && "views" in details ? details.views : undefined;
+  if (details && typeof details === "object" && views && typeof views === "object" && "pool" in views) {
+    const pool = views.pool;
+    const refs = "refs" in views ? views.refs : undefined;
+    if (!Array.isArray(pool) || pool.length > 3 || !refs || typeof refs !== "object" || Array.isArray(refs))
+      throw new QueryDecodeError("invalid", "Invalid property views in query link.");
+    c.d = { ...details, views: Object.fromEntries(Object.entries(refs).map(([mode, index]) => {
+      if (!["hover", "modal", "expand"].includes(mode) || !Number.isInteger(index) || (index as number) < 0 || (index as number) >= pool.length)
+        throw new QueryDecodeError("invalid", "Invalid property view reference.");
+      return [mode, pool[index as number]];
+    })) };
+  }
+  return c as CompactQuery;
+}
+
+/** v2 JSON or raw-DEFLATE UTF-8, whichever produces the shorter URL token. */
+export function encodeQuery(q: QueryState): string {
+  const json = JSON.stringify(packQuery(compactQuery(q)));
+  const bytes = new TextEncoder().encode(json);
+  if (bytes.length > MAX_QUERY_STATE_BYTES) throw new QueryDecodeError("too_large", "Query state exceeds the storage limit.");
+  const plain = "2j." + toBase64Url(json);
+  const compressed = "2d." + bytesToBase64(deflateSync(bytes));
+  const token = compressed.length < plain.length ? compressed : plain;
+  if (token.length > MAX_QUERY_TOKEN_LENGTH) throw new QueryDecodeError("too_large", "Encoded query state exceeds the storage limit.");
+  return token;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  if (typeof Buffer !== "undefined") return Buffer.from(bytes).toString("base64").replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
+  let bin = "";
+  for (const byte of bytes) bin += String.fromCharCode(byte);
+  return btoa(bin).replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
+}
+
+function inflateToken(token: string): string {
+  const bin = atob(token.replace(/-/g, "+").replace(/_/g, "/"));
+  const input = Uint8Array.from(bin, c => c.charCodeAt(0));
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  let complete = false;
+  const stream = new Inflate((chunk, final) => {
+    size += chunk.length;
+    if (size > MAX_QUERY_STATE_BYTES) throw new QueryDecodeError("too_large", "Expanded query state exceeds the storage limit.");
+    chunks.push(chunk); complete = final;
+  });
+  // Small input chunks bound allocations before the expanded-size check.
+  for (let i = 0; i < input.length; i += 256) stream.push(input.subarray(i, i + 256), i + 256 >= input.length);
+  if (!complete) throw new QueryDecodeError("invalid", "Incomplete compressed query link.");
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+  return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
 }
 
 /** base64url token → QueryState. Tolerant: bad input and legacy shapes both
  *  normalize to a valid QueryState (never throws). */
 export function decodeQuery(token: string): QueryState {
+  try { return decodeToken(token, false); } catch { return { ...EMPTY_QUERY }; }
+}
+
+/** Navigation uses this decoder so corrupt links cannot silently run defaults. */
+export function decodeQueryStrict(token: string): QueryState {
+  return decodeToken(token, true);
+}
+function decodeToken(token: string, strict: boolean): QueryState {
   if (!token) return { ...EMPTY_QUERY };
-  if (token.length > MAX_QUERY_TOKEN_LENGTH) return { ...EMPTY_QUERY };
+  if (token.length > MAX_QUERY_TOKEN_LENGTH) throw new QueryDecodeError("too_large", "Query link exceeds the storage limit.");
   try {
-    const c = JSON.parse(fromBase64Url(token)) as CompactQuery;
+    const versioned = token.includes(".");
+    if (versioned && !token.startsWith("2j.") && !token.startsWith("2d."))
+      throw new QueryDecodeError("unsupported_version", "Unsupported query link version.");
+    const payload = versioned ? token.slice(3) : token;
+    if (!/^[A-Za-z0-9_-]+$/.test(payload) || payload.length % 4 === 1) throw new QueryDecodeError("invalid", "Invalid query link encoding.");
+    const json = token.startsWith("2d.") ? inflateToken(payload) : fromBase64Url(payload);
+    if (new TextEncoder().encode(json).length > MAX_QUERY_STATE_BYTES) throw new QueryDecodeError("too_large", "Query state exceeds the storage limit.");
+    const raw = JSON.parse(json);
+    if (!raw || typeof raw !== "object" || Array.isArray(raw) || ["w", "g"].some(k => raw[k] !== undefined && !Array.isArray(raw[k])))
+      throw new QueryDecodeError("invalid", "Invalid query link state.");
+    const c = versioned ? unpackQuery(raw) : raw as CompactQuery;
+    if (strict && c.w) {
+      if (c.w.some((term: WhereTerm) => !term || typeof term !== "object")) throw new QueryDecodeError("invalid", "Invalid query predicates.");
+      const count = c.w.reduce((n: number, term: WhereTerm) => n + predicatesOf(term).length, 0);
+      const normalized = normalizeQueryState({ where: c.w });
+      const normalizedCount = normalized.where.reduce((n, term) => n + predicatesOf(term).length, 0);
+      if (count > 100 || count !== normalizedCount || c.w.some((term: WhereTerm) => predicatesOf(term).some(clause =>
+        !clause || typeof clause !== "object" || (clause.negated !== undefined && typeof clause.negated !== "boolean"))))
+        throw new QueryDecodeError("invalid", "Invalid query predicates or predicate budget exceeded.");
+    }
     const out = normalizeQueryState({
       select: normalizeSelect(c.s ?? c.c),
       where: Array.isArray(c.w) ? c.w : [],
@@ -101,9 +229,11 @@ export function decodeQuery(token: string): QueryState {
       fitToScreen: c.fs,
       grouping: c.b,
     });
+    if (strict && c.g && out.aggregations?.length !== c.g.length) throw new QueryDecodeError("invalid", "Invalid query metrics.");
     return out;
-  } catch {
-    return { ...EMPTY_QUERY };
+  } catch (error) {
+    if (error instanceof QueryDecodeError) throw error;
+    throw new QueryDecodeError("invalid", "Invalid or incomplete query link.");
   }
 }
 

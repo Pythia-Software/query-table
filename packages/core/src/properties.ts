@@ -2,11 +2,14 @@ import type { MetricValueFormat } from "./metricTypes";
 import type { FieldDef, FieldSchema } from "./schema";
 import { readFieldValue } from "./schema";
 import type { RowId } from "./query";
+import { parseCellDisplay, type CellDisplay, type JsonCellDisplay } from "./cellDisplay";
 
 /** Formats change presentation only; values retain their original types/units. */
 export type PropertyFormat =
   | MetricValueFormat
-  | { kind: "text" | "code" | "json" | "boolean" | "chips" }
+  | { kind: "text" | "code" | "boolean" | "chips" }
+  | JsonCellDisplay
+  | Extract<CellDisplay, { kind: "chip" }>
   | {
       kind: "relative";
       sourceUnit?: "iso" | "epochSeconds" | "epochMilliseconds";
@@ -49,6 +52,10 @@ export function normalizePropertyFormat(
 ): PropertyFormat | undefined {
   if (!record(input)) return;
   const kind = input.kind;
+  if (kind === "json" || kind === "chip") {
+    try { return parseCellDisplay(input) as PropertyFormat; }
+    catch { return; }
+  }
   if (
     input.decimals !== undefined &&
     !(
@@ -59,7 +66,7 @@ export function normalizePropertyFormat(
     )
   )
     return;
-  if (["text", "code", "json", "boolean", "chips"].includes(String(kind)))
+  if (["text", "code", "boolean", "chips"].includes(String(kind)))
     return { kind } as PropertyFormat;
   if (kind === "relative") {
     if (

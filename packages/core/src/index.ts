@@ -50,6 +50,7 @@ export type {
   FieldDef,
   FieldSchema,
 } from "./schema";
+export type { CellDisplay, JsonCellDisplay } from "./cellDisplay";
 export {
   isFilterable,
   isPushdownFilter,
@@ -82,7 +83,8 @@ export type {
   AggregationResultEntry,
   AggregationResult,
 } from "./encode";
-export { encodeQuery, decodeQuery, toServerQuery, toAggregationQuery } from "./encode";
+export { encodeQuery, decodeQuery, decodeQueryStrict, QueryDecodeError, MAX_QUERY_STATE_BYTES, toServerQuery, toAggregationQuery } from "./encode";
+export * from "./queryLinks";
 
 export type { ApplyResult } from "./apply";
 export { applyQuery, matchesClause, applyAggregations } from "./apply";

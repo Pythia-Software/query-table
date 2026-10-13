@@ -1,4 +1,5 @@
 @import "./baseTheme.css";
+@import "./cells.css";
 @import "./metrics.css";
 @import "./metricsEditor.css";
 @import "./properties.css";

@@ -36,7 +36,7 @@ function unreadableNotice(errors: string[]): string {
     ? `Some saved views could not be loaded; their original data is preserved. ${errors.join(" ")}`
     : "";
 }
-function boot(): { saved: SavedState; view: View; notice: string; stored: string | null } {
+function boot(): { saved: SavedState; view: View; notice: string; stored: string | null; legacyShare: boolean } {
   let saved: SavedState = { items: seedViews(), defaultId: "runs" };
   let notice = "";
   let stored: string | null = null;
@@ -90,7 +90,8 @@ function boot(): { saved: SavedState; view: View; notice: string; stored: string
     saved.items.find((item) => item.id === saved.defaultId)?.view ??
       initialView(),
   );
-  const shared = new URLSearchParams(window.location.search).get("view");
+  const params = new URLSearchParams(window.location.search);
+  const shared = params.get("view");
   if (shared) {
     try {
       if (shared.length > 100_000) throw new Error();
@@ -99,7 +100,7 @@ function boot(): { saved: SavedState; view: View; notice: string; stored: string
       notice = `This shared view could not be read. ${error instanceof Error ? error.message : ""} Loaded the default view.`;
     }
   }
-  return { saved, view: parseView(view), notice, stored };
+  return { saved, view: parseView(view), notice, stored, legacyShare: Boolean(shared) && !params.has("q") };
 }
 
 // Import old views once, through the standard storage adapter. The old keys
@@ -149,6 +150,15 @@ function demoStorage(start: ReturnType<typeof boot>) {
 }
 export function useGroupingDemo() {
   const [start] = useState(boot);
+  useEffect(() => {
+    // The initial query already captured the legacy view. Retaining its large
+    // JSON beside the new q token needlessly exhausts the share-link budget.
+    const url = new URL(window.location.href);
+    if (url.searchParams.has("view")) {
+      url.searchParams.delete("view");
+      window.history.replaceState(window.history.state, "", url);
+    }
+  }, []);
   const [{ storage, ready }] = useState(() => demoStorage(start));
   const [importNotice, setImportNotice] = useState("");
   useEffect(() => {
@@ -156,14 +166,13 @@ export function useGroupingDemo() {
     void ready.then(notice => { if (active) setImportNotice(notice); });
     return () => { active = false; };
   }, [ready]);
-  const params = new URLSearchParams(window.location.search);
   const api = useQueryTable<Row>({
     schema: inputSchema,
     clientRows: inputRows,
     storage,
     syncUrl: true,
     debounceMs: 0,
-    ...(params.has("view") && !params.has("q")
+    ...(start.legacyShare
       ? { initialQuery: queryFromView(start.view) }
       : {}),
   });
