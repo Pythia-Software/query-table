@@ -23,6 +23,19 @@ Then open http://localhost:5179. You can:
 
 The current view is encoded in the `?q=` URL, so reloads and bookmarks restore it.
 
+## Saved queries prototype
+
+Open `/saved-queries` to try the proposed query select and adjacent save actions
+inside the real query builder, metrics dashboard, and table. Loading and saving
+have explicit indicators; fully saved queries hide the actions and briefly show
+a saved confirmation that fades away after three seconds.
+All runs, Failed runs, and Linux runs are seeded on the first visit. Edit real
+filters, columns, sorting, or metrics; save changes, save a new query, revert, or
+switch queries with an explicit choice about unsaved changes. Prototype saves
+use a separate browser-storage namespace. `/` retains the current interface for
+comparison. The demo uses the optional `QueryBuilder.savedQueryControls` slot;
+this is an interaction prototype, not a replacement of the default controls.
+
 ## Cell displays and item details
 
 Open http://localhost:5179/cells to explore native, serialized, encoded, escaped,

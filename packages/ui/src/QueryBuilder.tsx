@@ -84,6 +84,8 @@ export interface QueryBuilderProps<Row> {
   selectPresentation?: SelectPresentation;
   /** Match/share the entire host definition when it contains more than QueryState. */
   matchesSavedQuery?: (saved: SavedQuery) => boolean;
+  /** Replace the built-in saved-query controls with host-owned controls. */
+  savedQueryControls?: ReactNode;
   shareUrl?: string;
   /** Additional diagnostics shown inside request activity. */
   requestActivityDetails?: ReactNode;
@@ -332,6 +334,7 @@ export function QueryBuilder<Row>({
   summary,
   selectPresentation,
   matchesSavedQuery,
+  savedQueryControls,
   shareUrl,
 }: QueryBuilderProps<Row>): ReactNode {
   const groupingUI = useGroupingPresentation(api, clauses === undefined);
@@ -646,7 +649,7 @@ export function QueryBuilder<Row>({
           api.grouping && "qt-qb--groupable", compact && "qt-qb--compact", classNames?.root)}>
       <div className="qt-qb-bar qt-qb-state-bar qt-qb-row">
         <span className="qt-qb-state-main">
-          <span className="qt-qb-saved">
+          {savedQueryControls !== undefined ? savedQueryControls : <span className="qt-qb-saved">
             <button
               type="button"
               className={cx(
@@ -710,7 +713,7 @@ export function QueryBuilder<Row>({
                 {activeSavedQuery ? activeSavedQuery.name : "Custom Query"}
               </button>
             )}
-          </span>
+          </span>}
           {isCollapsed ? (
             <span
               className="qt-qb-summary qt-truncate"
@@ -727,7 +730,7 @@ export function QueryBuilder<Row>({
             </span>
           ) : null}
         </span>
-        {showUpdateButton ? (
+        {savedQueryControls === undefined && showUpdateButton ? (
           <button
             type="button"
             className={cx("qt-btn", classNames?.button)}
@@ -750,7 +753,7 @@ export function QueryBuilder<Row>({
         </button>
         {api.links.kind === "local" && <small role="status">Temporary link · this browser only</small>}
         {api.links.error && <small role="alert">{api.links.error.message}</small>}
-        <button
+        {savedQueryControls === undefined && <button
           type="button"
           className={cx("qt-btn", classNames?.button)}
           onClick={() => setShowSaved(true)}
@@ -758,7 +761,7 @@ export function QueryBuilder<Row>({
           <Icon name="bookmark" />
           Saved
           {api.saved.items.length > 0 ? ` (${api.saved.items.length})` : ""}
-        </button>
+        </button>}
         <div className="qt-property-history qt-query-history" role="group" aria-label="Query history">
           <button type="button" className={cx("qt-link-btn", "qt-property-icon-button", classNames?.button)}
             aria-label="Undo" title="Undo query change" disabled={!api.canUndo || isBusy} onClick={api.undo}>
@@ -1010,7 +1013,7 @@ export function QueryBuilder<Row>({
           {requestActivityDetails}
         </RequestActivity>
       )}
-      {showSaved ? (
+      {savedQueryControls === undefined && showSaved ? (
         <SavedQueriesModal
           saved={api.saved}
           onClose={() => setShowSaved(false)}

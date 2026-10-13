@@ -302,6 +302,13 @@ The bundled `link` renderer allows only HTTP(S), email, telephone, relative,
 and fragment URLs. Applications remain responsible for validating URLs emitted
 by custom renderers.
 
+Pass `savedQueryControls` to `QueryBuilder` to replace its built-in saved-query
+name/star, Update action, and Saved menu with host-owned React controls; omitting
+the prop keeps the default interface. Use `api.saved` for persistence and loading,
+and handle selection, save feedback, and unsaved-edit protection in your controls.
+Share and query history remain available. The demo's `/saved-queries` route shows
+an integrated prototype of this slot.
+
 The query builder's **Share** button copies a URL containing the complete
 current query, including a saved default query. Configure `useQueryTable` with
 `syncUrl: true` so recipients load shared query URLs. Query tokens are encoded,

@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   loadSchema,
   localStorageAdapter,
+  normalizeQueryState,
   type RowId,
 } from "@pythia-software/query-table-core";
 import { useQueryTable } from "@pythia-software/query-table-react";
@@ -26,9 +27,20 @@ import {
   dateExampleSchema,
 } from "./dateMetricWorkbench";
 import { CollapsibleSection } from "./CollapsibleSection";
+import { SavedQueryControlsPrototype } from "./SavedQueryControlsPrototype";
+import { savedQueriesPrototypeStorage } from "./savedQueriesPrototypeStorage";
 import "./demo.css";
 
 const schema = loadSchema<Run>(runsDoc);
+const prototypeSchema = { ...schema, name: `${schema.name}:saved-queries-prototype` };
+const prototypeStorage = savedQueriesPrototypeStorage(normalizeQueryState({
+  select: schema.defaultSelect ?? [],
+  where: [],
+  orderBy: schema.defaultSort ?? [],
+  limit: schema.defaultLimit ?? 100,
+  offset: 0,
+  aggregations: DEMO_METRICS.slice(0, 3),
+}));
 const dateSchema = dateExampleSchema(schema);
 const storage = localStorageAdapter();
 // The demo has a durable seeded dashboard; saved query/URL restoration still wins.
@@ -98,14 +110,17 @@ const renderers: RenderRegistry<Run> = {
   detail_link: () => <button>view</button>,
 };
 
-export function App({ dateExample = false }: { dateExample?: boolean }) {
+export function App({ dateExample = false, savedQueriesPrototype = false }: {
+  dateExample?: boolean;
+  savedQueriesPrototype?: boolean;
+}) {
   const [metricsCollapsed, setMetricsCollapsed] = useState(false);
   const [tableCollapsed, setTableCollapsed] = useState(false);
 
   const api = useQueryTable<Run>({
-    schema: dateExample ? dateSchema : schema,
+    schema: savedQueriesPrototype ? prototypeSchema : dateExample ? dateSchema : schema,
     clientRows: dateExample ? DATE_EXAMPLE_RUNS : RUNS,
-    storage: demoStorage,
+    storage: savedQueriesPrototype ? prototypeStorage : demoStorage,
     syncUrl: true,
   });
   const metricCount = api.aggregations.clauses.length;
@@ -113,12 +128,17 @@ export function App({ dateExample = false }: { dateExample?: boolean }) {
   const tableSummary = `${api.rows.length} row${api.rows.length === 1 ? "" : "s"}${api.total != null ? ` (of ${api.total} total)` : ""}`;
 
   return (
-    <main className="qt-demo">
+    <main className={`qt-demo${savedQueriesPrototype ? " qt-saved-queries-demo" : ""}`}>
       <header className="qt-demo-header">
-        <p className="qt-demo-eyebrow">Interactive playground</p>
+        <p className="qt-demo-eyebrow">{savedQueriesPrototype ? "Saved queries · Prototype" : "Interactive playground"}</p>
         <h1>query-table{dateExample ? " · Date metric example" : ""}</h1>
+        {savedQueriesPrototype && <a className="qt-save-prototype-compare" href="/">Compare current UI <Icon name="arrowRight" size={12} /></a>}
       </header>
-      {dateExample ? (
+      {savedQueriesPrototype ? (
+        <p className="qt-demo-intro">
+          Choose a query, make changes, and save when you’re ready.
+        </p>
+      ) : dateExample ? (
         <p className="qt-demo-intro">
           96 runs across October 1–14, with seven empty days. Open{" "}
           <strong>Edit metrics</strong>, choose <strong>Runs by day</strong>,
@@ -140,7 +160,7 @@ export function App({ dateExample = false }: { dateExample?: boolean }) {
         </p>
       )}
 
-      {dateExample ? (
+      {savedQueriesPrototype ? null : dateExample ? (
         <p className="qt-demo-intro">
           <a href="/">← Back to the main playground</a>
         </p>
@@ -178,6 +198,7 @@ export function App({ dateExample = false }: { dateExample?: boolean }) {
         total={api.total}
         running={api.loading}
         metricTheme={DEMO_METRIC_THEME}
+        savedQueryControls={savedQueriesPrototype ? <SavedQueryControlsPrototype api={api} /> : undefined}
       />
 
       <CollapsibleSection

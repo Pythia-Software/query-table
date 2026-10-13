@@ -30,7 +30,9 @@ const PlaygroundFeedback = import.meta.env.DEV
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    {window.location.pathname.startsWith("/grouping") ? (
+    {window.location.pathname.startsWith("/saved-queries") ? (
+      <App savedQueriesPrototype />
+    ) : window.location.pathname.startsWith("/grouping") ? (
       <Suspense fallback={<p>Loading grouping playground…</p>}>
         <GroupingDemo />
       </Suspense>
