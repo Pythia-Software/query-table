@@ -10,6 +10,7 @@ import {
   type FormulaValue,
   type FormulaDiagnostic,
   type FormulaResult,
+  type FormulaFunction,
 } from "./formula";
 import { aggOpsForField, isGroupable, isMeasurable } from "./agg";
 import {
@@ -27,6 +28,7 @@ import {
   type QueryState,
 } from "./query";
 import { applyQuery } from "./apply";
+import { prepareGrouping, withoutGrouping, type GroupedRow } from "./grouping";
 import { toServerQueryV2 } from "./execution";
 import {
   toServerQuery,
@@ -55,7 +57,29 @@ const aggregates = new Set([
   "AVG",
   "MIN",
   "MAX",
+  "MEDIAN",
 ]);
+/** Functions available only in aggregate expressions, separate from row formulas. */
+export const METRIC_FUNCTIONS: FormulaFunction[] = [
+  ["COUNT", "Count rows, or non-empty values."],
+  ["COUNT_DISTINCT", "Count distinct non-empty values."],
+  ["SUM", "Total numeric values in each group."],
+  ["AVG", "Average numeric values in each group."],
+  ["MIN", "Smallest non-empty value in each group."],
+  ["MAX", "Largest non-empty value in each group."],
+  [
+    "MEDIAN",
+    "Middle numeric value; averages the middle pair. Ignores empty values.",
+  ],
+].map(([name, description]) => ({
+  name: name!,
+  description: description!,
+  signature: `${name}(row expression${name === "COUNT" ? "?" : ""})`,
+  min: name === "COUNT" ? 0 : 1,
+  max: 1,
+  result: name === "MIN" || name === "MAX" ? "branch" : "number",
+  args: ["SUM", "AVG", "MEDIAN"].includes(name!) ? ["number"] : "any",
+}));
 export interface MetricPlan extends FormulaPlan {
   aggregates: Extract<FormulaNode, { kind: "call" }>[];
   aggregateTypes: FormulaType[];
@@ -112,9 +136,12 @@ export function compileMetric(
               n.from,
               n.to,
             );
+          // MEDIAN is formula-only, so it is absent from the default AggOp
+          // list. Explicit field restrictions still apply to every reduction.
           if (
             !isMeasurable(field) ||
-            ((field.aggregate?.ops !== undefined || node.args[0] === n) &&
+            ((field.aggregate?.ops !== undefined ||
+              (node.args[0] === n && node.name !== "MEDIAN")) &&
               !aggOpsForField(field).includes(node.name.toLowerCase() as AggOp))
           )
             throw new FormulaError(
@@ -134,7 +161,7 @@ export function compileMetric(
       };
       node.args.forEach(visit);
       if (
-        ["SUM", "AVG"].includes(node.name) &&
+        ["SUM", "AVG", "MEDIAN"].includes(node.name) &&
         !["number", "null"].includes(type)
       )
         throw new FormulaError(
@@ -154,7 +181,9 @@ export function compileMetric(
         );
       nodes.push(node);
       aggregateTypes.push(type);
-      return ["COUNT", "COUNT_DISTINCT", "SUM", "AVG"].includes(node.name)
+      return ["COUNT", "COUNT_DISTINCT", "SUM", "AVG", "MEDIAN"].includes(
+        node.name,
+      )
         ? "number"
         : type;
     },
@@ -272,6 +301,22 @@ function reduceResults(
     if (node.name === "COUNT")
       return { value: node.args.length ? nonnull : count };
     if (!values.length) return { value: null };
+    if (node.name === "MEDIAN") {
+      const sorted = values
+        .map((value) => {
+          if (typeof value !== "number" || !Number.isFinite(value))
+            throw Error("Expected a finite number.");
+          return value;
+        })
+        .sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      const value =
+        sorted.length % 2
+          ? sorted[mid]!
+          : sorted[mid - 1]! / 2 + sorted[mid]! / 2;
+      assertMetricNumber(value);
+      return { value };
+    }
     if (node.name === "SUM" || node.name === "AVG") {
       let sum = 0;
       for (const v of values) {
@@ -719,12 +764,9 @@ export function selectMetricShownRows<Row>(
     throw Error("Metric operation budget exceeded.");
   return applyQuery(
     rows,
-    {
-      ...q,
-      orderBy: orderBy.some((s) => s.field === schema.idField)
-        ? orderBy
-        : [...orderBy, { field: schema.idField, dir: "asc" }],
-    },
+    // Local tables use a stable sort: ties retain input order. An extra ID
+    // sort here would choose a different page than the one the table shows.
+    { ...q, orderBy },
     schema,
     options,
   ).rows;
@@ -855,6 +897,19 @@ export function evaluateMetrics<Row>(
   schema: FieldSchema<Row>,
   options: MetricEvaluationOptions<Row> = {},
 ): AggregationResult {
+  if (q.grouping) {
+    try {
+      if (options.signal?.aborted) throw new Error("Metric evaluation cancelled.");
+      if (rows.length > (options.maxRows ?? 1_000_000)) throw new Error("Metric row budget exceeded.");
+      const now = evaluationTime(options);
+      const prepared = prepareGrouping(rows, schema, q.grouping, { now });
+      return evaluateMetrics(prepared.rows, withoutGrouping(q), prepared.schema, {
+        ...options, now,
+      } as unknown as MetricEvaluationOptions<GroupedRow>);
+    } catch (error) {
+      return { metrics: (q.aggregations ?? []).map(metric => ({ id: metric.id, buckets: [], error: error instanceof Error ? error.message : String(error) })) };
+    }
+  }
   const now = evaluationTime(options),
     fields = indexFields(schema);
   let matching: Row[] | undefined;

@@ -1,3 +1,4 @@
+import { columnRole, ColumnRoleBadge } from "./grouping/ColumnRole";
 import { ItemDetailsActions, ItemDetailsPanel } from "./ItemDetails";
 import type { ItemDetailsApi } from "@pythia-software/query-table-react";
 import { Icon } from "./Icon";
@@ -10,7 +11,7 @@ import { Icon } from "./Icon";
 // and emits intents through onQueryChange. Its props mirror a conventional
 // schema-driven table so adoption is mechanical.
 
-import { ITEM_DETAILS_COLUMN, isComputedCellError } from "@pythia-software/query-table-core";
+import { GROUP_ID_FIELD, ITEM_DETAILS_COLUMN, isComputedCellError } from "@pythia-software/query-table-core";
 import { useId, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type SetStateAction } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { OrderByClause, QueryState, FieldDef, RowId, SelectColumn, WhereClause } from "@pythia-software/query-table-core";
@@ -50,6 +51,8 @@ export interface DataTableProps<Row> {
   /** Always-visible trailing column (row actions, links). */
   trailing?: (row: Row) => ReactNode;
   trailingLabel?: string;
+  /** Optional compact role badge before the column label. */
+  headerAdornment?: ((field: FieldDef<Row>) => ReactNode) | undefined;
 
   /** Total matching rows before pagination, when known. */
   total?: number | null;
@@ -103,7 +106,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     query,
     onQueryChange,
     renderers,
-    rowId,
+    rowId: sourceRowId,
     selection,
     trailing,
     trailingLabel,
@@ -116,7 +119,14 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     classNames,
   } = props;
 
-  const details = props.itemDetails;
+  // Host accessors describe source records. Group projections have their own
+  // identity, regardless of whether the source id field is selected.
+  const rowId = useCallback((row: Row) => {
+    if (!query.grouping) return sourceRowId(row);
+    const id = (row as Record<string, unknown>)[GROUP_ID_FIELD];
+    return typeof id === "string" ? id : null;
+  }, [Boolean(query.grouping), sourceRowId]);
+  const details = query.grouping ? undefined : props.itemDetails;
   const detailRenderers = useMemo(() => props.itemRenderers ? { ...renderers, ...props.itemRenderers } : renderers, [renderers, props.itemRenderers]);
   const expandedPanelId = useId();
   const expandedRowIndex = details?.active?.mode === "expand" ? rows.findIndex((row) => rowId(row) === details.active?.id) : -1;
@@ -867,7 +877,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                     onDragEnd={() => columnDrag.end()}
                   >
                     <span className="qt-th-label">
-                      {f.label}
+                      {props.headerAdornment ? props.headerAdornment(f) : query.grouping ? <ColumnRoleBadge role={columnRole(f.name, { ...query.grouping, mode: "groups" })} /> : null}{f.label}
                       {info && (
                         <span className="qt-sort-indicator">
                           <Icon name={info.dir === "asc" ? "arrowUp" : "arrowDown"} />

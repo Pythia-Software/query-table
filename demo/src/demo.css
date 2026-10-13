@@ -12,10 +12,13 @@ body {
   color: var(--qt-text);
 }
 
-.qt-modal-surface:not(.qt-metrics-editor):not(.qt-property-editor):not(.qt-item-detail-modal):has(.qt-demo-feedback) {
+.qt-modal-surface:not(.qt-editor-modal):not(.qt-metrics-editor):not(.qt-item-detail-modal):has(.qt-demo-feedback) {
   box-sizing: border-box;
   padding-bottom: calc(72px + env(safe-area-inset-bottom));
 }
+
+/* Keep the floating feedback control clear of Apply without a blank footer row. */
+.qt-select-editor:has(.qt-demo-feedback) .qt-select-editor-footer { padding-inline-end: 76px; }
 
 button,
 input,

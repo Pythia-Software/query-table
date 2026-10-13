@@ -240,8 +240,9 @@ try {
   assert.ok((await page.locator(".qt-request-activity tbody tr").count()) > 0);
   assert.equal(await page.locator(".qt-metric-data").count(), 0);
   await page
-    .getByRole("button", { name: "Edit dashboard layout", exact: true })
+    .getByRole("button", { name: "Edit metrics", exact: true })
     .click();
+  await page.getByLabel("Workbench view").selectOption("dashboard");
   assert.equal(
     await page.getByLabel("Workbench view").inputValue(),
     "dashboard",

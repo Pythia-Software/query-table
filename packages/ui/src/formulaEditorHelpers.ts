@@ -1,6 +1,7 @@
 import {
   FORMULA_FUNCTIONS,
   type FieldDef,
+  type FormulaFunction,
 } from "@pythia-software/query-table-core";
 
 export const FORMULA_EDITOR_HELP =
@@ -50,6 +51,7 @@ export function formulaCompletions(
   end: number,
   fields: FieldDef[],
   explicit = false,
+  functions: readonly FormulaFunction[] = FORMULA_FUNCTIONS,
 ): FormulaCompletions | null {
   const before = text.slice(0, start);
   const { quoted, fieldStart } = formulaContext(text, start);
@@ -84,7 +86,7 @@ export function formulaCompletions(
   }));
   if (fieldStart < 0) {
     options.push(
-      ...FORMULA_FUNCTIONS.map((f) => ({
+      ...functions.map((f) => ({
         label: f.name,
         detail: f.signature,
         description: f.description,
@@ -113,7 +115,10 @@ export function formulaCompletions(
   };
 }
 
-export function signatureAt(text: string): string {
+export function signatureAt(
+  text: string,
+  functions: readonly FormulaFunction[] = FORMULA_FUNCTIONS,
+): string {
   const stack: { name: string; argument: number }[] = [];
   let quoted = false,
     field = false;
@@ -152,7 +157,7 @@ export function signatureAt(text: string): string {
     else if (c === "," && stack.length) stack[stack.length - 1]!.argument++;
   }
   const call = stack[stack.length - 1],
-    spec = FORMULA_FUNCTIONS.find((f) => f.name === call?.name);
+    spec = functions.find((f) => f.name === call?.name);
   return spec && call
     ? `${spec.signature} · Argument ${call.argument} — ${spec.description}`
     : FORMULA_EDITOR_HELP;

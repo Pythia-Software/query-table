@@ -7,6 +7,16 @@ selection, saved queries, aggregations, and column interactions.
 `useObjectReferences` batches cancellable relationship lookups. See
 [object property views](../../docs/object-properties.md).
 
+## Grouped rows
+
+`useQueryTable({ schema, clientRows })` enables one row-producing grouping stage
+for complete local datasets. The standard query builder supplies GROUP BY,
+HAVING, aggregate column editing and representative-row ordering. Use
+`api.schema`, `api.visibleFields` and `api.rowId` for the active result shape;
+set `grouping: false` to opt out. Backend transports currently reject grouped
+row queries. See [grouping integration](../../docs/grouping.md) for the query
+shape, source-stage controls, saved state and execution boundaries.
+
 ## Install
 
 ```bash

@@ -1,0 +1,65 @@
+/* Semantic roles are independent of the action accent and metric categories.
+ * Public --qt-column-{role}-* tokens inherit from the host's table wrapper.
+ * Resolve derived colors at the point of use, so scoped surface overrides work
+ * and a component never replaces the host's values with local defaults. */
+
+[data-column-role="key"],
+.qt-picker-item:has([data-column-role="key"]),
+.qt-column-items li:has([data-column-role="key"]),
+.qt-th-label:has([data-column-role="key"]) {
+  --qt-column-color: var(--qt-column-key-color, #956000);
+  --qt-column-bg: var(--qt-column-key-bg, color-mix(in srgb, var(--qt-column-color) 9%, var(--qt-bg, #fff)));
+  --qt-column-border: var(--qt-column-key-border, color-mix(in srgb, var(--qt-column-color) 45%, var(--qt-border)));
+  --qt-column-hover-bg: var(--qt-column-key-hover-bg, color-mix(in srgb, var(--qt-column-color) 15%, var(--qt-bg, #fff)));
+  --qt-column-selected-bg: var(--qt-column-key-selected-bg, var(--qt-column-bg));
+}
+
+[data-column-role="aggregate"],
+.qt-picker-item:has([data-column-role="aggregate"]),
+.qt-column-items li:has([data-column-role="aggregate"]),
+.qt-th-label:has([data-column-role="aggregate"]) {
+  --qt-column-color: var(--qt-column-aggregate-color, #7942a8);
+  --qt-column-bg: var(--qt-column-aggregate-bg, color-mix(in srgb, var(--qt-column-color) 9%, var(--qt-bg, #fff)));
+  --qt-column-border: var(--qt-column-aggregate-border, color-mix(in srgb, var(--qt-column-color) 45%, var(--qt-border)));
+  --qt-column-hover-bg: var(--qt-column-aggregate-hover-bg, color-mix(in srgb, var(--qt-column-color) 15%, var(--qt-bg, #fff)));
+  --qt-column-selected-bg: var(--qt-column-aggregate-selected-bg, var(--qt-column-bg));
+}
+
+[data-column-role="row"],
+.qt-picker-item:has([data-column-role="row"]),
+.qt-column-items li:has([data-column-role="row"]),
+.qt-th-label:has([data-column-role="row"]) {
+  --qt-column-color: var(--qt-column-row-color, #08786d);
+  --qt-column-bg: var(--qt-column-row-bg, color-mix(in srgb, var(--qt-column-color) 9%, var(--qt-bg, #fff)));
+  --qt-column-border: var(--qt-column-row-border, color-mix(in srgb, var(--qt-column-color) 45%, var(--qt-border)));
+  --qt-column-hover-bg: var(--qt-column-row-hover-bg, color-mix(in srgb, var(--qt-column-color) 15%, var(--qt-bg, #fff)));
+  --qt-column-selected-bg: var(--qt-column-row-selected-bg, var(--qt-column-bg));
+}
+
+.qt-column-label[data-column-role],
+.qt-th .qt-th-label:has(.qt-column-role-badge) {
+  color: var(--qt-column-color);
+}
+.qt-column-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.qt-column-role-badge,
+.qt-type-badge[data-column-role] {
+  color: var(--qt-column-color);
+  background: var(--qt-column-bg);
+  white-space: nowrap;
+}
+.qt-column-label > .qt-column-role-badge {
+  flex-shrink: 0;
+  margin-right: 0;
+}
+@media (forced-colors: active) {
+  .qt-column-role-badge {
+    color: CanvasText;
+    background: Canvas;
+    outline: 1px solid CanvasText;
+  }
+}

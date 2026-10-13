@@ -23,11 +23,85 @@ Opinionated, themeable React components for query-table, including the data
 table, query builder, field picker, metrics panel, saved queries, cell menus,
 and selection toolbar.
 
+## Grouped rows
+
+`useQueryTable({ schema, clientRows })` enables one row-producing grouping stage
+for complete local datasets. The standard query builder supplies GROUP BY,
+HAVING, aggregate column editing and representative-row ordering. Use
+`api.schema`, `api.visibleFields` and `api.rowId` for the active result shape;
+set `grouping: false` to opt out. Backend transports currently reject grouped
+row queries. See [grouping integration](../../docs/grouping.md) for the query
+shape, source-stage controls, saved state and execution boundaries.
+
 ## Install
 
 ```bash
 npm install @pythia-software/query-table-core @pythia-software/query-table-react @pythia-software/query-table-ui react react-dom
 ```
+
+## Client palettes and column roles
+
+Import `theme.css` and override `--qt-*` properties on a wrapper around your
+query table. Each instance can have its own palette; the library does not choose
+one from the OS appearance. `color-scheme` can match the host's native controls,
+but surfaces and role colors come from explicit tokens. Scoped tokens and
+typography also follow pickers and dialogs into mobile portals, including live
+changes to the wrapper's `class`, `style`, or `data-theme`.
+
+The general palette uses `--qt-bg`, `--qt-text`, `--qt-muted`, `--qt-header-bg`,
+`--qt-border`, and `--qt-border-subtle`. Actions use `--qt-accent` and
+`--qt-accent-bg`; filled buttons additionally accept `--qt-accent-fg` (default
+white) and `--qt-accent-hover` (default a darker accent).
+
+Grouping roles have their own tokens, independent of actions and metric/chart
+category colors:
+
+| Prefix | Meaning | Default text color |
+| --- | --- | --- |
+| `--qt-column-key` | GROUP BY key | `#956000` |
+| `--qt-column-aggregate` | Aggregated value, including custom formulas | `#7942a8` |
+| `--qt-column-row` | Value from the group's representative row | `#08786d` |
+
+Each prefix supports these suffixes:
+
+| Suffix | Controls | Default |
+| --- | --- | --- |
+| `-color` | Role text, label, and badge | Color above |
+| `-bg` | Badge and compact option background | 9% role color over `--qt-bg` |
+| `-border` | Role selection border | 45% role color over `--qt-border` |
+| `-hover-bg` | Hovered role option/control | 15% role color over `--qt-bg` |
+| `-selected-bg` | Selected role option/column | Role `-bg` |
+
+For example, a host adapter can map its own palette directly:
+
+```css
+.client-query-table {
+  --qt-bg: var(--client-panel);
+  --qt-text: var(--client-ink);
+  --qt-accent: var(--client-accent);
+  --qt-accent-fg: var(--client-panel);
+  --qt-column-key-color: var(--client-key-label);
+  --qt-column-aggregate-color: var(--client-aggregate-label);
+  --qt-column-row-color: var(--client-row-label);
+  /* Optional: choose a badge surface rather than deriving a tint. */
+  --qt-column-key-bg: var(--client-key-surface);
+}
+```
+
+`ColumnRoleBadge` accepts presentation metadata
+`{ kind: "key" | "aggregate" | "row", badge: string, title: string }` and an
+optional `className`. Use it with `DataTable.headerAdornment` and
+`QueryBuilder.selectPresentation.renderChip`; a `.qt-column-label` wrapper
+with the same `data-column-role` colors the field label too. Pass `undefined`
+for ordinary ungrouped fields to omit the badge. The host determines provenance;
+the component does not infer a role from a field's name or type. Role tokens
+also style the grouped column options and column workbench.
+
+The role text remains visible alongside color. Choose readable foregrounds
+against your surfaces; you can use neutral colors without losing the KEY,
+ROW, and aggregate labels. These presentation settings do not enter saved
+queries. Metric category assignments remain in the separate `MetricTheme` API.
+The `/grouping` demo includes adapters for Pharos' cream and forest palettes.
 
 ## Column widths
 
@@ -152,8 +226,10 @@ It accepts `anchor`, `label`, `onClose`, `returnFocus`, `width`, `placement`,
 ```
 
 Add column/filter/sort field pickers, rich filter-value pickers, and auto-refresh
-settings use this surface. `FieldPicker` accepts an optional `anchor` for floating
-use; omitting it preserves standalone inline usage. Tag multi-select editors and
+settings use this surface. `FieldPicker` accepts an optional `anchor` (or
+`PickerAnchor` wrapper) for floating desktop use; otherwise it stays inline on
+desktop. With `onClose`, it becomes a dismissible sheet on mobile. Omit `onClose`
+to keep a standalone picker inline on all screen sizes. Tag multi-select editors and
 full workbenches use the shared modal/sheet foundation with Apply/Cancel and focus
 containment. Native selects, expandable sections, and formula autocomplete keep
 their respective form, disclosure, and combobox interactions.
@@ -283,8 +359,9 @@ touch-based landscape viewports use a mobile interaction model:
 - **Tap to edit or delete:** filters, sorts, and metrics become readable summaries
   with pencil buttons. Remove actions live inside the editor, including removal
   of an entire OR group, and support Undo. There are no inline trash buttons.
-  Adding a filter, sort, or metric immediately
-  opens its editor. Filters can be combined with OR without relying on drag-and-drop.
+  Adding a filter or metric opens its editor. Add sort lets you choose a field,
+  then ascending or descending before committing; Back returns to the same field search.
+  Filters can be combined with OR without relying on drag-and-drop.
 - **Direct ordering:** columns, sorts, and metrics have leading drag handles
   directly in the query builder, with no Order buttons. Column chips stay
   wrapped and can move horizontally or between rows. Keyboard arrow keys reorder
@@ -305,18 +382,20 @@ touch-based landscape viewports use a mobile interaction model:
   padding and redundant headings. Query chips, their buttons, and inline handles
   use a 32px minimum height with zero vertical padding; long summaries can wrap.
   Filter, sort, and metric inputs use 36px controls. Keyword sections have extra breathing room
-  and solid horizontal rules on desktop and mobile.
+  without divider lines between clauses on desktop and mobile.
 - **Dense query setup:** filter, sort, and metric actions share a section header.
   Summaries use one line when space allows and wrap without truncating values.
   Labeled condition/value and function/measure pairs replace wrapping desktop
   chips. Sort direction and null-value placement use native selects; regex
-  extraction stays optional. Its configuration opens a dialog (a bottom sheet on small screens) with a live, worker-isolated preview of up to 100 matching rows. The preview shows original values, extracted sort values, and no-match/null states; Apply commits any syntactically valid pattern even when the preview is unavailable or still loading, while Cancel leaves the sort unchanged. Grouping uses removable tags and a field picker.
+  extraction stays optional. It is available from Add sort's field options or its detailed-sort caret, with direction configurable in the dialog. Plain desktop sort chips omit the extraction action; configured extractions remain editable. Its configuration opens a dialog (a bottom sheet on small screens) with a live, worker-isolated preview of up to 100 matching rows. The preview shows original values, extracted sort values, and no-match/null states; Apply commits any syntactically valid pattern even when the preview is unavailable or still loading, while Cancel leaves the sort unchanged. Grouping uses removable tags and a field picker.
   Simple metric results share two-column rows; grouped results use the full width.
 - **Touch-first controls:** dedicated drag handles, 16px text inputs,
   sticky bulk actions, a horizontal table scroll cue, and the device's native
   share sheet when available (clipboard fallback otherwise).
 
 Filter and sort edits update the query immediately; **Done** dismisses the sheet. The column and metric workbenches retain explicit **Apply** draft workflows. Desktop chips, popovers, and drag-and-drop remain available.
+
+In compact mode, **Add offset** reveals and focuses the inline offset input without changing the query. Enter or blur commits the value; the clear action returns to **Add offset**.
 
 Keep the standard viewport meta tag in the host page:
 
@@ -339,6 +418,36 @@ for customization and backend integration details.
 ## SELECT editor
 
 `QueryBuilder` includes a split **Add** button and **Reset** action for Columns: Add opens the field picker, while its caret opens the column customizer. Actions follow the selected chips on desktop and sit in the section header on small screens. The exported `SelectColumnEditor` also accepts `{ api, onClose }` for standalone use. It supports draft column ordering, a searchable catalogue, sampled value frequencies, and a lazy-loaded, dependency-free textarea formula editor with field/function suggestions, signature help, and compiler diagnostics with grouped live previews and regex inspection. A Function library beside the editor supports search by name or intent, browsing by concept and return type, and insertion at the cursor or around selected text; it stacks below the editor on narrow screens. Shared-definition saves and query-layout application are separate actions.
+
+### Shared editor components
+
+`EditorModal`, `useEditorWorkbench`, `EditorPanelToggle`, and
+`EditorPanelSeparator` provide the shared shell and panel geometry used by the
+metric editor and the grouped column editor. The hook accepts a
+fixed list of `{ width, minWidth, defaultVisible? }` panel sizes in pixels. Attach `root` to the
+workspace, build its grid from `visibleIndices` and `widths` with 6px separators,
+and hide panels with `visiblePanes`. The modal wires the header and Reset layout;
+its `panelControls` slot places panel toggles beside Reset layout. Pass the same
+workbench to panel toggles and separators. Reset restores dialog/pane sizes and
+each panel's current `defaultVisible` setting (true when omitted). Defaults can
+follow the selected column; changing them alone does not override manual toggles.
+Separators support
+pointer drag, arrow keys (Shift for larger steps), Home/double-click reset, and
+Escape to cancel a drag. Toggles keep at least one panel open. Geometry stays
+separate from query drafts; the consumer owns draft validation, Apply/Cancel,
+panel contents, and responsive section navigation.
+
+`FormulaEditor` is also exported for reuse. Supply `value`, `onChange`, `fields`,
+and `compile`; an optional `functions` catalogue drives completions, signature
+help, and the Function library. Row formulas use `FORMULA_FUNCTIONS` by default.
+Aggregate editors can combine core's `METRIC_FUNCTIONS` and `FORMULA_FUNCTIONS`
+with `compileMetric`, including `MEDIAN`. A catalogue describes available
+functions; the supplied compiler determines which expressions are valid.
+For a separate function panel, set `showLibrary={false}` and connect the exported
+`FormulaFunctionBrowser` with `variant="panel"` to the editor's
+`actionsRef.current.insertFunction(name)`. This preserves cursor/selection and
+native text undo. Omitting the browser's `onInsert` makes it a reference-only
+library when no formula is selected.
 
 ### Filter value presentation
 
@@ -364,9 +473,9 @@ a presentation provider retain the existing select control.
 
 ## Metric workbench and dashboards
 
-QueryBuilder's **Edit metrics** opens the resizable four-pane `MetricsEditor`. Apply commits drafts together; Cancel discards them. Dashboard layout provides draggable canvas widths, whole-rem card sizing through corner handles or inputs, canvas presets, pointer/keyboard reordering, and inline names. Metrics use their own workbench on desktop and compact viewports; their changes commit on Apply.
+QueryBuilder offers **Add metric** while the query has no metrics. Once metrics exist, editing moves to the always-visible **Edit** button in `MetricsPanel`, which opens the resizable four-pane `MetricsEditor`. Apply commits drafts together; Cancel discards them. Dashboard layout provides draggable canvas widths, whole-rem card sizing through corner handles or inputs, canvas presets, pointer/keyboard reordering, and inline names. Metrics use their own workbench on desktop and compact viewports; their changes commit on Apply.
 
-Use the icon buttons beside **Panels** to show or hide the metric list, definition, references, and preview. At least one panel stays visible; the metric picker and Previous/Next controls remain available when the list is hidden. **See in dashboard** reveals the selected card in the same draft; **Back to metric**, the card’s pencil action, or a double-click returns to editing. Open settings and panel preferences survive these transitions.
+Use the icon buttons beside **Panels** in the modal header to show or hide the metric list, definition, references, and preview. At least one panel stays visible; the metric picker and Previous/Next controls remain available when the list is hidden. **See in dashboard** reveals the selected card in the same draft; **Back to metric**, the card’s pencil action, or a double-click returns to editing. Open settings and panel preferences survive these transitions.
 
 Drag the dashboard canvas’s right edge to test responsive wrapping. Card corner handles adjust preferred width and height in whole rems; arrow keys resize and Shift increases the step. Escape or a cancelled pointer gesture restores the dimensions at drag start. Canvas and panel geometry are temporary preferences; card geometry commits on Apply. Removal offers **Undo remove**, and **Review issues** opens the metric needing attention while valid metrics continue to preview.
 

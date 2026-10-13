@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ModalSurface } from "../src/AdaptiveOverlay";
 import { FieldPicker } from "../src/FieldPicker";
+import { PickerAnchor } from "../src/PickerAnchor";
 import { ReorderList, type ReorderItem } from "../src/ReorderList";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -134,6 +135,30 @@ describe("adaptive mobile sheets", () => {
     act(() => root.render(createElement(FieldPicker, props)));
     expect(container.querySelector(".qt-picker")).not.toBeNull();
     expect(document.querySelector(".qt-sheet")).toBeNull();
+    expect(container.querySelector(".qt-picker-popover, [role=dialog]")).toBeNull();
+    expect(container.querySelector(".qt-picker-inline")?.getAttribute("style")).toBeNull();
+    act(() => container.querySelector(".qt-picker-input")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    expect(props.onClose).toHaveBeenCalledOnce();
+  });
+
+  it.each([true, false])("keeps a standalone picker without onClose inline (mobile=%s)", mobile => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: mobile, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    const pick = vi.fn();
+    const field = { name: "name", label: "Name", type: "text" as const, source: { kind: "backend" as const } };
+    const originalOverflow = document.body.style.overflow;
+    act(() => root.render(createElement("div", null,
+      createElement(FieldPicker, { fields: [field], onPick: pick }),
+      createElement("button", { id: "outside-picker" }, "Outside"),
+    )));
+    expect(container.querySelector(".qt-picker-inline .qt-picker")).not.toBeNull();
+    expect(document.querySelector('[aria-modal="true"], .qt-sheet')).toBeNull();
+    expect(document.body.style.overflow).toBe(originalOverflow);
+    expect(container.querySelector('[aria-label="Close field picker"]')).toBeNull();
+    act(() => container.querySelector<HTMLButtonElement>(".qt-picker-item")!.click());
+    expect(pick).toHaveBeenCalledExactlyOnceWith(field);
+    const outside = container.querySelector<HTMLButtonElement>("#outside-picker")!;
+    act(() => outside.focus());
+    expect(document.activeElement).toBe(outside);
   });
 
   it("preserves desktop picker focus until click even when pointer presses do not focus buttons", () => {
@@ -141,7 +166,10 @@ describe("adaptive mobile sheets", () => {
     const pick = vi.fn();
     const close = vi.fn();
     const field = { name: "name", label: "Name", type: "text" as const, source: { kind: "backend" as const } };
-    act(() => root.render(createElement(FieldPicker, { fields: [field], onPick: pick, onClose: close })));
+    act(() => root.render(createElement(PickerAnchor, {
+      children: createElement(FieldPicker, { fields: [field], onPick: pick, onClose: close }),
+    })));
+    expect(container.querySelector('.qt-picker-popover[role="dialog"]')).not.toBeNull();
     const input = container.querySelector<HTMLInputElement>(".qt-picker-input")!;
     const item = container.querySelector<HTMLButtonElement>(".qt-picker-item")!;
     expect(document.activeElement).toBe(input);
@@ -155,8 +183,41 @@ describe("adaptive mobile sheets", () => {
     expect(pick).not.toHaveBeenCalled();
     act(() => item.click());
     expect(pick).toHaveBeenCalledExactlyOnceWith(field);
-    act(() => input.blur());
+    const outside = document.createElement("button");
+    container.append(outside);
+    act(() => outside.focus());
     expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("lets custom picker actions finish after WebKit blurs without a focus destination", () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    const action = vi.fn();
+    const close = vi.fn();
+    function Fixture() {
+      const [open, setOpen] = useState(true);
+      return createElement("div", null,
+        createElement("button", { id: "outside-picker" }, "Outside"),
+        createElement(PickerAnchor, { children: open && createElement(FieldPicker, {
+            fields: [], onPick: vi.fn(), onClose: () => { close(); setOpen(false); },
+          },
+          createElement("button", { id: "picker-direction" }, "Ascending"),
+          createElement("button", { id: "picker-detail", onClick: action }, "Regex extraction")),
+        }),
+      );
+    }
+    act(() => root.render(createElement(Fixture)));
+    const direction = container.querySelector<HTMLButtonElement>("#picker-direction")!;
+    const detail = container.querySelector<HTMLButtonElement>("#picker-detail")!;
+    act(() => direction.focus());
+    pointer(detail, "pointerdown", 100);
+    act(() => direction.blur());
+    expect(close).not.toHaveBeenCalled();
+    expect(detail.isConnected).toBe(true);
+    act(() => detail.click());
+    expect(action).toHaveBeenCalledOnce();
+    act(() => container.querySelector<HTMLButtonElement>("#outside-picker")!.focus());
+    expect(close).toHaveBeenCalledOnce();
+    expect(container.querySelector(".qt-picker")).toBeNull();
   });
 });
 

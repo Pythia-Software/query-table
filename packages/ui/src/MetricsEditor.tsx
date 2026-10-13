@@ -13,6 +13,7 @@ import {
 } from "react";
 import {
   MAX_AGGREGATIONS,
+  METRIC_FUNCTIONS,
   aggOpsForField,
   compileFormula,
   compileMetric,
@@ -30,6 +31,12 @@ import {
   type MetricDateGrouping,
 } from "@pythia-software/query-table-core";
 import type { QueryTableApi } from "@pythia-software/query-table-react";
+import { EditorContext } from "./EditorParts";
+import {
+  EditorModal,
+  EditorPanelToggle,
+  EditorPanelSeparator,
+} from "./EditorModal";
 import { ModalSurface } from "./AdaptiveOverlay";
 import { MenuButton, MenuItem, MenuSeparator } from "./Menu";
 import { ReorderList } from "./ReorderList";
@@ -70,38 +77,7 @@ const panes: Array<{ label: string; icon: IconName }> = [
   { label: "Fields & functions", icon: "panelReference" },
   { label: "Live preview", icon: "panelPreview" },
 ];
-const aggregateFunctions = [
-  {
-    name: "SUM",
-    signature: "SUM(row expression)",
-    description: "Total numeric values per group; ignores NULL.",
-  },
-  {
-    name: "AVG",
-    signature: "AVG(row expression)",
-    description: "Average numeric values per group; ignores NULL.",
-  },
-  {
-    name: "COUNT",
-    signature: "COUNT(expression?)",
-    description: "Count rows, or non-NULL values per group.",
-  },
-  {
-    name: "COUNT_DISTINCT",
-    signature: "COUNT_DISTINCT(row expression)",
-    description: "Count distinct non-NULL values per group.",
-  },
-  {
-    name: "MIN",
-    signature: "MIN(row expression)",
-    description: "Minimum non-NULL value per group.",
-  },
-  {
-    name: "MAX",
-    signature: "MAX(row expression)",
-    description: "Maximum non-NULL value per group.",
-  },
-];
+const aggregateFunctions = METRIC_FUNCTIONS;
 const titleOf = (clause: AggregationClause, fields: FieldDef[]) =>
   clause.label ||
   `${clause.op.toUpperCase()} ${fields.find((f) => f.name === clause.field)?.label ?? clause.field ?? "rows"}`;
@@ -426,26 +402,18 @@ export function MetricsEditor<Row>({
   }
   function panelToggle(index: number, collapse = false) {
     const pane = panes[index]!;
-    const shown = workbench.visiblePanes[index];
     return (
-      <button
-        type="button"
-        className={`qt-btn qt-metric-icon-button${collapse ? " qt-metric-pane-collapse" : ""}`}
-        aria-label={
-          collapse
-            ? `Hide ${pane.label.toLowerCase()} panel`
-            : `${pane.label} panel`
-        }
-        aria-controls={`${titleId}-pane-${index}`}
-        aria-pressed={collapse ? undefined : shown}
-        disabled={shown && workbench.visibleIndices.length === 1}
-        title={`${shown ? "Hide" : "Show"} ${pane.label.toLowerCase()} panel`}
-        onClick={() => workbench.togglePane(index)}
-      >
-        <Icon name={collapse ? "close" : pane.icon} />
-      </button>
+      <EditorPanelToggle
+        workbench={workbench}
+        index={index}
+        label={pane.label}
+        icon={pane.icon}
+        paneId={`${titleId}-pane-${index}`}
+        collapse={collapse}
+      />
     );
   }
+
   function paneHeading(index: number, label: ReactNode) {
     return (
       <div className="qt-metric-pane-heading">
@@ -780,14 +748,13 @@ export function MetricsEditor<Row>({
   );
 
   return (
-    <ModalSurface
+    <EditorModal
       title="Edit metrics"
-      className="qt-modal qt-metrics-editor"
-      chrome={false}
+      titleId={titleId}
+      closeLabel="Close metric editor"
       onClose={close}
-    >
-      <header ref={workbench.header} className="qt-metrics-editor-header">
-        <h2 id={titleId}>Edit metrics</h2>
+      workbench={workbench}
+      headerActions={
         <label>
           <span className="qt-sr-only">Workbench view</span>
           <select
@@ -802,40 +769,28 @@ export function MetricsEditor<Row>({
             <option value="dashboard">Dashboard layout</option>
           </select>
         </label>
-        <button
-          type="button"
-          className="qt-btn qt-metric-reset-layout"
-          title="Restore dialog size and show all panels"
-          onClick={workbench.reset}
-        >
-          Reset layout
-        </button>
-        <button
-          type="button"
-          className="qt-btn qt-metric-close"
-          aria-label="Close metric editor"
-          onClick={close}
-        >
-          ×
-        </button>
-      </header>
-      <div className="qt-metrics-editor-context">
-        <span>
-          Shown: <b>{api.rows.length.toLocaleString(locale)} rows</b>
-        </span>
-        <span>
-          Matching:{" "}
-          <b>
-            {api.total === null ? "unknown" : api.total.toLocaleString(locale)}{" "}
-            rows
-          </b>
-        </span>
-        <span>
-          {api.query.where.length
-            ? `${api.query.where.length} filter terms`
-            : "No filters"}
-        </span>
-      </div>
+      }
+      panelControls={
+        view === "editor" && (
+          <div
+            className="qt-metric-panel-tools"
+            role="group"
+            aria-label="Visible editor panels"
+          >
+            <span>Panels</span>
+            {panes.map((pane, i) => (
+              <span key={pane.label}>{panelToggle(i)}</span>
+            ))}
+          </div>
+        )
+      }
+    >
+      <EditorContext
+        shown={api.rows.length}
+        total={api.total}
+        filters={api.query.where.length}
+        locale={locale}
+      />
       {view === "editor" && (
         <div className="qt-metric-workbench-tools">
           <div className="qt-metric-selection-tools">
@@ -885,16 +840,6 @@ export function MetricsEditor<Row>({
             See in dashboard
             <Icon name="arrowRight" size={14} />
           </button>
-          <div
-            className="qt-metric-panel-tools"
-            role="group"
-            aria-label="Visible editor panels"
-          >
-            <span>Panels</span>
-            {panes.map((pane, i) => (
-              <span key={pane.label}>{panelToggle(i)}</span>
-            ))}
-          </div>
         </div>
       )}
       {view === "dashboard" ? (
@@ -2619,44 +2564,16 @@ ${item.description}`}
           </div>
         </ModalSurface>
       )}
-    </ModalSurface>
+    </EditorModal>
   );
 
   function separator(index: number) {
-    const next = workbench.nextPane(index);
-    if (!workbench.visiblePanes[index] || next === undefined) return null;
     return (
-      <div
-        role="separator"
-        tabIndex={0}
-        aria-orientation="vertical"
-        aria-label={`Resize metric panes ${index + 1} and ${next + 1}`}
-        aria-controls={`${titleId}-pane-${index} ${titleId}-pane-${next}`}
-        title={`Resize ${panes[index]!.label.toLowerCase()} and ${panes[next]!.label.toLowerCase()} panels`}
-        aria-valuemin={workbench.minWidths[index]}
-        aria-valuenow={Math.round(workbench.widths[index] ?? 0)}
-        className="qt-metric-pane-separator"
-        aria-valuemax={
-          (workbench.widths[index] ?? 0) +
-          (workbench.widths[next] ?? 0) -
-          (workbench.minWidths[next] ?? 0)
-        }
-        aria-valuetext={`${Math.round(workbench.widths[index] ?? 0)} pixels`}
-        onDoubleClick={workbench.resetPanes}
-        onPointerDown={(e) => workbench.startResize(e, index)}
-        onKeyDown={(e) => {
-          if (e.key === "Home") {
-            e.preventDefault();
-            workbench.resetPanes();
-          }
-          if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-            e.preventDefault();
-            workbench.stepResize(
-              index,
-              (e.key === "ArrowLeft" ? -1 : 1) * (e.shiftKey ? 50 : 10),
-            );
-          }
-        }}
+      <EditorPanelSeparator
+        workbench={workbench}
+        index={index}
+        label={`Resize metric panes ${index + 1} and ${(workbench.nextPane(index) ?? index) + 1}`}
+        controls={`${titleId}-pane-${index} ${titleId}-pane-${workbench.nextPane(index)}`}
       />
     );
   }

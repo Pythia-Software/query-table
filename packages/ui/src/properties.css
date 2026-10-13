@@ -188,70 +188,55 @@
 .qt-property-editor.qt-modal {
   width: min(1260px, calc(100vw - 48px));
   height: min(780px, calc(100dvh - 48px));
-  max-width: calc(100vw - 48px);
-  max-height: calc(100dvh - 48px);
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  resize: both;
-  border: 1px solid var(--qt-border);
-  border-radius: 12px;
   background: var(--qt-bg, #fff);
   color: var(--qt-text);
-  box-shadow: 0 24px 90px #1f23283b;
-  font-size: 12px;
-  line-height: 1.5;
 }
-.qt-property-editor *, .qt-property-editor *::before, .qt-property-editor *::after { box-sizing: border-box; }
-.qt-property-editor :is(input, select) { width: 100%; min-width: 0; min-height: 34px; padding: 6px 9px; font: inherit; color: var(--qt-text); background: var(--qt-bg, #fff); border: 1px solid var(--qt-border); border-radius: 6px; }
-.qt-property-editor label { display: flex; flex-direction: column; gap: 6px; font-weight: 500; min-width: 0; }
-.qt-property-editor button { font: inherit; }
-.qt-property-editor button:disabled { opacity: .5; cursor: default; }
-.qt-property-editor :focus-visible { outline: 2px solid var(--qt-accent); outline-offset: 2px; }
-.qt-property-editor-header { display: flex; align-items: center; padding: 14px 20px; border-bottom: 1px solid var(--qt-border); }
-.qt-property-editor-header h2 { margin: 0; line-height: 1.4; font-size: 18px; font-family: inherit; font-weight: 600; }
-.qt-property-editor-header > button { margin-inline-start: auto; padding: 6px; }
-.qt-property-editor-context { display: flex; gap: 16px; flex-wrap: wrap; padding: 9px 20px; background: var(--qt-header-bg); border-bottom: 1px solid var(--qt-border); color: var(--qt-muted); }
+.qt-property-editor-context { display: flex; flex-shrink: 0; gap: 16px; flex-wrap: wrap; padding: 9px 20px; background: var(--qt-header-bg); border-bottom: 1px solid var(--qt-border); color: var(--qt-muted); }
 .qt-property-editor-context b { color: var(--qt-text); font-weight: 500; }
-.qt-property-workspace { display: grid; grid-template-columns: minmax(270px, .95fr) minmax(220px, .8fr) minmax(280px, 1.3fr); flex: 1; min-height: 0; }
+.qt-property-workspace { display: grid; grid-template-rows: minmax(0, 1fr); flex: 1; min-height: 0; overflow: auto; }
 .qt-property-workspace > :is(aside, section) { min-height: 0; min-width: 0; padding: 18px; overflow: auto; overscroll-behavior: contain; }
+.qt-property-workspace > [hidden] { display: none; }
 .qt-property-workspace h3 { display: flex; align-items: center; gap: 8px; font: inherit; font-weight: 600; font-size: 13px; margin: 0 0 16px; color: var(--qt-text); }
+.qt-property-workspace .qt-editor-pane-title h3 { margin: 0; }
 .qt-property-workspace .qt-muted { font-size: 12px; }
-.qt-property-editor-library { background: color-mix(in srgb, var(--qt-bg, #fff) 60%, var(--qt-header-bg)); border-inline-end: 1px solid var(--qt-border); }
-.qt-property-editor-definition { border-inline-end: 1px solid var(--qt-border); }
+.qt-property-workspace > .qt-property-editor-library { display: flex; flex-direction: column; overflow: hidden; padding: 0; background: var(--qt-editor-library-bg, color-mix(in srgb, var(--qt-bg, #fff) 60%, var(--qt-header-bg))); }
+.qt-property-workspace > .qt-property-editor-library[hidden] { display: none; }
+.qt-property-editor-library > .qt-editor-pane-title { flex-shrink: 0; gap: 6px; margin: 0; padding: 18px 14px 12px; }
+.qt-property-editor-library > .qt-editor-pane-title .qt-add { flex-shrink: 0; margin-inline-start: auto; white-space: nowrap; }
+/* The body owns scrolling; the reorder list must not trap wheel/touch input. */
+.qt-property-editor-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 0 14px 14px; }
 .qt-property-editor-field { display: block; overflow-wrap: anywhere; color: var(--qt-muted); margin: 4px 0 16px; font-size: 11px; }
 .qt-property-editor .qt-property-editor-options { flex-direction: column; align-items: stretch; gap: 16px; }
-.qt-property-editor-list { list-style: none; padding: 0; margin: 0 0 12px; }
-.qt-property-editor-list .qt-reorder-item { display: flex; align-items: center; gap: 2px; padding: 6px 4px; border: 1px solid transparent; border-radius: 6px; margin-bottom: 4px; }
+.qt-property-editor .qt-property-editor-list { list-style: none; padding: 0; margin: 0; overflow: visible; overscroll-behavior: auto; }
+.qt-property-editor-list .qt-reorder-item { display: flex; align-items: center; gap: 2px; min-height: 40px; padding: 2px 4px; border: 1px solid transparent; border-radius: 6px; margin-bottom: 2px; }
+.qt-property-editor-list .qt-reorder-handle { min-height: 28px; flex-shrink: 0; }
 .qt-property-editor-list .is-active { background: var(--qt-accent-bg); border-color: color-mix(in srgb, var(--qt-accent) 25%, var(--qt-border)); }
-.qt-property-pick { min-width: 0; flex: 1; display: flex; flex-direction: column; align-items: start; border: 0; background: transparent; color: inherit; padding: 3px; text-align: start; cursor: pointer; }
-.qt-property-pick :is(strong, small) { overflow-wrap: anywhere; }
+.qt-property-pick { min-width: 0; flex: 1; display: flex; flex-direction: column; align-items: start; border: 0; background: transparent; color: inherit; padding: 2px 3px; text-align: start; cursor: pointer; }
+.qt-property-pick :is(strong, small) { overflow-wrap: anywhere; line-height: 1.3; }
 .qt-property-pick strong { font-weight: 500; }
 .qt-property-pick small { color: var(--qt-muted); font-size: 10px; }
-.qt-property-editor-list .qt-property-icon-button { flex-shrink: 0; width: 22px; }
+.qt-property-editor-list .qt-property-icon-button { flex-shrink: 0; width: 24px; min-height: 28px; }
+.qt-property-editor-preview > .qt-object-inspector { overflow: clip; }
 .qt-property-editor-preview .qt-property-columns, .qt-property-editor-preview .qt-property { grid-template-columns: minmax(0, var(--qt-property-label-width, 35%)) minmax(0, 1fr); }
 .qt-property-editor-preview .qt-property dt, .qt-property-editor-preview .qt-property dd { padding: 8px 10px; }
-.qt-property-editor-footer { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 14px 20px; border-top: 1px solid var(--qt-border); }
+.qt-property-editor-footer { display: flex; flex-shrink: 0; gap: 10px; align-items: center; flex-wrap: wrap; padding: 14px 20px; border-top: 1px solid var(--qt-border); }
 .qt-property-editor-footer > span { flex: 1; }
-.qt-property-editor .qt-btn--primary { background: var(--qt-accent); border-color: var(--qt-accent); color: #fff; }
+.qt-property-editor-footer .qt-btn-primary { background: var(--qt-accent); }
 .qt-property-editor-tabs { display: none; }
 @media (max-width: 1000px) {
-  .qt-property-workspace { grid-template-columns: minmax(250px, .9fr) minmax(200px, .8fr) minmax(220px, 1fr); }
   .qt-property-workspace > :is(aside, section) { padding: 12px; }
+  .qt-property-workspace > .qt-property-editor-library { padding: 0; }
 }
-@media (max-width: 760px) {
-  .qt-property-editor.qt-modal.qt-sheet { width: 100%; max-width: 100%; max-height: 94dvh; height: 94dvh; border-radius: 16px 16px 0 0; resize: none; }
-  .qt-property-editor-header { padding: 12px 16px; }
+@media (max-width: 760px), (pointer: coarse) and (max-height: 500px) {
   .qt-property-editor-context { padding: 8px 16px; gap: 4px 12px; }
-  .qt-property-editor-tabs { display: flex; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--qt-border); }
+  .qt-property-editor-tabs { display: flex; flex-shrink: 0; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--qt-border); }
   .qt-property-editor-tabs > button { flex: 1; min-height: 36px; }
   .qt-property-editor-tabs [aria-selected="true"] { color: var(--qt-accent); background: var(--qt-accent-bg); }
-  .qt-property-workspace { display: block; overflow: auto; }
-  .qt-property-workspace > :is(aside, section) { display: none; min-height: 100%; border: 0; }
-  .qt-property-workspace--properties > .qt-property-editor-library,
-  .qt-property-workspace--definition > .qt-property-editor-definition,
-  .qt-property-workspace--preview > .qt-property-editor-preview { display: block; }
+  .qt-property-workspace { display: flex; overflow: hidden; }
+  .qt-property-workspace > :is(aside, section) { flex: 1; }
+  .qt-property-editor-library > .qt-editor-pane-title { padding: 12px; }
+  .qt-property-editor-scroll { padding: 0 12px 12px; }
+  .qt-property-editor-list .qt-reorder-item { min-height: 44px; }
   .qt-property-editor-footer { padding: 12px; }
   .qt-property-editor-footer > span { flex-basis: 100%; }
   .qt-property-editor-footer > button { flex: 1; min-height: 40px; justify-content: center; }

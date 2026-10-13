@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { filterValues, opsForField, type FieldDef, type SetFilterMode } from "@pythia-software/query-table-core";
-import type { QueryTableApi } from "@pythia-software/query-table-react";
+import type { QueryFilterApi } from "@pythia-software/query-table-react";
 import { PresentedFilterValue, useFilterValuePresentation } from "./FilterValuePresentation";
 import { ModalSurface } from "./AdaptiveOverlay";
 import type { QueryBuilderClassNames } from "./classNames";
 
 export function SetFilterEditor<Row>({ api, field, returnFocus, classNames, mode: initialMode, values: initialValues, disabled, maxPredicates, onApply, onClose }: {
-  api: QueryTableApi<Row>;
+  api: QueryFilterApi<Row>;
   field: FieldDef<Row>;
   returnFocus: HTMLElement;
   classNames: QueryBuilderClassNames | undefined;

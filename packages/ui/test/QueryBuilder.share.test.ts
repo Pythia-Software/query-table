@@ -166,11 +166,10 @@ describe("QueryBuilder sharing", () => {
       false,
     );
 
-    const addExtract = Array.from(container!.querySelectorAll("button")).find(
-      (button) => button.textContent?.trim() === "regex extract",
-    );
-    expect(addExtract).toBeDefined();
-    await act(async () => addExtract!.click());
+    expect(container!.querySelector('.qt-chip--sort [aria-label="Configure regex extract for Name"]')).toBeNull();
+    await act(async () => container!.querySelector<HTMLButtonElement>('[aria-label="Add sort"]')!.click());
+    await act(async () => container!.querySelector<HTMLButtonElement>('.qt-picker-item[title="name"]')!.click());
+    await act(async () => container!.querySelector<HTMLButtonElement>('.qt-sort-picker-regex')!.click());
     expect(currentQuery!.orderBy[0]!.extract).toBeUndefined();
     expect(container!.querySelector('[aria-modal="true"]')).not.toBeNull();
 
@@ -183,10 +182,11 @@ describe("QueryBuilder sharing", () => {
     });
     expect(currentQuery!.orderBy[0]!.extract).toBeUndefined();
     await act(async () => vi.advanceTimersByTimeAsync(201));
-    const applyExtract = Array.from(container!.querySelectorAll("button")).find((button) => button.textContent === "Apply extraction")!;
+    const applyExtract = Array.from(container!.querySelectorAll("button")).find((button) => button.textContent === "Update sort")!;
     expect(applyExtract.disabled).toBe(false);
     await act(async () => applyExtract.click());
     expect(currentQuery!.orderBy[0]!.extract).toEqual({ regex: "item-(\\d+)" });
+    expect(currentQuery!.orderBy[0]!.dir).toBe("asc");
     expect(container!.querySelector(".qt-chip--sort input")).toBeNull();
     await act(async () => container!.querySelector<HTMLButtonElement>('[aria-label="Configure regex extract for Name"]')!.click());
 
@@ -229,6 +229,11 @@ describe("QueryBuilder sharing", () => {
     const fieldSelect = modal.querySelector<HTMLSelectElement>("select.qt-sort-extract-field")!;
     expect(Array.from(fieldSelect.options, (option) => option.textContent)).toEqual(["Id", "Name"]);
     expect(fieldSelect.value).toBe("name");
+    const directionSelect = modal.querySelector<HTMLSelectElement>('.qt-sort-extract-direction')!;
+    await act(async () => {
+      directionSelect.value = "asc";
+      directionSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    });
 
     const extractInput = modal.querySelector<HTMLInputElement>('input[aria-label="Regex extract for Name"]')!;
     await act(async () => {
@@ -238,7 +243,43 @@ describe("QueryBuilder sharing", () => {
     await act(async () => vi.advanceTimersByTimeAsync(201));
     expect(currentQuery!.orderBy).toEqual([]);
     await act(async () => Array.from(modal.querySelectorAll("button")).find((button) => button.textContent === "Add sort")!.click());
-    expect(currentQuery!.orderBy).toEqual([{ field: "name", dir: "desc", extract: { regex: "item-(\\d+)" } }]);
+    expect(currentQuery!.orderBy).toEqual([{ field: "name", dir: "asc", extract: { regex: "item-(\\d+)" } }]);
     expect(container!.querySelector('[aria-modal="true"]')).toBeNull();
+  });
+
+  it.each([undefined, "item-(\\d+)"])("loads the selected field's sort direction and extraction (%s) in the regex dialog", async regex => {
+    vi.useFakeTimers();
+    let currentQuery: QueryState;
+    const existing = { field: "name", dir: "asc" as const, nulls: "first" as const,
+      ...(regex === undefined ? {} : { extract: { regex } }) };
+    function TestTable() {
+      const api = useQueryTable<Row>({ schema, clientRows: [], debounceMs: 0,
+        initialQuery: { select: [{ field: "name" }], where: [], orderBy: [existing], limit: 25, offset: 0 } });
+      currentQuery = api.query;
+      return createElement(QueryBuilder<Row>, { api, fields: schema.fields, total: api.total });
+    }
+    await act(async () => { root = createRoot(container!); root.render(createElement(TestTable)); });
+    await act(async () => container!.querySelector<HTMLButtonElement>('[aria-label="Sort with regex extraction"]')!.click());
+    const field = () => container!.querySelector<HTMLSelectElement>(".qt-sort-extract-field")!;
+    const direction = () => container!.querySelector<HTMLSelectElement>(".qt-sort-extract-direction")!;
+    const pattern = () => container!.querySelector<HTMLInputElement>(".qt-sort-extract-input")!;
+    const selectField = async (name: string) => act(async () => {
+      field().value = name; field().dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(field().value).toBe("id");
+    expect(direction().value).toBe("desc");
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(pattern(), "draft");
+      pattern().dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await selectField("name");
+    expect(direction().value).toBe("asc");
+    expect(pattern().value).toBe(regex ?? "");
+    await selectField("id");
+    expect(direction().value).toBe("desc");
+    expect(pattern().value).toBe("");
+    await selectField("name");
+    await act(async () => Array.from(container!.querySelectorAll("button")).find(button => button.textContent === "Update sort")!.click());
+    expect(currentQuery!.orderBy).toEqual([{ ...existing, extract: { regex: regex ?? "" } }]);
   });
 });

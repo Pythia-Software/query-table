@@ -1,17 +1,19 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import type { ColumnPreview } from "@pythia-software/query-table-core";
+import type { ColumnPreview, OrderByClause } from "@pythia-software/query-table-core";
 import type { QueryTableApi } from "@pythia-software/query-table-react";
 import { ModalSurface } from "./AdaptiveOverlay";
 import { Icon } from "./Icon";
 import { previewSortExtraction, type SortExtractionResult } from "./sortExtractionPreview";
 
-export function SortExtractionEditor<Row>({ api, field, label, fieldOptions, onFieldChange, title, applyLabel = "Apply extraction", initialPattern, disabled, onApply, onRemove, onClose }: {
+export function SortExtractionEditor<Row>({ api, field, label, fieldOptions, onFieldChange, direction = "desc", onDirectionChange, title, applyLabel = "Apply extraction", initialPattern, disabled, onApply, onRemove, onClose }: {
   api: QueryTableApi<Row>;
   field: string;
   label: string;
   /** When set, the editor shows a field picker so a new sort can be configured from scratch. */
   fieldOptions?: Array<{ name: string; label: string }> | undefined;
   onFieldChange?: ((field: string) => void) | undefined;
+  direction?: OrderByClause["dir"];
+  onDirectionChange?: (direction: OrderByClause["dir"]) => void;
   title?: string | undefined;
   applyLabel?: string | undefined;
   initialPattern?: string | undefined;
@@ -21,6 +23,13 @@ export function SortExtractionEditor<Row>({ api, field, label, fieldOptions, onF
   onClose: () => void;
 }) {
   const [pattern, setPattern] = useState(initialPattern ?? "");
+  const [patternField, setPatternField] = useState(field);
+  // A field switch starts from that field's extraction, without remounting the
+  // modal or moving focus out of its field selector.
+  if (patternField !== field) {
+    setPatternField(field);
+    setPattern(initialPattern ?? "");
+  }
   const [sample, setSample] = useState<ColumnPreview | null>(null);
   const [sampleError, setSampleError] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ pattern: string; sample: ColumnPreview; results: SortExtractionResult[]; error?: string } | null>(null);
@@ -28,6 +37,7 @@ export function SortExtractionEditor<Row>({ api, field, label, fieldOptions, onF
   request.current = api.computed.preview;
   const inputId = useId();
   const fieldId = useId();
+  const directionId = useId();
   const helpId = useId();
   const patternError = useMemo(() => {
     try {
@@ -83,6 +93,15 @@ export function SortExtractionEditor<Row>({ api, field, label, fieldOptions, onF
             <label className="qt-sort-extract-label" htmlFor={fieldId}>Field</label>
             <select id={fieldId} className="qt-input qt-sort-extract-field" value={field} disabled={disabled} onChange={(event) => onFieldChange?.(event.target.value)}>
               {fieldOptions.map((option) => <option key={option.name} value={option.name}>{option.label}</option>)}
+            </select>
+          </>
+        )}
+        {onDirectionChange && (
+          <>
+            <label className="qt-sort-extract-label" htmlFor={directionId}>Direction</label>
+            <select id={directionId} className="qt-input qt-sort-extract-direction" value={direction} disabled={disabled} onChange={(event) => onDirectionChange(event.target.value as OrderByClause["dir"])}>
+              <option value="asc">Ascending</option>
+              <option value="desc">Descending</option>
             </select>
           </>
         )}

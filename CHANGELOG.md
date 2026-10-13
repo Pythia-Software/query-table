@@ -4,6 +4,14 @@
 
 ### Added
 
+- Add row-producing GROUP BY for complete client datasets, with source filters,
+  HAVING, result sorting and paging, custom aggregate formulas including MEDIAN,
+  and one representative row chosen by configurable ordering. Preserve grouping
+  in saved views, URLs and history, and evaluate metrics over matching or shown
+  groups. Backend transports explicitly reject grouped-row queries.
+- Export shared resizable, closable editor panels and customizable column-role
+  theme tokens for group keys, aggregate values and representative-row fields;
+  add grouping integration documentation and themed playground examples.
 - Add an isolated date metric demo prototype with calendar intervals, optional
   empty buckets, explicit ranges, and count/sum versus average behavior.
 - Add date interval and empty-date settings to the existing metric editor,
@@ -45,6 +53,10 @@
 
 ### Changed
 
+- Unify column, metric and property editors around shared panels, field-first
+  selection and contextual formula libraries. Compact optional query controls,
+  keep sort direction in the picker, and improve property-list density,
+  scrolling, add-property placement and live previews.
 - Display cell-menu string-length comparisons with `>`, `≤`, `<`, `≥`, `=`,
   and `≠` symbols in the paired keep/exclude actions.
 - Use the shared overlay system for table and metric actions, condition choices,
@@ -60,6 +72,12 @@
 
 ### Fixed
 
+- Retain grouped rows during refresh, normalize saved grouping safely, and show
+  validation failures without unmounting editors. Restore hidden computed
+  columns, discard removed aggregate drafts, and respect contextual panel
+  defaults when resetting editor layouts.
+- Preserve inline standalone field pickers and dismissible mobile sheets,
+  including consistent grouping layouts on landscape touch screens.
 - Keep raw chart group labels when a scatter/histogram X format survives a
   display change without calendar grouping.
 - Reuse the last date bucket's boundaries and ISO key for dense timestamp rows,

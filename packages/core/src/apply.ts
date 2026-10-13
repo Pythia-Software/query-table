@@ -30,6 +30,7 @@ import type { AggregationBucket, AggregationResult } from "./encode";
 import { indexFields, readFieldValue, resolveFieldName } from "./schema";
 import { isOrGroup, predicatesOf, normalizeQueryState } from "./query";
 import { coerceValue } from "./ops";
+import { prepareGrouping, withoutGrouping } from "./grouping";
 
 export interface ApplyResult<Row> {
   /** The page slice (after filter + sort + offset/limit). */
@@ -49,6 +50,12 @@ export function applyQuery<Row>(
   options: QueryEvaluationOptions = {},
 ): ApplyResult<Row> {
   const now = evaluationTime(options);
+  if (q.grouping) {
+    const grouped = prepareGrouping(rows, schema, q.grouping, { now });
+    // Grouped results are projections described by grouped.schema; they do not
+    // retain source-row accessors or identities.
+    return applyQuery(grouped.rows, withoutGrouping(q), grouped.schema, { now }) as ApplyResult<Row>;
+  }
   const byName = indexFields(schema);
   const resolveField = (name: string) => resolveFieldName(schema, name) ?? name;
   // Terms touching a computed column are dropped here (the formula engine
@@ -135,6 +142,7 @@ export function applyAggregations<Row>(
   schema: FieldSchema<Row>,
   options: MetricEvaluationOptions<Row> = {},
 ): AggregationResult {
+  if (q.grouping) return evaluateMetrics(rows, q, schema, options);
   if (
     options.signal?.aborted ||
     q.where.some((t) =>

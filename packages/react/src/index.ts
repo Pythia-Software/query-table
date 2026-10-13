@@ -2,6 +2,7 @@
 
 export type { AutoRefreshApi, AutoRefreshConfig, AutoRefreshStatus, AggregationsApi, AggregationPatch, UseQueryTableOptions, QueryTableApi } from "./useQueryTable";
 export { useQueryTable } from "./useQueryTable";
+export type { GroupingApi, GroupingSourceApi } from "./useGrouping";
 
 export type { AggregationsApiState } from "./useAggregations";
 export { useAggregations } from "./useAggregations";
@@ -28,3 +29,5 @@ export type { PropertyViewApi, UsePropertyViewOptions } from "./usePropertyView"
 export { useObjectReferences } from "./useObjectReferences";
 
 export type { ItemDetailsApi, ItemDetailsOptions, ItemDetailRecord } from "./useItemDetails";
+
+export type { QueryFilterApi } from "./useQueryFilters";

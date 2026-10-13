@@ -2,6 +2,7 @@ import { normalizePropertyView, type PropertyViewState } from "./properties";
 import type { MetricDisplay, MetricLayout, MetricDistribution, MetricSort, MetricScope, MetricDateGrouping } from "./metricTypes";
 import { normalizeMetricOptions } from "./metricNormalize";
 import { isComputedField } from "./computed";
+import type { GroupingState, SummaryColumn, RepresentativeOrder } from "./grouping";
 // query.ts — the canonical query state shape.
 //
 // We lean into SQL vocabulary at every layer (per design feedback): a QueryState
@@ -179,6 +180,10 @@ export interface ItemDetailsState {
 }
 
 export interface QueryState {
+  /** Optional row-producing stage. `grouping.source` is the original record
+   * query (its WHERE runs first). This query selects/filters/sorts the groups;
+   * its `where` therefore represents HAVING. Only one stage is supported. */
+  grouping?: GroupingState;
   itemDetails?: ItemDetailsState;
   /** Ordered SELECT list + per-column widths. Empty = the schema's default columns. */
   select: SelectColumn[];
@@ -393,6 +398,8 @@ export function normalizeQueryState(input: unknown, fallback: QueryState = EMPTY
 
   if (raw.fitToScreen === true) out.fitToScreen = true;
 
+  if (raw.grouping != null) out.grouping = normalizeGroupingState(raw.grouping);
+
   if (Array.isArray(raw.aggregations)) {
     const aggregations: AggregationClause[] = [];
     for (const item of raw.aggregations.slice(0, MAX_AGGREGATIONS)) {
@@ -457,6 +464,55 @@ export function normalizeQueryState(input: unknown, fallback: QueryState = EMPTY
   return out;
 }
 
+/** Retain an invalid stage as a diagnostic rather than silently executing an
+ * ungrouped query. Strip nesting before normalizing the source snapshot. */
+function normalizeGroupingState(value: unknown): GroupingState {
+  const raw = isRecord(value) ? value : {};
+  const diagnostics: string[] = [];
+  const fail = () => { diagnostics.push("Invalid grouping definition."); };
+  const keys = Array.isArray(raw.keys) ? raw.keys.slice(0, MAX_GROUP_BY_FIELDS).filter((key): key is string => !!boundedString(key, MAX_FIELD_NAME_LENGTH)) : [];
+  if (!Array.isArray(raw.keys) || !keys.length || keys.length !== raw.keys.length || new Set(keys).size !== keys.length) fail();
+  const summaries: SummaryColumn[] = [];
+  if (!Array.isArray(raw.summaries) || raw.summaries.length > 64) fail();
+  for (const item of Array.isArray(raw.summaries) ? raw.summaries.slice(0, 64) : []) {
+    if (!isRecord(item) || !boundedString(item.id, MAX_FIELD_NAME_LENGTH) || typeof item.op !== "string" || (!AGG_OPS.has(item.op) && item.op !== "row" && item.op !== "formula")) { fail(); continue; }
+    const column: SummaryColumn = { id: item.id as string, op: item.op as SummaryColumn["op"] };
+    if (item.field !== undefined) {
+      if (!boundedString(item.field, MAX_FIELD_NAME_LENGTH)) fail();
+      else column.field = item.field as string;
+    }
+    if (item.op === "formula") {
+      if (typeof item.expression !== "string" || item.expression.length > 10_000) fail();
+      else column.expression = item.expression;
+    }
+    if (item.label !== undefined) {
+      if (typeof item.label !== "string" || item.label.length > MAX_LABEL_LENGTH) fail();
+      else column.label = item.label;
+    }
+    summaries.push(column);
+  }
+  let representative: GroupingState["representative"] = null;
+  if (raw.representative != null) {
+    const ordering = isRecord(raw.representative) ? raw.representative.orderBy : undefined;
+    const orderBy: RepresentativeOrder[] = [];
+    if (!Array.isArray(ordering) || !ordering.length || ordering.length > 8) fail();
+    for (const term of Array.isArray(ordering) ? ordering.slice(0, 8) : []) {
+      if (!isRecord(term) || !boundedString(term.field, MAX_FIELD_NAME_LENGTH) || !["asc", "desc"].includes(String(term.dir)) || (term.nulls !== undefined && !["first", "last"].includes(String(term.nulls)))) { fail(); continue; }
+      orderBy.push({ field: term.field as string, dir: term.dir as "asc" | "desc", nulls: term.nulls === "first" ? "first" : "last" });
+    }
+    representative = { orderBy };
+  }
+  if (!isRecord(raw.source) || raw.source.grouping != null) fail();
+  const { grouping: _nested, ...source } = isRecord(raw.source) ? raw.source : {};
+  if (Array.isArray(raw.diagnostics) && raw.diagnostics.length) fail();
+  const normalizedSource = normalizeQueryState(source);
+  if (Array.isArray(source.where)) {
+    const supplied = source.where.reduce((count: number, term: unknown) => count + (isRecord(term) && Array.isArray(term.any) ? term.any.length : 1), 0);
+    if (supplied !== normalizedSource.where.reduce((count, term) => count + predicatesOf(term).length, 0)) fail();
+  }
+  return { keys, summaries, representative, source: normalizedSource, ...(diagnostics.length ? { diagnostics: [...new Set(diagnostics)] } : {}) };
+}
+
 /** Structural equality on two queries — used to decide whether a `?q=` write or a
  *  refetch is actually needed (avoids history spam / redundant fetches). */
 export function queriesEqual(a: QueryState, b: QueryState): boolean {
@@ -468,6 +524,7 @@ export function queriesEqual(a: QueryState, b: QueryState): boolean {
   if (!sameArray(a.select, b.select)) return false;
   if (!sameArray(a.aggregations ?? [], b.aggregations ?? [])) return false;
   if (JSON.stringify(a.itemDetails) !== JSON.stringify(b.itemDetails)) return false;
+  if (JSON.stringify(a.grouping) !== JSON.stringify(b.grouping)) return false;
   return true;
 }
 

@@ -153,6 +153,9 @@ export function App({ dateExample = false }: { dateExample?: boolean }) {
             </a>
           </p>
           <p className="qt-demo-intro">
+            <a href="/grouping">Explore grouped saved views and representative rows</a>
+          </p>
+          <p className="qt-demo-intro">
             <a href="/objects">Customize and save views of individual objects</a>
           </p>
           <p className="qt-demo-intro">
@@ -170,7 +173,7 @@ export function App({ dateExample = false }: { dateExample?: boolean }) {
 
       <QueryBuilder
         api={api}
-        fields={(dateExample ? dateSchema : schema).fields}
+        fields={api.schema!.fields}
         total={api.total}
         running={api.loading}
         metricTheme={DEMO_METRIC_THEME}
@@ -186,7 +189,7 @@ export function App({ dateExample = false }: { dateExample?: boolean }) {
         <MetricsPanel
           api={api}
           aggregations={api.aggregations}
-          fields={(dateExample ? dateSchema : schema).fields}
+          fields={api.schema!.fields}
           renderers={renderers}
           theme={DEMO_METRIC_THEME}
         />
@@ -210,7 +213,7 @@ export function App({ dateExample = false }: { dateExample?: boolean }) {
           onQueryChange={api.setQuery}
           total={api.total}
           renderers={renderers}
-          rowId={(r: Run) => r.id}
+          rowId={api.rowId}
           selection={api.selection}
           columnDrag={api.columnDrag}
           loading={api.loading}

@@ -72,6 +72,30 @@ try {
   const before = await fields(itemCard(page));
   await itemCard(page).getByRole("button", { name: "Customize properties", exact: true }).click();
   let editor = page.getByRole("dialog", { name: "Edit properties", exact: true });
+  // The picker must anchor to Add property, not the entire 780px-high modal.
+  // Verify a field is fully visible and pointer-accessible without typing.
+  const selectedCount = await editor.locator(".qt-property-pick").count();
+  await editor.getByRole("button", { name: "Add property", exact: true }).click();
+  const propertyPicker = editor.getByRole("dialog", { name: "Choose a field", exact: true });
+  const choice = propertyPicker.locator(".qt-picker-item").first();
+  await choice.waitFor({ state: "visible" });
+  const chosenLabel = await choice.locator(".qt-picker-label").innerText();
+  assert.equal(await choice.evaluate((button) => {
+    const rect = button.getBoundingClientRect();
+    const modal = button.closest(".qt-property-editor").getBoundingClientRect();
+    const target = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+    return rect.top >= 0 && rect.bottom <= innerHeight &&
+      rect.top >= modal.top && rect.bottom <= modal.bottom && button.contains(target);
+  }), true, "Add property must expose a clickable field inside the modal and viewport");
+  await page.screenshot({ path: ".context/add-property-picker.png", animations: "disabled" });
+  await choice.click();
+  assert.equal(await propertyPicker.count(), 0);
+  assert.equal(await editor.locator(".qt-property-pick").count(), selectedCount + 1);
+  assert.equal(await editor.locator(".qt-property-pick strong").last().innerText(), chosenLabel);
+  await editor.getByRole("button", { name: "Cancel", exact: true }).click();
+  assert.deepEqual(await fields(itemCard(page)), before);
+  await itemCard(page).getByRole("button", { name: "Customize properties", exact: true }).click();
+  editor = page.getByRole("dialog", { name: "Edit properties", exact: true });
   await editor.getByRole("button", { name: "Move Command up", exact: true }).click();
   assert.deepEqual(await fields(itemCard(page)), before);
   assert.notDeepEqual(await editor.locator("dt").allTextContents(), before);

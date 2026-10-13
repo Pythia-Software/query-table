@@ -234,8 +234,7 @@
 .qt-metric.qt-metric {
   position: relative;
 }
-.qt-metric-edit,
-.qt-metrics-edit {
+.qt-metric-edit {
   position: absolute;
   right: 0.35rem;
   top: 0.35rem;
@@ -244,26 +243,28 @@
   pointer-events: none;
   background: transparent;
 }
-.qt-btn.qt-metric-edit,
-.qt-btn.qt-metrics-edit {
+.qt-btn.qt-metric-edit {
   color: var(--qt-metric-muted, var(--qt-muted, #8c959f));
   border: 1px dotted var(--qt-border, #d0d7de);
 }
-.qt-btn.qt-metric-edit:hover,
-.qt-btn.qt-metrics-edit:hover {
+.qt-btn.qt-metric-edit:hover {
   color: var(--qt-metric-muted, var(--qt-muted, #8c959f));
   border-color: var(--qt-border, #d0d7de);
   background: var(--qt-header-bg, #f6f8fa);
 }
-.qt-metrics-edit {
-  top: -0.75rem;
-  z-index: 3;
-  background: var(--qt-header-bg, #f6f8fa);
+.qt-metrics-toolbar {
+  display: flex;
+  flex: 1 0 100%;
+  justify-content: flex-end;
+  margin-bottom: -6px;
+}
+.qt-btn.qt-metrics-edit {
+  color: var(--qt-accent, #0969da);
+  border-style: dotted;
+  background: transparent;
 }
 .qt-metric:hover > .qt-metric-edit,
-.qt-metric:focus-within > .qt-metric-edit,
-.qt-metrics:hover > .qt-metrics-edit,
-.qt-metrics:focus-within > .qt-metrics-edit {
+.qt-metric:focus-within > .qt-metric-edit {
   opacity: 1;
   pointer-events: auto;
 }
@@ -271,8 +272,7 @@
   padding-right: 1.75rem;
 }
 @media (hover: none) {
-  .qt-metric-edit,
-  .qt-metrics-edit {
+  .qt-metric-edit {
     opacity: 1;
     pointer-events: auto;
   }

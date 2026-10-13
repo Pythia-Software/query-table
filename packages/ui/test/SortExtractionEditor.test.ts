@@ -206,9 +206,11 @@ it("re-samples when the configurator's field changes and never shows the previou
   let resolveHost!: (value: ColumnPreview) => void;
   sampleRequest.mockReturnValueOnce(new Promise<ColumnPreview>((resolve) => { resolveHost = resolve; }));
   await renderField("host", "Host");
+  expect(container.querySelector<HTMLInputElement>("input")!.value).toBe("");
   expect(sampleRequest).toHaveBeenLastCalledWith("[host]", 100, expect.any(AbortSignal));
   expect(container.querySelectorAll("tbody tr")).toHaveLength(0);
   expect(button("Add sort").disabled).toBe(false);
+  await changePattern("(\\w+)");
 
   await act(async () => resolveHost({ ...sample, groups: [{ inputs: ["db-1"], result: { value: "db-1" }, count: 5 }] }));
   expect(button("Add sort").disabled).toBe(false);

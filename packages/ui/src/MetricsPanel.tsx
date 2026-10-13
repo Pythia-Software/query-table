@@ -91,6 +91,7 @@ export function MetricsPanel<Row>({
   locale,
   onInspect,
 }: MetricsPanelProps<Row>): ReactNode {
+  if (api?.query.grouping && api.schema) fields = api.schema.fields;
   const { clauses, results, loading, error } = aggregations;
   const [editing, setEditing] = useState<{
     id?: string;
@@ -101,7 +102,7 @@ export function MetricsPanel<Row>({
     (api ? (id: string) => setEditing({ id, view: "editor" }) : undefined);
   const editDashboard =
     onEditDashboard ??
-    (api ? () => setEditing({ view: "dashboard" }) : undefined);
+    (api ? () => setEditing({ view: "editor" }) : undefined);
 
   if (clauses.length === 0) {
     return emptyMessage ? (
@@ -122,15 +123,20 @@ export function MetricsPanel<Row>({
       style={metricThemeStyle(theme)}
     >
       {editDashboard && (
-        <button
-          type="button"
-          className="qt-btn qt-metrics-edit"
-          aria-label="Edit dashboard layout"
-          title="Edit dashboard layout"
-          onClick={editDashboard}
-        >
-          <Icon name="pencil" />
-        </button>
+        <div className="qt-metrics-toolbar">
+          <button
+            type="button"
+            className="qt-btn qt-metrics-edit"
+            aria-label="Edit metrics"
+            aria-haspopup="dialog"
+            title="Edit metrics"
+            onClick={editDashboard}
+          >
+            <Icon name="pencil" />
+            Edit
+            <Icon name="chevronRight" size={14} />
+          </button>
+        </div>
       )}
       {editing && api && (
         <MetricsEditor

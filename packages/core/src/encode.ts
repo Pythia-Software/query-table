@@ -62,6 +62,7 @@ interface CompactQuery {
   d?: QueryState["itemDetails"];
   c?: string[]; // legacy alias for select column names
   fs?: boolean;
+  b?: QueryState["grouping"];
 }
 
 /** QueryState → base64url token (omitting defaults). All-default query → "". */
@@ -77,6 +78,7 @@ export function encodeQuery(q: QueryState): string {
   if (q.aggregations?.length) c.g = q.aggregations;
   if (q.itemDetails) c.d = q.itemDetails;
   if (q.fitToScreen) c.fs = true;
+  if (q.grouping) c.b = q.grouping;
   if (Object.keys(c).length === 0) return "";
   return toBase64Url(JSON.stringify(c));
 }
@@ -97,6 +99,7 @@ export function decodeQuery(token: string): QueryState {
       aggregations: c.g,
       itemDetails: c.d,
       fitToScreen: c.fs,
+      grouping: c.b,
     });
     return out;
   } catch {
@@ -142,6 +145,7 @@ export interface ServerQuery {
 /** Project a QueryState into the server request, dropping client-only filters,
  *  client-only sorts, and remapping sort fields through `sort.field`. */
 export function toServerQuery<Row>(q: QueryState, schema: FieldSchema<Row>): ServerQuery {
+  if (q.grouping) throw new Error("Row grouping requires complete client rows; this transport does not support grouped queries.");
   q = normalizeQueryState(q);
   const byName = indexFields(schema);
   const resolveField = (name: string) => resolveFieldName(schema, name) ?? name;
@@ -255,6 +259,7 @@ export interface AggregationResult {
  *  all server-capable backend columns. Aggregations referencing a derived /
  *  unknown field are dropped — the server has no SQL for them. */
 export function toAggregationQuery<Row>(q: QueryState, schema: FieldSchema<Row>): AggregationRequest {
+  if (q.grouping) throw new Error("Metrics over grouped rows require grouped-query execution.");
   const suppliedPredicateCount = q.where.reduce((n,t)=>n+predicatesOf(t).length,0);
   q = normalizeQueryState(q);
   if (q.aggregations?.some(a => a.dateGrouping)) throw new Error("Date grouping currently requires local metric execution.");

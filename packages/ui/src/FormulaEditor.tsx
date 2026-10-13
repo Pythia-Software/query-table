@@ -1,12 +1,19 @@
 import {
   useEffect,
   useId,
+  useImperativeHandle,
   useRef,
   useState,
   type KeyboardEvent,
   type MutableRefObject,
+  type Ref,
 } from "react";
-import { FormulaError, type FieldDef } from "@pythia-software/query-table-core";
+import {
+  FORMULA_FUNCTIONS,
+  FormulaError,
+  type FormulaFunction,
+  type FieldDef,
+} from "@pythia-software/query-table-core";
 import {
   formulaCompletions,
   formulaContext,
@@ -17,7 +24,13 @@ import {
 
 import { FormulaFunctionBrowser } from "./FormulaFunctionBrowser";
 
+export interface FormulaEditorActions {
+  insertFunction: (name: string) => void;
+}
+
 export interface FormulaEditorProps {
+  actionsRef?: Ref<FormulaEditorActions>;
+  functions?: readonly FormulaFunction[];
   value: string;
   onChange: (value: string) => void;
   fields: FieldDef[];
@@ -34,6 +47,8 @@ export interface FormulaEditorProps {
 
 export default function FormulaEditor({
   value,
+  actionsRef,
+  functions = FORMULA_FUNCTIONS,
   onChange,
   fields,
   compile,
@@ -101,7 +116,7 @@ export default function FormulaEditor({
     to: number;
   } | null>(null);
   const options = suggestions ? (completions?.options.slice(0, 50) ?? []) : [];
-  const hint = suggestions ? signatureAt(value.slice(0, caret)) : "";
+  const hint = suggestions ? signatureAt(value.slice(0, caret), functions) : "";
 
   useEffect(() => {
     // Native edits already updated the DOM; avoid resetting selection/undo on each keystroke.
@@ -156,6 +171,7 @@ export default function FormulaEditor({
         input.selectionEnd,
         fields,
         explicit,
+        functions,
       ),
     );
   };
@@ -209,6 +225,22 @@ export default function FormulaEditor({
           : undefined,
       );
   };
+
+  const insertFunction = (name: string) => {
+    const input = editor.current;
+    if (!input) return;
+    const from = input.selectionStart;
+    const to = input.selectionEnd;
+    const selected = input.value.slice(from, to);
+    insert(
+      from,
+      to,
+      `${name}(${selected})`,
+      name.length + selected.length + 1,
+      { open: name.length, close: name.length + selected.length + 1 },
+    );
+  };
+  useImperativeHandle(actionsRef, () => ({ insertFunction }));
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     const input = event.currentTarget;
@@ -415,20 +447,8 @@ export default function FormulaEditor({
       </div>
       {showLibrary && (
         <FormulaFunctionBrowser
-          onInsert={(name) => {
-            const input = editor.current;
-            if (!input) return;
-            const from = input.selectionStart;
-            const to = input.selectionEnd;
-            const selected = input.value.slice(from, to);
-            insert(
-              from,
-              to,
-              `${name}(${selected})`,
-              name.length + selected.length + 1,
-              { open: name.length, close: name.length + selected.length + 1 },
-            );
-          }}
+          functions={functions}
+          onInsert={insertFunction}
         />
       )}
     </div>
