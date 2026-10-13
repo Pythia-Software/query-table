@@ -4,6 +4,10 @@
 
 ### Added
 
+- Add a saved-query interface prototype at `/saved-queries` with a native query
+  select, adjacent save actions, explicit loading/saving states, a transient
+  saved confirmation, and protection for unsaved edits when switching queries.
+  Add an optional `QueryBuilder.savedQueryControls` slot for host-owned controls.
 - Add row-producing GROUP BY for complete client datasets, with source filters,
   HAVING, result sorting and paging, custom aggregate formulas including MEDIAN,
   and one representative row chosen by configurable ordering. Preserve grouping

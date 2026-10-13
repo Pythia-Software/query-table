@@ -1,0 +1,70 @@
+/* Keep this exploration on the same type, spacing, and control scale as QT. */
+.qt-save-prototype { display: flex; flex-direction: column; gap: 6px; min-width: 0; max-width: 100%; }
+.qt-save-prototype-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.qt-save-prototype-picker { position: relative; display: inline-flex; width: 196px; max-width: 100%; min-width: 0; }
+.qt-save-prototype-picker select {
+  appearance: none;
+  box-sizing: border-box;
+  width: 100%; min-width: 0; height: 24px;
+  padding: 0 28px 0 8px;
+  border: 1px solid var(--qt-border); border-radius: var(--qt-radius);
+  background: var(--qt-bg, #fff); color: var(--qt-text);
+  font: inherit; font-size: 12px; text-overflow: ellipsis; cursor: pointer;
+}
+.qt-save-prototype-picker > .qt-icon { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); color: var(--qt-muted); pointer-events: none; }
+.qt-save-prototype-picker select:hover:not(:disabled) { border-color: var(--qt-accent); }
+.qt-save-prototype-picker select:focus-visible { outline: 2px solid var(--qt-accent); outline-offset: 2px; }
+.qt-save-prototype-picker select:disabled { cursor: default; opacity: .6; }
+.qt-save-prototype-actions { display: inline-flex; flex-shrink: 0; }
+.qt-save-prototype-actions > .qt-btn { justify-content: center; }
+.qt-save-prototype-actions > .qt-save-prototype-save { min-width: 96px; padding-inline: 8px; border-radius: var(--qt-radius) 0 0 var(--qt-radius); }
+.qt-save-prototype-actions > .qt-save-prototype-more { width: 24px; padding: 0; border-radius: 0 var(--qt-radius) var(--qt-radius) 0; border-left-color: color-mix(in srgb, var(--qt-accent-fg, #fff) 30%, var(--qt-accent)); }
+.qt-save-prototype-actions > .qt-btn:focus-visible { position: relative; z-index: 1; }
+.qt-save-prototype-status { display: inline-flex; align-items: center; gap: 5px; margin-left: 4px; font-size: 11px; color: var(--qt-muted); white-space: nowrap; }
+.qt-save-prototype-status--unsaved::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--qt-warn-fg); }
+.qt-save-prototype-confirmation { display: inline-flex; align-items: center; gap: 5px; animation: qt-save-prototype-confirm 3s both; }
+@keyframes qt-save-prototype-confirm { 0%, 90% { opacity: 1; } 100% { opacity: 0; } }
+.qt-save-prototype-spinner { width: 10px; height: 10px; border: 1.5px solid var(--qt-border); border-top-color: var(--qt-accent); border-radius: 50%; animation: qt-save-prototype-spin .8s linear infinite; }
+@keyframes qt-save-prototype-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .qt-save-prototype-spinner, .qt-save-prototype-confirmation { animation: none; } }
+.qt-save-prototype-error { font-size: 12px; color: var(--qt-fail-fg); }
+.qt-save-prototype-dialog { box-sizing: border-box; width: 460px; max-width: calc(100vw - 32px); }
+.qt-save-prototype-form { display: flex; flex-direction: column; gap: 12px; }
+.qt-save-prototype-form p { margin: 0; font-size: 13px; line-height: 1.5; }
+.qt-save-prototype-field { display: flex; flex-direction: column; gap: 6px; }
+.qt-save-prototype-field label { font-size: 12px; font-weight: 600; }
+.qt-save-prototype-form .qt-input { box-sizing: border-box; width: 100%; height: 32px; padding: 6px 8px; border: 1px solid var(--qt-border); border-radius: var(--qt-radius); background: var(--qt-bg, #fff); color: var(--qt-text); font: inherit; font-size: 13px; }
+.qt-save-prototype-form .qt-input:focus-visible { outline: 2px solid var(--qt-accent); outline-offset: 2px; }
+.qt-save-prototype-form .qt-input::placeholder { color: var(--qt-muted); }
+.qt-save-prototype-dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-top: 4px; padding-top: 16px; border-top: 1px solid var(--qt-border-subtle); }
+.qt-save-prototype-dialog-actions .qt-btn { height: 28px; padding-inline: 8px; }
+.qt-save-prototype-keep { margin-right: auto; }
+.qt-saved-queries-demo .qt-qb-state-bar { padding-left: 8px; }
+.qt-saved-queries-demo .qt-qb-state-main { max-width: 100%; }
+.qt-saved-queries-demo .qt-demo-header { align-items: center; flex-wrap: wrap; gap: 10px; }
+.qt-saved-queries-demo .qt-demo-eyebrow { color: var(--qt-muted); background: var(--qt-header-bg); border: 1px solid var(--qt-border); border-radius: 4px; padding: 2px 6px; font-size: 11px; font-weight: 400; letter-spacing: 0; text-transform: none; }
+.qt-save-prototype-compare { display: inline-flex; align-items: center; gap: 4px; order: 3; margin-left: auto; color: var(--qt-muted); font-size: 12px; text-decoration: none; }
+.qt-save-prototype-compare:hover { color: var(--qt-accent); text-decoration: underline; }
+
+@media (max-width: 760px), (pointer: coarse) and (max-height: 500px) {
+  .qt-saved-queries-demo .qt-qb-state-bar { padding-left: 36px; }
+  .qt-saved-queries-demo .qt-qb-state-bar .qt-qb-collapse-btn { top: 40px; }
+  .qt-saved-queries-demo .qt-qb-state-main { flex-basis: 100%; overflow: visible; }
+  .qt-save-prototype { width: 100%; }
+  .qt-save-prototype-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; width: 100%; gap: 8px 6px; }
+  .qt-save-prototype-controls > label { width: auto; min-width: 0; grid-area: 1 / 1; font-size: 11px; }
+  .qt-save-prototype-picker { width: 100%; grid-area: 2 / 1; }
+  .qt-save-prototype-controls:not(:has(.qt-save-prototype-actions)) .qt-save-prototype-picker { grid-column: 1 / -1; }
+  .qt-save-prototype-picker select { height: 32px; font-size: 16px; }
+  .qt-save-prototype-actions { grid-area: 2 / 2; }
+  .qt-save-prototype-actions > .qt-save-prototype-more { width: 28px; min-width: 28px; }
+  .qt-save-prototype-status { grid-area: 1 / 2; justify-self: end; margin-left: 0; }
+  .qt-save-prototype-form .qt-input { font-size: 16px; min-height: 44px; }
+  .qt-save-prototype-dialog-actions { gap: 8px; }
+  .qt-save-prototype-dialog-actions .qt-btn { min-height: 44px; justify-content: center; }
+  .qt-modal-surface.qt-save-prototype-dialog:has(.qt-demo-feedback) { padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
+  .qt-save-prototype-keep { margin-right: 0; }
+  .qt-saved-queries-demo .qt-demo-header { display: flex; }
+  .qt-saved-queries-demo .qt-demo-eyebrow { margin: 0; }
+  .qt-save-prototype-compare { flex-basis: 100%; margin-left: 0; }
+}
