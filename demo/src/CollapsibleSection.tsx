@@ -25,20 +25,20 @@ export function CollapsibleSection({
 
   return (
     <section className={cx("qt-qt-section", collapsed ? "qt-qt-section--collapsed" : "qt-qt-section--expanded", className)}>
-      <button
-        type="button"
-        className="qt-btn qt-qt-section-toggle"
-        onClick={() => onToggle(!collapsed)}
-        aria-expanded={!collapsed}
-        aria-controls={bodyId}
-        title={collapsed ? `Expand ${title}` : `Collapse ${title}`}
-      >
-        <Icon name="chevronDown" size={18} className={collapsed ? "qt-qt-section-toggle-caret qt-qt-section-toggle-caret--collapsed" : "qt-qt-section-toggle-caret"} />
-        <span className="qt-sr-only">{collapsed ? `Expand ${title}` : `Collapse ${title}`}</span>
-      </button>
       <div className="qt-qt-section-head">
-        <span className="qt-qt-section-title">{title}</span>
-        {collapsed && hasSummary ? <span className="qt-qt-section-summary">{collapsedSummary}</span> : null}
+        <button
+          type="button"
+          className="qt-btn qt-qt-section-toggle"
+          onClick={() => onToggle(!collapsed)}
+          aria-expanded={!collapsed}
+          aria-controls={bodyId}
+          aria-label={collapsed ? `Expand ${title}` : `Collapse ${title}`}
+          title={collapsed ? `Expand ${title}` : `Collapse ${title}`}
+        >
+          <Icon name="chevronDown" size={18} className={collapsed ? "qt-qt-section-toggle-caret qt-qt-section-toggle-caret--collapsed" : "qt-qt-section-toggle-caret"} />
+          <span className="qt-qt-section-title">{title}</span>
+        </button>
+        {hasSummary ? <span className="qt-qt-section-summary">{collapsedSummary}</span> : null}
       </div>
       {!collapsed ? <div id={bodyId}>{children}</div> : null}
     </section>

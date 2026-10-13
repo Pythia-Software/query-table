@@ -47,8 +47,6 @@
 .qt-save-prototype-compare:hover { color: var(--qt-accent); text-decoration: underline; }
 
 @media (max-width: 760px), (pointer: coarse) and (max-height: 500px) {
-  .qt-saved-queries-demo .qt-qb-state-bar { padding-left: 36px; }
-  .qt-saved-queries-demo .qt-qb-state-bar .qt-qb-collapse-btn { top: 40px; }
   .qt-saved-queries-demo .qt-qb-state-main { flex-basis: 100%; overflow: visible; }
   .qt-save-prototype { width: 100%; }
   .qt-save-prototype-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; width: 100%; gap: 8px 6px; }
