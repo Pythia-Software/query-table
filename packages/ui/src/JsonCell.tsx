@@ -81,6 +81,7 @@ function JsonValueContent({ inspection, label, display, onClose, compact = false
   const [expandedBuckets, setExpandedBuckets] = useState(new Set<string>());
   const [searchMode, setSearchMode] = useState<"filter" | "highlight">("filter");
   const [matchIndex, setMatchIndex] = useState(0);
+  const [navigationRequest, setNavigationRequest] = useState(0);
   const [searchOverrides, setSearchOverrides] = useState(new Map<string, boolean>());
   const contentRef = useRef<HTMLDivElement>(null);
   const searching = Boolean(search.trim());
@@ -117,10 +118,12 @@ function JsonValueContent({ inspection, label, display, onClose, compact = false
     const bounds = content.getBoundingClientRect();
     const target = selected.getBoundingClientRect();
     if (target.top < bounds.top || target.bottom > bounds.bottom) content.scrollTop += target.top - bounds.top - (bounds.height - target.height) / 2;
-  }, [searching, raw, activeMatch, lines]);
+    // Expansion changes the rendered lines but should preserve manual scrolling.
+  }, [searching, raw, activeMatch, searchMode, navigationRequest]);
   const navigate = (direction: number) => {
     if (!occurrences.length) return;
     setMatchIndex((current) => (current + direction + occurrences.length) % occurrences.length);
+    setNavigationRequest(current => current + 1);
     setSearchOverrides(new Map());
   };
   const copy = async (text: string, message: string) => {

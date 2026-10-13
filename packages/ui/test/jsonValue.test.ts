@@ -43,6 +43,35 @@ describe("JSON cell inspection", () => {
     expect(inspectJsonValue(raw)).toMatchObject({ raw, error: expect.stringContaining("safe integer precision"), entries: [] });
   });
 
+  it.each(['1e300', '1e21', '-1e21', '9007199254740993.0', '{"x":1e300}', '{"id":"9007199254740993"}', '{"9007199254740993":0}'])
+  ("accepts floating-point notation and quoted integer-like text: %s", (raw) => {
+    const result = inspectJsonValue(raw);
+    expect(result.error).toBeUndefined();
+    expect(JSON.parse(result.formatted)).toEqual(JSON.parse(raw));
+  });
+
+  it.each([1e300, 1e21, Number.MAX_SAFE_INTEGER + 1, { x: 1e300, id: Number.MAX_SAFE_INTEGER + 1 }])
+  ("accepts native numbers without claiming to preserve source precision: %j", (value) => {
+    const result = inspectJsonValue(value);
+    expect(result.error).toBeUndefined();
+    expect(JSON.parse(result.formatted)).toEqual(value);
+  });
+
+  it.each(['9007199254740993', '-9007199254740993', '{"id":9007199254740993}', '[9007199254740993]'])
+  ("guards unsafe integer literals through encoded and escaped input: %s", (raw) => {
+    for (const input of [raw, JSON.stringify(raw), JSON.stringify(raw).slice(1, -1)]) {
+      expect(inspectJsonValue(input)).toMatchObject({ raw: input, error: expect.stringContaining("safe integer precision"), entries: [] });
+    }
+  });
+
+  it("excludes invisible container summaries from key/path/value search", () => {
+    const entries = inspectJsonValue({ tags: ["a", "b"], items: [1] }).entries;
+    expect(searchJsonEntries(entries, "items").map(entry => entry.path)).toEqual(['$["items"]', '$["items"][0]']);
+    expect(searchJsonEntries(entries, "keys")).toEqual([]);
+    expect(searchJsonEntries(entries, "2")).toEqual([]);
+    expect(searchJsonEntries(inspectJsonValue({ keys: {} }).entries, "keys").map(entry => entry.path)).toEqual(['$["keys"]']);
+  });
+
   it("finds collapsed descendant keys, values, types and paths literally", () => {
     const entries = inspectJsonValue(payload).entries;
     expect(searchJsonEntries(entries, "DISPLAY.NAME").map((entry) => entry.path)).toEqual(['$["customer"]["display.name"]']);

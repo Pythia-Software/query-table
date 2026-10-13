@@ -123,6 +123,9 @@ try {
       return target.top >= bounds.top && target.bottom <= bounds.bottom;
     });
     assert.ok(matchVisible, "Selected occurrence scrolls into view");
+    await long.locator(".qt-json-content").evaluate(content => { content.scrollTop = 0; });
+    await long.getByRole("button", { name: "Collapse $[0]", exact: true }).click();
+    assert.equal(await long.locator(".qt-json-content").evaluate(content => content.scrollTop), 0, "Toggling another node preserves manual scrolling during search");
     await long.getByRole("button", { name: "Previous JSON match", exact: true }).click();
     assert.equal(await long.locator(".qt-json-search-count").innerText(), "2/4");
     await long.getByRole("searchbox").press("Shift+Enter");

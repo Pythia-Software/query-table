@@ -46,6 +46,7 @@ export function inspectJsonValue(input: unknown, display: JsonCellDisplay = { ki
   try {
     if (raw.length > JSON_MAX_CHARACTERS) throw Error("JSON exceeds the 1,048,576 character inspection limit. Inspect it outside the table.");
     let value = input;
+    let decodedSource: string | undefined;
     const encoding = display.encoding ?? "auto";
     const passes = encoding === "json" ? 1 : boundedJsonOption(display.maxDecodeDepth, 4, 1, 8);
     if (typeof value === "string" && encoding !== "value") {
@@ -54,6 +55,7 @@ export function inspectJsonValue(input: unknown, display: JsonCellDisplay = { ki
         const text = value;
         try {
           value = JSON.parse(text);
+          decodedSource = text;
           decoded = true;
         } catch {
           // Strict JSON unescaping handles blobs such as {\"key\":\"value\"}
@@ -63,6 +65,7 @@ export function inspectJsonValue(input: unknown, display: JsonCellDisplay = { ki
               const unescaped: unknown = JSON.parse(`"${text}"`);
               if (typeof unescaped !== "string" || unescaped === text) throw Error();
               value = JSON.parse(unescaped);
+              decodedSource = unescaped;
               decoded = true;
               continue;
             } catch { /* show a decoded JSON string literally, or raw invalid text */ }
@@ -78,12 +81,19 @@ export function inspectJsonValue(input: unknown, display: JsonCellDisplay = { ki
         if (stillEncoded) throw Error("JSON string decoding limit reached. Increase maxDecodeDepth or use encoding: value.");
       }
     }
+    // Guard integer literals in decoded source, not the magnitude of a double:
+    // exponent/decimal values and native numbers already have number semantics.
+    // Skip quoted strings so numeric-looking keys and values remain literal.
+    if (decodedSource !== undefined) {
+      for (const [token] of decodedSource.matchAll(/"(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g)) {
+        if (/^-?\d+$/.test(token) && !Number.isSafeInteger(Number(token))) {
+          throw Error("JSON contains an integer literal outside safe integer precision. Use the original text to preserve its value.");
+        }
+      }
+    }
     const formatted = JSON.stringify(value, (_key, item: unknown) => {
       if (item === undefined || typeof item === "function" || typeof item === "symbol" || typeof item === "bigint" ||
           (typeof item === "number" && !Number.isFinite(item))) throw Error("Value contains data that cannot be represented as JSON.");
-      if (typeof item === "number" && Number.isInteger(item) && !Number.isSafeInteger(item)) {
-        throw Error("JSON contains a number outside safe integer precision. Use the original text to preserve its value.");
-      }
       return item;
     }, 2);
     if (formatted === undefined) throw Error("Value cannot be represented as JSON.");
@@ -129,5 +139,8 @@ export function inspectJsonValue(input: unknown, display: JsonCellDisplay = { ki
 /** Search keys, full paths and typed values; case insensitive, literal matching. */
 export function searchJsonEntries(entries: JsonEntry[], search: string): JsonEntry[] {
   const needle = search.trim().toLowerCase();
-  return needle ? entries.filter((entry) => `${entry.key}\n${entry.path}\n${entry.text}`.toLowerCase().includes(needle)) : entries;
+  return needle ? entries.filter((entry) => {
+    const valueText = entry.type === "object" || entry.type === "array" ? "" : entry.text;
+    return `${entry.key}\n${entry.path}\n${valueText}`.toLowerCase().includes(needle);
+  }) : entries;
 }

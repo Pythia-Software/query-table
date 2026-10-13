@@ -106,8 +106,10 @@ inspected match across those batches. A visible notice states
 when inspection/search is partial; copying a valid decoded document still includes
 the full accepted value. Larger or unserializable values show an error. Very large
 original text is truncated in the viewer while Copy original retains the source.
-Numbers outside JavaScript's safe integer precision keep the original text and
-disable decoded copying, preventing a silently rounded identifier.
+Integer literals outside JavaScript's safe integer precision keep the original
+JSON text and disable decoded copying, preventing a silently rounded identifier.
+Decimal/exponent notation and native numeric values retain JavaScript number
+semantics and remain inspectable.
 No HTML from a value is executed.
 
 ## Details defaults and overrides

@@ -76,6 +76,9 @@
 
 ### Fixed
 
+- Exclude invisible JSON container summaries from search, preserve manual
+  scrolling when toggling sections during search, and apply the precision guard
+  to source integer literals while accepting large floats and native numbers.
 - Keep raw chart group labels when a scatter/histogram X format survives a
   display change without calendar grouping.
 - Reuse the last date bucket's boundaries and ISO key for dense timestamp rows,

@@ -38,6 +38,39 @@ describe("pretty JSON structure", () => {
     expect(JSON.parse(code())).toEqual(value);
     expect(button("Show more")).toBeUndefined();
   });
+  it("keeps Filter results, match counts and navigation free of container-summary hits", () => {
+    act(() => root.render(createElement(JsonValueView, { value: { tags: ["a", "b"], items: [1] } })));
+    search("items");
+    expect(container.querySelector('.qt-json-search-count')?.textContent).toBe("1/2");
+    expect(container.querySelector('.qt-json-footer')?.textContent).toContain("2 matching paths");
+    expect(container.querySelector('[data-json-path="$[\\"tags\\"]"]')).toBeNull();
+    search("keys");
+    expect(container.querySelector('.qt-json-search-count')?.textContent).toBe("0/0");
+    expect(container.querySelector('.qt-json-footer')?.textContent).toContain("0 matching paths");
+    expect(button("Next JSON match").disabled).toBe(true);
+  });
+  it("preserves manual scrolling on node/bucket toggles and scrolls on explicit match navigation", () => {
+    act(() => root.render(createElement(JsonValueView, { value: Array.from({ length: 45 }, (_, i) => ({ name: i === 1 ? "needle" : "other" })) })));
+    const content = container.querySelector<HTMLElement>(".qt-json-content")!;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const top = this === content ? 0 : 500;
+      const height = this === content ? 100 : 20;
+      return { top, bottom: top + height, height, left: 0, right: 100, width: 100, x: 0, y: top, toJSON: () => ({}) };
+    });
+    search("needle");
+    const mode = container.querySelector<HTMLSelectElement>('[aria-label="JSON search mode"]')!;
+    act(() => { mode.value = "highlight"; mode.dispatchEvent(new Event("change", { bubbles: true })); });
+    expect(content.scrollTop).toBeGreaterThan(0);
+    content.scrollTop = 125;
+    act(() => button("Collapse $[0]").click());
+    expect(content.scrollTop).toBe(125);
+    act(() => button("Expand $ items 20–39").click());
+    expect(content.scrollTop).toBe(125);
+    act(() => button("Collapse $ items 20–39").click());
+    expect(content.scrollTop).toBe(125);
+    act(() => button("Next JSON match").click());
+    expect(content.scrollTop).toBeGreaterThan(125); // even when the single match wraps to itself
+  });
 });
 afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 const button = (label: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.getAttribute("aria-label") === label || item.textContent === label)!;
