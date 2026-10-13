@@ -9,6 +9,7 @@ import type { MetricQuery, MetricCapabilities } from "./metricTypes";
 
 import { normalizeQueryState } from "./query";
 import type { QueryState, RowId } from "./query";
+import type { QuerySnapshotStore } from "./queryLinks";
 import type { ServerQuery, AggregationRequest, AggregationResult } from "./encode";
 
 // ---- Transport ------------------------------------------------------------
@@ -80,6 +81,7 @@ export interface Transport<Row = any> {
 // ---- Saved queries --------------------------------------------------------
 
 export interface SavedQuery {
+  snapshotCode?: string;
   id: string;
   name: string;
   /** Epoch millis; injected by the caller so core stays deterministic/testable. */
@@ -92,6 +94,8 @@ export interface SavedQuery {
  *  on one origin don't collide. Async to allow backend implementations; the
  *  browser adapters can still resolve synchronously. */
 export interface StorageAdapter {
+  /** Optional authenticated server store. Ordinary URL sync never calls it. */
+  snapshots?: QuerySnapshotStore;
   loadLast(key: string): Promise<QueryState | null>;
   saveLast(key: string, query: QueryState): Promise<void>;
 
@@ -103,7 +107,10 @@ export interface StorageAdapter {
   setDefaultSaved?(key: string, id: string | null): Promise<void>;
   /** Persist a named query snapshot. Rejects when a saved query with the same
    *  name already exists in the key namespace. */
-  saveNamed(key: string, name: string, query: QueryState, savedAt: number): Promise<SavedQuery>;
+  saveNamed(key: string, name: string, query: QueryState, savedAt: number, snapshotCode?: string): Promise<SavedQuery>;
+  /** Atomically replace a named query's state, preserving its id, name and default
+   * selection. On rejection the original entry must remain unchanged. */
+  updateNamed?(key: string, id: string, query: QueryState, savedAt: number, snapshotCode?: string): Promise<SavedQuery>;
   deleteSaved(key: string, id: string): Promise<void>;
 }
 
@@ -130,7 +137,8 @@ function normalizeSavedQuery(value: unknown): SavedQuery | null {
   ) {
     return null;
   }
-  return { id: raw.id, name: raw.name, savedAt: raw.savedAt, query: normalizeQueryState(raw.query) };
+  return { id: raw.id, name: raw.name, savedAt: raw.savedAt, query: normalizeQueryState(raw.query),
+    ...(typeof raw.snapshotCode === "string" ? { snapshotCode: raw.snapshotCode } : {}) };
 }
 
 function normalizeSavedQueries(value: unknown): SavedQuery[] {
@@ -172,7 +180,7 @@ export function memoryStorageAdapter(): StorageAdapter {
       if (!(saved.get(key) ?? []).some((item) => item.id === id)) throw new Error(`Saved query "${id}" does not exist.`);
       defaults.set(key, id);
     },
-    async saveNamed(key, name, query, savedAt) {
+    async saveNamed(key, name, query, savedAt, snapshotCode) {
       const normalizedName = name.trim();
       if (!normalizedName || normalizedName.length > MAX_SAVED_NAME_LENGTH) {
         throw new Error(`Saved query name must be between 1 and ${MAX_SAVED_NAME_LENGTH} characters.`);
@@ -181,12 +189,25 @@ export function memoryStorageAdapter(): StorageAdapter {
       if (items.length >= MAX_SAVED_QUERIES) throw new Error(`At most ${MAX_SAVED_QUERIES} saved queries are allowed.`);
       if (items.some((item) => item.name === normalizedName)) throw new Error(`Saved query "${normalizedName}" already exists.`);
       const item: SavedQuery = {
+        ...(snapshotCode ? { snapshotCode } : {}),
         id: `${savedAt}-${Math.round((savedAt * 9301 + 49297) % 233280)}`,
         name: normalizedName,
         savedAt,
         query: normalizeQueryState(query),
       };
       saved.set(key, [...items, item]);
+      return item;
+    },
+    async updateNamed(key, id, query, savedAt, snapshotCode) {
+      const items = saved.get(key) ?? [];
+      const original = items.find((item) => item.id === id);
+      if (!original) throw new Error(`Saved query "${id}" does not exist.`);
+      const item: SavedQuery = {
+        id, name: original.name, savedAt,
+        query: normalizeQueryState(query),
+        ...(snapshotCode ? { snapshotCode } : {}),
+      };
+      saved.set(key, items.map((entry) => entry.id === id ? item : entry));
       return item;
     },
     async deleteSaved(key, id) {
@@ -259,7 +280,7 @@ export function localStorageAdapter(): StorageAdapter {
       }
       writeDefaultId(key, id);
     },
-    async saveNamed(key, name, query, savedAt) {
+    async saveNamed(key, name, query, savedAt, snapshotCode) {
       const normalizedName = name.trim();
       if (!normalizedName || normalizedName.length > MAX_SAVED_NAME_LENGTH) {
         throw new Error(`Saved query name must be between 1 and ${MAX_SAVED_NAME_LENGTH} characters.`);
@@ -270,6 +291,7 @@ export function localStorageAdapter(): StorageAdapter {
         throw new Error(`Saved query "${normalizedName}" already exists.`);
       }
       const item: SavedQuery = {
+        ...(snapshotCode ? { snapshotCode } : {}),
         id: `${savedAt}-${Math.round((savedAt * 9301 + 49297) % 233280)}`,
         name: normalizedName,
         savedAt,
@@ -277,6 +299,18 @@ export function localStorageAdapter(): StorageAdapter {
       };
       items.push(item);
       writeSaved(key, items);
+      return item;
+    },
+    async updateNamed(key, id, query, savedAt, snapshotCode) {
+      const items = readSaved(key);
+      const original = items.find((item) => item.id === id);
+      if (!original) throw new Error(`Saved query "${id}" does not exist.`);
+      const item: SavedQuery = {
+        id, name: original.name, savedAt,
+        query: normalizeQueryState(query),
+        ...(snapshotCode ? { snapshotCode } : {}),
+      };
+      writeSaved(key, items.map((entry) => entry.id === id ? item : entry));
       return item;
     },
     async deleteSaved(key, id) {

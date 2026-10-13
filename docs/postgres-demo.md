@@ -28,7 +28,10 @@ Twenty initial cards cover counts, page-only counts, ratios, temporal values,
 pie/ring charts, bars, lines, scatter, lists, two-key pivot tables, three-key
 tables, box plots, histograms, and computed-field grouping/aggregation. The
 metric editor and dashboard layout editor use the production UI. Edits persist
-in browser storage and shareable query URLs. **Restore demo dashboard** restores
+in browser storage and compact query URLs. Oversized views use a local FIFO cache;
+explicit Save/Share promotes an immutable code to PostgreSQL through
+`/api/postgres/query-snapshots`. Shared codes resolve in a fresh browser profile.
+Named search names/defaults remain browser-local. **Restore demo dashboard** restores
 the starter configuration. The backend supports up to 20 metrics per request;
 remove an existing card before adding one to this full starter dashboard.
 
@@ -40,8 +43,8 @@ snapshot, including the canonical computed definitions. Saving a computed
 column refreshes that snapshot and its revisions; other open tabs may need to
 reconnect afterward. Base records remain fixed throughout the session.
 
-The only new third-party runtime dependency is the PostgreSQL driver in the
-separate `demo/server` Go module. Published query-table libraries gain none.
+The demo uses a PostgreSQL driver in the separate `demo/server` Go module.
+Core uses `fflate` for compact query URL compression.
 Charts and editors continue to use the dependency-light production UI.
 
 ## Loading experiments

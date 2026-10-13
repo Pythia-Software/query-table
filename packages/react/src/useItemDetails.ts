@@ -4,6 +4,7 @@ import type {
   QueryState, RelationshipAdapter, RowId, Transport, PropertyViewState,
 } from "@pythia-software/query-table-core";
 import { usePropertyView, type PropertyViewApi } from "./usePropertyView";
+import type { QueryLinksApi } from "./useQueryLinks";
 
 export interface ItemDetailRecord<Row> {
   row: Row;
@@ -28,6 +29,7 @@ export interface ItemDetailsOptions<Row> {
   loadRow?: (id: RowId, signal: AbortSignal) => Promise<ItemDetailRecord<Row> | null>;
 }
 export interface ItemDetailsApi<Row> {
+  links?: QueryLinksApi;
   schema: FieldSchema<Row>;
   /** Collection catalogue used to resolve Page template fields. */
   pageSchema: FieldSchema<Row>;
@@ -100,7 +102,7 @@ function useDetailProperties<Row>(mode: ItemPropertyMode, schema: FieldSchema<Ro
 
 /** Independent, type-level property controllers for each detail modality. */
 export function useItemDetails<Row>({
-  schema, query, setQuery, options, rows, clientRows, rowId, transport, refreshKey,
+  schema, query, setQuery, options, rows, clientRows, rowId, transport, refreshKey, links, queryReady = true,
 }: {
   schema: FieldSchema<Row>;
   query: QueryState;
@@ -111,6 +113,9 @@ export function useItemDetails<Row>({
   rowId: (row: Row) => RowId | null;
   transport: Transport<Row> | undefined;
   refreshKey: number;
+  links?: QueryLinksApi;
+  /** Hold property-view synchronization while the collection query is restoring. */
+  queryReady?: boolean;
 }): ItemDetailsApi<Row> | undefined {
   const enabled = Boolean(options);
   const config = typeof options === "object" ? options : undefined;
@@ -122,9 +127,12 @@ export function useItemDetails<Row>({
   const sharedModal = requested?.mode === "modal" && query.itemDetails?.modes.includes("modal")
     && (availableModes.includes("hover") || (availableModes.includes("page") && !page.urlTemplate.trim()));
   const active = requested && (modes.includes(requested.mode) || sharedModal) ? requested : null;
-  const modalProperties = useDetailProperties("modal", detailSchema, config, query, setQuery, enabled);
-  const hoverProperties = useDetailProperties("hover", detailSchema, config, query, setQuery, enabled);
-  const expandProperties = useDetailProperties("expand", detailSchema, config, query, setQuery, enabled);
+  // Property storage can hydrate independently, but must not apply its view to
+  // a placeholder query and thereby cancel a pending URL/saved-query restore.
+  const syncProperties = enabled && queryReady;
+  const modalProperties = useDetailProperties("modal", detailSchema, config, query, setQuery, syncProperties);
+  const hoverProperties = useDetailProperties("hover", detailSchema, config, query, setQuery, syncProperties);
+  const expandProperties = useDetailProperties("expand", detailSchema, config, query, setQuery, syncProperties);
   const propertiesByMode = { modal: modalProperties, hover: hoverProperties, expand: expandProperties };
   const views: Record<ItemPropertyMode, PropertyViewState> = {
     modal: modalProperties.view, hover: hoverProperties.view, expand: expandProperties.view,
@@ -175,6 +183,7 @@ export function useItemDetails<Row>({
   }, [activeId, loadRow, refreshKey, retryKey]);
   if (!enabled) return;
   return {
+    ...(links ? { links } : {}),
     schema: detailSchema, queryParameter: config?.queryParameter ?? "q", properties: modalProperties, propertiesByMode, availableModes, modes, active,
     page, pageSchema: schema,
     record: currentResult ? result.record : null,

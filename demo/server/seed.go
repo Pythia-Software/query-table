@@ -89,6 +89,9 @@ func seed(ctx context.Context, db *sql.DB, n int) error {
 	if _, err = tx.ExecContext(ctx, qt.ComputedColumnsDDL); err != nil {
 		return err
 	}
+	if _, err = tx.ExecContext(ctx, qt.QuerySnapshotsDDL); err != nil {
+		return err
+	}
 	for _, c := range seededColumns {
 		_, err = tx.ExecContext(ctx, `INSERT INTO query_table_computed_columns(scope,dataset,id,label,language,language_version,source) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`, scope, dataset, c.ID, c.Label, c.Expression.Language, c.Expression.Version, c.Expression.Source)
 		if err != nil {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { encodeQuery, renderItemPageTemplate, type ItemDetailMode, type ItemPropertyMode, type QueryState, type RowId } from "@pythia-software/query-table-core";
 import type { ItemDetailRecord, ItemDetailsApi } from "@pythia-software/query-table-react";
@@ -64,19 +64,29 @@ function DetailStatus({ loading, error, onRetry }: { loading: boolean; error: Er
 /** Snapshot the item and collection state, even when URL synchronization is off.
  * A popover is shared as a modal with that popover's current appearance. */
 export function itemDetailHref<Row>(api: ItemDetailsApi<Row>, query: QueryState, id: RowId, mode: ItemPropertyMode = "modal"): string {
+  const sharedQuery = itemDetailQuery(api, query, id, mode);
+  if (api.links) return api.links.local(sharedQuery, window.location.href, api.queryParameter).url;
+  return inlineItemDetailHref(api, sharedQuery);
+}
+function inlineItemDetailHref<Row>(api: ItemDetailsApi<Row>, sharedQuery: QueryState, baseUrl = window.location.href): string {
+  const url = new URL(baseUrl);
+  url.searchParams.set(api.queryParameter, encodeQuery(sharedQuery));
+  return url.toString();
+}
+function itemDetailQuery<Row>(api: ItemDetailsApi<Row>, query: QueryState, id: RowId, mode: ItemPropertyMode): QueryState {
   const sharedMode = mode === "hover" ? "modal" : mode;
   const modes = api.modes.includes(sharedMode) ? api.modes : [...api.modes, sharedMode];
-  const url = new URL(window.location.href);
-  url.searchParams.set(api.queryParameter, encodeQuery({ ...query, itemDetails: {
+  return { ...query, itemDetails: {
     ...query.itemDetails, modes, page: api.page,
     views: { hover: api.propertiesByMode.hover.view,
       modal: mode === "hover" ? api.propertiesByMode.hover.view : api.propertiesByMode.modal.view,
       expand: api.propertiesByMode.expand.view }, active: { id, mode: sharedMode },
-  } }));
-  return url.toString();
+  } };
 }
 export function ItemDetailShare<Row>({ api, query, id, mode = "modal", compact = false }: { api: ItemDetailsApi<Row>; query: QueryState; id: RowId; mode?: ItemPropertyMode; compact?: boolean }): ReactNode {
-  return <ShareButton getUrl={() => itemDetailHref(api, query, id, mode)} compact={compact} />;
+  return <ShareButton getUrl={async () => api.links
+    ? (await api.links.create(itemDetailQuery(api, query, id, mode), { parameter: api.queryParameter })).url
+    : itemDetailHref(api, query, id, mode)} compact={compact} />;
 }
 export function ItemDetailsPanel<Row>({ api, query, renderers, outsidePage = false }: {
   api: ItemDetailsApi<Row>; query: QueryState; renderers: RenderRegistry<Row>; outsidePage?: boolean;
@@ -96,10 +106,37 @@ export function ItemDetailsActions<Row>({ api, query, id, row, renderers, expand
 }): ReactNode {
   const [hover, setHover] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
-  const pageHref = api.modes.includes("page")
-    ? api.page.urlTemplate.trim() ? renderItemPageTemplate(api.page.urlTemplate, api.pageSchema, row, id, encodeQuery(query))
-      : id != null && typeof window !== "undefined" ? itemDetailHref(api, query, id) : null
-    : null;
+  const [navigationError, setNavigationError] = useState<string | null>(null);
+  const modesKey = api.modes.join(",");
+  const baseUrl = typeof window !== "undefined" ? window.location.href : "";
+  const pageLink = useMemo(() => {
+    let href: string | null = null;
+    let error: string | null = null;
+    let lazy = false;
+    try {
+      if (api.modes.includes("page")) href = api.page.urlTemplate.trim()
+        ? renderItemPageTemplate(api.page.urlTemplate, api.pageSchema, row, id, encodeQuery(query))
+        : id != null && baseUrl ? inlineItemDetailHref(api, itemDetailQuery(api, query, id, "modal"), baseUrl) : null;
+      if (href && new TextEncoder().encode(href).length > (api.links?.maxUrlBytes ?? 2000)) {
+        href = null;
+        if (!api.page.urlTemplate.trim() && api.links) lazy = true;
+        else error = "Page URL exceeds the inline link budget. Use an item Share link or a host page that resolves query codes.";
+      }
+    } catch (e) { error = e instanceof Error ? e.message : String(e); }
+    return { href, error, lazy };
+  }, [query, row, id, baseUrl, modesKey, api.queryParameter, api.page.urlTemplate, api.page.target, api.pageSchema,
+    api.links?.maxUrlBytes, api.propertiesByMode.hover.view, api.propertiesByMode.modal.view, api.propertiesByMode.expand.view]);
+  function followPage(newTab = false) {
+    try {
+      // Only an activated oversized link writes to the FIFO cache. Rendering
+      // a page of rows must not evict the live collection's address-bar code.
+      const href = itemDetailHref(api, query, id!);
+      setNavigationError(null);
+      if (newTab || api.page.target === "_blank") window.open(href, "_blank", "noopener,noreferrer");
+      else window.location.assign(href);
+    } catch (e) { setNavigationError(e instanceof Error ? e.message : String(e)); }
+  }
+  const pageHref = pageLink.href;
   return <div className="qt-item-detail-actions">
     {api.modes.includes("hover") && <button ref={button} type="button" className="qt-link-btn qt-item-detail-button" aria-label={`Preview item ${id ?? ""}`} title="Open popover" disabled={id == null}
       aria-haspopup="dialog" aria-expanded={hover}
@@ -111,7 +148,11 @@ export function ItemDetailsActions<Row>({ api, query, id, row, renderers, expand
     {api.modes.includes("page") && (pageHref
       ? <a className="qt-link-btn qt-item-detail-button" href={pageHref} target={api.page.target} rel={api.page.target === "_blank" ? "noopener noreferrer" : undefined}
         aria-label={`Open item ${id ?? ""} on page`} title={api.page.target === "_blank" ? "Open page in new tab" : "Open page"}><Icon name="externalLink" /></a>
-      : <button type="button" className="qt-link-btn qt-item-detail-button" disabled aria-label={`Open item ${id ?? ""} on page`} title="Page URL unavailable. Check the template and row values."><Icon name="externalLink" /></button>)}
+      : <button type="button" className="qt-link-btn qt-item-detail-button" disabled={!pageLink.lazy}
+        onClick={event => followPage(event.metaKey || event.ctrlKey)}
+        onAuxClick={event => { if (event.button === 1) { event.preventDefault(); followPage(true); } }}
+        aria-label={`Open item ${id ?? ""} on page`} title={pageLink.lazy ? "Open page" : pageLink.error ?? "Page URL unavailable. Check the template and row values."}><Icon name="externalLink" /></button>)}
+    {navigationError && <small role="alert">{navigationError}</small>}
     {hover && api.modes.includes("hover") && id != null && <ItemHoverCard api={api} query={query} id={id} renderers={renderers} anchor={button.current}
       onClose={() => { setHover(false); button.current?.focus(); }} />}
   </div>;

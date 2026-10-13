@@ -57,6 +57,28 @@ history, referrers, logs, analytics, bookmarks, and screenshots. Pass
 is appropriate; sensitive applications should use an access-controlled server
 `StorageAdapter`.
 
+With `syncUrl: true`, oversized queries use a browser-local FIFO cache and a
+temporary short URL. Configure its size/budget with `links: { cache,
+maxUrlBytes }`; the default complete URL budget is 2,000 bytes. Local links
+can expire through cache eviction and do not transfer with browser bookmark sync.
+Configure `storage.snapshots: httpQuerySnapshotStore("/api/query-snapshots")`
+for permanent Save/Share links. `api.links.create()` also supports a host's explicit
+Bookmark action. Normal edits never write snapshots to the server. Missing
+references fail visibly before rows/metrics execute. See the
+[link integration contract](../../docs/url-state-and-saved-search-design.md).
+
+`api.saved.update(id)` persists the current snapshot before replacing the saved
+search through `storage.updateNamed`. The adapter must update atomically and
+retain the saved ID and default selection; failed updates preserve the original.
+Both built-in adapters support updates. For custom adapters, QueryBuilder offers
+Update only when `api.saved.canUpdate` is true. Optional last/default storage read
+failures fall back to table defaults; explicit broken URL links still block
+execution. A single empty `?q=` is treated as an absent query.
+
+Item-detail property views hydrate independently, but synchronize into the
+collection query only after URL/saved-query restoration settles. Detail layouts
+encoded in the restored query take precedence over stored property views.
+
 See the [repository README](https://github.com/Pythia-Software/query-table#readme)
 for transport and schema examples.
 

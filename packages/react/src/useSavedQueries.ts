@@ -4,8 +4,8 @@
 // StorageAdapter (in-memory by default, explicitly durable when the caller
 // provides one). Loading a saved query pushes its QueryState into the controller.
 
-import { useCallback, useEffect, useState } from "react";
-import type { QueryState, SavedQuery, StorageAdapter } from "@pythia-software/query-table-core";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { QueryState, SavedQuery, StorageAdapter, QuerySnapshot } from "@pythia-software/query-table-core";
 
 export interface SavedQueriesApi {
   items: SavedQuery[];
@@ -14,6 +14,10 @@ export interface SavedQueriesApi {
   defaultId: string | null;
   /** Persist the current query under a name. Rejects on duplicate names. */
   save: (name: string) => Promise<SavedQuery>;
+  /** Whether the storage adapter supports atomic updates. */
+  canUpdate: boolean;
+  /** Replace a saved query with the current state, retaining its id and default. */
+  update: (id: string) => Promise<SavedQuery>;
   /** Load a saved query into the live controller. */
   load: (id: string) => void;
   /** Mark a saved query as the default view. No-op when storage lacks support. */
@@ -30,24 +34,30 @@ export function useSavedQueries(
   storage: StorageAdapter,
   /** Injected clock so saves are deterministic/testable. */
   now: () => number,
+  snapshot?: (query: QueryState) => Promise<QuerySnapshot | null>,
 ): SavedQueriesApi {
   const [items, setItems] = useState<SavedQuery[]>([]);
   const [defaultId, setDefaultId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const storageRef = useRef(storage);
+  storageRef.current = storage;
 
   const refresh = useCallback(async () => {
+    const storage = storageRef.current;
     setLoading(true);
     try {
-      const [savedItems, defaultSaved] = await Promise.all([
+      const [savedItems, defaultSaved] = await Promise.allSettled([
         storage.listSaved(key),
         storage.loadDefaultSaved?.(key) ?? Promise.resolve(null),
       ]);
-      setItems(savedItems);
-      setDefaultId(defaultSaved?.id ?? null);
+      // Optional catalogue reads must not block the table or turn a committed
+      // save into a reported failure. Keep the last successful data on failure.
+      if (savedItems.status === "fulfilled") setItems(savedItems.value);
+      if (defaultSaved.status === "fulfilled") setDefaultId(defaultSaved.value?.id ?? null);
     } finally {
       setLoading(false);
     }
-  }, [storage, key]);
+  }, [key]);
 
   useEffect(() => {
     void refresh();
@@ -55,11 +65,14 @@ export function useSavedQueries(
 
   const save = useCallback(
     async (name: string) => {
-      const saved = await storage.saveNamed(key, name, currentQuery, now());
+      name = name.trim();
+      if (!name || name.length > 200) throw Error("Saved query name must be between 1 and 200 characters.");
+      const immutable = await snapshot?.(currentQuery);
+      const saved = await storage.saveNamed(key, name, currentQuery, now(), immutable?.code);
       await refresh();
       return saved;
     },
-    [storage, key, currentQuery, now, refresh],
+    [storage, key, currentQuery, now, refresh, snapshot],
   );
 
   const load = useCallback(
@@ -68,6 +81,17 @@ export function useSavedQueries(
       if (found) applyQueryState(found.query);
     },
     [items, applyQueryState],
+  );
+
+  const update = useCallback(
+    async (id: string) => {
+      if (!storage.updateNamed) throw Error("This storage adapter does not support saved-query updates.");
+      const immutable = await snapshot?.(currentQuery);
+      const saved = await storage.updateNamed(key, id, currentQuery, now(), immutable?.code);
+      await refresh();
+      return saved;
+    },
+    [storage, key, currentQuery, now, refresh, snapshot],
   );
 
   const setDefault = useCallback(
@@ -92,5 +116,5 @@ export function useSavedQueries(
     [storage, key, defaultId, refresh],
   );
 
-  return { items, loading, defaultId, save, load, setDefault, clearDefault, remove };
+  return { items, loading, defaultId, save, canUpdate: Boolean(storage.updateNamed), update, load, setDefault, clearDefault, remove };
 }

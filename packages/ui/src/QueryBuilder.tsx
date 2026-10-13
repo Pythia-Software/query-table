@@ -40,7 +40,6 @@ import {
   NULLARY_OPS,
   ITEM_DETAILS_COLUMN,
   MAX_WHERE_CLAUSES,
-  encodeQuery,
   filterValues as filterValuesFor,
   isOrGroup,
   opPairsForField,
@@ -346,7 +345,7 @@ export function QueryBuilder<Row>({
   const bodyId = useId();
   const isEditingSaved =
     editingSavedId != null && activeSavedQuery?.id === editingSavedId;
-  const showUpdateButton = Boolean(lastSavedQuery) && !activeSavedQuery;
+  const showUpdateButton = api.saved.canUpdate && Boolean(lastSavedQuery) && !activeSavedQuery;
   const collapsedSummary = useMemo(
     () => buildCollapsedSummary(api.query.where, api.query.orderBy, byName),
     [api.query.where, api.query.orderBy, byName],
@@ -382,7 +381,7 @@ export function QueryBuilder<Row>({
     : lastFailureAt
       ? `Last failure at ${formatStatusTime(lastFailureAt)}`
       : null;
-  const isBusy = Boolean(running) || api.loading;
+  const isBusy = Boolean(running) || api.loading || api.links.busy;
   const lastRowsRef = useRef<Row[] | null>(null);
   const lastTotalRef = useRef<number | null>(null);
   const previousLoadingRef = useRef(api.loading);
@@ -521,14 +520,8 @@ export function QueryBuilder<Row>({
 
   async function updateLastSavedQuery() {
     if (!lastSavedQuery) return;
-    const wasDefault = api.saved.defaultId === lastSavedQuery.id;
-    const trimmedName = lastSavedQuery.name.trim();
-    if (!trimmedName) return;
-
     try {
-      await api.saved.remove(lastSavedQuery.id);
-      const saved = await api.saved.save(trimmedName);
-      if (wasDefault) await api.saved.setDefault(saved.id);
+      const saved = await api.saved.update(lastSavedQuery.id);
       setLastSavedId(saved.id);
     } catch (error) {
       saveFailed(error);
@@ -571,12 +564,9 @@ export function QueryBuilder<Row>({
 
   async function shareQuery() {
     if (typeof window === "undefined") return;
-
-    const url = new URL(window.location.href);
-    // Always derive the token from the live query. In particular, a saved
-    // default must be shared by value because the recipient will not have the
-    // sender's StorageAdapter contents.
-    url.searchParams.set("q", encodeQuery(api.query));
+    let url: URL;
+    try { url = new URL((await api.links.create()).url); }
+    catch (error) { saveFailed(error); return; }
 
     if (mobile && navigator.share) {
       try {
@@ -704,10 +694,13 @@ export function QueryBuilder<Row>({
           onClick={() => void shareQuery()}
           title="Copy a URL for this query"
           aria-live="polite"
+          disabled={api.loading || api.links.busy}
         >
           <Icon name={shareCopied ? "check" : "share"} />
           {shareCopied ? "Copied!" : "Share"}
         </button>
+        {api.links.kind === "local" && <small role="status">Temporary link · this browser only</small>}
+        {api.links.error && <small role="alert">{api.links.error.message}</small>}
         <button
           type="button"
           className={cx("qt-btn", classNames?.button)}

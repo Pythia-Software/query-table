@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   httpComputedColumnStore,
+  httpQuerySnapshotStore,
   loadSchema,
   localStorageAdapter,
   type ComputedColumnStore,
@@ -32,6 +33,7 @@ const schema = loadSchema<PostgresRun>(document);
 const local = localStorageAdapter();
 const storage = {
   ...local,
+  snapshots: httpQuerySnapshotStore("/api/postgres/query-snapshots"),
   loadLast: async (key: string) =>
     (await local.loadLast(key)) ?? POSTGRES_INITIAL_QUERY,
 };
