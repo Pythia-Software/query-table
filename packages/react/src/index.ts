@@ -2,6 +2,7 @@
 
 export type { AutoRefreshApi, AutoRefreshConfig, AutoRefreshStatus, AggregationsApi, AggregationPatch, UseQueryTableOptions, QueryTableApi } from "./useQueryTable";
 export { useQueryTable } from "./useQueryTable";
+export type { QueryLinksApi } from "./useQueryLinks";
 
 export type { AggregationsApiState } from "./useAggregations";
 export { useAggregations } from "./useAggregations";

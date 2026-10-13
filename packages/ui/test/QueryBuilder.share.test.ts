@@ -6,9 +6,11 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
   decodeQuery,
+  memoryStorageAdapter,
   queriesEqual,
   type FieldSchema,
   type QueryState,
+  type QuerySnapshot,
   type SavedQuery,
   type StorageAdapter,
 } from "@pythia-software/query-table-core";
@@ -80,6 +82,54 @@ afterEach(() => {
 });
 
 describe("QueryBuilder sharing", () => {
+  it.each(["snapshot", "replacement"])("preserves a saved default on failed %s update and supports retry", async failure => {
+    vi.useFakeTimers();
+    const alert = vi.spyOn(window, "alert").mockImplementation(() => {});
+    const backing = memoryStorageAdapter();
+    const saved = await backing.saveNamed("things", "Pinned", defaultQuery, 1, "old-code");
+    await backing.setDefaultSaved!("things", saved.id);
+    const snapshot = vi.fn(async (_key: string, value: QuerySnapshot) => value);
+    const updateNamed = vi.fn(backing.updateNamed!);
+    const deleteSaved = vi.fn(backing.deleteSaved);
+    const storage = { ...backing, updateNamed, deleteSaved, snapshots: { save: snapshot, resolve: async () => null } };
+    let api!: ReturnType<typeof useQueryTable<Row>>;
+    function TestTable() {
+      api = useQueryTable<Row>({ schema, clientRows: [], storage, debounceMs: 0 });
+      return createElement(QueryBuilder<Row>, { api, fields: schema.fields, total: api.total });
+    }
+    await act(async () => {
+      root = createRoot(container!);
+      root.render(createElement(TestTable));
+      await Promise.resolve();
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    const edited = { ...defaultQuery, limit: 40 };
+    await act(async () => { api.setQuery(edited); await vi.advanceTimersByTimeAsync(500); });
+    const updateButton = () => Array.from(container!.querySelectorAll("button")).find(button => button.textContent === "Update Query 'Pinned'")!;
+    expect(updateButton().disabled).toBe(false);
+    if (failure === "snapshot") snapshot.mockRejectedValueOnce(Error("offline"));
+    else updateNamed.mockRejectedValueOnce(Error("quota exhausted"));
+    await act(async () => { updateButton().click(); await Promise.resolve(); });
+    expect(alert).toHaveBeenCalledWith(failure === "snapshot" ? "offline" : "quota exhausted");
+    expect(await backing.listSaved("things")).toEqual([saved]);
+    expect(await backing.loadDefaultSaved!("things")).toEqual(saved);
+    expect(deleteSaved).not.toHaveBeenCalled();
+    if (failure === "snapshot") expect(updateNamed).not.toHaveBeenCalled();
+
+    await act(async () => { updateButton().click(); await Promise.resolve(); });
+    const updated = (await backing.listSaved("things"))[0]!;
+    expect(updated.id).toBe(saved.id);
+    expect(updated.name).toBe(saved.name);
+    expect(updated.query).toEqual(edited);
+    expect(updated.snapshotCode).toMatch(/^[\w-]{22}$/);
+    expect(updated.snapshotCode).not.toBe(saved.snapshotCode);
+    expect(await backing.loadDefaultSaved!("things")).toEqual(updated);
+    expect(api.saved.items).toEqual([updated]);
+    expect(api.saved.defaultId).toBe(saved.id);
+    expect(deleteSaved).not.toHaveBeenCalled();
+    expect(updateButton()).toBeUndefined();
+  });
+
   it("copies the live saved-default query into a URL", async () => {
     const writeText = vi.fn<(value: string) => Promise<void>>().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {

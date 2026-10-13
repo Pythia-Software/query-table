@@ -108,6 +108,12 @@ func main() {
 	mux.Handle("POST /api/postgres/metrics", s.withTransaction(s.metrics))
 	mux.Handle("POST /api/postgres/distinct", s.withTransaction(s.distinct))
 	mux.Handle("/api/postgres/computed", s.computedHandler())
+	mux.Handle("/api/postgres/query-snapshots", qt.NewQuerySnapshotsHandler(qt.SQLQuerySnapshotStore{DB: db}, func(r *http.Request, name string, write bool) (string, error) {
+		if name != dataset {
+			return "", errors.New("unknown demo dataset")
+		}
+		return scope, nil
+	}))
 	server := &http.Server{Addr: *addr, Handler: s.localOnly(mux), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second}
 	shutdown := make(chan os.Signal, 1)
 	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)

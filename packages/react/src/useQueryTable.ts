@@ -26,8 +26,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   EMPTY_QUERY,
   applyQuery,
-  decodeQuery,
-  encodeQuery,
   memoryStorageAdapter,
   normalizeQueryState,
   readFieldValue,
@@ -73,6 +71,8 @@ import { useSelection, type SelectionApi } from "./useSelection";
 import { useSelect, type SelectApi } from "./useSelect";
 import { useColumnDrag, type ColumnDragApi } from "./useColumnDrag";
 import { useSavedQueries, type SavedQueriesApi } from "./useSavedQueries";
+import { useQueryLinks, type QueryLinksApi } from "./useQueryLinks";
+import { createQueryLinkService, type QueryLinkOptions } from "@pythia-software/query-table-core";
 
 export interface UseQueryTableOptions<Row> {
   /** Normalize external aliases without storing presentation in query state. Must be pure and not throw. */
@@ -102,6 +102,8 @@ export interface UseQueryTableOptions<Row> {
    * base64url is encoding, not encryption: filters will appear in browser
    * history, referrers, logs, analytics, and screenshots when enabled. */
   syncUrl?: boolean;
+  /** URL budget and browser-local FIFO cache; remote snapshots come from storage.snapshots. */
+  links?: QueryLinkOptions;
   /** Enable schema-driven click popovers, item modals and row expansion. */
   itemDetails?: boolean | ItemDetailsOptions<Row>;
   /** Debounce (ms) between a query change and the fetch it triggers. Default 200. */
@@ -178,6 +180,7 @@ export interface AggregationsApi {
 }
 
 export interface QueryTableApi<Row> {
+  links: QueryLinksApi;
   /** Built-in item details, enabled by the instance creator. */
   itemDetails?: ItemDetailsApi<Row>;
   // state
@@ -391,6 +394,11 @@ function distinctValuesFromRows<Row>(
   return { values: values.sort((a, b) => a.localeCompare(b)), hasMore };
 }
 
+function hasQueryLink(url: string, parameter: string): boolean {
+  const values = new URL(url).searchParams.getAll(parameter);
+  return values.length > 1 || (values.length === 1 && values[0] !== "");
+}
+
 function resolveInitial<Row>(opts: UseQueryTableOptions<Row>): {
   q: QueryState;
   fromUrl: boolean;
@@ -402,10 +410,10 @@ function resolveInitial<Row>(opts: UseQueryTableOptions<Row>): {
       fromUrl: false,
     };
   if (opts.syncUrl === true && typeof window !== "undefined") {
-    const token = new URLSearchParams(window.location.search).get("q");
-    if (token)
+    const parameter = typeof opts.itemDetails === "object" ? opts.itemDetails.queryParameter ?? "q" : "q";
+    if (hasQueryLink(window.location.href, parameter))
       return {
-        q: normalizeQueryState(decodeQuery(token), defaults),
+        q: defaults,
         fromUrl: true,
       };
   }
@@ -429,6 +437,9 @@ export function useQueryTable<Row>(
     () => opts.storage ?? memoryStorageAdapter(),
     [opts.storage],
   );
+  const parameter = typeof opts.itemDetails === "object" ? opts.itemDetails.queryParameter ?? "q" : "q";
+  const linkService = useMemo(() => createQueryLinkService(schema.name, storage.snapshots, opts.links),
+    [schema.name, storage.snapshots, opts.links?.cache, opts.links?.maxUrlBytes]);
   const now = opts.now ?? Date.now;
   const nowRef = useRef(now);
   const onRefreshRef = useRef(opts.onRefresh);
@@ -439,6 +450,9 @@ export function useQueryTable<Row>(
   );
 
   const initRef = useRef(resolveInitial(opts));
+  const [restoration, setRestoration] = useState<{ loading: boolean; error: Error | null }>({ loading: initRef.current.fromUrl, error: null });
+  const [storageReady, setStorageReady] = useState(Boolean(initialQuery));
+  const manualQueryEpoch = useRef(0);
   const aggIdRef = useRef(0);
   const [queryHistory, setQueryHistory] = useState<{ query: QueryState; past: QueryState[]; future: QueryState[] }>(
     () => ({ query: initRef.current.q, past: [], future: [] }),
@@ -479,6 +493,9 @@ export function useQueryTable<Row>(
 
   const setQuery = useCallback<QueryTableApi<Row>["setQuery"]>(
     (next) => {
+      manualQueryEpoch.current++;
+      setStorageReady(true);
+      setRestoration(previous => !previous.loading && !previous.error ? previous : { loading: false, error: null });
       setQueryHistory((history) => {
         const prev = history.query;
         const candidate =
@@ -493,26 +510,68 @@ export function useQueryTable<Row>(
     [defaults],
   );
 
-  // Restore the default saved query (preferred) or last query on mount when
-  // nothing explicit seeded the view.
+  // Track only this table's URL parameter, including duplicates. Host routes,
+  // anchors and unrelated history.state changes do not restore table state.
+  const observedQueryUrl = useRef<string | null>(null);
+  const recordQueryUrl = useCallback((url: string) => {
+    observedQueryUrl.current = JSON.stringify(new URL(url).searchParams.getAll(parameter));
+  }, [parameter]);
+  const links = useQueryLinks(query, linkService, syncUrl, storageReady && !restoration.loading && !restoration.error,
+    parameter, opts.links?.maxUrlBytes ?? 2000, recordQueryUrl);
+  const restoreSources = useRef({ storage, linkService, defaults, initialQuery });
+  restoreSources.current = { storage, linkService, defaults, initialQuery };
+
+  // Resolve URL references before rows, metrics, persistence, or address-bar writes.
   useEffect(() => {
-    if (initRef.current.fromUrl || initialQuery) return;
     let cancelled = false;
-    void (async () => {
-      const defaultSaved = await storage.loadDefaultSaved?.(schema.name);
-      const restored =
-        defaultSaved?.query ?? (await storage.loadLast(schema.name));
-      if (!cancelled && restored) {
-        const normalized = normalizeQueryState(restored, defaults);
-        setQueryHistory({ query: normalized, past: [], future: [] });
+    let controller = new AbortController();
+    let generation = 0;
+    async function restore(navigation = false) {
+      const { storage, linkService, defaults } = restoreSources.current;
+      const run = ++generation;
+      const epoch = manualQueryEpoch.current;
+      controller.abort(); controller = new AbortController();
+      setStorageReady(false);
+      const explicitLink = syncUrl && typeof window !== "undefined" && hasQueryLink(window.location.href, parameter);
+      if (navigation || explicitLink)
+        setRestoration({ loading: true, error: null });
+      try {
+        const fromUrl = syncUrl && typeof window !== "undefined" ? await linkService.resolve(window.location.href, parameter, controller.signal) : null;
+        const defaultSaved = fromUrl ? null : await storage.loadDefaultSaved?.(schema.name);
+        const restored = fromUrl ?? defaultSaved?.query ?? (navigation ? defaults : await storage.loadLast(schema.name));
+        if (!cancelled && run === generation && epoch === manualQueryEpoch.current) {
+          if (restored) setQueryHistory({ query: normalizeQueryState(restored, defaults), past: [], future: [] });
+          setStorageReady(true);
+          setRestoration(previous => !previous.loading && !previous.error ? previous : { loading: false, error: null });
+        }
+      } catch (e) {
+        if (!cancelled && run === generation && epoch === manualQueryEpoch.current) {
+          if (explicitLink) {
+            setRestoration({ loading: false, error: e instanceof Error ? e : Error(String(e)) });
+          } else {
+            // Last/default saved queries are optional restoration sources.
+            // A failed host read should still leave a usable default table.
+            setQueryHistory({ query: defaults, past: [], future: [] });
+            setRestoration({ loading: false, error: null });
+          }
+          setStorageReady(true);
+        }
       }
-    })();
-    return () => {
-      cancelled = true;
+    }
+    if (typeof window !== "undefined") recordQueryUrl(window.location.href);
+    if (!restoreSources.current.initialQuery) void restore();
+    const navigate = () => {
+      const key = JSON.stringify(new URL(window.location.href).searchParams.getAll(parameter));
+      if (key === observedQueryUrl.current) return;
+      observedQueryUrl.current = key;
+      void restore(true);
     };
-    // mount-only
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (syncUrl && typeof window !== "undefined") window.addEventListener("popstate", navigate);
+    return () => {
+      cancelled = true; controller.abort();
+      if (syncUrl && typeof window !== "undefined") window.removeEventListener("popstate", navigate);
+    };
+  }, [schema.name, syncUrl, parameter, recordQueryUrl]);
 
   const { api: computed, displaySchema } = useComputedColumns({
     schema,
@@ -557,7 +616,7 @@ export function useQueryTable<Row>(
   const definitionKey = JSON.stringify(computedRevisions);
 
   // Fetch (debounced + abortable). Transport mode, or client-side applyQuery.
-  const queryKey = useMemo(() => encodeQuery(query), [query]);
+  const queryKey = useMemo(() => JSON.stringify(query), [query]);
   const serverRowQuery = useMemo(() => {
     const execution = opts.computedExecution;
     const detailConfig = typeof opts.itemDetails === "object" ? opts.itemDetails : undefined;
@@ -646,6 +705,10 @@ export function useQueryTable<Row>(
   const executionKey = JSON.stringify(opts.computedExecution ?? null);
   const pageContext = `${schema.name}:${rowQueryKey}:${nonce}:${executionKey}`;
   useEffect(() => {
+    if (restoration.loading || restoration.error) {
+      setRows(previous => previous.length ? [] : previous); setTotal(null); setCommittedPage(null); setLoading(false);
+      return;
+    }
     const ac = new AbortController();
     let cancelled = false;
     const run = async () => {
@@ -736,23 +799,15 @@ export function useQueryTable<Row>(
     nonce,
     opts.validateQuery,
     executionKey,
+    restoration,
   ]);
-
-  // URL sync.
-  useEffect(() => {
-    if (!syncUrl || typeof window === "undefined") return;
-    const url = new URL(window.location.href);
-    const token = encodeQuery(query);
-    if (token) url.searchParams.set("q", token);
-    else url.searchParams.delete("q");
-    window.history.replaceState(null, "", url.toString());
-  }, [queryKey, syncUrl, query]);
 
   // Persist last query (debounced).
   useEffect(() => {
+    if (!storageReady || restoration.loading || restoration.error) return;
     const t = setTimeout(() => void storage.saveLast(schema.name, query), 400);
     return () => clearTimeout(t);
-  }, [queryKey, storage, schema.name, query]);
+  }, [queryKey, storage, schema.name, query, restoration, storageReady]);
 
   // Resolved id accessor.
   const idField = useMemo(
@@ -783,6 +838,7 @@ export function useQueryTable<Row>(
     (q) => setQuery(q),
     storage,
     now,
+    links.snapshot,
   );
   const pageReady =
     committedPage === pageContext &&
@@ -822,6 +878,7 @@ export function useQueryTable<Row>(
         ? { workerFactory: opts.formulaWorkerFactory }
         : {}),
     },
+    !restoration.loading && !restoration.error,
   );
   const queryRef = useRef(query);
   queryRef.current = query;
@@ -1267,18 +1324,20 @@ export function useQueryTable<Row>(
 
   const itemDetails = useItemDetails({
     schema: displaySchema, query, setQuery, options: opts.itemDetails,
-    rows, clientRows, rowId, transport, refreshKey: nonce,
+    rows, clientRows, rowId, transport, refreshKey: nonce, links,
+    queryReady: storageReady && !restoration.loading && !restoration.error,
   });
 
   return {
+    links,
     ...(itemDetails ? { itemDetails } : {}),
     query,
     defaults,
     setQuery,
     rows,
     total,
-    loading,
-    error,
+    loading: loading || restoration.loading,
+    error: restoration.error ?? error,
     requestActivity,
     canUndo,
     canRedo,

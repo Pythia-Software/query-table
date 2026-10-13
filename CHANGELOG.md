@@ -4,6 +4,12 @@
 
 ### Added
 
+- Add compact compressed query URLs and a bounded FIFO browser cache for
+  oversized views. Explicit Save/Share promotes immutable link codes through
+  an optional snapshot store; query editing never writes snapshots remotely.
+  Add HTTP and Go PostgreSQL/SQLite snapshot storage, fresh-session restoration,
+  missing-link errors, and browser back/forward resolution.
+
 - Display JSON as collapsible, pretty-printed code with branch-preserving search
   in the upper-right toolbar and whole-object/per-value copying. Align its
   resizable modal, Close control, footer, and mobile sheet with item details.
