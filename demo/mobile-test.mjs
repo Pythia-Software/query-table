@@ -131,12 +131,24 @@ for (const [name, engine] of [
       const headers = () => page.locator(".qt-th-label").allTextContents();
       const before = await headers();
       for (const button of await page
-        .locator(".qt-qb-state-bar .qt-btn")
+        .locator(".qt-qb-state-bar .qt-btn:not(.qt-qb-collapse-btn)")
         .all()) {
         assert(
           (await button.boundingBox()).height <= 34,
           "Top toolbar buttons use compact 32px controls",
         );
+      }
+      for (const toggle of await page.locator(".qt-qb-collapse-btn, .qt-qt-section-toggle").all()) {
+        const layout = await toggle.evaluate(element => {
+          const bounds = element.getBoundingClientRect();
+          const header = element.closest(".qt-qb-state-bar, .qt-qt-section-head").getBoundingClientRect();
+          return {
+            height: bounds.height,
+            contained: bounds.left >= header.left && bounds.right <= header.right,
+          };
+        });
+        assert(layout.height >= 44, "Inline section labels retain a full touch target");
+        assert(layout.contained, "Section controls stay inside the table margins");
       }
       const caret = await page
         .locator("svg.qt-qb-collapse-caret")

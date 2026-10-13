@@ -649,6 +649,25 @@ export function QueryBuilder<Row>({
           api.grouping && "qt-qb--groupable", compact && "qt-qb--compact", classNames?.root)}>
       <div className="qt-qb-bar qt-qb-state-bar qt-qb-row">
         <span className="qt-qb-state-main">
+          <button
+            type="button"
+            className={cx("qt-btn", "qt-qb-collapse-btn", classNames?.button)}
+            onClick={() => setCollapsed(!isCollapsed)}
+            aria-expanded={!isCollapsed}
+            aria-controls={bodyId}
+            aria-label={isCollapsed ? "Expand query builder" : "Collapse query builder"}
+            title={isCollapsed ? "Expand query builder" : "Collapse query builder"}
+          >
+            <Icon
+              name="chevronDown"
+              size={18}
+              className={cx(
+                "qt-qb-collapse-caret",
+                isCollapsed && "qt-qb-collapse-caret--collapsed",
+              )}
+            />
+            <span>Query</span>
+          </button>
           {savedQueryControls !== undefined ? savedQueryControls : <span className="qt-qb-saved">
             <button
               type="button"
@@ -776,28 +795,6 @@ export function QueryBuilder<Row>({
             <Icon name="reset" size={14} />
           </button>
         </div>
-        <button
-          type="button"
-          className={cx("qt-btn", "qt-qb-collapse-btn", classNames?.button)}
-          onClick={() => setCollapsed(!isCollapsed)}
-          aria-expanded={!isCollapsed}
-          aria-controls={bodyId}
-          title={
-            isCollapsed ? "Expand query builder" : "Collapse query builder"
-          }
-        >
-          <Icon
-            name="chevronDown"
-            size={18}
-            className={cx(
-              "qt-qb-collapse-caret",
-              isCollapsed && "qt-qb-collapse-caret--collapsed",
-            )}
-          />
-          <span className="qt-sr-only">
-            {isCollapsed ? "Expand query builder" : "Collapse query builder"}
-          </span>
-        </button>
       </div>
 
       {!isCollapsed ? (

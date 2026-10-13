@@ -79,6 +79,10 @@
 
 ### Changed
 
+- Move Query, Metrics and Table expand/collapse controls inside the layout,
+  beside clickable section labels. Keep metric and row summaries visible in
+  section headers, preserve independent folding and query actions, and retain
+  44px mobile touch targets without controls extending into page margins.
 - Unify column, metric and property editors around shared panels, field-first
   selection and contextual formula libraries. Compact optional query controls,
   keep sort direction in the picker, and improve property-list density,

@@ -292,6 +292,14 @@ export function OrdersTable({ table, schema }) {
 }
 ```
 
+`QueryBuilder` has an inline **Query** label and chevron in its toolbar to fold
+the editor. Set `defaultCollapsed` for its initial state, or use `collapsed` and
+`onCollapsedChange` to control it from a parent. Folding keeps the current query,
+its summary, saved-query controls, history, and run actions available; pass
+`summary` to replace the default folded summary. The demo's Metrics and Table
+sections fold independently through their inline labels, with metric and row
+counts visible in their headers and 44px touch targets on small screens.
+
 `DataTable` virtualizes body rows and uses a 600px maximum-height scroll
 viewport by default. Set `maxHeight` to match the surrounding layout;
 `estimateRowHeight` (37px by default) and `overscan` (8 rows) are available for
