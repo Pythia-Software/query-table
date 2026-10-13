@@ -13,6 +13,12 @@
 - Embed the shared JSON inspector in item detail properties across popovers,
   modals, and expanded rows. Inherit field display settings, add editable JSON
   property options that persist in saves/share links, and export `JsonValueView`.
+- Keep JSON property trees initially collapsed without nested scrolling, with
+  hidden-key/value counts and a viewer button beside the property label. In the
+  full viewer, open the root and small containers by default, bucket long arrays
+  into ranges of 20, and offer filter/highlight search with match navigation.
+  Preserve standard cell click/copy behavior and add Open in JSON Viewer to
+  JSON cell menus.
 
 - Add an isolated date metric demo prototype with calendar intervals, optional
   empty buckets, explicit ranges, and count/sum versus average behavior.

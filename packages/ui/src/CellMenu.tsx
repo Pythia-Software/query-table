@@ -6,12 +6,13 @@ import { PresentedFilterValue } from "./FilterValuePresentation";
 // with the clicked cell's value; array cells get a per-element `includes` row.
 // Anchors just off the click point and clamps to the viewport.
 
-import type { ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { Icon } from "./Icon";
 import type { FieldDef, FilterOp, WhereClause } from "@pythia-software/query-table-core";
 import { NULLARY_OPS, negateClause, opsForField, opPairsForField, isFilterable } from "@pythia-software/query-table-core";
 import type { MenuClassNames } from "./classNames";
 import { cellValueText } from "./jsonValue";
+import { JsonViewerModal } from "./JsonCell";
 import { Menu, MenuGroup, MenuItem, MenuSeparator } from "./Menu";
 
 export interface CellMenuProps<Row> {
@@ -34,6 +35,8 @@ interface FilterRow {
 }
 
 export function CellMenu<Row>({ field, value, x, y, onAddFilter, onClose, classNames, returnFocus }: CellMenuProps<Row>): ReactNode {
+  const [jsonOpen, setJsonOpen] = useState(false);
+  const openingViewer = useRef(false);
   // A non-filterable field (e.g. a computed column that opted out) offers no
   // filter rows; only the header + copy remain. `pairs` is the shared keep/
   // exclude op source the WHERE op picker uses too, so the two read identically.
@@ -44,6 +47,8 @@ export function CellMenu<Row>({ field, value, x, y, onAddFilter, onClose, classN
   const isArray = Array.isArray(value) && !json;
   const isNullish = value == null || (isArray && (value as unknown[]).length === 0);
   const cellText = json ? cellValueText(value) : valueToString(value);
+
+  if (jsonOpen) return <JsonViewerModal value={value} label={field.label} display={field.display?.kind === "json" ? field.display : undefined} onClose={onClose} returnFocus={returnFocus} />;
 
   function applyClause(clause: WhereClause) {
     onAddFilter(clause);
@@ -85,7 +90,10 @@ export function CellMenu<Row>({ field, value, x, y, onAddFilter, onClose, classN
   }
 
   return (
-    <Menu label={field.label} anchor={{ x: x + 4, y: y + 4 }} width={320} onClose={onClose} classNames={classNames} returnFocus={returnFocus}>
+    <Menu label={field.label} anchor={{ x: x + 4, y: y + 4 }} width={320} onClose={() => {
+      // The old menu may dismiss on focus transfer while the viewer mounts.
+      if (!openingViewer.current) onClose();
+    }} classNames={classNames} returnFocus={returnFocus}>
       <div className="qt-cm-header">
         <span className="qt-cm-field">{field.label}</span>
         <span className="qt-cm-value">{json ? cellText : Array.isArray(value) ? value.map(v => <PresentedFilterValue key={String(v)} field={field.name} value={String(v)}/>) : <PresentedFilterValue field={field.name} value={String(value ?? "")}/>}</span>
@@ -99,6 +107,9 @@ export function CellMenu<Row>({ field, value, x, y, onAddFilter, onClose, classN
       >
         copy value
       </MenuItem>
+      {json && <MenuItem icon={<Icon name="panelDefinition" />} closeOnSelect={false} onSelect={() => { openingViewer.current = true; setJsonOpen(true); }}>
+        Open in JSON Viewer
+      </MenuItem>}
       <MenuSeparator />
       {rows.length > 0 && (
         <MenuGroup className="qt-cm-filter-grid" label="Filter by this cell" columns={2}>

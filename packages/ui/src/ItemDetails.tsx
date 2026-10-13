@@ -156,8 +156,8 @@ function ItemHoverCard<Row>({ api, query, id, renderers, anchor, onClose }: {
     positionCard();
     const resize = new ResizeObserver(positionCard);
     if (popup.current) resize.observe(popup.current);
-    const dismiss = (event: PointerEvent) => { if (!popup.current?.contains(event.target as Node) && !anchor.contains(event.target as Node) && !document.querySelector(".qt-property-editor, .qt-property-saved-modal")) onClose(); };
-    const key = (event: KeyboardEvent) => { if (event.key === "Escape" && !event.defaultPrevented && !document.querySelector(".qt-property-editor, .qt-property-saved-modal")) { event.preventDefault(); onClose(); } };
+    const dismiss = (event: PointerEvent) => { if (!popup.current?.contains(event.target as Node) && !anchor.contains(event.target as Node) && !document.querySelector(".qt-property-editor, .qt-property-saved-modal, .qt-json-inspector")) onClose(); };
+    const key = (event: KeyboardEvent) => { if (event.key === "Escape" && !event.defaultPrevented && !document.querySelector(".qt-property-editor, .qt-property-saved-modal, .qt-json-inspector")) { event.preventDefault(); onClose(); } };
     document.addEventListener("pointerdown", dismiss);
     document.addEventListener("keydown", key);
     window.addEventListener("resize", positionCard);

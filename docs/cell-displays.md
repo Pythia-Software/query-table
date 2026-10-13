@@ -8,7 +8,7 @@ need to write another renderer for each column.
 ```tsx
 const fields: FieldDef[] = [
   { name: "payload", label: "Payload", type: "text", source: { kind: "backend" },
-    display: { kind: "json", encoding: "auto", expandDepth: 1 } },
+    display: { kind: "json", encoding: "auto" } },
   { name: "started", label: "Started", type: "number", source: { kind: "backend" },
     display: { kind: "datetime", sourceUnit: "epochSeconds", timeZone: "UTC", style: "iso" } },
   { name: "elapsed", label: "Elapsed", type: "number", source: { kind: "backend" },
@@ -34,7 +34,7 @@ No display is guessed from arbitrary cell text.
 
 | Kind | Configuration | Defaults |
 | --- | --- | --- |
-| `json` | `encoding`, `maxDecodeDepth`, `previewLength`, `expandDepth` | auto, 4 passes, 80 characters, 1 level |
+| `json` | `encoding`, `maxDecodeDepth`, `previewLength`, `expandDepth` | auto, 4 passes, 80 characters; root open, nested containers with up to 3 entries open, 4 or more collapsed |
 | `date`, `datetime` | `sourceUnit`: iso/epochSeconds/epochMilliseconds; `style`: human/iso/custom; `pattern`, `timeZone`, `locale` | ISO input, human output, UTC, en-US |
 | `time` | Calendar options plus secondsOfDay/millisecondsOfDay | ISO clock input; civil clocks stay in UTC |
 | `duration` | `sourceUnit`: milliseconds/seconds/minutes/hours/days; `style`: human/long/clock/custom; `pattern`, `decimals` | milliseconds, human output |
@@ -54,18 +54,31 @@ tooltip. Null and empty values show an em dash; zero and false are preserved.
 ## JSON inspector
 
 The compact cell button opens a dialog on desktop and a bottom sheet on mobile.
-In item details, the same inspector is embedded directly in the property value,
-including popovers, modals, expanded rows, and standalone `ObjectInspector`
-cards. Search and copy controls stay inside the details surface.
+Only the JSON badge opens the viewer directly. Clicking the preview or the rest
+of the cell opens the standard cell menu, including **Open in JSON Viewer**;
+double-clicking copies the original cell value.
+In item details (popovers, modals, expanded rows, and standalone `ObjectInspector`
+cards), JSON appears as a plain collapsible tree in the property value. It starts
+fully collapsed, with no inner toolbar, footer, or scroll area. A viewer button
+beside the property label opens the full modal with search and copy controls.
 The inspector displays pretty-printed JSON with quoted keys, indentation, braces,
 commas, and syntax colors. Use the chevron beside an object or array to collapse
-or expand that section. Hover a line (or focus it with the keyboard) to copy that
-object, array, or scalar; copy controls stay visible on touch devices.
+or expand that section. Objects and arrays with three or fewer immediate entries
+open by default in the full viewer; nested containers with four or more start
+collapsed. The root always starts open in that viewer. Set `expandDepth` explicitly to override nested expansion
+with a fixed number of expanded levels. Long arrays show their first 20 items,
+then expandable index ranges of 20 items each. Hover a line (or focus it with the
+keyboard) to copy that object, array, or scalar; copy controls stay visible on
+touch devices in the full viewer. Collapsed containers show a muted count of
+hidden keys (objects) or values (arrays).
 
-Literal, case-insensitive search stays in the upper-right toolbar. Search includes
-descendants of collapsed containers, opens matching branches, and highlights
-matching text while retaining ancestor braces and indentation. Clearing search
-restores the previous expansion state. Line tooltips and copy-button labels use
+Literal, case-insensitive search stays in the upper-right toolbar. Choose **Filter**
+to show matching paths and their ancestors, or **Highlight** to retain surrounding
+content. Search includes descendants of collapsed containers and list buckets.
+The adjoining arrows navigate individual matches (also Enter and Shift+Enter),
+opening the selected match's ancestors and bucket and scrolling it into view.
+The counter shows the current match and total; the selected match is highlighted.
+Clearing search restores the previous expansion state. Line tooltips and copy-button labels use
 JSONPath bracket notation to keep keys with dots, brackets, quotes, or Unicode
 unambiguous. Clipboard copying always uses the complete selected value, even
 when search filters the visible document.
@@ -87,8 +100,9 @@ original text and an error, and remains copyable.
 
 Inspection accepts up to 1,048,576 UTF-16 characters of source/formatted JSON and
 visits at most 5,000 entries and 64 nested levels. Tree traversal starts when the
-inspector opens or a detail property mounts, and values are shown in batches of
-200 with balanced closing braces and a Show more control. A visible notice states
+inspector opens or a detail property mounts. Browsing uses batches of 200 entries
+with balanced closing braces and a Show more control; search can reveal any
+inspected match across those batches. A visible notice states
 when inspection/search is partial; copying a valid decoded document still includes
 the full accepted value. Larger or unserializable values show an error. Very large
 original text is truncated in the viewer while Copy original retains the source.

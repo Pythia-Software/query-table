@@ -384,9 +384,11 @@ Set `FieldDef.display` for built-in JSON, date/time, duration, number/percent,
 text, and chip presentation. JSON cells open a searchable tree with nested paths
 and original/decoded copying; objects, JSON strings and escaped strings share
 the same inspector. Custom `render` functions and registered keys take precedence.
-Detail properties inherit these displays and embed JSON search/copy inline in
-popovers, modals, and expanded rows. JSON property options can be edited, saved,
-and shared through the existing property-view controls.
+Detail properties inherit these displays and embed initially collapsed JSON
+trees in popovers, modals, and expanded rows. A button beside the property label
+opens the full viewer with filter/highlight search, match navigation, and copy
+controls. JSON property options can be edited, saved, and shared through the
+existing property-view controls.
 See the [cell display guide](../../docs/cell-displays.md) for typed configuration,
 units, examples, and inspection limits. `JsonCell` and the embedded `JsonValueView`
 are also exported for standalone use.

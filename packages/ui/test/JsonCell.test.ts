@@ -55,7 +55,7 @@ describe.each([false, true])("JSON inspector (mobile: %s)", (mobile) => {
     const payload = { customer: { "display.name": "Ada", id: 42 }, empty: [], ok: false };
     const original = JSON.stringify(JSON.stringify(payload));
     const cellClick = vi.fn(); const cellCopy = vi.fn();
-    act(() => root.render(createElement("div", { onClick: cellClick, onDoubleClick: cellCopy }, createElement(JsonCell, { value: original, label: "Payload" }))));
+    act(() => root.render(createElement("div", { onClick: cellClick, onDoubleClick: cellCopy }, createElement(JsonCell, { value: original, label: "Payload", display: { kind: "json", expandDepth: 1 } }))));
     const trigger = button("Inspect Payload"); trigger.focus();
     act(() => trigger.click());
     expect(cellClick).not.toHaveBeenCalled();
@@ -68,7 +68,7 @@ describe.each([false, true])("JSON inspector (mobile: %s)", (mobile) => {
     expect(dialog.querySelector('.qt-json-toolbar input[type="search"]')).not.toBeNull();
     expect(dialog.querySelector(".qt-json-content input")).toBeNull();
     expect(dialog.textContent).not.toContain("Ada");
-    expect(dialog.querySelector('[data-json-path="$[\\"customer\\"]"] code')?.textContent).toBe('"customer": { … },');
+    expect(dialog.querySelector('[data-json-path="$[\\"customer\\"]"] code')?.textContent).toBe('"customer": { … }, 2 keys hidden');
     search("aDa");
     expect(dialog.querySelectorAll(".qt-json-match")).toHaveLength(1);
     expect(dialog.querySelectorAll(".qt-json-entry")).toHaveLength(3);
@@ -91,13 +91,23 @@ describe.each([false, true])("JSON inspector (mobile: %s)", (mobile) => {
     expect(JSON.parse([...dialog.querySelectorAll(".qt-json-line-code")].map(node => node.textContent).join("\n"))).toEqual(payload);
     act(() => button("Collapse $").click());
     expect(dialog.querySelectorAll(".qt-json-entry")).toHaveLength(1);
-    expect(dialog.querySelector(".qt-json-line-code")?.textContent).toBe("{ … }");
+    expect(dialog.querySelector(".qt-json-line-code")?.textContent).toBe("{ … } 3 keys hidden");
     act(() => dialog.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(document.activeElement).toBe(trigger);
     expect(document.body.style.overflow).toBe("");
     expect(cellClick).not.toHaveBeenCalled();
     expect(cellCopy).not.toHaveBeenCalled();
+  });
+  it("lets preview clicks and double-clicks reach standard cell handlers", () => {
+    const cellClick = vi.fn(), cellCopy = vi.fn();
+    act(() => root.render(createElement("div", { onClick: cellClick, onDoubleClick: cellCopy }, createElement(JsonCell, { value: { id: 42 } }))));
+    const preview = container.querySelector<HTMLElement>(".qt-json-preview-text")!;
+    act(() => preview.click());
+    act(() => preview.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
+    expect(cellClick).toHaveBeenCalledTimes(1);
+    expect(cellCopy).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
   it("keeps malformed input readable and reports clipboard denial", async () => {
     const malformed = '{"broken":}';

@@ -32,11 +32,21 @@ describe("JSON in item properties", () => {
     expect(container.querySelector('[role="dialog"]')).toBeNull();
     expect(container.textContent).toContain("00:01:01.250");
     expect(container.textContent).toContain("Ready");
-    input(container.querySelector<HTMLInputElement>('input[type="search"]')!, "ada");
-    expect(container.querySelectorAll(".qt-json-match")).toHaveLength(1);
-    expect(container.querySelectorAll(".qt-json-entry")).toHaveLength(3);
-    expect(container.querySelector('[data-json-path="$[\\"customer\\"][\\"name\\"]"]')).not.toBeNull();
-    expect(container.textContent).toContain("Ada");
+    expect(container.querySelector('.qt-json-toolbar, .qt-json-footer, input[type="search"]')).toBeNull();
+    expect(container.querySelectorAll('.qt-json-entry')).toHaveLength(1);
+    expect(container.querySelector('.qt-json-hidden-count')?.textContent).toBe(' 1 key hidden');
+    const expand = container.querySelector<HTMLButtonElement>('[aria-label="Expand $"]')!;
+    act(() => expand.click());
+    expect([...container.querySelectorAll("button")].some(button => button.getAttribute("aria-label") === 'Expand $["customer"]')).toBe(true);
+    const open = container.querySelector<HTMLButtonElement>('dt [aria-label="Open Payload in JSON Viewer"]')!;
+    expect(container.querySelector('dd [aria-label="Open Payload in JSON Viewer"]')).toBeNull();
+    act(() => open.click());
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!;
+    input(dialog.querySelector<HTMLInputElement>('input[type="search"]')!, "ada");
+    expect(dialog.querySelectorAll(".qt-json-match")).toHaveLength(1);
+    expect(dialog.querySelectorAll(".qt-json-entry")).toHaveLength(3);
+    expect(dialog.textContent).toContain("Ada");
+
   });
   it("honors saved format overrides and detail-specific JSON formats and renderers", () => {
     const view: PropertyViewState = { version: 1, properties: [{ id: "literal", field: "payload", format: { kind: "text" } }] };

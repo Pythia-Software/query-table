@@ -8,7 +8,9 @@ export interface JsonCellDisplay {
   maxDecodeDepth?: number;
   /** Inline preview length, 20–500 characters. Default 80. */
   previewLength?: number;
-  /** Initially expanded container levels, 0–8. Default 1. */
+  /** Override initially expanded container levels, 0–8.
+   * The root starts open. By default, nested containers with up to 3 entries
+   * open; larger nested containers collapse. */
   expandDepth?: number;
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { cloneElement, isValidElement, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
   EMPTY_QUERY,
   readFieldValue,
@@ -23,7 +23,7 @@ import {
 import { formatMetricOutput, metricTimestamp } from "./metricFormat";
 import { createMetricColorResolver, type MetricTheme } from "./metricColors";
 import { Icon } from "./Icon";
-import { JsonValueView } from "./JsonCell";
+import { JsonValueView, JsonViewerModal, type JsonCellProps } from "./JsonCell";
 import { inspectJsonValue } from "./jsonValue";
 import { renderCellDisplay } from "./cellFormatting";
 
@@ -270,7 +270,9 @@ export function ObjectProperties<Row>(
   const drag = useRef<{ left: number; width: number; value: number } | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [copyError, setCopyError] = useState("");
+  const [jsonViewer, setJsonViewer] = useState<{ props: JsonCellProps; trigger: HTMLElement } | null>(null);
   useEffect(() => { setCopied(null); setCopyError(""); }, [row]);
+  useEffect(() => { setJsonViewer(null); }, [row]);
   useEffect(() => {
     if (!copied) return;
     const timer = setTimeout(() => setCopied(null), 1800);
@@ -379,6 +381,7 @@ export function ObjectProperties<Row>(
           let content: ReactNode;
           let available = false;
           let rawValue: unknown;
+          let jsonProps: JsonCellProps | undefined;
           if (!field || field.property?.enabled === false)
             content = (
               <span className="qt-property-unavailable">Field unavailable</span>
@@ -403,9 +406,13 @@ export function ObjectProperties<Row>(
               ? resolved.values.get(objectReferenceKey(reference))
               : undefined;
             const href = result?.href ? safeLinkHref(result.href) : null;
-            const display =
+            let display =
               result?.label ??
               propertyContent(field, property, value, props, now);
+            if (isValidElement<JsonCellProps & { compact?: boolean }>(display) && display.type === JsonValueView) {
+              if (value != null && value !== "") jsonProps = { ...display.props, label: property.label ?? field.label };
+              display = cloneElement(display, { compact: true });
+            }
             content = href ? (
               <a
                 className="qt-link qt-property-reference"
@@ -435,7 +442,9 @@ export function ObjectProperties<Row>(
           }
           return (
             <div className="qt-property" key={property.id} data-property-type={field?.type}>
-              <dt>{property.label ?? field?.label ?? property.field}</dt>
+              <dt><span>{property.label ?? field?.label ?? property.field}</span>{jsonProps && <button type="button" className="qt-link-btn qt-property-json-open"
+                aria-label={`Open ${property.label ?? field?.label ?? property.field} in JSON Viewer`} title="Open in JSON Viewer"
+                onClick={(event) => setJsonViewer({ props: jsonProps!, trigger: event.currentTarget })}><Icon name="panelDefinition" size={14} /></button>}</dt>
               <dd tabIndex={available ? 0 : undefined} title={available ? "Double click or press Enter to copy the value" : undefined}
                 onDoubleClick={event => {
                   if (!available || (event.target as HTMLElement).closest("a, button, input, textarea, select, [contenteditable]")) return;
@@ -454,6 +463,7 @@ export function ObjectProperties<Row>(
           );
         })}
       </dl>
+      {jsonViewer && <JsonViewerModal {...jsonViewer.props} onClose={() => setJsonViewer(null)} returnFocus={jsonViewer.trigger} />}
       {copyError && <p className="qt-property-copy-error" role="status">{copyError}</p>}
       {resolved.error ? (
         <p role="status" className="qt-property-unavailable">
