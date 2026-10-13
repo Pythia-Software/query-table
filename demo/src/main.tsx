@@ -1,6 +1,7 @@
 import { lazy, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+const CellDisplayDemo = lazy(() => import("./CellDisplayDemo").then(module => ({ default: module.CellDisplayDemo })));
 const MenuDemo = lazy(() =>
   import("./MenuDemo").then((module) => ({ default: module.MenuDemo })),
 );
@@ -28,7 +29,9 @@ const PlaygroundFeedback = import.meta.env.DEV
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    {window.location.pathname.startsWith("/objects") ? (
+    {window.location.pathname.startsWith("/cells") ? (
+      <Suspense fallback={<p>Loading cell displays…</p>}><main className="qt-demo"><CellDisplayDemo /></main></Suspense>
+    ) : window.location.pathname.startsWith("/objects") ? (
       <Suspense fallback={<p>Loading object playground…</p>}>
         <PropertiesDemo />
       </Suspense>

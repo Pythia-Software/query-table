@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { cloneElement, isValidElement, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
   EMPTY_QUERY,
   readFieldValue,
@@ -23,6 +23,9 @@ import {
 import { formatMetricOutput, metricTimestamp } from "./metricFormat";
 import { createMetricColorResolver, type MetricTheme } from "./metricColors";
 import { Icon } from "./Icon";
+import { JsonValueView, JsonViewerModal, type JsonCellProps } from "./JsonCell";
+import { inspectJsonValue } from "./jsonValue";
+import { renderCellDisplay } from "./cellFormatting";
 
 export interface ObjectPropertiesProps<Row> {
   schema: FieldSchema<Row>;
@@ -52,8 +55,10 @@ export function formatPropertyValue(
       case "text":
       case "code":
         return { text: String(value) };
-      case "json":
-        return { text: JSON.stringify(value, null, 2) ?? String(value) };
+      case "json": {
+        const result = inspectJsonValue(value, format, false);
+        return { text: result.formatted, ...(result.error ? { error: result.error } : {}) };
+      }
       case "boolean":
         if (value !== true && value !== false && value !== 0 && value !== 1)
           throw Error("Expected a boolean.");
@@ -62,6 +67,11 @@ export function formatPropertyValue(
         return {
           text: Array.isArray(value) ? value.join(", ") : String(value),
         };
+      case "chip":
+        return { text: (Array.isArray(value) ? value : [value]).map(item => {
+          const key = String(item);
+          return format.labels && Object.prototype.hasOwnProperty.call(format.labels, key) ? format.labels[key] : key;
+        }).join(", ") };
       case "currency": {
         if (typeof value !== "number" || !Number.isFinite(value))
           throw Error("Expected a finite currency amount.");
@@ -162,6 +172,7 @@ function propertyContent<Row>(
       row: props.row,
       field,
       query: EMPTY_QUERY,
+      presentation: "property",
     });
   }
   // Preserve host renderers, but avoid table truncation and short date strings.
@@ -182,9 +193,18 @@ function propertyContent<Row>(
     return resolveRenderer(
       field,
       registry,
-    )({ value, row: props.row, field, query: EMPTY_QUERY });
+    )({ value, row: props.row, field, query: EMPTY_QUERY, presentation: "property" });
+  // A single field display supplies the default in both table cells and item
+  // properties. A saved appearance or detail-specific renderer/format still wins.
+  if (!format && field.display) return renderCellDisplay(
+    { value, row: props.row, field, query: EMPTY_QUERY, presentation: "property" }, field.display,
+  );
   const effective = format ?? defaultFormat(field)!;
   if (value == null) return <span className="qt-muted">—</span>;
+  if (effective.kind === "json") return <JsonValueView value={value} label={property.label ?? field.label} display={effective} />;
+  if (effective.kind === "chip") return renderCellDisplay(
+    { value, row: props.row, field, query: EMPTY_QUERY, presentation: "property" }, effective,
+  );
   if (effective.kind === "chips") {
     const values = Array.isArray(value) ? value : [value];
     const colors = createMetricColorResolver(props.theme);
@@ -219,7 +239,7 @@ function propertyContent<Row>(
   }
   const output = formatPropertyValue(value, effective, props.locale, now);
   const content =
-    effective.kind === "code" || effective.kind === "json" ? (
+    effective.kind === "code" ? (
       <pre className="qt-property-code">{output.text}</pre>
     ) : (
       <span>{output.text}</span>
@@ -250,7 +270,9 @@ export function ObjectProperties<Row>(
   const drag = useRef<{ left: number; width: number; value: number } | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [copyError, setCopyError] = useState("");
+  const [jsonViewer, setJsonViewer] = useState<{ props: JsonCellProps; trigger: HTMLElement } | null>(null);
   useEffect(() => { setCopied(null); setCopyError(""); }, [row]);
+  useEffect(() => { setJsonViewer(null); }, [row]);
   useEffect(() => {
     if (!copied) return;
     const timer = setTimeout(() => setCopied(null), 1800);
@@ -359,6 +381,7 @@ export function ObjectProperties<Row>(
           let content: ReactNode;
           let available = false;
           let rawValue: unknown;
+          let jsonProps: JsonCellProps | undefined;
           if (!field || field.property?.enabled === false)
             content = (
               <span className="qt-property-unavailable">Field unavailable</span>
@@ -383,9 +406,13 @@ export function ObjectProperties<Row>(
               ? resolved.values.get(objectReferenceKey(reference))
               : undefined;
             const href = result?.href ? safeLinkHref(result.href) : null;
-            const display =
+            let display =
               result?.label ??
               propertyContent(field, property, value, props, now);
+            if (isValidElement<JsonCellProps & { compact?: boolean }>(display) && display.type === JsonValueView) {
+              if (value != null && value !== "") jsonProps = { ...display.props, label: property.label ?? field.label };
+              display = cloneElement(display, { compact: true });
+            }
             content = href ? (
               <a
                 className="qt-link qt-property-reference"
@@ -415,7 +442,9 @@ export function ObjectProperties<Row>(
           }
           return (
             <div className="qt-property" key={property.id} data-property-type={field?.type}>
-              <dt>{property.label ?? field?.label ?? property.field}</dt>
+              <dt><span>{property.label ?? field?.label ?? property.field}</span>{jsonProps && <button type="button" className="qt-link-btn qt-property-json-open"
+                aria-label={`Open ${property.label ?? field?.label ?? property.field} in JSON Viewer`} title="Open in JSON Viewer"
+                onClick={(event) => setJsonViewer({ props: jsonProps!, trigger: event.currentTarget })}><Icon name="panelDefinition" size={14} /></button>}</dt>
               <dd tabIndex={available ? 0 : undefined} title={available ? "Double click or press Enter to copy the value" : undefined}
                 onDoubleClick={event => {
                   if (!available || (event.target as HTMLElement).closest("a, button, input, textarea, select, [contenteditable]")) return;
@@ -434,6 +463,7 @@ export function ObjectProperties<Row>(
           );
         })}
       </dl>
+      {jsonViewer && <JsonViewerModal {...jsonViewer.props} onClose={() => setJsonViewer(null)} returnFocus={jsonViewer.trigger} />}
       {copyError && <p className="qt-property-copy-error" role="status">{copyError}</p>}
       {resolved.error ? (
         <p role="status" className="qt-property-unavailable">

@@ -14,10 +14,12 @@
 //
 //   2. CONFIG vs CODE. Everything except `source.accessor` and `render` is
 //      declarative, serializable config grouped by capability (`filter`, `sort`,
-//      `select`). The only code-bearing members are the derived `accessor` and
-//      the `render` function — kept apart from the config so the two don't mix.
+//      `select`, `display`). The only code-bearing members are the derived
+//      `accessor` and the `render` function — kept apart from the config.
 
 import type { AggOp, FilterOp, OrderByClause, SelectColumn } from "./query";
+import type { CellDisplay } from "./cellDisplay";
+import { parseCellDisplay } from "./cellDisplay";
 import { normalizePropertyFormat, type PropertyFieldConfig, type FieldOrigin, type FieldRelationship } from "./properties";
 
 export type FieldType =
@@ -147,7 +149,10 @@ export interface FieldDef<Row = any, V = unknown> {
   alias?: string; // single alternative search term
   aliases?: string[]; // extra search terms
 
-  // presentation (the only code-bearing field): registry key or inline fn
+  /** Declarative built-in presentation, independent of the query's field type.
+   * An explicit render function or registered render key takes precedence. */
+  display?: CellDisplay;
+  // custom presentation: registry key or inline fn
   render?: string | CellRenderer<Row, V>;
   property?: PropertyFieldConfig;
   /** Structured provenance for relationship discovery; never SQL text. */
@@ -368,6 +373,7 @@ function projectField<Row>(raw: any, i: number): FieldDef<Row> {
     group: raw.group,
     alias: raw.alias,
     aliases: normalizeAliases(raw.aliases, raw.alias),
+    ...(raw.display === undefined ? {} : { display: parseCellDisplay(raw.display, `schema: field ${raw.name} display`) }),
     render: raw.render, // string key from JSON; consumer may override with a fn
     property: raw.property ? { ...raw.property, format: raw.property.format === undefined ? undefined : normalizePropertyFormat(raw.property.format) } : undefined,
     origin: raw.origin,

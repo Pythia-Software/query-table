@@ -225,10 +225,28 @@ of inheriting table truncation. Zero, false, and NULL are distinct. Format error
 retain the raw value with a diagnostic tooltip.
 
 Precedence is the saved appearance's `render` or `format`, then field `property`
-metadata, then the existing field renderer and type defaults. Hosts can register
+metadata, then custom field renderers, `FieldDef.display`, and type defaults. A
+field's display supplies the same JSON decoding, date/time or duration units,
+and configured chip labels/tones in table cells and detail properties.
+Hosts can register
 detail-specific renderers using `property.render`; they receive the existing
-renderer context, including the complete row. The view editor changes
+renderer context, including the complete row and `presentation: "property"`.
+The view editor changes
 presentation only and has no object update callback.
+
+JSON properties show a plain collapsible, pretty-printed tree, including when
+using `render: "json"`. Every container starts collapsed, with muted counts of
+hidden keys or values. Expansion grows the property list without an inner scroll
+area or toolbar. A single button beside the property label opens the full JSON
+viewer with search and original, decoded, and per-object/value copying.
+Native objects, serialized JSON, and encoded/escaped strings share that viewer. The
+properties editor offers JSON encoding, decode-pass, and expansion settings;
+these persist in named views and item share links. A literal string can use
+`format: { kind: "json", encoding: "value" }`. Configured chips can use
+`format: { kind: "chip", labels: { ok: "Ready" }, tones: { ok: "success" } }`.
+See [cell displays](cell-displays.md) for options and inspection limits, or try
+the `/cells` demo. `JsonValueView` is exported for custom detail surfaces; set
+`compact: true` for the plain, initially collapsed tree presentation.
 
 If a fetched row is a projection, pass `loadedFields` as **catalogue field names**.
 An omitted field then displays “Not loaded”, while a loaded NULL displays a dash.

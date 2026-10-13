@@ -168,3 +168,24 @@ describe("foreign key projection", () => {
     ).toBe(explicit);
   });
 });
+
+describe("shared JSON and chip property formats", () => {
+  it("retains JSON decoding settings through normalization, storage and query encoding", async () => {
+    const { encodeQuery, decodeQuery, EMPTY_QUERY } = await import("../src/index");
+    const json = { kind: "json", encoding: "escaped", maxDecodeDepth: 6, expandDepth: 2 };
+    const view = normalizePropertyView({ version: 1, properties: [{ id: "payload", field: "payload", format: json }] });
+    expect(view.properties[0]?.format).toEqual(json);
+    const query = { ...EMPTY_QUERY, itemDetails: { modes: ["modal" as const], views: { modal: view } } };
+    expect(decodeQuery(encodeQuery(query))?.itemDetails?.views?.modal).toEqual(view);
+    const storage = memoryPropertyViewStorage();
+    await storage.saveNamed("responses", "JSON", view, 123);
+    expect((await storage.listSaved("responses"))[0]?.view).toEqual(view);
+  });
+  it("rejects invalid decode settings and clones chip label maps", () => {
+    expect(() => normalizePropertyView({ version: 1, properties: [{ id: "payload", field: "payload", format: { kind: "json", maxDecodeDepth: 99 } }] })).toThrow("Invalid format");
+    const labels = { ready: "Ready" };
+    const view = normalizePropertyView({ version: 1, properties: [{ id: "status", field: "status", format: { kind: "chip", labels } }] });
+    labels.ready = "Changed";
+    expect(view.properties[0]?.format).toEqual({ kind: "chip", labels: { ready: "Ready" } });
+  });
+});

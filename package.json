@@ -43,6 +43,7 @@
     "test:mobile": "node demo/mobile-test.mjs",
     "test:menus": "node demo/menu-test.mjs",
     "test:feedback": "node demo/agentation-test.mjs",
+    "test:cells": "node demo/cell-display-test.mjs",
     "test:computed": "node demo/computed-test.mjs",
     "test:formula-editor": "node demo/formula-editor-test.mjs",
     "test:properties": "node demo/properties-test.mjs && node demo/detail-page-test.mjs && node demo/item-modal-test.mjs && node demo/item-inline-test.mjs",

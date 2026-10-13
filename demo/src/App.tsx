@@ -152,6 +152,7 @@ export function App({ dateExample = false }: { dateExample?: boolean }) {
               latency
             </a>
           </p>
+          <p className="qt-demo-intro"><a href="/cells">Explore formatted cells and JSON in item details</a></p>
           <p className="qt-demo-intro">
             <a href="/objects">Customize and save views of individual objects</a>
           </p>

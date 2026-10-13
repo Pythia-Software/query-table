@@ -142,6 +142,10 @@
 .qt-property-chip::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--qt-property-chip-color); flex-shrink: 0; }
 .qt-property-unavailable { color: var(--qt-muted); font-size: 12px; }
 .qt-property-link { border: 0; background: transparent; padding: 0; font: inherit; color: var(--qt-accent); cursor: pointer; text-align: start; }
+.qt-property dt { display: flex; align-items: flex-start; gap: 6px; }
+.qt-property dt > span { min-width: 0; }
+.qt-property-json-open { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; margin-inline-start: auto; width: 24px; height: 24px; padding: 0; color: var(--qt-muted); }
+.qt-property-json-open:hover { color: var(--qt-accent); background: var(--qt-cell-hover); }
 .qt-property-reference { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; text-decoration: none; }
 .qt-property-reference > span { min-width: 0; }
 .qt-property-reference > .qt-icon:last-child { opacity: 0.6; }

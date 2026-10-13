@@ -50,6 +50,7 @@ export type {
   FieldDef,
   FieldSchema,
 } from "./schema";
+export type { CellDisplay, JsonCellDisplay } from "./cellDisplay";
 export {
   isFilterable,
   isPushdownFilter,
