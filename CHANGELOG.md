@@ -4,6 +4,13 @@
 
 ### Added
 
+- Add a reusable TypeScript DuckDB backend profile for native and Wasm
+  connections, including parameterized filters, metadata, metrics, exact
+  distributions, grouped rows/HAVING, representative rows and calendar metrics.
+- Add a static public demo with versioned NYC 311, NYC taxi and Open Food Facts
+  Parquet cohorts, a saved-query sidebar, an action-checked guided tour, item details and a
+  GitHub Pages workflow building from the current library source.
+
 - Add a saved-query interface prototype at `/saved-queries` with a native query
   select, adjacent save actions, explicit loading/saving states, a transient
   saved confirmation, and protection for unsaved edits when switching queries.

@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const packageSpecs = [
   { name: "@pythia-software/query-table-core", path: "packages/core/package.json", public: true },
+  { name: "@pythia-software/query-table-duckdb", path: "packages/duckdb/package.json", public: true },
   { name: "@pythia-software/query-table-react", path: "packages/react/package.json", public: true },
   { name: "@pythia-software/query-table-ui", path: "packages/ui/package.json", public: true },
   { name: "@pythia-software/query-table-codegen", path: "tools/schema-codegen/package.json", public: true },

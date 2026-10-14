@@ -1,0 +1,46 @@
+{
+  "name": "@pythia-software/query-table-duckdb",
+  "version": "0.6.0",
+  "description": "Schema-bound DuckDB execution for Query Table, in Node.js or the browser.",
+  "license": "MIT",
+  "author": "Pythia Software",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Pythia-Software/query-table.git",
+    "directory": "packages/duckdb"
+  },
+  "homepage": "https://github.com/Pythia-Software/query-table#readme",
+  "bugs": {
+    "url": "https://github.com/Pythia-Software/query-table/issues"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --sourcemap --clean --target es2020",
+    "typecheck": "tsc --noEmit",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@pythia-software/query-table-core": "0.6.0"
+  }
+}

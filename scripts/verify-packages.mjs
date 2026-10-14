@@ -11,6 +11,7 @@ const consumerDirectory = join(temporaryRoot, "consumer");
 
 const packages = [
   { name: "@pythia-software/query-table-core", directory: "packages/core", required: ["dist/index.js", "dist/index.d.ts"] },
+  { name: "@pythia-software/query-table-duckdb", directory: "packages/duckdb", required: ["dist/index.js", "dist/index.d.ts"] },
   { name: "@pythia-software/query-table-react", directory: "packages/react", required: ["dist/index.js", "dist/index.d.ts"] },
   {
     name: "@pythia-software/query-table-ui",
@@ -67,10 +68,12 @@ try {
     join(consumerDirectory, "runtime.mjs"),
     `import * as core from "@pythia-software/query-table-core";
 import * as react from "@pythia-software/query-table-react";
+import * as duckdb from "@pythia-software/query-table-duckdb";
 import * as ui from "@pythia-software/query-table-ui";
 import * as codegen from "@pythia-software/query-table-codegen";
 
 if (typeof core.normalizeQueryState !== "function") throw new Error("core runtime export missing");
+if (typeof duckdb.DuckDBBackend !== "function" || typeof duckdb.fromDuckDBWasmConnection !== "function") throw new Error("DuckDB runtime export missing");
 for (const name of ["toQueryRequestV3", "validateQueryResultV3", "sourceDependencies", "QuerySnapshotHttpError"])
   if (typeof core[name] !== "function") throw new Error("next-release core export missing: " + name);
 if (typeof react.useQueryTable !== "function") throw new Error("react runtime export missing");

@@ -1,0 +1,18 @@
+{
+  "id": "food",
+  "file": "food.parquet",
+  "rows": 7949,
+  "bytes": 4765290,
+  "sha256": "1bd60de933cfb3578f0196bb2c0ff34129a771c77a3461d33ceab154e37f9bf1",
+  "preparedAt": "2026-10-14T14:45:35.729Z",
+  "title": "Open Food Facts products",
+  "source": "Open Food Facts",
+  "sourceUrl": "https://huggingface.co/datasets/openfoodfacts/product-database",
+  "downloadUrl": "https://huggingface.co/datasets/openfoodfacts/product-database/resolve/ac98f7483473b9588d26ca45102329d7d9f4b6ae/food.parquet",
+  "sourceRevision": "ac98f7483473b9588d26ca45102329d7d9f4b6ae",
+  "sourceSha256": "da614c8d27fafb5998db16900823f2391950e87c414aa1687f39dd7889b6d53b",
+  "license": "Open Database License (ODbL)",
+  "licenseUrl": "https://opendatacommons.org/licenses/odbl/1-0/",
+  "cohort": "First 8,000 source records, retaining named products and deduplicating barcodes. This is a curated source-order cohort, not a representative sample of the food market.",
+  "transformations": "English/main name selected; namespace prefixes removed from displayed tags. Nutrients are per 100g/100ml as supplied. A single category is chosen for exclusive grouping; original category tags retained. Missing allergen tags do not establish allergen absence."
+}

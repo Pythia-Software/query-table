@@ -290,7 +290,7 @@
           "type": "object",
           "description": "Per-backend binding, keyed by backend id so one schema can serve several backends.",
           "additionalProperties": false,
-          "properties": { "postgres": { "$ref": "#/$defs/sqlBinding" }, "sqlite": { "$ref": "#/$defs/sqliteBinding" } }
+          "properties": { "postgres": { "$ref": "#/$defs/sqlBinding" }, "sqlite": { "$ref": "#/$defs/sqliteBinding" }, "duckdb": { "$ref": "#/$defs/duckdbBinding" } }
         }
       }
     },
@@ -544,6 +544,14 @@
         },
         { "type": "object", "required": ["source"], "additionalProperties": false, "properties": { "source": { "const": "freeform" } } }
       ]
+    },
+    "duckdbBinding": {
+      "type": "object",
+      "required": ["expr"],
+      "additionalProperties": false,
+      "properties": {
+        "expr": { "type": "string", "minLength": 1, "description": "Trusted DuckDB SQL expression. Native VARCHAR[] arrays and DATE/TIMESTAMP/TIMESTAMPTZ are supported; never derived from request input." }
+      }
     },
     "sqliteBinding": {
       "type": "object",

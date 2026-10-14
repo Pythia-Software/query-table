@@ -856,7 +856,7 @@ export function SelectColumnEditor<Row>({
         </div>
         <footer className="qt-select-editor-footer">
           <span className="qt-muted">
-            Computed columns are display-only. Select at least one column.
+            Select at least one column. Your layout stays with the query.
           </span>
           <button type="button" className="qt-btn" onClick={onClose}>
             Cancel layout changes
