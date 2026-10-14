@@ -135,7 +135,7 @@ func compileMetricDialect(ctx context.Context, q MetricQuery, spec AggSpec, s Sc
 			return SQLPlan{}, err
 		}
 		b.stage("SELECT * FROM " + b.rel + " ORDER BY " + order + " LIMIT " + b.param(q.Limit, "bigint") + " OFFSET " + b.param(q.Offset, "bigint"))
-		if !sqlite {
+		if !sqlite && !schemaHasErrors(s) {
 			b.lateWindow = len(b.stages) - 1
 			b.earlyBindings = map[string]bool{b.sourceAliases[s.IDField]: true}
 			for name := range b.dependencies {

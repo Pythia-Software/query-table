@@ -470,6 +470,7 @@ func groupJoin(left, right string, n int) string {
 	parts := []string{}
 	for i := 0; i < n; i++ {
 		parts = append(parts, fmt.Sprintf("%s.group%d IS NOT DISTINCT FROM %s.group%d", left, i, right, i))
+		parts = append(parts, fmt.Sprintf("%s.group%d_error IS NOT DISTINCT FROM %s.group%d_error", left, i, right, i))
 	}
 	return strings.Join(parts, " AND ")
 }
@@ -512,7 +513,7 @@ func representativePlan(ctx context.Context, g *GroupingDefinition, s Schema, o 
 	partitions := []string{}
 	for i, v := range groupValues {
 		projections = append(projections, fmt.Sprintf("%s AS group%d,%s AS group%d_error", v.Value, i, v.Error, i))
-		partitions = append(partitions, v.Value)
+		partitions = append(partitions, v.Value, v.Error)
 	}
 	for i, summary := range g.Summaries {
 		if summary.Op == "row" {
@@ -538,7 +539,7 @@ func (d QueryDatasetV3) assignGroupIdentities(ctx context.Context, tx *sql.Tx, t
 	names := []string{"qt_group_ordinal"}
 	ordered := make([]int, len(keys))
 	for i := range keys {
-		names = append(names, fmt.Sprintf("group%d", i))
+		names = append(names, fmt.Sprintf("group%d", i), fmt.Sprintf("group%d_error", i))
 		ordered[i] = i
 	}
 	sort.Slice(ordered, func(i, j int) bool { return groupNameLess(keys[ordered[i]], keys[ordered[j]]) })
@@ -554,9 +555,10 @@ func (d QueryDatasetV3) assignGroupIdentities(ctx context.Context, tx *sql.Tx, t
 	for rows.Next() {
 		var ordinal int64
 		raw := make([]any, len(keys))
+		errors := make([]any, len(keys))
 		dest := []any{&ordinal}
 		for i := range raw {
-			dest = append(dest, &raw[i])
+			dest = append(dest, &raw[i], &errors[i])
 		}
 		if e := rows.Scan(dest...); e != nil {
 			rows.Close()
@@ -566,6 +568,9 @@ func (d QueryDatasetV3) assignGroupIdentities(ctx context.Context, tx *sql.Tx, t
 		for _, i := range ordered {
 			key := keys[i]
 			v := typedQueryValue(raw[i], expressionType(s.Fields[key].Kind))
+			if code := sqliteErrorCode(errors[i]); code != "" {
+				v = map[string]any{"computedError": code}
+			}
 			if utf16Length(key)+utf16Length(fmt.Sprint(v)) > 10000 {
 				rows.Close()
 				return diagnostic("resource_limit", "grouping key length budget exceeded")
