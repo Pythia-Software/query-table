@@ -89,7 +89,7 @@ func TestV3HTTPExecutionErrors(t *testing.T) {
 			o.ValidatePlanToken = func(context.Context, string) error {
 				return fmt.Errorf("private_host_catalog: %w", context.DeadlineExceeded)
 			}
-		}, 408, "query timed out\n"},
+		}, 504, "query timed out\n"},
 		{"wrapped diagnostic", func(q *qt.QueryRequestV3, _ *qt.QueryDatasetV3, o *qt.PlanOptions) {
 			q.PlanToken = "plan"
 			o.ValidatePlanToken = func(context.Context, string) error {

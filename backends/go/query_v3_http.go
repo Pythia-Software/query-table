@@ -85,7 +85,7 @@ func NewQueryV3Handler(db *sql.DB, authorize func(*http.Request) (QueryDatasetV3
 			var issue *PlanDiagnostic
 			switch {
 			case errors.Is(err, context.DeadlineExceeded):
-				http.Error(w, "query timed out", http.StatusRequestTimeout)
+				http.Error(w, "query timed out", http.StatusGatewayTimeout)
 			case errors.Is(err, context.Canceled):
 				http.Error(w, "query cancelled", http.StatusRequestTimeout)
 			case errors.As(err, &issue):
