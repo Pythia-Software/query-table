@@ -15,7 +15,7 @@ The same catalogue can display individual objects with ordered, formatted,
 read-only properties and multiple saved views per object type. See
 [object property views](docs/object-properties.md) and the `/objects` demo.
 
-Complete client datasets and negotiated SQLite/PostgreSQL transports support [row-producing GROUP BY](docs/grouping.md),
+Complete client datasets and negotiated SQLite/PostgreSQL/DuckDB transports support [row-producing GROUP BY](docs/grouping.md),
 HAVING, custom aggregate columns, and a configurable representative row through
 the standard editor. Grouped views use the same saved queries, URLs and theme.
 
@@ -29,6 +29,11 @@ canonical computed metadata and development across linked checkouts.
 ---
 
 ## Real-data demo
+
+Build the static public showcase with `npm run build:showcase`. It uses real NYC
+311, NYC taxi and Open Food Facts cohorts with the reusable
+[`query-table-duckdb` backend](packages/duckdb/README.md), entirely in the browser.
+See [GitHub Pages setup and data refresh](docs/public-demo.md).
 
 Run `npm run demo:postgres` and open [the PostgreSQL playground](http://localhost:5179/postgres)
 for 500,000 records, 20 seeded metrics, the Go backend, and adjustable latency.
@@ -128,6 +133,7 @@ your own markup, or just `@pythia-software/query-table-core` for the wire types 
 | `@pythia-software/query-table-react` | Headless hooks that own query state, URL/storage sync, fetch orchestration, selection, columns. No markup. | core, react (peer) |
 | `@pythia-software/query-table-ui` | The opinionated components. Themeable via CSS variables **or** a `classNames` slot map (Tailwind-friendly). | core, React hooks, React + React DOM (peers) |
 | `backends/go` | `querytable` Go module: compiles a `WireQuery` to parameterized SQL against a schema allowlist. | — |
+| `@pythia-software/query-table-duckdb` | Driver-independent DuckDB SQL planner and transport for native and Wasm execution, including v3 grouping and metrics. | core |
 | `@pythia-software/query-table-codegen` | CLI and JS API that emit the TS catalog + Go schema from a JSON schema document. | core |
 | `demo` | Runnable Vite playground over an in-memory dataset, for seeing UI changes live and manual testing. | core, react, ui |
 | `native/macos` | Native SwiftUI/AppKit frontend, Swift query contracts, HTTP/local transports, formula runtime, and sample app. | macOS 14+ |
@@ -262,6 +268,7 @@ The Go module also supports SQLite row queries, Unicode/RE2 filters, JSON arrays
 |---|---|---|
 | `@pythia-software/query-table-core` | **implemented** | unit tests (`vitest`) + `tsc --noEmit` |
 | `backends/go` | **implemented** | `go test` + `go vet`; loads the example doc |
+| `@pythia-software/query-table-duckdb` | **implemented** | native DuckDB conformance, browser Wasm checks, and TypeScript declarations |
 | `@pythia-software/query-table-react` | **implemented** | unit tests + `tsc --noEmit` |
 | `@pythia-software/query-table-ui` | **implemented** | unit tests + `tsc --noEmit` |
 | `@pythia-software/query-table-codegen` | **implemented** | unit tests, CLI tarball test, and generated TS/Go output checks |

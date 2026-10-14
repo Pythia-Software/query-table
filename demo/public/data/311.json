@@ -1,0 +1,18 @@
+{
+  "id": "311",
+  "file": "311.parquet",
+  "rows": 20519,
+  "bytes": 1525217,
+  "sha256": "ca431e414cc8c0e33e6e33cc48c33aba73a9fcbbe53cbcd734d578eba4019854",
+  "preparedAt": "2026-10-14T15:00:09.728Z",
+  "title": "NYC 311 service requests",
+  "source": "NYC Open Data",
+  "sourceUrl": "https://data.cityofnewyork.us/Social-Services/311-Service-Requests-from-2020-to-Present/erm2-nwe9/about_data",
+  "downloadUrl": "https://data.cityofnewyork.us/resource/erm2-nwe9.json?%24where=created_date+%3E%3D+%272025-01-01T00%3A00%3A00%27+AND+created_date+%3C+%272025-02-01T00%3A00%3A00%27+AND+unique_key%3A%3Anumber+%25+17+%3D+0&%24order=unique_key+ASC&%24limit=30000",
+  "sourceSha256": "b01c56b874c8bf949a3b4fbb872b5b07dd050de1bf950e335d9297dbc9c3ef3f",
+  "license": "NYC Open Data terms of use",
+  "licenseUrl": "https://opendata.cityofnewyork.us/overview/#termsofuse",
+  "cohort": "January 2025 requests with unique key divisible by 17. Status and closure fields reflect the export, not historical status on February 1.",
+  "snapshotAt": "2025-02-01T05:00:00Z",
+  "transformations": "Local source dates interpreted in America/New_York, including DST for closures outside January. Created day retains the local calendar date. Closure duration and age at the fixed reference date are derived; negative closure durations are null."
+}
