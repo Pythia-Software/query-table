@@ -19,7 +19,7 @@ Complete client datasets and negotiated SQLite/PostgreSQL/DuckDB transports supp
 HAVING, custom aggregate columns, and a configurable representative row through
 the standard editor. Grouped views use the same saved queries, URLs and theme.
 
-The [next-release host integration guide](docs/host-integration-next-release.md)
+The [0.7 host integration guide](docs/host-integration-next-release.md)
 covers backend calendar metrics, server execution, router restoration,
 canonical computed metadata and development across linked checkouts.
 

@@ -1,7 +1,7 @@
-# Integrating the next Query Table release
+# Integrating Query Table 0.7.0
 
-This guide covers consumers moving from the 0.6.0 release to the next source
-release. Existing row transports remain compatible. The v3 query executor is an
+This guide covers consumers moving from the 0.6.0 release to 0.7.0. Existing
+row transports remain compatible. The v3 query executor is an
 opt-in capability for grouped result rows and calendar metrics; URL/query state
 still uses the `2j.`/`2d.` codec and immutable `@code` references.
 
@@ -194,12 +194,12 @@ Run package watchers with `--watch --no-clean`; a clean watcher can temporarily
 remove `dist` while a dependent watcher reads it. Schema edits still require
 regeneration. `npm ci` removes local links, so relink afterward.
 
-Before release, run `npm run package:check` to install packed artifacts into a
-clean consumer and check exports/types without local links. Pin reviewed source
-archives with provenance while the new exports are unpublished, or move to the
-published version once it exists; an unchanged registry 0.6.0 pin does not contain
-the new APIs. A browser/native bookmark copies a URL, not the local cache, so use
-an explicit durable Bookmark action for portable references.
+Run `npm run package:check` to install packed artifacts into a clean consumer
+and check exports/types without local links. For deployed consumers, pin the
+core/react/ui/codegen packages to `0.7.0` and the Go module to `v0.7.0`; an
+unchanged registry 0.6.0 pin does not contain the new APIs. A browser/native
+bookmark copies a URL, not the local cache, so use an explicit durable Bookmark
+action for portable references.
 
 `npm run test:sqlite` includes the browser/backend grouping and calendar parity
 fixtures. To run the PostgreSQL transaction, grouping, calendar and quota tests,

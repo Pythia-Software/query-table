@@ -2,8 +2,12 @@
 
 ## Unreleased
 
+## 0.7.0 — 2026-10-14
+
 ### Added
 
+- Add optional compact metric covers, bounded display group counts with additive
+  Other remainders, and configurable list bar placement and label wrapping.
 - Add a reusable TypeScript DuckDB backend profile for native and Wasm
   connections, including parameterized filters, metadata, metrics, exact
   distributions, grouped rows/HAVING, representative rows and calendar metrics.
@@ -119,6 +123,9 @@
 
 ### Fixed
 
+- Bound v3 calendar scratch tables by population and byte budgets, stage only
+  metric dependencies, assign bucket keys in batches, and release tables after
+  each metric. Ignore cleared date filters when resolving query-range calendars.
 - Preserve pending and failed query links during empty undo/redo, retain history
   when reactivating hidden tables, accept relative router locations, and capture
   fresh evaluation clocks for ordinary v3 requests and previews.
@@ -381,7 +388,8 @@ contain intentional API changes described in their release notes.
 - Updated the JavaScript toolchain to remove known dependency advisories.
 - Added Git-history secret scanning and Go/npm vulnerability checks to CI.
 
-[Unreleased]: https://github.com/Pythia-Software/query-table/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Pythia-Software/query-table/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/Pythia-Software/query-table/compare/v0.6.0...v0.7.0
 [0.3.0]: https://github.com/Pythia-Software/query-table/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Pythia-Software/query-table/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Pythia-Software/query-table/releases/tag/v0.1.0
