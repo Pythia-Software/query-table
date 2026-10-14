@@ -63,16 +63,34 @@ export function compactMetricScale(values: readonly number[], options: MetricAxi
 }
 
 /** Axis labels only. Tooltips and data tables continue using the full declared format. */
-export function compactMetricTick(value: number, format?: MetricValueFormat, locale?: string) {
+export function compactMetricTick(value: number, format?: MetricValueFormat, locale?: string, step?: number) {
+  // Neighbouring ticks differ by `step`, so labels keep enough precision to resolve it.
+  const resolvable = step !== undefined && Number.isFinite(step) && step > 0;
+  const digits = (magnitude: number) => resolvable && magnitude
+    ? Math.min(21, Math.max(3, Math.floor(Math.log10(magnitude)) - Math.floor(Math.log10(step!)) + 1))
+    : 3;
   if (format?.kind === "duration") {
     if (!value) return "0";
     const unit = durationUnit(format, Math.abs(value));
-    return `${Number((value / unit.size).toPrecision(3))}${unit.suffix}`;
+    return `${Number((value / unit.size).toPrecision(digits(Math.abs(value))))}${unit.suffix}`;
   }
-  if (format?.kind === "percent")
-    return formatMetricOutput(value, { ...format, decimals: Math.abs(value * 100) < 1 && value !== 0 ? Math.min(12, -Math.floor(Math.log10(Math.abs(value * 100)))) : 0 }, locale).text;
+  if (format?.kind === "percent") {
+    const small = Math.abs(value * 100) < 1 && value !== 0 ? -Math.floor(Math.log10(Math.abs(value * 100))) : 0;
+    const spacing = resolvable ? -Math.floor(Math.log10(step! * 100)) : 0;
+    return formatMetricOutput(value, { ...format, decimals: Math.min(12, Math.max(0, small, spacing)) }, locale).text;
+  }
   if (format && ["date", "time", "datetime"].includes(format.kind)) return formatMetricOutput(value, format, locale).text;
-  return value.toLocaleString(locale, { notation: "compact", maximumSignificantDigits: 3 });
+  return value.toLocaleString(locale, { notation: "compact", maximumSignificantDigits: digits(Math.abs(value)) });
+}
+
+/** Smallest gap between adjacent ticks, for label precision. */
+export function compactTickStep(ticks: readonly number[]): number | undefined {
+  let step: number | undefined;
+  for (let i = 1; i < ticks.length; i++) {
+    const gap = Math.abs(ticks[i]! - ticks[i - 1]!);
+    if (gap > 0 && (step === undefined || gap < step)) step = gap;
+  }
+  return step;
 }
 
 /** Label round local calendar boundaries, sparsely enough to fit a small chart. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compactMetricScale, compactMetricTick, compactCalendarLabels } from "../src/compactMetricChart";
+import { compactMetricScale, compactMetricTick, compactTickStep, compactCalendarLabels } from "../src/compactMetricChart";
 import { metricScale } from "../src/metricChartHelpers";
 import type { MetricBucket, RenderingClause } from "../src/metricTypes";
 
@@ -43,6 +43,17 @@ describe("compact chart axes", () => {
     expect(narrow.ticks.map(v => compactMetricTick(v, format))).toEqual(["2m", "2.5m", "3m"]);
     const constant = compactMetricScale([160000, 160000], undefined, false, format);
     expect(constant.ticks.map(v => compactMetricTick(v, format))).toEqual(["2.5m", "3m"]);
+  });
+  it("keeps narrow ranges far from zero distinguishable", () => {
+    const labels = (values: number[], format?: { kind: "percent" }) => {
+      const scale = compactMetricScale(values, undefined, false, format);
+      return scale.ticks.map(v => compactMetricTick(v, format, "en-US", compactTickStep(scale.ticks)));
+    };
+    expect(labels([1000000, 1004000])).toEqual(["1M", "1.002M", "1.004M"]);
+    expect(labels([.1, .108], { kind: "percent" })).toEqual(["10.0%", "10.5%", "11.0%"]);
+    expect(compactTickStep([0, 1000, 2000])).toBe(1000);
+    expect(compactTickStep([5])).toBeUndefined();
+    expect(compactMetricTick(2000, undefined, "en-US", 1000)).toBe("2K");
   });
   it("labels sparse round hours in the computation timezone and retains date identity across days", () => {
     const clause: RenderingClause = { id: "words", op: "sum", groupBy: ["sent_at"], dateGrouping: { field: "sent_at", interval: "hour", timeZone: "America/Denver", range: "observed", includeEmpty: false } };

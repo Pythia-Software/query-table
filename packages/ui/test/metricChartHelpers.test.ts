@@ -36,6 +36,18 @@ describe("metric chart geometry", () => {
     expect(input).toHaveLength(3);
     expect(metricDisplayBuckets(clause, input)).toBe(input);
   });
+  it("limits pivots by row rather than by cell", () => {
+    const cell = (row: string, col: string, value: number) => ({ keys: [row, col], value, count: 1 });
+    const input = [cell("r1", "a", 1), cell("r1", "b", 2), cell("r2", "a", 3), cell("r3", "b", 4)];
+    for (const kind of ["table", "auto"] as const) {
+      const pivot: RenderingClause = { ...clause, groupBy: ["row", "col"], display: { kind, maxGroups: 2 } };
+      expect(metricDisplayBuckets(pivot, input).map(b => b.keys)).toEqual(input.slice(0, 3).map(b => b.keys));
+    }
+    const swapped: RenderingClause = { ...clause, groupBy: ["row", "col"], display: { kind: "table", maxGroups: 1, pivot: { swap: true } } };
+    expect(metricDisplayBuckets(swapped, input).map(b => b.keys)).toEqual([["r1", "a"], ["r2", "a"]]);
+    const flat: RenderingClause = { ...clause, groupBy: ["a", "b", "c"], display: { kind: "table", maxGroups: 1 } };
+    expect(metricDisplayBuckets(flat, [{ keys: ["x", "y", "z"], value: 1, count: 1 }, { keys: ["x", "y", "w"], value: 1, count: 1 }])).toHaveLength(1);
+  });
   it("labels the combined remainder verbatim on date-grouped lists", () => {
     const dated: RenderingClause = { ...clause, dateGrouping: { field: clause.groupBy[0]!, interval: "day", includeEmpty: false, range: "observed" }, display: { kind: "list", maxGroups: 1, showOther: true } };
     const output = metricDisplayBuckets(dated, [bucket("2026-10-01", 4), bucket("2026-10-02", 2)], 2);

@@ -30,7 +30,7 @@ import type {
   RenderingClause,
 } from "./metricTypes";
 
-import { compactMetricScale, compactMetricTick, compactCalendarLabels } from "./compactMetricChart";
+import { compactMetricScale, compactMetricTick, compactTickStep, compactCalendarLabels } from "./compactMetricChart";
 
 interface ChartProps {
   compact?: boolean | undefined;
@@ -85,8 +85,8 @@ export function MetricChart({
     colors = createMetricColorResolver(theme);
   const fmt = (v: MetricValue | undefined, f: MetricValueFormat | undefined) =>
     formatMetricOutput(v, f, locale).text;
-  const tickFmt = (v: number, format: MetricValueFormat | undefined) =>
-    compact ? compactMetricTick(v, format, locale) : format
+  const tickFmt = (v: number, format: MetricValueFormat | undefined, ticks: readonly number[] = []) =>
+    compact ? compactMetricTick(v, format, locale, compactTickStep(ticks)) : format
       ? fmt(v, format)
       : v.toLocaleString(locale, { maximumSignificantDigits: 8 });
   const percent = (ratio: number) =>
@@ -276,7 +276,7 @@ export function MetricChart({
         {s && axis && !b.error && axis.accepts(s.low) ? <>
           {axis.ticks.map((v, j) => <g key={j}>
             {grid(x(v), y - 9, x(v), y + 9)}
-            {text(x(v), y + 21, tickFmt(v, display.format), j === 0 ? "start" : j === axis.ticks.length - 1 ? "end" : "middle")}
+            {text(x(v), y + 21, tickFmt(v, display.format, axis.ticks), j === 0 ? "start" : j === axis.ticks.length - 1 ? "end" : "middle")}
           </g>)}
           <g {...interaction(b, detailLabel)}>
             <line x1={x(s.low)} x2={x(s.high)} y1={y} y2={y} stroke={color} strokeWidth={2} />
@@ -306,7 +306,7 @@ export function MetricChart({
     axes = axis.ticks.map((v, i) => (
       <g key={i}>
         {grid(x(v), top, x(v), bottom)}
-        {text(x(v), bottom + 18, tickFmt(v, display.format))}
+        {text(x(v), bottom + 18, tickFmt(v, display.format, axis.ticks))}
       </g>
     ));
     marks = visible.map((b, i) => {
@@ -448,7 +448,7 @@ export function MetricChart({
         {ya.ticks.map((v, i) => (
           <g key={i}>
             {grid(left, y(v), right, y(v))}
-            {text(left - 7, y(v) + 4, compact ? tickFmt(v, undefined) : v.toLocaleString(locale), "end")}
+            {text(left - 7, y(v) + 4, compact ? tickFmt(v, undefined, ya.ticks) : v.toLocaleString(locale), "end")}
           </g>
         ))}
         {xa.ticks.map((v, i) => (
@@ -456,7 +456,7 @@ export function MetricChart({
             {text(
               left + xa.fraction(v) * plotW,
               bottom + 18,
-              tickFmt(v, display.xFormat),
+              tickFmt(v, display.xFormat, xa.ticks),
             )}
           </g>
         ))}
@@ -538,13 +538,13 @@ export function MetricChart({
         {xa.ticks.map((v, i) => (
           <g key={`x${i}`}>
             {grid(x(v), top, x(v), bottom)}
-            {text(x(v), bottom + 18, tickFmt(v, display.xFormat))}
+            {text(x(v), bottom + 18, tickFmt(v, display.xFormat, xa.ticks))}
           </g>
         ))}
         {ya.ticks.map((v, i) => (
           <g key={`y${i}`}>
             {grid(left, y(v), right, y(v))}
-            {text(left - 7, y(v) + 4, tickFmt(v, display.yFormat), "end")}
+            {text(left - 7, y(v) + 4, tickFmt(v, display.yFormat, ya.ticks), "end")}
           </g>
         ))}
       </>
@@ -783,8 +783,8 @@ export function MetricChart({
           ? grid(x(v), top, x(v), bottom)
           : grid(left, y(v), right, y(v))}
         {horizontal
-          ? text(x(v), bottom + 18, compact ? tickFmt(v, display.format) : fmt(v, display.format))
-          : text(left - 7, y(v) + 4, tickFmt(v, display.format), "end")}
+          ? text(x(v), bottom + 18, compact ? tickFmt(v, display.format, axis.ticks) : fmt(v, display.format))
+          : text(left - 7, y(v) + 4, tickFmt(v, display.format, axis.ticks), "end")}
       </g>
     ));
     axes = (

@@ -171,22 +171,35 @@ export function metricPieSlices(
   return { slices, total };
 }
 
+/**
+ * Line buckets are (time, series) points and pivot buckets are (row, column)
+ * cells, so their limit applies to series or rows rather than to buckets.
+ */
+export function metricKeyedLimit(clause: RenderingClause): { unit: "series" | "rows"; key: (b: MetricBucket) => string } | undefined {
+  const kind = clause.display?.kind ?? "auto";
+  if (kind === "line") return { unit: "series", key: b => metricTupleKey(b.keys.slice(1)) };
+  if ((kind === "table" || kind === "auto") && clause.groupBy.length === 2) {
+    const axis = clause.display?.pivot?.swap ? 1 : 0;
+    return { unit: "rows", key: b => metricTupleKey([b.keys[axis] ?? null]) };
+  }
+  return undefined;
+}
+
 /** Presentation limit, with an exact additive remainder only when requested. */
 export function metricDisplayBuckets(clause: RenderingClause, buckets: MetricBucket[], groupCount?: number, other?: MetricBucket, partial = false): MetricBucket[] {
   const requested = clause.display?.maxGroups;
   const limited = Number.isSafeInteger(requested) && !!requested && requested >= 1 && requested <= 1000000;
   if (!limited && (!other || !clause.display?.showOther)) return buckets;
-  // Line buckets are (time, series) points, so the limit applies to series.
-  if (clause.display?.kind === "line") {
+  const keyed = metricKeyedLimit(clause);
+  if (keyed) {
     if (!limited) return buckets;
-    const series = new Set<string>();
+    const kept = new Set<string>(), all = new Set<string>();
     for (const b of buckets) {
-      const key = metricTupleKey(b.keys.slice(1));
-      if (series.size < requested! || series.has(key)) series.add(key);
+      const key = keyed.key(b);
+      all.add(key);
+      if (kept.size < requested!) kept.add(key);
     }
-    return series.size < new Set(buckets.map(b => metricTupleKey(b.keys.slice(1)))).size
-      ? buckets.filter(b => series.has(metricTupleKey(b.keys.slice(1))))
-      : buckets;
+    return kept.size < all.size ? buckets.filter(b => kept.has(keyed.key(b))) : buckets;
   }
   const limit = limited ? requested! : buckets.length;
   const head = buckets.slice(0, limit), tail = buckets.slice(limit);

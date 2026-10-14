@@ -37,6 +37,7 @@ import {
   metricGroupLabel,
   metricDisplayBuckets,
   isMetricOtherBucket,
+  metricKeyedLimit,
 } from "./metricChartHelpers";
 import { formatMetricOutput } from "./metricFormat";
 import type {
@@ -211,6 +212,7 @@ export function MetricCard<Row>({
   const allBuckets = explicitBuckets ?? result?.buckets ?? [];
   const buckets = ["pie", "donut", "value"].includes(clause.display?.kind ?? "") ? allBuckets
     : metricDisplayBuckets(clause, allBuckets, result?.groupCount, result?.other, result?.coverage === "partial");
+  const keyedLimit = metricKeyedLimit(clause);
   const byName = useMemo(
     () => new Map(fields.map((f) => [f.name, f])),
     [fields],
@@ -368,9 +370,9 @@ export function MetricCard<Row>({
         </p>
       )}
       {body}
-      {kind === "line"
+      {keyedLimit
         ? buckets !== allBuckets && (
-            <p className="qt-metric-note">Showing the first {clause.display?.maxGroups} series in result order.</p>
+            <p className="qt-metric-note">Showing the first {clause.display?.maxGroups} {keyedLimit.unit} in result order.</p>
           )
         : buckets !== allBuckets && allBuckets.length > (clause.display?.maxGroups ?? allBuckets.length) && (
             <p className="qt-metric-note">Showing the first {clause.display?.maxGroups} groups in result order{buckets.length > clause.display!.maxGroups! ? " plus Other" : ""}.</p>
