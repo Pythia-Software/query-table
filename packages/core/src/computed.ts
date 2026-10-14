@@ -223,6 +223,9 @@ export function groupPreview(
 
 /** Server-issued capabilities are hints for client planning, never authorization. */
 export interface ComputedFieldCapabilities {
+
+  /** Host-approved canonical predicates; omitted retains the closed default. */
+  filter?: boolean;
   type: import('./schema').FieldType;
   select: boolean;
   sort: boolean;

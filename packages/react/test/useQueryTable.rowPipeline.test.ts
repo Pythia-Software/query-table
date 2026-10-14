@@ -91,8 +91,9 @@ describe("useQueryTable row pipeline", () => {
     remote.unmount();
   });
 
-  it("does not recompute client rows for a width-only query change", () => {
+  it("does not recompute client rows for a width-only query change", async () => {
     const { result, unmount } = renderQueryTable({ clientRows });
+    await act(async () => {});
     advance(20);
     const rowsBeforeResize = result.current.rows;
 
@@ -111,10 +112,12 @@ describe("useQueryTable row pipeline", () => {
     unmount();
   });
 
-  it("does not refetch transport rows for widths, but does for a changed projection", () => {
+  it("does not refetch transport rows for widths, but does for a changed projection", async () => {
     const fetchRows = vi.fn(async () => ({ rows: clientRows, total: clientRows.length }));
     const { result, unmount } = renderQueryTable({ transport: { fetchRows } });
+    await act(async () => {});
     advance(20);
+    await act(async () => {});
     expect(fetchRows).toHaveBeenCalledTimes(1);
 
     act(() => {

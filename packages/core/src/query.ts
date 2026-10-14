@@ -1,7 +1,6 @@
 import { normalizePropertyView, type PropertyViewState } from "./properties";
 import type { MetricDisplay, MetricLayout, MetricDistribution, MetricSort, MetricScope, MetricDateGrouping } from "./metricTypes";
 import { normalizeMetricOptions } from "./metricNormalize";
-import { isComputedField } from "./computed";
 import type { GroupingState, SummaryColumn, RepresentativeOrder } from "./grouping";
 // query.ts — the canonical query state shape.
 //
@@ -279,7 +278,7 @@ function normalizeWhereClause(item: unknown): WhereClause | null {
   if (!isRecord(item)) return null;
   const field = boundedString(item.field, MAX_FIELD_NAME_LENGTH);
   const value = typeof item.value === "string" && item.value.length <= MAX_FILTER_VALUE_LENGTH ? item.value : null;
-  if (!field || isComputedField(field) || typeof item.op !== "string" || !FILTER_OPS.has(item.op) || value == null) {
+  if (!field || typeof item.op !== "string" || !FILTER_OPS.has(item.op) || value == null) {
     return null;
   }
   const clause: WhereClause = { field, op: item.op as FilterOp, value };

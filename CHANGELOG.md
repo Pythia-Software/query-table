@@ -12,7 +12,16 @@
   HAVING, result sorting and paging, custom aggregate formulas including MEDIAN,
   and one representative row chosen by configurable ordering. Preserve grouping
   in saved views, URLs and history, and evaluate metrics over matching or shown
-  groups. Backend transports explicitly reject grouped-row queries.
+  groups. Legacy backend transports explicitly reject grouped-row queries;
+  negotiated v3 transports execute them on the server.
+- Add opt-in v3 SQLite/PostgreSQL execution for grouped rows, canonical computed
+  source filters, representative rows, HAVING, and calendar/timezone metrics,
+  with narrow source dependency plans and host-owned execution budgets.
+- Add independent collection URL parameters, explicit cancellable router
+  restoration and readiness, paused hidden tables, remote grouping previews,
+  and server execution and multi-table router integration examples.
+- Add partial computed-capability descriptions, exported snapshot validation,
+  host-owned snapshot transactions, and typed actionable snapshot HTTP errors.
 - Export shared resizable, closable editor panels and customizable column-role
   theme tokens for group keys, aggregate values and representative-row fields;
   add grouping integration documentation and themed playground examples.
@@ -43,7 +52,8 @@
 - Add date interval and empty-date settings to the existing metric editor,
   persisted with metric definitions. Complete calendar buckets locally over
   query, observed, or custom bounds, with an example at `/date-metrics-workbench`.
-  Server date grouping remains unsupported and reports an explicit error.
+  Legacy metric transports reject date grouping; v3 transports execute it on
+  the server.
 - Add named timezones to metric date grouping (UTC by default), with local
   calendar boundaries, custom date bounds, and matching graph/list/table labels.
   Handle daylight-saving gaps, repeated hours, and fractional offset changes;
@@ -102,6 +112,15 @@
 
 ### Fixed
 
+- Preserve pending and failed query links during empty undo/redo, retain history
+  when reactivating hidden tables, accept relative router locations, and capture
+  fresh evaluation clocks for ordinary v3 requests and previews.
+- Keep computed runtime errors in individual v3 cells, batch group identity
+  assignment, preflight UTF-8 staging budgets, sanitize infrastructure errors,
+  and restrict grouping source statistics to backend fields with cancellation.
+- Ignore synthetic timezone boundaries after explicit DST data ends, preserve
+  future partial-hour transitions in browser/server execution, and skip empty
+  date filling when no dated series exists.
 - Preserve grouped rows and metric results during column resizing/reordering,
   and retain default key columns when adding a group key to an empty SELECT.
 - Retain grouped rows during refresh, normalize saved grouping safely, and show

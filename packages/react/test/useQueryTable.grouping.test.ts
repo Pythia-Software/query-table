@@ -52,6 +52,7 @@ function mount(options: Partial<UseQueryTableOptions<GroupedRow>> = {}) {
   return current;
 }
 async function settle() {
+  await act(async () => {});
   await act(async () => {
     await vi.advanceTimersByTimeAsync(50);
   });
@@ -230,7 +231,7 @@ describe("standard query table grouping", () => {
       }),
     });
     await settle();
-    expect(current.api.error?.message).toMatch(/complete client rows/);
+    expect(current.api.error?.message).toMatch(/server with grouped-query support/);
     expect(current.api.rows).toEqual([]);
     expect(fetchRows).not.toHaveBeenCalled();
     act(() => current.api.grouping!.changeKeys([]));

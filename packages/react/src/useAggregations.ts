@@ -79,7 +79,7 @@ export function useAggregations<Row>(
   // A v2 server scopes shownRows from the query window and snapshot itself.
   // Only client/legacy/regex evaluation depends on the downloaded row page.
   const localPage =
-    shown &&
+    !options.executeV3 && shown &&
     (!transport?.fetchMetrics ||
       transport.metricCapabilities?.version !== 2 ||
       (query.aggregations ?? []).some((clause) => {
@@ -113,6 +113,7 @@ export function useAggregations<Row>(
     options.execution ?? null,
     options.now,
     options.strictLocalMetrics,
+    options.queryContextKey,
   ]);
   useEffect(() => {
     if (!enabled || !latest.current.query.aggregations?.length) {

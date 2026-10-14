@@ -8,5 +8,5 @@
     "moduleResolution": "Bundler",
     "types": ["node"]
   },
-  "include": ["usage.tsx"]
+  "include": ["*.tsx"]
 }

@@ -115,10 +115,83 @@ export function memoryQuerySnapshotCache(): QuerySnapshotCache {
   return localQuerySnapshotCache({ storage: { getItem: () => text, setItem: (_key, value) => { text = value; } } });
 }
 
+export type QuerySnapshotHttpErrorCode = "quota" | "forbidden" | "conflict" | "unavailable" | "storage" | "http";
+
+/** HTTP failures retain structured information for host error formatting. The
+ * message is plain text suitable for displaying in the Save/Share UI. */
+export class QuerySnapshotHttpError extends Error {
+  readonly name = "QuerySnapshotHttpError";
+  constructor(
+    readonly status: number,
+    readonly code: QuerySnapshotHttpErrorCode,
+    message: string,
+    readonly detail?: string,
+    readonly serverCode?: string,
+  ) { super(message); }
+}
+
+async function snapshotHttpError(response: Response): Promise<QuerySnapshotHttpError> {
+  // Error endpoints may return plain text (including Go's http.Error), JSON,
+  // HTML proxy pages, or arbitrarily large bodies. Read at most 4 KiB and never
+  // turn an infrastructure response or HTML into a browser-facing message.
+  let detail: string | undefined;
+  let serverCode: string | undefined;
+  const type = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
+  if (response.body && (type === "text/plain" || type === "application/json")) {
+    const reader = response.body.getReader();
+    try {
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      let complete = false;
+      while (size <= 4096) {
+        const next = await reader.read();
+        if (next.done) { complete = true; break; }
+        size += next.value.byteLength;
+        if (size <= 4096) chunks.push(next.value);
+      }
+      if (complete) {
+        const bytes = new Uint8Array(size);
+        let offset = 0;
+        for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+        const text = new TextDecoder().decode(bytes);
+        let reason: unknown = text;
+        if (type === "application/json") {
+          const body = JSON.parse(text);
+          reason = body?.message ?? body?.error?.message ?? body?.error;
+          const code = body?.code ?? body?.error?.code;
+          if (typeof code === "string" && /^[A-Za-z0-9_.-]{1,64}$/.test(code)) serverCode = code;
+        }
+        if (typeof reason === "string" && !/[<>]/.test(reason)) {
+          const safe = reason.replace(/[\u0000-\u001f\u007f]/g, " ").trim();
+          if (safe) detail = safe.slice(0, 512);
+        }
+      }
+    } catch { /* An unreadable error body must not hide the HTTP failure. */ }
+    finally {
+      try { await reader.cancel(); } catch { /* Already closed or disconnected. */ }
+      reader.releaseLock();
+    }
+  }
+  const status = response.status;
+  const code: QuerySnapshotHttpErrorCode = status === 507 ? "quota" : status === 401 || status === 403 ? "forbidden"
+    : status === 409 ? "conflict" : status === 404 ? "unavailable" : status >= 500 ? "storage" : "http";
+  const messages: Record<QuerySnapshotHttpErrorCode, string> = {
+    quota: "Query snapshot storage is full. Ask your host to increase its quota, then retry saving. Existing links still work.",
+    forbidden: "You do not have permission to save or open this query link. Sign in or ask your host for access.",
+    conflict: "This query link code already identifies different state. Ask your host to check its snapshot store.",
+    unavailable: "This query link is unavailable. Check its address or ask its author for a new link.",
+    storage: "Query snapshot storage is temporarily unavailable. Retry later; your previous saved query is unchanged.",
+    http: `Query snapshot request failed (${status}). Check the request or retry later.`,
+  };
+  const message = messages[code] + (code !== "http" ? ` (HTTP ${status})` : "")
+    + (detail && (status < 500 || status === 507) ? ` ${detail}` : "");
+  return new QuerySnapshotHttpError(status, code, message, detail, serverCode);
+}
+
 export function httpQuerySnapshotStore(base: string, fetcher: typeof fetch = fetch): QuerySnapshotStore {
   const url = (key: string, code: string) => `${base}${base.includes("?") ? "&" : "?"}dataset=${encodeURIComponent(key)}&code=${encodeURIComponent(code)}`;
   async function responseSnapshot(response: Response): Promise<QuerySnapshot> {
-    if (!response.ok) throw Error(`Query snapshot request failed (${response.status}).`);
+    if (!response.ok) throw await snapshotHttpError(response);
     return validateQuerySnapshot(await response.json());
   }
   return {

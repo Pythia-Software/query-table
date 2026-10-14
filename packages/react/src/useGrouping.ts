@@ -26,6 +26,8 @@ export type GroupingSourceApi<Row> = QueryFilterApi<Row> &
   };
 
 export interface GroupingApi<Row> {
+  inputsReady?: boolean;
+  preview?: (query: QueryState, signal?: AbortSignal) => Promise<{ rows: GroupedRow[]; sourceTotal: number; total: number }>;
   supported: boolean;
   model: GroupingModel<Row>;
   api: QueryTableApi<Row>;
@@ -53,6 +55,7 @@ export function useGroupingController<Row>(
   inputs: Row[],
   supported: boolean,
   viewRevision: number,
+  execution: Pick<GroupingApi<Row>, "inputsReady" | "preview"> = {},
 ): GroupingApi<Row> {
   const [notice, setNotice] = useState("");
   useEffect(() => setNotice(""), [viewRevision]);
@@ -278,6 +281,7 @@ export function useGroupingController<Row>(
     );
   }
   return {
+    ...execution,
     supported,
     model,
     api,

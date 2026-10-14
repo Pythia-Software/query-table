@@ -3,7 +3,7 @@ import { deflateSync } from "fflate";
 import {
   createQueryLinkService, localQuerySnapshotCache, memoryQuerySnapshotCache,
   encodeQuery, decodeQueryStrict, EMPTY_QUERY, createSetFilter, queriesEqual,
-  MAX_QUERY_STATE_BYTES, httpQuerySnapshotStore,
+  MAX_QUERY_STATE_BYTES, httpQuerySnapshotStore, QuerySnapshotHttpError,
   type QuerySnapshot, type QuerySnapshotStore, type QueryState,
 } from "../src/index";
 
@@ -137,6 +137,61 @@ describe("local query links and explicit promotion", () => {
     expect(fetcher.mock.calls[0]![1]?.method).toBe("PUT");
     fetcher.mockResolvedValueOnce(new Response(null, {status:404}));
     expect(await remote.resolve("runs", snapshot.code)).toBeNull();
+  });
+  it.each([
+    [507, "quota", "storage is full"], [403, "forbidden", "permission"],
+    [409, "conflict", "different state"], [404, "unavailable", "unavailable"],
+    [500, "storage", "Retry later"],
+  ])("exposes actionable typed snapshot failures for HTTP %i", async (status, code, message) => {
+    const snapshot: QuerySnapshot = { version:1, code:"a".repeat(22), token:encodeQuery(EMPTY_QUERY), createdAt:1 };
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response("host reason", {
+      status: status as number, headers: {"content-type":"text/plain; charset=utf-8"},
+    }));
+    const remote = httpQuerySnapshotStore("/snapshots", fetcher);
+    const error = await remote.save("runs", snapshot).catch(error => error);
+    expect(error).toBeInstanceOf(QuerySnapshotHttpError);
+    expect(error).toMatchObject({status, code, detail:"host reason"});
+    expect(error.message).toContain(message);
+    if (status === 500) expect(error.message).not.toContain("host reason");
+    else expect(error.message).toContain("host reason");
+  });
+  it("retains bounded JSON reasons and codes and ignores HTML or oversized bodies", async () => {
+    const snapshot: QuerySnapshot = { version:1, code:"a".repeat(22), token:encodeQuery(EMPTY_QUERY), createdAt:1 };
+    for (const [body, type, expected] of [
+      [JSON.stringify({error:{code:"library_quota",message:"The library allows 64 MiB."}}), "application/json", "The library allows 64 MiB."],
+      ["<html>gateway failure</html>", "text/html", undefined],
+      ["<script>bad</script>", "text/plain", undefined],
+      ["x".repeat(4097), "text/plain", undefined],
+      ["{broken", "application/json", undefined],
+    ]) {
+      const remote = httpQuerySnapshotStore("/snapshots", vi.fn<typeof fetch>().mockResolvedValue(new Response(body, {
+        status:507, headers:{"content-type":type!},
+      })));
+      const error = await remote.save("runs", snapshot).catch(error => error);
+      expect(error).toMatchObject({status:507, code:"quota"});
+      expect(error.detail).toBe(expected);
+      expect(error.message.length).toBeLessThan(1024);
+      if (expected) expect(error.serverCode).toBe("library_quota");
+    }
+  });
+  it("retries quota failures with the same code and can still resolve existing links", async () => {
+    let stored!: QuerySnapshot;
+    const requests: QuerySnapshot[] = [];
+    const fetcher = vi.fn<typeof fetch>(async (_url, options) => {
+      if (options?.method === "PUT") {
+        const snapshot = JSON.parse(options.body as string) as QuerySnapshot;
+        requests.push(snapshot);
+        if (requests.length === 1) return new Response("query snapshot storage quota exceeded", {status:507,headers:{"content-type":"text/plain"}});
+        stored = snapshot;
+      }
+      return new Response(JSON.stringify(stored));
+    });
+    const remote = httpQuerySnapshotStore("/snapshots", fetcher);
+    const service = createQueryLinkService("runs", remote, {cache:memoryQuerySnapshotCache()});
+    await expect(service.snapshot(EMPTY_QUERY)).rejects.toMatchObject({status:507,code:"quota"});
+    const saved = await service.snapshot(EMPTY_QUERY);
+    expect(requests[0]!.code).toBe(requests[1]!.code);
+    expect(await remote.resolve("runs", saved!.code)).toEqual(saved);
   });
   it.each(["{broken", "null", "{}"])("recovers a corrupt cache envelope %s on the next write", async text => {
     const storage = { getItem: () => text, setItem: (_key: string, value: string) => { text = value; } };

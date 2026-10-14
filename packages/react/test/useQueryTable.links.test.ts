@@ -2,7 +2,7 @@
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { createQueryLinkService, createPropertyView, memoryPropertyViewStorage, memoryQuerySnapshotCache, memoryStorageAdapter, EMPTY_QUERY, encodeQuery,
+import { createQueryLinkService, createPropertyView, memoryPropertyViewStorage, memoryQuerySnapshotCache, memoryStorageAdapter, EMPTY_QUERY, ITEM_DETAILS_COLUMN, encodeQuery,
   type QuerySnapshot, type QuerySnapshotStore, type FieldSchema, type QueryState, type Transport } from "@pythia-software/query-table-core";
 import { useQueryTable, type QueryTableApi } from "../src/useQueryTable";
 
@@ -37,9 +37,54 @@ function mount(options: Parameters<typeof useQueryTable<Row>>[0] | (() => Parame
   dispose = () => act(() => root.unmount());
   return () => current;
 }
-async function settle() { await act(async () => { await vi.advanceTimersByTimeAsync(500); }); }
+async function settle() { await act(async () => {}); await act(async () => { await vi.advanceTimersByTimeAsync(500); }); }
 beforeEach(() => { vi.useFakeTimers(); localStorage.clear(); window.history.replaceState(null,"","/runs?section=recent#table"); });
 afterEach(() => { dispose?.(); dispose=undefined; vi.useRealTimers(); });
+
+it("isolates two mounted collection parameters without enabling item views", async () => {
+  const firstQuery = {...EMPTY_QUERY,limit:25};
+  const secondQuery = {...EMPTY_QUERY,limit:50};
+  window.history.replaceState(null,"",`/runs?section=recent&q_first=${encodeQuery(firstQuery)}&q_second=${encodeQuery(secondQuery)}#table`);
+  const root = createRoot(document.createElement("div"));
+  let first!: QueryTableApi<Row>;
+  let second!: QueryTableApi<Row>;
+  const secondSchema = {...schema,name:"other"};
+  function Probe() {
+    first = useQueryTable({schema,clientRows:rows,syncUrl:true,queryParameter:"q_first",debounceMs:0});
+    second = useQueryTable({schema:secondSchema,clientRows:rows,syncUrl:true,queryParameter:"q_second",debounceMs:0});
+    return null;
+  }
+  act(() => root.render(createElement(Probe)));
+  dispose = () => act(() => root.unmount());
+  await settle();
+  expect(first.query.limit).toBe(25);
+  expect(second.query.limit).toBe(50);
+  expect(first.itemDetails).toBeUndefined();
+  expect(first.query.select.some(column => column.field === ITEM_DETAILS_COLUMN)).toBe(false);
+  const secondToken = new URL(window.location.href).searchParams.get("q_second");
+  act(() => first.setLimit(10));
+  await settle();
+  expect(second.query.limit).toBe(50);
+  expect(new URL(window.location.href).searchParams.get("q_second")).toBe(secondToken);
+  const share = await first.links.create();
+  expect(new URL(share.url).searchParams.has("q_first")).toBe(true);
+  expect(new URL(share.url).searchParams.get("q_second")).toBe(secondToken);
+  expect(new URL(share.url).searchParams.get("section")).toBe("recent");
+  expect(new URL(share.url).hash).toBe("#table");
+});
+
+it.each([undefined,"q_collection"])("resolves item links with collection parameter precedence (%s)", async queryParameter => {
+  const parameter = queryParameter ?? "q_legacy";
+  window.history.replaceState(null,"",`/runs?${parameter}=${encodeQuery({...EMPTY_QUERY,limit:25})}`);
+  const api = mount({schema,clientRows:rows,syncUrl:true,debounceMs:0,...(queryParameter ? {queryParameter} : {}),
+    itemDetails:{queryParameter:"q_legacy",modes:["modal"]}});
+  await settle();
+  expect(api().query.limit).toBe(25);
+  expect(api().itemDetails?.queryParameter).toBe(parameter);
+  const link = await api().links.create();
+  expect(new URL(link.url).searchParams.has(parameter)).toBe(true);
+  if (queryParameter) expect(new URL(link.url).searchParams.has("q_legacy")).toBe(false);
+});
 
 it("uses only local cache on edits, promotes on Save/Share, and associates the saved search", async () => {
   const snapshots: QuerySnapshotStore = {
@@ -80,6 +125,107 @@ it("blocks fetch, persistence and URL rewriting until a remote reference resolve
   expect(api().query.limit).toBe(25); expect(fetchRows).toHaveBeenCalledOnce();
   expect(api().links.kind).toBe("durable");
   expect(new URL(window.location.href).searchParams.get("q")).toBe("@"+code);
+});
+
+it.each(["undo", "redo"] as const)("empty-history %s preserves a loading query link", async action => {
+  let complete!: (snapshot: QuerySnapshot) => void;
+  let signal!: AbortSignal;
+  const code = "f".repeat(22);
+  const snapshots: QuerySnapshotStore = {
+    resolve: vi.fn<QuerySnapshotStore["resolve"]>((_source, _code, abortSignal) => {
+      signal = abortSignal!;
+      return new Promise<QuerySnapshot>(resolve => { complete = resolve; });
+    }),
+    save: vi.fn(async (_source, snapshot) => snapshot),
+  };
+  const storage = { ...memoryStorageAdapter(), snapshots, saveLast: vi.fn(async () => {}) };
+  const fetchRows = vi.fn(async () => ({ rows, total: 1 }));
+  window.history.replaceState(null, "", `/runs?q=@${code}&section=incoming#table`);
+  const incoming = window.location.href;
+  const api = mount({ schema, storage, transport: { fetchRows }, syncUrl: true, debounceMs: 0, links: { cache: memoryQuerySnapshotCache() } });
+  await settle();
+  const query = api().query;
+  expect(api().canUndo).toBe(false); expect(api().canRedo).toBe(false);
+  act(() => { api()[action](); api()[action](); });
+  await settle();
+  expect(signal.aborted).toBe(false);
+  expect(api().restoration.status).toBe("resolving");
+  expect(api().query).toBe(query);
+  expect(fetchRows).not.toHaveBeenCalled(); expect(storage.saveLast).not.toHaveBeenCalled();
+  expect(window.location.href).toBe(incoming);
+  await act(async () => complete({ version: 1, code, token: encodeQuery({ ...EMPTY_QUERY, limit: 25 }), createdAt: 1 }));
+  await settle();
+  expect(api().query.limit).toBe(25); expect(api().restoration.ready).toBe(true);
+  expect(fetchRows).toHaveBeenCalledOnce();
+  const restoredUrl = new URL(window.location.href);
+  expect(restoredUrl.searchParams.get("q")).toBe("@" + code);
+  expect(restoredUrl.searchParams.get("section")).toBe("incoming"); expect(restoredUrl.hash).toBe("#table");
+});
+
+it.each(["undo", "redo"] as const)("empty-history %s preserves a failed query link", async action => {
+  window.history.replaceState(null, "", "/runs?q=corrupt&section=incoming#table");
+  const incoming = window.location.href;
+  const fetchRows = vi.fn(async () => ({ rows, total: 1 }));
+  const storage = { ...memoryStorageAdapter(), saveLast: vi.fn(async () => {}) };
+  const api = mount({ schema, storage, transport: { fetchRows }, syncUrl: true, debounceMs: 0 });
+  await settle();
+  const error = api().restoration.error, query = api().query;
+  expect(error).toBeInstanceOf(Error);
+  expect(api().canUndo).toBe(false); expect(api().canRedo).toBe(false);
+  act(() => { api()[action](); api()[action](); });
+  await settle();
+  expect(api().restoration.status).toBe("error"); expect(api().restoration.error).toBe(error);
+  expect(api().query).toBe(query);
+  expect(fetchRows).not.toHaveBeenCalled(); expect(storage.saveLast).not.toHaveBeenCalled();
+  expect(window.location.href).toBe(incoming);
+  await act(async () => { await expect(api().links.create()).rejects.toThrow("Resolve or reset"); });
+  act(() => api().resetAll()); await settle();
+  expect(api().restoration.ready).toBe(true); expect(fetchRows).toHaveBeenCalledOnce();
+});
+
+it("keeps batched history edits and retained keyboard callbacks current", async () => {
+  const api = mount({ schema, clientRows: rows, initialQuery: EMPTY_QUERY, debounceMs: 0 });
+  await settle();
+  const baseline = api().query;
+  const { undo, redo } = api();
+  act(() => { api().setLimit(7); undo(); redo(); });
+  await settle();
+  expect(api().query.limit).toBe(7); expect(api().canUndo).toBe(true); expect(api().canRedo).toBe(false);
+  expect(api().undo).toBe(undo); expect(api().redo).toBe(redo);
+  act(() => { undo(); undo(); }); await settle();
+  expect(api().query).toEqual(baseline); expect(api().canUndo).toBe(false); expect(api().canRedo).toBe(true);
+  act(() => { redo(); redo(); }); await settle();
+  expect(api().query.limit).toBe(7); expect(api().canUndo).toBe(true); expect(api().canRedo).toBe(false);
+});
+
+it.each(["undo", "redo"] as const)("available %s supersedes pending navigation through a retained callback", async action => {
+  let complete!: (snapshot: QuerySnapshot) => void;
+  let signal!: AbortSignal;
+  const code = "g".repeat(22);
+  const snapshots: QuerySnapshotStore = {
+    resolve: (_source, _code, abortSignal) => {
+      signal = abortSignal!;
+      return new Promise(resolve => { complete = resolve; });
+    },
+    save: async (_source, snapshot) => snapshot,
+  };
+  const storage = { ...memoryStorageAdapter(), snapshots };
+  const api = mount({ schema, clientRows: rows, storage, initialQuery: EMPTY_QUERY, syncUrl: true, debounceMs: 0, links: { cache: memoryQuerySnapshotCache() } });
+  await settle();
+  const retained = api()[action], baseline = api().query.limit;
+  act(() => api().setLimit(7)); await settle();
+  if (action === "redo") { act(() => api().undo()); await settle(); }
+  window.history.pushState(null, "", `/runs?q=@${code}`);
+  let pending!: Promise<void>;
+  act(() => { pending = api().restoreLocation(window.location.href); }); await settle();
+  expect(api().restoration.status).toBe("resolving");
+  act(() => retained()); await settle();
+  expect(signal.aborted).toBe(true); expect(api().restoration.ready).toBe(true);
+  const applied = api().query, address = window.location.href;
+  expect(applied.limit).toBe(action === "undo" ? baseline : 7);
+  await act(async () => { complete({ version: 1, code, token: encodeQuery({ ...EMPTY_QUERY, limit: 25 }), createdAt: 1 }); await pending; });
+  await settle();
+  expect(api().query).toBe(applied); expect(window.location.href).toBe(address);
 });
 
 it.each([false, true])("waits for remote query restoration before syncing stored detail views (embedded views: %s)", async embedded => {

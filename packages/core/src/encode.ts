@@ -275,7 +275,7 @@ export interface ServerQuery {
 /** Project a QueryState into the server request, dropping client-only filters,
  *  client-only sorts, and remapping sort fields through `sort.field`. */
 export function toServerQuery<Row>(q: QueryState, schema: FieldSchema<Row>): ServerQuery {
-  if (q.grouping) throw new Error("Row grouping requires complete client rows; this transport does not support grouped queries.");
+  if (q.grouping) throw new Error("This transport does not support grouped queries. Enable the v3 query executor.");
   q = normalizeQueryState(q);
   const byName = indexFields(schema);
   const resolveField = (name: string) => resolveFieldName(schema, name) ?? name;

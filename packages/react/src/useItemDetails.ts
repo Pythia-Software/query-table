@@ -14,7 +14,7 @@ export interface ItemDetailRecord<Row> {
 export interface ItemDetailsOptions<Row> {
   /** Detail catalogue; defaults to the table catalogue. Useful for non-column properties. */
   schema?: FieldSchema<Row>;
-  /** Host-owned URL parameter for this table. Default q. */
+  /** Legacy collection URL parameter. useQueryTable.queryParameter takes precedence. */
   queryParameter?: string;
   /** Creator-approved modalities; users can enable/disable these in Select columns. Defaults to all. */
   modes?: ItemDetailMode[];
@@ -102,7 +102,7 @@ function useDetailProperties<Row>(mode: ItemPropertyMode, schema: FieldSchema<Ro
 
 /** Independent, type-level property controllers for each detail modality. */
 export function useItemDetails<Row>({
-  schema, query, setQuery, options, rows, clientRows, rowId, transport, refreshKey, links, queryReady = true,
+  schema, query, setQuery, options, rows, clientRows, rowId, transport, refreshKey, links, queryReady = true, queryParameter,
 }: {
   schema: FieldSchema<Row>;
   query: QueryState;
@@ -114,6 +114,7 @@ export function useItemDetails<Row>({
   transport: Transport<Row> | undefined;
   refreshKey: number;
   links?: QueryLinksApi;
+  queryParameter?: string;
   /** Hold property-view synchronization while the collection query is restoring. */
   queryReady?: boolean;
 }): ItemDetailsApi<Row> | undefined {
@@ -184,7 +185,7 @@ export function useItemDetails<Row>({
   if (!enabled) return;
   return {
     ...(links ? { links } : {}),
-    schema: detailSchema, queryParameter: config?.queryParameter ?? "q", properties: modalProperties, propertiesByMode, availableModes, modes, active,
+    schema: detailSchema, queryParameter: queryParameter ?? config?.queryParameter ?? "q", properties: modalProperties, propertiesByMode, availableModes, modes, active,
     page, pageSchema: schema,
     record: currentResult ? result.record : null,
     loading: activeId !== undefined && (!currentResult || result.loading),

@@ -1,4 +1,5 @@
 import type { ServerQueryV2, FetchRowsResultV2 } from "./execution";
+import type { QueryCapabilitiesV3, QueryRequestV3, QueryResultV3 } from "./queryV3";
 import type { MetricQuery, MetricCapabilities } from "./metricTypes";
 // adapters.ts — the pluggable seams. Everything project-specific is injected
 // here so the package core stays generic.
@@ -50,6 +51,8 @@ export interface FieldStats {
 }
 
 export interface Transport<Row = any> {
+  queryCapabilities?: QueryCapabilitiesV3;
+  fetchQueryV3?(query: QueryRequestV3, signal?: AbortSignal): Promise<QueryResultV3>;
   fetchRowsV2?(query: ServerQueryV2, signal?: AbortSignal): Promise<FetchRowsResultV2<Row>>;
   metricCapabilities?: MetricCapabilities;
   fetchMetrics?(query: MetricQuery, signal?: AbortSignal): Promise<AggregationResult>;

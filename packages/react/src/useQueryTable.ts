@@ -1,6 +1,7 @@
 import { useQueryFilters } from "./useQueryFilters";
 import { useGroupingController, type GroupingApi, type GroupingSourceApi } from "./useGrouping";
-import { createGroupingModel, prepareGrouping, withoutGrouping } from "@pythia-software/query-table-core";
+import { createGroupingModel, prepareGrouping, withoutGrouping,
+  sourceExecutionSchema, toQueryRequestV3, validateQueryResultV3 } from "@pythia-software/query-table-core";
 import { ITEM_DETAILS_COLUMN, itemPageFields } from "@pythia-software/query-table-core";
 import { useItemDetails, initialDetailModes, type ItemDetailsApi, type ItemDetailsOptions } from "./useItemDetails";
 // useQueryTable — the one hook that owns everything.
@@ -78,6 +79,11 @@ import { useQueryLinks, type QueryLinksApi } from "./useQueryLinks";
 import { createQueryLinkService, type QueryLinkOptions } from "@pythia-software/query-table-core";
 
 export interface UseQueryTableOptions<Row> {
+
+  /** Pause execution and URL synchronization while a mounted host view is hidden. */
+  active?: boolean;
+  /** Capture evaluation time for grouped executions and remote query requests. */
+  evaluationNow?: () => number;
   /** Normalize external aliases without storing presentation in query state. Must be pure and not throw. */
   canonicalizeQuery?: (query: QueryState) => QueryState;
   /** Reject an entire query before rows or metrics execute. Errors retain editable query state. */
@@ -88,7 +94,8 @@ export interface UseQueryTableOptions<Row> {
   schema: FieldSchema<Row>;
   /** Data access. Omit for a purely client-side table driven by `clientRows`. */
   transport?: Transport<Row>;
-  /** All rows, for client-side mode (applyQuery runs locally over these). */
+  /** Dataset already available in memory. Remote grouping/aggregation belongs
+   * on the server; do not download a population to supply this option. */
   clientRows?: Row[];
   /** Saved/last-query persistence. Defaults to a non-durable in-memory adapter.
    * Pass localStorageAdapter() explicitly only when filter values are safe to
@@ -107,6 +114,9 @@ export interface UseQueryTableOptions<Row> {
    * base64url is encoding, not encryption: filters will appear in browser
    * history, referrers, logs, analytics, and screenshots when enabled. */
   syncUrl?: boolean;
+  /** Collection URL parameter, independent of item views. Takes precedence
+   * over the legacy itemDetails.queryParameter; otherwise defaults to q. */
+  queryParameter?: string;
   /** URL budget and browser-local FIFO cache; remote snapshots come from storage.snapshots. */
   links?: QueryLinkOptions;
   /** Enable schema-driven click popovers, item modals and row expansion. */
@@ -185,6 +195,12 @@ export interface AggregationsApi {
 }
 
 export interface QueryTableApi<Row> {
+  /** Dependent source fetches can use ready without parsing display errors. */
+  restoration: { status: "resolving" | "ready" | "error"; ready: boolean; error: Error | null };
+  /** Call after a host pushState/router update, with an absolute URL or a location
+   * relative to window.location.href. Supersedes prior resolution;
+   * abort or an intervening query edit prevents stale publication. */
+  restoreLocation: (location: string | URL, signal?: AbortSignal) => Promise<void>;
   /** Row-producing GROUP BY controls and source stage, when supported. */
   grouping?: GroupingApi<Row>;
   /** Current result schema; changes when entering or leaving grouping. */
@@ -201,9 +217,11 @@ export interface QueryTableApi<Row> {
   canUndo: boolean;
   /** Can move forward to a previously undone local query state. */
   canRedo: boolean;
-  /** Move backward through local, unsaved query history. */
+  /** Move backward through local, unsaved query history. Empty history leaves
+   * incoming link restoration and errors unchanged. */
   undo: () => void;
-  /** Move forward through local, unsaved query history. */
+  /** Move forward through local, unsaved query history. Empty history leaves
+   * incoming link restoration and errors unchanged. */
   redo: () => void;
 
   requestActivity: RequestActivityApi;
@@ -409,6 +427,10 @@ function hasQueryLink(url: string, parameter: string): boolean {
   return values.length > 1 || (values.length === 1 && values[0] !== "");
 }
 
+function queryParameter<Row>(opts: UseQueryTableOptions<Row>): string {
+  return opts.queryParameter ?? (typeof opts.itemDetails === "object" ? opts.itemDetails.queryParameter : undefined) ?? "q";
+}
+
 function resolveInitial<Row>(opts: UseQueryTableOptions<Row>): {
   q: QueryState;
   fromUrl: boolean;
@@ -419,8 +441,8 @@ function resolveInitial<Row>(opts: UseQueryTableOptions<Row>): {
       q: normalizeQueryState(opts.initialQuery, defaults),
       fromUrl: false,
     };
-  if (opts.syncUrl === true && typeof window !== "undefined") {
-    const parameter = typeof opts.itemDetails === "object" ? opts.itemDetails.queryParameter ?? "q" : "q";
+  if (opts.syncUrl === true && opts.active !== false && typeof window !== "undefined") {
+    const parameter = queryParameter(opts);
     if (hasQueryLink(window.location.href, parameter))
       return {
         q: defaults,
@@ -436,18 +458,21 @@ export function useQueryTable<Row>(
   const {
     schema: sourceSchema,
     transport: sourceTransport,
-    clientRows: sourceRows,
+    clientRows: providedRows,
     initialQuery,
-    syncUrl = false,
     debounceMs = 200,
   } = opts;
-  const { transport, activity: requestActivity } =
+  const active = opts.active !== false;
+  const urlSyncEnabled = opts.syncUrl === true;
+  const syncUrl = urlSyncEnabled && active;
+  const { transport: metadataTransport, activity: requestActivity } =
     useRequestActivity(sourceTransport);
+  const transport = metadataTransport;
   const storage = useMemo(
     () => opts.storage ?? memoryStorageAdapter(),
     [opts.storage],
   );
-  const parameter = typeof opts.itemDetails === "object" ? opts.itemDetails.queryParameter ?? "q" : "q";
+  const parameter = queryParameter(opts);
   const linkService = useMemo(() => createQueryLinkService(sourceSchema.name, storage.snapshots, opts.links),
     [sourceSchema.name, storage.snapshots, opts.links?.cache, opts.links?.maxUrlBytes]);
   const now = opts.now ?? Date.now;
@@ -458,7 +483,17 @@ export function useQueryTable<Row>(
   const initRef = useRef(resolveInitial(opts));
   const [restoration, setRestoration] = useState<{ loading: boolean; error: Error | null }>({ loading: initRef.current.fromUrl, error: null });
   const [storageReady, setStorageReady] = useState(Boolean(initialQuery));
+  const restorationCurrent = useRef({ storageReady, restoration, active });
+  restorationCurrent.current = { storageReady, restoration, active };
   const manualQueryEpoch = useRef(0);
+  const restoreController = useRef<AbortController | null>(null);
+  const restoreHandler = useRef<((location: string, signal?: AbortSignal) => Promise<void>) | null>(null);
+  const initialRestore = useRef<(() => Promise<void>) | null>(null);
+  const initialRestorationStarted = useRef(false);
+  const restoreLocation = useCallback((location: string | URL, signal?: AbortSignal) => {
+    if (!restoreHandler.current) return Promise.reject(Error("Query controller is not mounted."));
+    return restoreHandler.current(String(location), signal);
+  }, []);
   const aggIdRef = useRef(0);
   // A null baseline follows current host defaults. Explicit views keep their
   // snapshot, scoped to the source so reset cannot restore another table.
@@ -471,28 +506,44 @@ export function useQueryTable<Row>(
   const [queryHistory, setQueryHistory] = useState<{ query: QueryState; past: QueryState[]; future: QueryState[] }>(
     () => ({ query: initRef.current.q, past: [], future: [] }),
   );
+  // Keep history current even when React batches several edits or
+  // undo/redo calls. History updates stay pure and cancellation stays outside
+  // React state updaters, which may run more than once.
+  const queryHistoryRef = useRef(queryHistory);
+  const updateQueryHistory = useCallback((update: (history: typeof queryHistory) => typeof queryHistory) => {
+    const previous = queryHistoryRef.current;
+    const next = update(previous);
+    if (next === previous) return;
+    queryHistoryRef.current = next;
+    setQueryHistory(next);
+  }, []);
   const storedQuery = queryHistory.query;
   const [nonce, setNonce] = useState(0);
   const query = useMemo(
     () => opts.canonicalizeQuery?.(storedQuery) ?? storedQuery,
     [storedQuery, opts.canonicalizeQuery],
   );
-  const groupingModel = useMemo(() => createGroupingModel(sourceSchema), [sourceSchema]);
-  const groupingSupported = !sourceTransport && sourceRows !== undefined && opts.grouping !== false;
+  const sourceCatalogue = useMemo(() => sourceExecutionSchema(sourceSchema, opts.computedExecution), [sourceSchema, opts.computedExecution]);
+  const sourceRows = providedRows;
+  const groupingModel = useMemo(() => createGroupingModel(sourceCatalogue), [sourceCatalogue]);
+  const remoteGrouping = !!transport?.fetchQueryV3 && transport.queryCapabilities?.version === 3 && transport.queryCapabilities.groupedRows;
+  const groupingSupported = ((!transport && sourceRows !== undefined) || remoteGrouping) && opts.grouping !== false;
   const groupKey = JSON.stringify(query.grouping ?? null);
   // Capture the grouped evaluation clock with its population. Debounced rows,
   // metric previews and committed metrics must use the same relative bounds.
-  const groupingNow = useMemo(() => query.grouping ? Date.now() : undefined,
-    [sourceRows, sourceSchema, groupingSupported, groupKey, nonce]);
+  // Ordinary V3 requests capture their clock when each execution begins.
+  const groupingNow = useMemo(() => query.grouping ? (opts.evaluationNow ?? Date.now)() : undefined,
+    [sourceRows, sourceSchema, groupingSupported, groupKey, nonce, opts.evaluationNow]);
   const prepared = useMemo(() => {
     if (!query.grouping) return null;
     try {
-      if (!groupingSupported) throw new Error("Row grouping requires complete client rows; this table's data source does not support grouped queries.");
-      return { ...prepareGrouping(sourceRows!, sourceSchema, query.grouping, { now: groupingNow! }), error: null };
+      if (!groupingSupported) throw new Error("Grouped queries require a server with grouped-query support or a dataset already in memory.");
+      if (remoteGrouping) { groupingModel.validate(query.grouping); return { inputs: [] as Row[], rows: [], error: null }; }
+      return { ...prepareGrouping(sourceRows!, sourceCatalogue, query.grouping, { now: groupingNow! }), error: null };
     } catch (error) {
       return { inputs: [] as Row[], rows: [], error: error as Error };
     }
-  }, [sourceRows, sourceSchema, groupingModel, groupingSupported, groupKey, nonce, groupingNow]);
+  }, [sourceRows, sourceCatalogue, groupingModel, groupingSupported, groupKey, nonce, groupingNow, remoteGrouping]);
   // Result fields depend on the projection, not the current population. Keep
   // their identity across refresh/WHERE changes so committed rows stay visible
   // during debounce, while real shape changes still invalidate them below.
@@ -547,9 +598,11 @@ export function useQueryTable<Row>(
   const setQuery = useCallback<QueryTableApi<Row>["setQuery"]>(
     (next) => {
       manualQueryEpoch.current++;
+      initialRestorationStarted.current = true;
+      restoreController.current?.abort();
       setStorageReady(true);
       setRestoration(previous => !previous.loading && !previous.error ? previous : { loading: false, error: null });
-      setQueryHistory((history) => {
+      updateQueryHistory((history) => {
         const prev = history.query;
         const candidate =
           typeof next === "function"
@@ -560,7 +613,7 @@ export function useQueryTable<Row>(
         return { query: cloneQueryState(nextQuery), past: [...history.past, cloneQueryState(prev)], future: [] };
       });
     },
-    [defaults],
+    [defaults, updateQueryHistory],
   );
 
   const sourceQuery = query.grouping?.source ?? query;
@@ -571,7 +624,7 @@ export function useQueryTable<Row>(
       return current.grouping ? { ...current, offset: 0, grouping: { ...current.grouping, source } } : source;
     });
   }, [setQuery]);
-  const sourceFilters = useQueryFilters(sourceSchema, setSourceQuery);
+  const sourceFilters = useQueryFilters(sourceCatalogue, setSourceQuery);
 
   // Track only this table's URL parameter, including duplicates. Host routes,
   // anchors and unrelated history.state changes do not restore table state.
@@ -589,19 +642,27 @@ export function useQueryTable<Row>(
     let cancelled = false;
     let controller = new AbortController();
     let generation = 0;
-    async function restore(navigation = false) {
+    initialRestorationStarted.current = Boolean(restoreSources.current.initialQuery);
+    async function restore(navigation = false, location = typeof window !== "undefined" ? window.location.href : "", signal?: AbortSignal) {
+      initialRestorationStarted.current = true;
       const { storage, linkService, defaults } = restoreSources.current;
       const run = ++generation;
       const epoch = manualQueryEpoch.current;
       controller.abort(); controller = new AbortController();
+      restoreController.current = controller;
+      const currentController = controller;
+      const abort = () => currentController.abort();
+      signal?.addEventListener("abort", abort, { once: true });
+      if (signal?.aborted) currentController.abort();
       setStorageReady(false);
-      const explicitLink = syncUrl && typeof window !== "undefined" && hasQueryLink(window.location.href, parameter);
-      if (navigation || explicitLink)
-        setRestoration({ loading: true, error: null });
+      const explicitLink = !!location && (navigation || urlSyncEnabled) && hasQueryLink(location, parameter);
+      setRestoration({ loading: true, error: null });
       try {
-        const fromUrl = syncUrl && typeof window !== "undefined" ? await linkService.resolve(window.location.href, parameter, controller.signal) : null;
+        if (currentController.signal.aborted) throw new DOMException("Query restoration cancelled.", "AbortError");
+        const fromUrl = location && (navigation || urlSyncEnabled) ? await linkService.resolve(location, parameter, currentController.signal) : null;
         const defaultSaved = fromUrl ? null : await storage.loadDefaultSaved?.(sourceSchema.name);
         const restored = fromUrl ?? defaultSaved?.query ?? (navigation ? defaults : await storage.loadLast(sourceSchema.name));
+        if (currentController.signal.aborted) throw new DOMException("Query restoration cancelled.", "AbortError");
         if (!cancelled && run === generation && epoch === manualQueryEpoch.current) {
           if (restored) {
             const normalized = normalizeQueryState(restored, defaults);
@@ -609,39 +670,58 @@ export function useQueryTable<Row>(
               ? { source: sourceSchema.name, query: cloneQueryState(normalized) }
               : null;
             viewRevision.current++;
-            setQueryHistory({ query: normalized, past: [], future: [] });
+            updateQueryHistory(() => ({ query: normalized, past: [], future: [] }));
           }
           setStorageReady(true);
           setRestoration(previous => !previous.loading && !previous.error ? previous : { loading: false, error: null });
         }
       } catch (e) {
         if (!cancelled && run === generation && epoch === manualQueryEpoch.current) {
-          if (explicitLink) {
+          if (explicitLink || navigation && currentController.signal.aborted) {
             setRestoration({ loading: false, error: e instanceof Error ? e : Error(String(e)) });
           } else {
             // Last/default saved queries are optional restoration sources.
             // A failed host read should still leave a usable default table.
-            setQueryHistory({ query: defaults, past: [], future: [] });
+            updateQueryHistory(() => ({ query: defaults, past: [], future: [] }));
             setRestoration({ loading: false, error: null });
           }
           setStorageReady(true);
         }
+        if (navigation && !cancelled && run === generation && epoch === manualQueryEpoch.current) throw e;
+      } finally {
+        signal?.removeEventListener("abort", abort);
       }
     }
+    restoreHandler.current = async (location, signal) => {
+      location = new URL(location, typeof window !== "undefined" ? window.location.href : undefined).href;
+      const key = JSON.stringify(new URL(location).searchParams.getAll(parameter));
+      const current = restorationCurrent.current;
+      if (key === observedQueryUrl.current && current.storageReady && !current.restoration.loading && !current.restoration.error) return;
+      recordQueryUrl(location);
+      await restore(true, location, signal);
+    };
+    initialRestore.current = () => restore();
     if (typeof window !== "undefined") recordQueryUrl(window.location.href);
-    if (!restoreSources.current.initialQuery) void restore();
     const navigate = () => {
+      if (!restorationCurrent.current.active) return;
       const key = JSON.stringify(new URL(window.location.href).searchParams.getAll(parameter));
       if (key === observedQueryUrl.current) return;
       observedQueryUrl.current = key;
-      void restore(true);
+      void restore(true).catch(() => { /* Restoration state owns the display error. */ });
     };
-    if (syncUrl && typeof window !== "undefined") window.addEventListener("popstate", navigate);
+    if (urlSyncEnabled && typeof window !== "undefined") window.addEventListener("popstate", navigate);
     return () => {
       cancelled = true; controller.abort();
-      if (syncUrl && typeof window !== "undefined") window.removeEventListener("popstate", navigate);
+      restoreHandler.current = null;
+      initialRestore.current = null;
+      if (urlSyncEnabled && typeof window !== "undefined") window.removeEventListener("popstate", navigate);
     };
-  }, [sourceSchema.name, syncUrl, parameter, recordQueryUrl]);
+  }, [sourceSchema.name, urlSyncEnabled, parameter, recordQueryUrl, updateQueryHistory]);
+  // Activation pauses a mounted controller; it only initiates restoration if
+  // this dataset has never started, preserving edits and history on tab switches.
+  useEffect(() => {
+    if (active && !initialRestorationStarted.current) void initialRestore.current?.();
+  }, [active, sourceSchema.name, urlSyncEnabled, parameter, recordQueryUrl]);
 
   const { api: computed, displaySchema } = useComputedColumns({
     schema,
@@ -761,11 +841,15 @@ export function useQueryTable<Row>(
   const rowQueryKey = useMemo(
     () =>
       transport
-        ? `server:${JSON.stringify(serverRowQuery)}`
+        ? `server:${JSON.stringify(serverRowQuery)}:${transport.fetchQueryV3 ? JSON.stringify([groupKey, groupingNow,
+          query.select.map(column => column.field), query.where, query.orderBy, query.limit, query.offset]) : ""}`
         : `client:${JSON.stringify([query.where, query.orderBy, query.limit, query.offset])}`,
     [
       transport,
       serverRowQuery,
+      groupKey,
+      groupingNow,
+      query.select,
       query.where,
       query.orderBy,
       query.limit,
@@ -775,7 +859,7 @@ export function useQueryTable<Row>(
   const executionKey = JSON.stringify(opts.computedExecution ?? null);
   const pageContext = `${schema.name}:${rowQueryKey}:${nonce}:${executionKey}`;
   useEffect(() => {
-    if (restoration.loading || restoration.error) {
+    if (!active || !storageReady || restoration.loading || restoration.error) {
       setRows(previous => previous.length ? [] : previous); setTotal(null); setCommittedPage(null); setLoading(false);
       return;
     }
@@ -787,6 +871,26 @@ export function useQueryTable<Row>(
       try {
         validateExecution(query);
         if (transport) {
+          if (transport.fetchQueryV3 && transport.queryCapabilities?.version === 3 &&
+            (query.grouping || query.select.some(column => isComputedField(column.field)) || query.orderBy.some(term => isComputedField(term.field)) ||
+              query.where.some(term => ("any" in term ? term.any : [term]).some(predicate => isComputedField(predicate.field))))) {
+            const request = toQueryRequestV3({ ...query, aggregations: [], select: [...query.select.filter(column => isComputedField(column.field)),
+              ...serverRowQuery.select.map(field => ({ field }))] }, sourceSchema,
+              transport.queryCapabilities, opts.computedExecution, { now: groupingNow ?? (opts.evaluationNow ?? Date.now)() });
+            if (request.diagnostics.length) throw Error(request.diagnostics.join(" "));
+            const result = await transport.fetchQueryV3(request, ac.signal);
+            validateQueryResultV3(result, request, query.grouping ? schema : sourceCatalogue);
+            if (!cancelled) {
+              setCommittedFields(request.result.select); setServerExecution(result.execution);
+              setServerComputed(new Map(result.rows.map(row => [row[schema.idField] as RowId,
+                Object.fromEntries(Object.entries(row).filter(([name]) => isComputedField(name)).map(([name, value]) =>
+                  [name.slice(10), value && typeof value === "object" && "computedError" in value
+                    ? { value: null, error: { code: String(value.computedError) } } : { value: value as import("@pythia-software/query-table-core").MetricValue }]))])));
+              setRows(result.rows as Row[]); setTotal(result.total); setCommittedPage(pageContext);
+              setCommittedSource({ schema, transport, clientRows });
+            }
+            return;
+          }
           const useV2 = "version" in serverRowQuery && transport.fetchRowsV2;
           if (
             "diagnostics" in serverRowQuery &&
@@ -872,6 +976,8 @@ export function useQueryTable<Row>(
     executionKey,
     groupingNow,
     restoration,
+    active,
+    storageReady,
   ]);
 
   // Persist last query (debounced).
@@ -937,6 +1043,25 @@ export function useQueryTable<Row>(
     () => ++dataToken.current,
     [schema, transport, clientRows, nonce, definitionKey, executionKey],
   );
+  const executeV3Metrics = useCallback(async (metricQuery: QueryState, signal?: AbortSignal) => {
+    if (!transport?.fetchQueryV3 || transport.queryCapabilities?.version !== 3) throw Error("The v3 query executor is unavailable.");
+    const request = toQueryRequestV3(query.grouping ? { ...metricQuery, grouping: query.grouping } : metricQuery,
+      sourceSchema, transport.queryCapabilities, opts.computedExecution, { now: groupingNow ?? (opts.evaluationNow ?? Date.now)(), rows: false });
+    if (request.diagnostics.length) throw Error(request.diagnostics.join(" "));
+    const result = await transport.fetchQueryV3(request, signal);
+    validateQueryResultV3(result, request, query.grouping ? schema : sourceCatalogue);
+    return { metrics: result.metrics };
+  }, [transport, sourceSchema, sourceCatalogue, schema, opts.computedExecution, groupKey, groupingNow, opts.evaluationNow]);
+  const previewGrouping = useCallback(async (draft: QueryState, signal?: AbortSignal) => {
+    if (!active || !storageReady || restoration.loading || restoration.error) throw Error("Wait for query restoration before previewing groups.");
+    if (!transport?.fetchQueryV3 || !transport.queryCapabilities?.groupedRows || !draft.grouping) throw Error("The server group preview is unavailable.");
+    const request = toQueryRequestV3({ ...draft, aggregations: [] }, sourceSchema, transport.queryCapabilities,
+      opts.computedExecution, { now: groupingNow ?? (opts.evaluationNow ?? Date.now)() });
+    if (request.diagnostics.length) throw Error(request.diagnostics.join(" "));
+    const result = await transport.fetchQueryV3(request, signal);
+    validateQueryResultV3(result, request, groupingModel.resultSchema(draft.grouping.keys, draft.grouping.summaries));
+    return { rows: result.rows, total: result.total, sourceTotal: result.sourceTotal };
+  }, [transport, sourceSchema, opts.computedExecution, groupingModel, groupingNow, opts.evaluationNow, active, storageReady, restoration.loading, restoration.error]);
   const aggState = useAggregations(
     executionQuery,
     schema,
@@ -946,6 +1071,10 @@ export function useQueryTable<Row>(
     nonce,
     validateExecution,
     {
+      ...(transport?.fetchQueryV3 && transport.queryCapabilities?.version === 3 &&
+        (query.grouping || query.aggregations?.some(metric => metric.dateGrouping) ||
+          query.where.some(term => ("any" in term ? term.any : [term]).some(predicate => isComputedField(predicate.field))))
+        ? { executeV3: executeV3Metrics, queryContextKey: groupKey } : {}),
       ...(groupingNow !== undefined ? { now: groupingNow, strictLocalMetrics: true } : {}),
       shownRows: rows,
       rowsReady: pageReady,
@@ -965,7 +1094,7 @@ export function useQueryTable<Row>(
         ? { workerFactory: opts.formulaWorkerFactory }
         : {}),
     },
-    !restoration.loading && !restoration.error,
+    active && storageReady && !restoration.loading && !restoration.error,
   );
   const queryRef = useRef(query);
   queryRef.current = query;
@@ -994,20 +1123,30 @@ export function useQueryTable<Row>(
   const canRedo = queryHistory.future.length > 0;
 
   const undo = useCallback(() => {
-    setQueryHistory((history) => {
+    if (!queryHistoryRef.current.past.length) return;
+    manualQueryEpoch.current++;
+    restoreController.current?.abort();
+    setStorageReady(true);
+    setRestoration({ loading: false, error: null });
+    updateQueryHistory((history) => {
       const previous = history.past[history.past.length - 1];
       if (!previous) return history;
       return { query: cloneQueryState(previous), past: history.past.slice(0, -1), future: [...history.future, cloneQueryState(history.query)] };
     });
-  }, []);
+  }, [updateQueryHistory]);
 
   const redo = useCallback(() => {
-    setQueryHistory((history) => {
+    if (!queryHistoryRef.current.future.length) return;
+    manualQueryEpoch.current++;
+    restoreController.current?.abort();
+    setStorageReady(true);
+    setRestoration({ loading: false, error: null });
+    updateQueryHistory((history) => {
       const next = history.future[history.future.length - 1];
       if (!next) return history;
       return { query: cloneQueryState(next), past: [...history.past, cloneQueryState(history.query)], future: history.future.slice(0, -1) };
     });
-  }, []);
+  }, [updateQueryHistory]);
 
   // ---- intent helpers (keep offset/url/storage coherent) ----
   const patch = useCallback(
@@ -1111,7 +1250,7 @@ export function useQueryTable<Row>(
 
   const filterValues = useCallback(
     async (field: string, search: string): Promise<DistinctValuesResult> => {
-      if (!transport?.fetchDistinctValues) {
+      if (!metadataTransport?.fetchDistinctValues || query.grouping && !query.grouping.keys.includes(field)) {
         const f = byName.get(field);
         if (!f || !clientRows) return { values: [], hasMore: false };
 
@@ -1124,20 +1263,20 @@ export function useQueryTable<Row>(
           hasNull: fieldHasNull,
         };
       }
-      return transport.fetchDistinctValues({ field, search });
+      return metadataTransport.fetchDistinctValues({ field, search });
     },
-    [transport, byName, clientRows],
+    [metadataTransport, byName, clientRows, groupKey],
   );
 
   const fieldStats = useCallback<QueryTableApi<Row>["fieldStats"]>(
     async (fields, signal) => {
       const requested = [...new Set(fields)];
-      if (transport?.fetchFieldStats) {
+      if (metadataTransport?.fetchFieldStats && !query.grouping) {
         const backendFields = requested.filter(
           (name) => byName.get(name)?.source.kind === "backend",
         );
         return backendFields.length
-          ? transport.fetchFieldStats(backendFields, signal)
+          ? metadataTransport.fetchFieldStats(backendFields, signal)
           : {};
       }
       if (!clientRows) return {};
@@ -1156,7 +1295,7 @@ export function useQueryTable<Row>(
       }
       return result;
     },
-    [transport, byName, clientRows],
+    [metadataTransport, byName, clientRows, groupKey],
   );
 
   // Single refresh seam: re-runs the internal query (setNonce) and fires the
@@ -1307,11 +1446,14 @@ export function useQueryTable<Row>(
     schema: query.grouping ? sourceSchema : displaySchema,
     query: sourceQuery, setQuery: setSourceQuery, options: opts.itemDetails,
     rows: query.grouping ? sourceRows ?? [] : rows, clientRows: sourceRows,
-    rowId: sourceRowId, transport, refreshKey: nonce, links,
+    rowId: sourceRowId, transport: metadataTransport, refreshKey: nonce, links, queryParameter: parameter,
     queryReady: storageReady && !restoration.loading && !restoration.error,
   });
 
   const api: QueryTableApi<Row> = {
+    restoration: { status: restoration.error ? "error" : !storageReady || restoration.loading ? "resolving" : "ready",
+      ready: active && storageReady && !restoration.loading && !restoration.error, error: restoration.error },
+    restoreLocation,
     links,
     schema: columnSchema,
     ...(itemDetails && detailsEnabled ? { itemDetails } : {}),
@@ -1360,17 +1502,29 @@ export function useQueryTable<Row>(
   const sourceApi: GroupingSourceApi<Row> = {
     ...sourceFilters, loading, rowId: sourceRowId, query: sourceQuery, setQuery: setSourceQuery,
     ...(itemDetails ? { itemDetails } : {}),
-    schema: sourceSchema,
+    schema: sourceCatalogue,
     filterValues: async (name, search) => {
+      if (metadataTransport?.fetchDistinctValues) return metadataTransport.fetchDistinctValues({ field: name, search });
       const field = groupingModel.sourceField(name);
       return field && sourceRows ? { ...distinctValuesFromRows(field, sourceRows, search), hasNull: fieldHasNullInRows(field, sourceRows) } : { values: [], hasMore: false };
     },
-    fieldStats: async (names) => Object.fromEntries(names.flatMap(name => {
-      const field = groupingModel.sourceField(name);
-      return field && sourceRows ? [[name, { distinct: new Set(sourceRows.map(row => JSON.stringify(readFieldValue(field, row)))).size }]] : [];
-    })),
+    fieldStats: async (names, signal) => {
+      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+      const requested = [...new Set(names)];
+      if (metadataTransport?.fetchFieldStats) {
+        const backendFields = requested.filter(
+          name => sourceCatalogue.fields.find(field => field.name === name)?.source.kind === "backend",
+        );
+        return backendFields.length ? metadataTransport.fetchFieldStats(backendFields, signal) : {};
+      }
+      return Object.fromEntries(requested.flatMap(name => {
+        const field = groupingModel.sourceField(name);
+        return field && sourceRows ? [[name, { distinct: new Set(sourceRows.map(row => JSON.stringify(readFieldValue(field, row)))).size }]] : [];
+      }));
+    },
   };
-  const grouping = useGroupingController(api, sourceApi, groupingModel, prepared?.inputs ?? sourceRows ?? [], groupingSupported, viewRevision.current);
+  const grouping = useGroupingController(api, sourceApi, groupingModel, prepared?.inputs ?? sourceRows ?? [], groupingSupported, viewRevision.current,
+    { inputsReady: !remoteGrouping, ...(remoteGrouping ? { preview: previewGrouping } : {}) });
   return {
     ...api,
     ...(groupingSupported || query.grouping ? { grouping } : {}),

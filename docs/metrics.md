@@ -60,7 +60,16 @@ Legend placement for pie, ring, and scatter is `left`, `right`, `top`, `bottom`,
 - `allMatching` (default): all rows matching the query filters, excluding the table limit/offset.
 - `shownRows`: the current ordered page, including limit/offset. Virtualization and selection do not define the population.
 
-Local mode must receive the complete dataset in `clientRows`. It uses the committed page for shown-row metrics. With a remote transport, advanced metrics require `fetchMetrics` and explicit `metricCapabilities.version: 2`. A legacy `fetchAggregations` endpoint remains usable for representable v1 metrics. Unsupported features fail explicitly; an all-matching metric never falls back to aggregating an incomplete page.
+Remote all-matching metrics execute on the server and return bounded metric
+results. Local mode accepts `clientRows` already available in memory; the
+controller never downloads a population for aggregation. Shown-row metrics may
+use the committed page.
+Existing remote advanced metrics use `fetchMetrics` and explicit
+`metricCapabilities.version: 2`. A negotiated `fetchQueryV3` executor adds
+backend calendar metrics and metrics over grouped results. A legacy
+`fetchAggregations` endpoint remains usable for representable v1 metrics.
+Unsupported features fail explicitly; an all-matching metric never falls back
+to an incomplete page. See the [host integration guide](host-integration-next-release.md).
 
 Shown-row fallback can reduce committed remote rows when all required inputs are present. Automatic evaluation waits in a loading state while that page is being fetched; a failed page request ends that wait and surfaces the row error. Applying such metrics adds their input dependencies to row projections. A draft referencing an unloaded field explains that the author must select/refresh it or use a snapshot-capable metric service. It never refetches current IDs and claims that newer values belong to the displayed snapshot.
 
@@ -186,8 +195,8 @@ before result sorting and limits, within the normal metric budgets, and does
 not add records to the table. Clearing or changing the first grouping field
 clears its date settings.
 
-This iteration executes locally on complete client datasets or committed shown
-rows. All-matching server execution rejects date grouping explicitly; version 1
-projection throws and version 2 projection returns an unsupported diagnostic.
-Backend calendar grouping and completion are not implemented yet. Settings are
+Calendar metrics execute on the v3 backend, locally on datasets already in
+memory, or over committed shown rows. Legacy v1/v2 server execution rejects date
+grouping explicitly. An unsupported server operation never triggers a population
+download. Settings are
 serialized with the query and participate in metric computation identity.

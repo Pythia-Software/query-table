@@ -234,9 +234,31 @@ export function GroupedColumnsEditor({
   ]
     .filter(Boolean)
     .join(", ");
+  const previewQuery = useMemo(() => {
+    const changedFields = new Set(initial.current.summaries.filter(before => {
+      const after = summaries.find(summary => summary.id === before.id);
+      return !after || before.op !== after.op || before.field !== after.field || before.expression !== after.expression;
+    }).map(summary => summary.id));
+    return { ...api.query, ...view.result, grouping: { ...api.query.grouping!, source: view.input, keys: view.keys, summaries, representative },
+      select: columns, where: view.result.where.filter(term => !predicatesOf(term).some(predicate => changedFields.has(predicate.field))),
+      orderBy: view.result.orderBy.filter(term => !changedFields.has(term.field)), limit: 8, offset: 0 };
+  }, [view.input, view.keys, view.result, columns, summaries, representative]);
+  const previewKey = JSON.stringify({ ...previewQuery, select: previewQuery.select.map(column => ({ field: column.field })) });
+  const [remotePreview, setRemotePreview] = useState<{ key: string; rows: Row[]; sourceTotal?: number; error: string | null; loading: boolean } | null>(null);
+  useEffect(() => {
+    if (!grouping || !controller.preview) return;
+    const controllerAbort = new AbortController();
+    setRemotePreview({ key: previewKey, rows: [], error: null, loading: true });
+    void controller.preview(previewQuery, controllerAbort.signal).then(result => {
+      if (!controllerAbort.signal.aborted) setRemotePreview({ key: previewKey, rows: result.rows as Row[], sourceTotal: result.sourceTotal, error: null, loading: false });
+    }).catch(error => { if (!controllerAbort.signal.aborted) setRemotePreview({ key: previewKey, rows: [], error: error instanceof Error ? error.message : String(error), loading: false }); });
+    return () => controllerAbort.abort();
+  }, [grouping, controller.preview, previewKey]);
   const groupPreview = useMemo(() => {
+    if (controller.preview) return remotePreview?.key === previewKey ? remotePreview : { rows: [] as Row[], error: null, loading: true };
     if (!grouping) return { rows: [] as Row[], error: null };
     try {
+      if (controller.inputsReady === false) throw Error("Wait for the complete source before previewing groups.");
       model.validate({ ...api.query.grouping, keys: view.keys, summaries, representative });
       const rows = groupRows(
         controller.inputs,
@@ -284,6 +306,10 @@ export function GroupedColumnsEditor({
     }
   }, [
     grouping,
+    controller.preview,
+    controller.inputsReady,
+    remotePreview,
+    previewKey,
     controller.inputs,
     view.keys,
     view.result,
@@ -1036,14 +1062,15 @@ export function GroupedColumnsEditor({
                       </tbody>
                     </table>
                   </div>
-                  {!groupPreview.rows.length && !groupPreview.error && (
+                  {"loading" in groupPreview && groupPreview.loading && <p role="status">Loading server preview…</p>}
+                  {!groupPreview.rows.length && !groupPreview.error && !("loading" in groupPreview && groupPreview.loading) && (
                     <p className="qt-muted">
                       No groups match the current filters.
                     </p>
                   )}
                   <p className="qt-column-preview-note">
                     First {groupPreview.rows.length} matching groups ·{" "}
-                    {controller.inputs.length} source rows
+                    {"sourceTotal" in groupPreview ? groupPreview.sourceTotal ?? "…" : controller.inputs.length} source rows
                   </p>
                 </>
               )}

@@ -150,6 +150,7 @@ describe("useQueryTable auto-refresh + onRefresh", () => {
     );
 
     // Initial debounced fetch.
+    await act(async () => {});
     advance(200);
     expect(fetchRows).toHaveBeenCalledTimes(1);
 

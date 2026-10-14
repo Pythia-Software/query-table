@@ -71,13 +71,28 @@ func TestQuerySnapshotCompressedBounds(t *testing.T) {
 	_, _ = writer.Write(bytes.Repeat([]byte("x"), 4*1024*1024+1))
 	_ = writer.Close()
 	q := QuerySnapshot{Version: 1, Code: "aaaaaaaaaaaaaaaaaaaaaa", Token: "2d." + base64.RawURLEncoding.EncodeToString(compressed.Bytes())}
-	if err := validateQuerySnapshot(q); err == nil {
+	if err := ValidateQuerySnapshot(q); err == nil {
 		t.Fatal("oversized expanded state accepted")
 	}
 	for _, token := range []string{"3j.e30", "2j.bnVsbA", "2d.AA"} {
 		q.Token = token
-		if validateQuerySnapshot(q) == nil {
+		if ValidateQuerySnapshot(q) == nil {
 			t.Fatal(token)
 		}
+	}
+}
+
+type quotaSnapshotRepo struct{ snapshotTestRepo }
+
+func (s quotaSnapshotRepo) Save(context.Context, string, string, QuerySnapshot) (QuerySnapshot, error) {
+	return QuerySnapshot{}, ErrQuerySnapshotQuota
+}
+func TestQuerySnapshotQuotaHTTP(t *testing.T) {
+	handler := NewQuerySnapshotsHandler(quotaSnapshotRepo{}, func(*http.Request, string, bool) (string, error) { return "local", nil })
+	r := httptest.NewRequest("PUT", "/snapshots?dataset=runs&code=aaaaaaaaaaaaaaaaaaaaaa", strings.NewReader(`{"version":1,"code":"aaaaaaaaaaaaaaaaaaaaaa","token":"2j.e30","createdAt":0}`))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+	if w.Code != http.StatusInsufficientStorage || !strings.Contains(w.Body.String(), "quota") {
+		t.Fatal(w.Code, w.Body.String())
 	}
 }

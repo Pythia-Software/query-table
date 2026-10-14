@@ -29,6 +29,7 @@ import {
 } from "./query";
 import { applyQuery } from "./apply";
 import { prepareGrouping, withoutGrouping, type GroupedRow } from "./grouping";
+import { computedInputAllowed } from "./apply";
 import { toServerQueryV2 } from "./execution";
 import {
   toServerQuery,
@@ -792,7 +793,7 @@ function assertMetricPopulation<Row>(
     q.where.some((t) =>
       predicatesOf(t).some(
         (p) =>
-          isComputedField(p.field) ||
+          isComputedField(p.field) && !computedInputAllowed(schema, p.field, "filter") ||
           !fields.has(resolveFieldName(schema, p.field) ?? p.field),
       ),
     )
@@ -801,7 +802,7 @@ function assertMetricPopulation<Row>(
   if (
     orderBy.some(
       (s) =>
-        isComputedField(s.field) ||
+        isComputedField(s.field) && !computedInputAllowed(schema, s.field, "sort") ||
         !fields.has(resolveFieldName(schema, s.field) ?? s.field),
     )
   )

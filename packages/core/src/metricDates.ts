@@ -40,6 +40,28 @@ export function metricDateTime(value: MetricValue, timeZone = "UTC"): number {
     : time;
 }
 
+/** Find an offset change inside one bucket window. The polyfill's "previous"
+ * transition lookup caps future searches to about three years from today. */
+function metricOffsetTransition(
+  start: number,
+  end: number,
+  timeZone: string,
+): number | undefined {
+  if (end <= start) return undefined;
+  const offset = (time: number) =>
+    Temporal.Instant.fromEpochMilliseconds(time).toZonedDateTimeISO(timeZone)
+      .offsetNanoseconds;
+  const before = offset(start);
+  if (before === offset(end)) return undefined;
+  // IANA transitions are separated by more than this hour-sized window.
+  while (end - start > 1) {
+    const middle = Math.floor((start + end) / 2);
+    if (offset(middle) === before) start = middle;
+    else end = middle;
+  }
+  return end;
+}
+
 export function metricDateFloor(
   time: number,
   interval: MetricDateGrouping["interval"],
@@ -49,18 +71,11 @@ export function metricDateFloor(
     const zoned =
       Temporal.Instant.fromEpochMilliseconds(time).toZonedDateTimeISO(timeZone);
     if (interval === "hour") {
-      const floor = zoned.with(
-        { minute: 0, second: 0, millisecond: 0, microsecond: 0, nanosecond: 0 },
-        { offset: "prefer", disambiguation: "earlier" },
-      ).epochMilliseconds;
+      const floor =
+        time - zoned.minute * 60000 - zoned.second * 1000 - zoned.millisecond;
       // An offset change can start a partial hour (e.g. Lord Howe's 30-minute
       // DST shift). Split there rather than mapping into the previous offset.
-      const transition = zoned
-        .add({ nanoseconds: 1 })
-        .getTimeZoneTransition("previous");
-      return transition && transition.epochMilliseconds > floor
-        ? transition.epochMilliseconds
-        : floor;
+      return metricOffsetTransition(floor, time, timeZone) ?? floor;
     }
     let date = zoned.toPlainDate();
     if (interval === "week") date = date.subtract({ days: date.dayOfWeek - 1 });
@@ -103,10 +118,7 @@ export function metricDateNext(
         next = target.toZonedDateTime(timeZone, {
           disambiguation: "later",
         }).epochMilliseconds;
-      const transition = zoned.getTimeZoneTransition("next");
-      return transition && transition.epochMilliseconds < next
-        ? transition.epochMilliseconds
-        : next;
+      return metricOffsetTransition(time, next, timeZone) ?? next;
     }
     let date = zoned.toPlainDate();
     if (interval === "month") date = date.with({ day: 1 }).add({ months: 1 });

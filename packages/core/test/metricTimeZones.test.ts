@@ -17,6 +17,16 @@ import {
   metricDateTime,
 } from "../src/metricDates";
 
+it.each([
+  ["Australia/Lord_Howe", "2044-04-02T15:15:00Z", "2044-04-02T15:00:00Z", "2044-04-02T15:30:00Z"],
+  ["Australia/Lord_Howe", "2044-10-01T15:45:00Z", "2044-10-01T15:30:00Z", "2044-10-01T16:00:00Z"],
+  ["Australia/Adelaide", "2045-01-01T00:15:00Z", "2044-12-31T23:30:00Z", "2045-01-01T00:30:00Z"],
+])("uses actual future hour transitions in %s at %s", (zone, instant, floor, next) => {
+  const at = metricDateFloor(Date.parse(instant), "hour", zone);
+  expect(at).toBe(Date.parse(floor));
+  expect(metricDateNext(at, "hour", zone)).toBe(Date.parse(next));
+});
+
 const schema: FieldSchema = {
   name: "zoned-dates",
   idField: "id",
