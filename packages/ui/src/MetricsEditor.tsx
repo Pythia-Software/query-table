@@ -2050,8 +2050,56 @@ export function MetricsEditor<Row>({
                       </select>
                     </label>
                   )}
+                  {chosen.kind !== "value" && (
+                    <label>
+                      Maximum displayed groups
+                      <MetricNumberInput key={selected.id} aria-label="Maximum displayed groups" allowEmpty min={1} max={1000000} step={1} placeholder="Automatic" value={chosen.maxGroups}
+                        onCommit={maxGroups => {
+                          const display = { ...chosen };
+                          if (maxGroups === undefined) delete display.maxGroups;
+                          else display.maxGroups = maxGroups;
+                          patch(selected.id, { display });
+                        }} />
+                    </label>
+                  )}
+                  {["list", "pie", "donut"].includes(chosen.kind) && (
+                    <label>
+                      <input type="checkbox" aria-label="Show Other remainder" checked={chosen.showOther ?? ["pie", "donut"].includes(chosen.kind)}
+                        onChange={event => displayPatch({ showOther: event.target.checked })} />
+                      Show Other remainder (additive values only)
+                    </label>
+                  )}
                   {chosen.kind === "list" && (
                     <div className="qt-metric-list-controls">
+                      <label>
+                        Bar placement
+                        <select aria-label="List bar placement" value={chosen.list?.barPosition ?? "inline"}
+                          onChange={event => displayPatch({ list: { ...chosen.list, barPosition: event.target.value as "inline" | "below" } })}>
+                          <option value="inline">Beside label</option>
+                          <option value="below">Under label</option>
+                        </select>
+                      </label>
+                      {chosen.list?.barPosition === "below" && (
+                        <label>
+                          Maximum label lines
+                          <MetricNumberInput
+                            key={selected.id}
+                            aria-label="Maximum label lines"
+                            allowEmpty
+                            min={1}
+                            max={1000000}
+                            step={1}
+                            placeholder="Unlimited"
+                            value={chosen.list?.maxLabelLines}
+                            onCommit={(maxLabelLines) => {
+                              const list = { ...chosen.list };
+                              if (maxLabelLines === undefined) delete list.maxLabelLines;
+                              else list.maxLabelLines = maxLabelLines;
+                              displayPatch({ list });
+                            }}
+                          />
+                        </label>
+                      )}
                       {(
                         ["showBars", "useGroupColors", "showValues"] as const
                       ).map((key) => (
@@ -2590,6 +2638,7 @@ function newId(): string {
 function MetricNumberInput({
   value,
   onCommit,
+  allowEmpty,
   min,
   max,
   ...props
@@ -2597,11 +2646,17 @@ function MetricNumberInput({
   InputHTMLAttributes<HTMLInputElement>,
   "value" | "onChange" | "onBlur" | "onKeyDown" | "min" | "max"
 > & {
-  value: number;
   min: number;
   max: number;
+} & ({
+  allowEmpty?: false;
+  value: number;
   onCommit: (value: number) => void;
-}) {
+} | {
+  allowEmpty: true;
+  value: number | undefined;
+  onCommit: (value: number | undefined) => void;
+})) {
   const [draft, setDraft] = useState<string | null>(null);
   return (
     <input
@@ -2609,9 +2664,10 @@ function MetricNumberInput({
       type="number"
       min={min}
       max={max}
-      value={draft ?? value}
+      value={draft ?? value ?? ""}
       onChange={(event) => setDraft(event.currentTarget.value)}
       onBlur={() => {
+        if (draft !== null && !draft.trim() && allowEmpty) onCommit(undefined);
         if (draft !== null && draft.trim() && Number.isFinite(Number(draft)))
           onCommit(Math.max(min, Math.min(max, Math.round(Number(draft)))));
         setDraft(null);

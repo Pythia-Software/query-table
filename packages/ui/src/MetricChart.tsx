@@ -30,7 +30,10 @@ import type {
   RenderingClause,
 } from "./metricTypes";
 
+import { compactMetricScale, compactMetricTick, compactCalendarLabels } from "./compactMetricChart";
+
 interface ChartProps {
+  compact?: boolean | undefined;
   clause: RenderingClause;
   buckets: MetricBucket[];
   result?: MetricRenderResult | undefined;
@@ -59,8 +62,9 @@ function usePlotSize() {
   return { ref, ...size };
 }
 export function MetricChart({
+  compact = false,
   clause,
-  buckets,
+  buckets: inputBuckets,
   result,
   theme,
   locale,
@@ -71,13 +75,18 @@ export function MetricChart({
     tooltipId = useId(),
     clipId = useId(),
     [tooltip, setTooltip] = useState<string | null>(null);
+  // Calendar covers read left to right in time, regardless of result ranking.
+  let buckets = inputBuckets;
+  if (compact && clause.dateGrouping && ["line", "bar-vertical"].includes(clause.display?.kind ?? "")) {
+    try { buckets = chronologicalBuckets(inputBuckets).map(point => point.bucket); } catch { /* validation below reports invalid coordinates */ }
+  }
   const display = clause.display ?? { kind: "auto" },
     kind = display.kind,
     colors = createMetricColorResolver(theme);
   const fmt = (v: MetricValue | undefined, f: MetricValueFormat | undefined) =>
     formatMetricOutput(v, f, locale).text;
   const tickFmt = (v: number, format: MetricValueFormat | undefined) =>
-    format
+    compact ? compactMetricTick(v, format, locale) : format
       ? fmt(v, format)
       : v.toLocaleString(locale, { maximumSignificantDigits: 8 });
   const percent = (ratio: number) =>
@@ -127,10 +136,11 @@ export function MetricChart({
       }
     },
   });
-  const left = Math.min(78, W * 0.24),
-    right = W - 32,
-    top = 12,
-    bottom = H - 42,
+  const compactBox = compact && kind === "box";
+  const left = compactBox ? 8 : compact ? 28 : Math.min(78, W * 0.24),
+    right = W - (compactBox ? 8 : compact ? 8 : 32),
+    top = compactBox ? 0 : 12,
+    bottom = H - (compactBox ? 5 : compact ? 20 : 42),
     plotW = right - left,
     plotH = bottom - top;
   const text = (
@@ -140,7 +150,7 @@ export function MetricChart({
     anchor: "start" | "middle" | "end" = "middle",
   ) => (
     <text
-      x={x}
+      x={compact && anchor === "middle" ? Math.max(label.length * 2.7 + 2, Math.min(W - label.length * 2.7 - 2, x)) : x}
       y={y}
       textAnchor={anchor}
       className={`qt-metric-axis ${classNames?.axis ?? ""}`}
@@ -167,8 +177,9 @@ export function MetricChart({
     values: number[],
     options: typeof display.xScale,
     zero = false,
+    format?: MetricValueFormat,
   ) => {
-    const axis = metricScale(values, options, zero);
+    const axis = compact ? compactMetricScale(values, options, zero, format) : metricScale(values, options, zero);
     if (axis.error) problem = axis.error;
     if (axis.omitted)
       scaleNotes.push(
@@ -194,6 +205,8 @@ export function MetricChart({
       buckets,
       result?.groupCount,
       result?.other,
+      display.maxGroups ?? 8,
+      display.showOther !== false,
     );
     problem =
       result?.coverage === "partial"
@@ -242,7 +255,41 @@ export function MetricChart({
       label: `${s.other ? "Other (remainder)" : groupLabel(s.bucket)} · ${fmt(s.value, display.format)} · ${percent(s.value / pie.total)}`,
       color: s.other ? colors.token("other") : shade(s.bucket),
     }));
-    note = `Exact additive denominator: ${fmt(pie.total, display.format)}. Other combines remaining groups; Hover a slice for its value.`;
+    note = `Exact additive denominator: ${fmt(pie.total, display.format)}. ${display.showOther === false ? "Hidden remainder retains its share of the full denominator." : "Other combines remaining groups."} Hover a slice for its value.`;
+  } else if (compactBox) {
+    const step = 52, visible = buckets.slice(0, Math.max(1, Math.floor(plotH / step)));
+    marks = visible.map((b, i) => {
+      const s = b.distribution?.kind === "box" ? b.distribution.summary : null;
+      const y = top + i * step + 27, color = shade(b);
+      const median = s ? `med ${fmt(s.median, display.format)}` : "";
+      const fullLabel = groupLabel(b);
+      const chars = Math.max(4, Math.floor((plotW - median.length * 5.5 - 12) / 5.5));
+      const shortLabel = fullLabel.length > chars ? `${fullLabel.slice(0, chars - 1)}…` : fullLabel;
+      const axis = s ? scale([s.low, s.high], { ...display.xScale, mode: "linear" }, false, display.format) : undefined;
+      const x = (v: number) => left + axis!.fraction(v) * plotW;
+      const detailLabel = s
+        ? `${fullLabel}\nMin ${fmt(s.min, display.format)} · Q1 ${fmt(s.q1, display.format)} · Median ${fmt(s.median, display.format)} · Q3 ${fmt(s.q3, display.format)} · Max ${fmt(s.max, display.format)} · Mean ${fmt(s.mean, display.format)}\nWhiskers ${fmt(s.low, display.format)} – ${fmt(s.high, display.format)}\n${s.n} samples · ${b.nullCount ?? 0} NULL · ${s.outlierCount} outliers (omitted from cover). Independent whisker scale.`
+        : detail(b);
+      return <g key={i} className="qt-metric-box-row">
+        <text x={left} y={y - 17} textAnchor="start" className="qt-metric-axis qt-metric-box-label"><title>{fullLabel}</title>{shortLabel}</text>
+        {text(right, y - 17, median, "end")}
+        {s && axis && !b.error && axis.accepts(s.low) ? <>
+          {axis.ticks.map((v, j) => <g key={j}>
+            {grid(x(v), y - 9, x(v), y + 9)}
+            {text(x(v), y + 21, tickFmt(v, display.format), j === 0 ? "start" : j === axis.ticks.length - 1 ? "end" : "middle")}
+          </g>)}
+          <g {...interaction(b, detailLabel)}>
+            <line x1={x(s.low)} x2={x(s.high)} y1={y} y2={y} stroke={color} strokeWidth={2} />
+            {[s.low, s.high].map((v, j) => <line key={j} x1={x(v)} x2={x(v)} y1={y - 6} y2={y + 6} stroke={color} />)}
+            <rect x={x(s.q1)} y={y - 8} width={Math.max(1, x(s.q3) - x(s.q1))} height={16} fill={color} fillOpacity={0.25} stroke={color} />
+            <line x1={x(s.median)} x2={x(s.median)} y1={y - 8} y2={y + 8} stroke={color} strokeWidth={2} />
+            <rect x={left} y={y - 11} width={plotW} height={22} fill="transparent" />
+          </g>
+        </> : text((left + right) / 2, y + 4, b.error ? "Error" : "No samples")}
+      </g>;
+    });
+    if (visible.length < buckets.length) disclosure = `${visible.length} of ${buckets.length} returned groups drawn.`;
+    note = "Independent linear scales focus on each row's whiskers. Outlier markers are omitted; full summaries remain available in the data table.";
   } else if (kind === "box") {
     const summaries = buckets.flatMap((b) =>
         !b.error && b.distribution?.kind === "box" && b.distribution.summary
@@ -361,7 +408,7 @@ export function MetricChart({
           b.distribution?.kind === "histogram" &&
           b.distribution.n > 0,
       ),
-      series = valid.slice(0, 6),
+      series = valid.slice(0, display.maxGroups ?? 6),
       first = series[0]?.distribution,
       edges = first?.kind === "histogram" ? first.edges : [],
       bins = edges.length - 1;
@@ -394,14 +441,14 @@ export function MetricChart({
       b.distribution?.kind === "histogram" ? b.distribution.counts : [],
     );
     const ya = scale(counts, display.yScale, true),
-      xa = scale(edges, display.xScale);
+      xa = scale(edges, display.xScale, false, display.xFormat);
     const y = (v: number) => bottom - ya.fraction(v) * plotH;
     axes = (
       <>
         {ya.ticks.map((v, i) => (
           <g key={i}>
             {grid(left, y(v), right, y(v))}
-            {text(left - 7, y(v) + 4, v.toLocaleString(locale), "end")}
+            {text(left - 7, y(v) + 4, compact ? tickFmt(v, undefined) : v.toLocaleString(locale), "end")}
           </g>
         ))}
         {xa.ticks.map((v, i) => (
@@ -475,10 +522,14 @@ export function MetricChart({
     const xa = scale(
         points.map((b) => b.value as number),
         display.xScale,
+        false,
+        display.xFormat,
       ),
       ya = scale(
         points.map((b) => b.y as number),
         display.yScale,
+        false,
+        display.yFormat,
       ),
       x = (v: number) => left + xa.fraction(v) * plotW,
       y = (v: number) => bottom - ya.fraction(v) * plotH;
@@ -529,6 +580,7 @@ export function MetricChart({
         ),
         horizontal ? display.xScale : display.yScale,
         true,
+        display.format,
       );
     const x = (v: number) => left + axis.fraction(v) * plotW,
       y = (v: number) => bottom - axis.fraction(v) * plotH;
@@ -538,9 +590,13 @@ export function MetricChart({
           timeAxis = scale(
             ordered.map((p) => p.time),
             display.xScale,
+            false,
+            { kind: "datetime", sourceUnit: "epochMilliseconds" },
           ),
           tx = (v: number) => left + timeAxis.fraction(v) * plotW;
+        const calendarLabels = compactCalendarLabels(compact ? ordered.map(({bucket, time}) => ({bucket, x: tx(time)})) : [], clause, locale);
         const timeLabel = (b: MetricBucket) =>
+          compact && clause.dateGrouping ? calendarLabels.get(b) ?? "" :
           groupFormat
             ? formatMetricOutput(b.keys[0], groupFormat, locale).text
             : String(b.keys[0]);
@@ -623,7 +679,7 @@ export function MetricChart({
             {ordered
               .filter(
                 (_, i) =>
-                  i % Math.max(1, Math.ceil(ordered.length / 4)) === 0 ||
+                  compact && clause.dateGrouping ? calendarLabels.has(ordered[i]!.bucket) : i % Math.max(1, Math.ceil(ordered.length / 4)) === 0 ||
                   i === ordered.length - 1,
               )
               .filter(({ time }) => timeAxis.accepts(time))
@@ -664,6 +720,7 @@ export function MetricChart({
           ? buckets.slice(0, Math.max(1, Math.floor(plotH / 20)))
           : buckets,
         step = (horizontal ? plotH : plotW) / Math.max(1, visible.length);
+      const calendarLabels = compactCalendarLabels(compact && !horizontal ? visible.map((bucket, i) => ({ bucket, x: left + step * (i + .5) })) : [], clause, locale);
       marks = visible.map((b, i) => {
         const center = (horizontal ? top : left) + step * (i + 0.5),
           valid =
@@ -671,11 +728,11 @@ export function MetricChart({
           value = valid ? (b.value as number) : 0;
         return (
           <g key={i}>
-            {(horizontal || step > 42 || i % Math.ceil(42 / step) === 0) &&
+            {(compact && clause.dateGrouping && !horizontal ? calendarLabels.has(b) : horizontal || step > 42 || i % Math.ceil(42 / step) === 0) &&
               text(
                 horizontal ? left - 7 : center,
                 horizontal ? center + 4 : bottom + 18,
-                !horizontal && groupFormat && b.keys.length === 1
+                compact && clause.dateGrouping && !horizontal ? calendarLabels.get(b)! : !horizontal && groupFormat && b.keys.length === 1
                   ? formatMetricOutput(b.keys[0], groupFormat, locale).text
                   : groupLabel(b),
                 horizontal ? "end" : "middle",
@@ -726,7 +783,7 @@ export function MetricChart({
           ? grid(x(v), top, x(v), bottom)
           : grid(left, y(v), right, y(v))}
         {horizontal
-          ? text(x(v), bottom + 18, fmt(v, display.format))
+          ? text(x(v), bottom + 18, compact ? tickFmt(v, display.format) : fmt(v, display.format))
           : text(left - 7, y(v) + 4, tickFmt(v, display.format), "end")}
       </g>
     ));
@@ -764,6 +821,10 @@ export function MetricChart({
     (["pie", "donut", "scatter", "histogram"].includes(kind)
       ? "right"
       : "none");
+  const xAxisLabel = display.xLabel ?? (kind === "scatter" ? "X value"
+    : kind === "histogram" ? display.valueLabel ?? "Value" : horizontalLabel(kind, clause));
+  const yAxisLabel = display.yLabel ?? (kind === "scatter" ? "Y value"
+    : kind === "histogram" ? "Count" : kind === "bar-horizontal" ? clause.groupBy.join(" / ") : display.valueLabel ?? "Value");
   return (
     <>
       <div
@@ -772,7 +833,7 @@ export function MetricChart({
           kind === "bar-horizontal" || kind === "box"
             ? {
                 minHeight:
-                  Math.min(8, buckets.length) * (kind === "box" ? 22 : 20) + 54,
+                  Math.min(8, buckets.length) * (compactBox ? 52 : kind === "box" ? 22 : 20) + (compactBox ? 5 : 54),
               }
             : undefined
         }
@@ -796,7 +857,7 @@ export function MetricChart({
               </defs>
               {axes}
               {marks}
-              {!["pie", "donut"].includes(kind) && (
+              {!compact && !["pie", "donut"].includes(kind) && (
                 <>
                   {text(
                     (left + right) / 2,
@@ -839,6 +900,17 @@ export function MetricChart({
           </ul>
         )}
       </div>
+      {compact && !compactBox && !["pie", "donut"].includes(kind) && (
+        <div className="qt-metric-axis-labels">
+          <span title={yAxisLabel}>
+            <span aria-hidden="true">↑ </span>{yAxisLabel}
+          </span>
+          <span title={xAxisLabel}>
+            <span aria-hidden="true">→ </span>{xAxisLabel}
+          </span>
+        </div>
+      )}
+      {compactBox && <p className="qt-metric-compact-guide">Box: middle 50% · line: median<br />Per-row scales · outliers omitted</p>}
       {tooltip && (
         <div id={tooltipId} role="tooltip" className="qt-metric-tooltip">
           {tooltip}

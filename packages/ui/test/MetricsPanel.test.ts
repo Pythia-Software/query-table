@@ -692,3 +692,82 @@ it("lets Escape bubble after dismissing a chart tooltip and never inspects a syn
   expect(second.defaultPrevented).toBe(false);
   expect(onKeyDown).toHaveBeenCalledOnce();
 });
+
+it("compact box covers label readable independent whisker scales and retain full summaries", () => {
+  const boxes: MetricBucket[] = ["Fast command with a long descriptive label", "Slow command", "Third command"].map((key, i) => {
+    const factor = 10 ** i;
+    return { keys: [key], value: null, count: 10, nullCount: 1, distribution: { kind: "box", summary: {
+      n: 9, min: 1000 * factor, q1: 3000 * factor, median: 5000 * factor, q3: 7000 * factor,
+      max: 100000000 * factor, mean: 10000000 * factor, low: 1000 * factor, high: 9000 * factor,
+      outliers: [100000000 * factor], outlierCount: 1, whiskers: "tukey", method: "exact-linear",
+    } } };
+  });
+  const c: RenderingClause = { ...clause, display: { kind: "box", format: { kind: "duration", sourceUnit: "milliseconds" } } };
+  const html = renderToStaticMarkup(createElement(MetricCard, { clause: c, buckets: boxes, fields, compact: true }));
+  const host = document.createElement("div"); host.innerHTML = html;
+  expect(host.querySelectorAll(".qt-metric-box-row")).toHaveLength(3);
+  expect(host.querySelectorAll("svg circle")).toHaveLength(0);
+  expect(host.querySelectorAll(".qt-metric-box-label title")[0]?.textContent).toBe(boxes[0]!.keys[0]);
+  expect(host.querySelector(".qt-metric-compact-guide")?.textContent).toContain("Per-row scales · outliers omitted");
+  for (const box of host.querySelectorAll(".qt-metric-box-row .qt-metric-mark > rect:not([fill=transparent])"))
+    expect(Number(box.getAttribute("width"))).toBeGreaterThan(50);
+  expect(html).toContain("9 samples · 1 NULL · 1 outliers");
+  expect(html).toContain("Max 1d3h");
+  expect(render(c, boxes)).toContain("Scale includes all returned summaries");
+});
+
+it("underline lists keep labels, values and bar proportions with independent visibility switches", () => {
+  const b: MetricBucket[] = [{ keys: ["A long error signature with several meaningful words"], value: 10, count: 1 }, { keys: ["Second signature"], value: 5, count: 1 }];
+  for (const showBars of [true, false]) for (const showValues of [true, false]) {
+    const host = document.createElement("div");
+    host.innerHTML = render({ ...clause, display: { kind: "list", list: { barPosition: "below", showBars, showValues } } }, b);
+    expect(host.querySelectorAll(".qt-metric-bar-row--below")).toHaveLength(2);
+    expect(host.querySelector(".qt-metric-bar-label")?.textContent).toBe(b[0]!.keys[0]);
+    expect(host.querySelectorAll(".qt-metric-bar-track")).toHaveLength(showBars ? 2 : 0);
+    expect(host.querySelectorAll(".qt-metric-bar-value")).toHaveLength(showValues ? 2 : 0);
+    if (showBars) expect([...host.querySelectorAll<HTMLElement>(".qt-metric-bar-fill")].map(el => el.style.width)).toEqual(["100%", "50%"]);
+  }
+  expect(render({ ...clause, display: { kind: "list" } }, b)).not.toContain("qt-metric-bar-row--below");
+});
+
+it("limits only below-list labels while preserving the full label and title", () => {
+  const text = "A very long error signature that wraps across several lines without losing its full tooltip";
+  const buckets: MetricBucket[] = [{ keys: [text], value: 5, count: 1 }];
+  for (const barPosition of ["inline", "below"] as const) {
+    for (const maxLabelLines of [undefined, 1, 2, 3, 0, -1, 1.5, Infinity, 1000001]) {
+      const host = document.createElement("div");
+      host.innerHTML = render({ ...clause, display: { kind: "list", list: { barPosition, ...(maxLabelLines === undefined ? {} : { maxLabelLines }) } } }, buckets);
+      const label = host.querySelector<HTMLElement>(".qt-metric-bar-label")!;
+      const limited = barPosition === "below" && [1, 2, 3].includes(maxLabelLines!);
+      expect(label.classList.contains("qt-metric-bar-label--clamped")).toBe(limited);
+      expect(label.style.webkitLineClamp).toBe(limited ? String(maxLabelLines) : "");
+      expect(label.textContent).toBe(text);
+      expect(label.title).toBe(text);
+    }
+  }
+});
+
+it("compact charts put both axis labels in a footer while full charts retain their axis labels", () => {
+  const c: RenderingClause = { ...clause, display: { kind: "scatter", xLabel: "Duration", yLabel: "Output" } };
+  const b: MetricBucket[] = [{ keys: ["A"], value: 2, y: 3, count: 1 }];
+  const host = document.createElement("div");
+  host.innerHTML = renderToStaticMarkup(createElement(MetricCard, { clause: c, buckets: b, fields, compact: true }));
+  expect(host.querySelector(".qt-metric-axis-labels")?.textContent).toBe("↑ Output→ Duration");
+  expect(host.querySelectorAll("svg text[transform]")).toHaveLength(0);
+  expect(host.querySelector("svg")?.textContent).not.toContain("Duration");
+  expect(render(c, b)).toContain("rotate(-90)");
+});
+
+it("limits rendered list groups and exposes an accessible animated loading state", () => {
+  const b: MetricBucket[] = [1, 2, 3].map(n => ({ keys: [String(n)], value: n, count: 1 }));
+  for (const showOther of [true, false]) {
+    const host = document.createElement("div");
+    host.innerHTML = render({ ...clause, op: "count", display: { kind: "list", maxGroups: 2, showOther } }, b);
+    expect(host.querySelectorAll(".qt-metric-bar-row")).toHaveLength(showOther ? 3 : 2);
+    expect(host.textContent?.includes("Other (combined remainder)")).toBe(showOther);
+  }
+  const html = renderToStaticMarkup(createElement(MetricCard, { clause, buckets: [], fields, loading: true }));
+  expect(html).toContain("qt-metric-spinner");
+  expect(html).toContain('role="status"');
+  expect(html).toContain("Loading metric");
+});

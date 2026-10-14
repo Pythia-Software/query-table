@@ -4,6 +4,9 @@ import {
   metricPieSlices,
   metricExtent,
   metricFraction,
+  metricDisplayBuckets,
+  isMetricOtherBucket,
+  metricGroupLabel,
 } from "../src/metricChartHelpers";
 import type { MetricBucket, RenderingClause } from "../src/metricTypes";
 const clause: RenderingClause = { id: "x", op: "count", groupBy: ["os"] };
@@ -13,6 +16,43 @@ const bucket = (key: string, value: number | null): MetricBucket => ({
   count: 1,
 });
 describe("metric chart geometry", () => {
+  it("hides a pie remainder without rebasing its exact denominator or hiding a real Other", () => {
+    const result = metricPieSlices(clause, [bucket("Other", 4), bucket("a", 2), bucket("b", 3)], 3, undefined, 1, false);
+    expect(result.total).toBe(9);
+    expect(result.slices.map(s => [s.value, s.other, s.bucket.keys])).toEqual([[4, false, ["Other"]]]);
+    expect(metricPieSlices(clause, [bucket("a", 2)], 10, undefined, 1, false).error).toMatch(/complete/);
+  });
+  it("limits lists in result order and combines only an exact additive remainder", () => {
+    const input = [bucket("Other", 4), bucket("a", 2), bucket("b", 3)];
+    const list: RenderingClause = { ...clause, display: { kind: "list", maxGroups: 1, showOther: true } };
+    expect(metricDisplayBuckets(list, input, 3).map(b => [b.keys[0], b.value])).toEqual([["Other", 4], ["Other (combined remainder)", 5]]);
+    expect(metricDisplayBuckets(list, input, 10, bucket("Other", 11)).at(-1)?.value).toBe(16);
+    expect(metricDisplayBuckets({ ...list, display: { kind: "list", showOther: true } }, input, 10, bucket("Other", 11)).at(-1)?.value).toBe(11);
+    expect(metricDisplayBuckets(list, [bucket("a", 1), bucket("b", 1e308), bucket("c", 1e308)])).toHaveLength(1);
+    for (const variant of ["unknown", "partial", "average", "negative", "hidden"] as const) {
+      const output = metricDisplayBuckets({ ...list, op: variant === "average" ? "avg" : "count", display: { ...list.display!, showOther: variant !== "hidden" } }, variant === "negative" ? [...input, bucket("bad", -1)] : input, variant === "unknown" ? 10 : 3, undefined, variant === "partial");
+      expect(output).toHaveLength(1);
+    }
+    expect(input).toHaveLength(3);
+    expect(metricDisplayBuckets(clause, input)).toBe(input);
+  });
+  it("labels the combined remainder verbatim on date-grouped lists", () => {
+    const dated: RenderingClause = { ...clause, dateGrouping: { field: clause.groupBy[0]!, interval: "day", includeEmpty: false, range: "observed" }, display: { kind: "list", maxGroups: 1, showOther: true } };
+    const output = metricDisplayBuckets(dated, [bucket("2026-10-01", 4), bucket("2026-10-02", 2)], 2);
+    expect(isMetricOtherBucket(output[0]!)).toBe(false);
+    expect(isMetricOtherBucket(output[1]!)).toBe(true);
+    expect(metricGroupLabel(output[1]!, dated)).toBe("Other (combined remainder)");
+    expect(metricGroupLabel(output[1]!, dated, undefined, true)).toBe("Other (combined remainder)");
+  });
+  it("limits line charts by series rather than by time point", () => {
+    const point = (day: string, series: string, value: number) => ({ keys: [day, series], value, count: 1 });
+    const input = [point("2026-10-01", "a", 1), point("2026-10-01", "b", 2), point("2026-10-02", "a", 3), point("2026-10-02", "b", 4), point("2026-10-03", "c", 5)];
+    const line: RenderingClause = { ...clause, groupBy: ["day", "series"], display: { kind: "line", maxGroups: 2 } };
+    expect(metricDisplayBuckets(line, input).map(b => b.keys)).toEqual(input.slice(0, 4).map(b => b.keys));
+    expect(metricDisplayBuckets({ ...line, display: { kind: "line", maxGroups: 3 } }, input)).toBe(input);
+    const single = input.filter(b => b.keys[1] === "a").map(b => ({ ...b, keys: [b.keys[0]!] }));
+    expect(metricDisplayBuckets({ ...line, groupBy: ["day"], display: { kind: "line", maxGroups: 1 } }, single)).toBe(single);
+  });
   it("orders time chronologically without mutating results and keeps gaps", () => {
     const input = [
         bucket("2026-10-08", 4),
