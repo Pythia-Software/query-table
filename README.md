@@ -15,9 +15,13 @@ The same catalogue can display individual objects with ordered, formatted,
 read-only properties and multiple saved views per object type. See
 [object property views](docs/object-properties.md) and the `/objects` demo.
 
-Complete client datasets also support [row-producing GROUP BY](docs/grouping.md),
+Complete client datasets and negotiated SQLite/PostgreSQL transports support [row-producing GROUP BY](docs/grouping.md),
 HAVING, custom aggregate columns, and a configurable representative row through
 the standard editor. Grouped views use the same saved queries, URLs and theme.
+
+The [next-release host integration guide](docs/host-integration-next-release.md)
+covers backend calendar metrics, server execution, router restoration,
+canonical computed metadata and development across linked checkouts.
 
 > Naming: the package family is **`query-table`**. Use `query_table` where
 > dashes are illegal (Go identifiers), and `querytable` where neither is allowed.

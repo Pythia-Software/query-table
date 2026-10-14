@@ -59,6 +59,7 @@ function mount(options: UseQueryTableOptions<Row>) {
   };
 }
 async function settle() {
+  await act(async () => {});
   await act(async () => {
     await vi.advanceTimersByTimeAsync(30);
   });

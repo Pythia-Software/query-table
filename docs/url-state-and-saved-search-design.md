@@ -127,6 +127,7 @@ const cache = localQuerySnapshotCache({
 
 const api = useQueryTable({
   schema, transport, storage, syncUrl: true,
+  queryParameter: 'q_runs',
   links: { maxUrlBytes: 2000, cache },
 });
 
@@ -136,9 +137,36 @@ const { url } = await api.links.create();
 
 Stable storage/cache objects reduce avoidable work. Inline storage adapters are supported: initial restoration and the named-save list load once per dataset, and subsequent explicit operations use the latest adapter. Applications that require actor-specific browser-cache isolation should set an appropriate `storageKey` or supply their own scoped cache.
 
+`queryParameter` names the collection state parameter without enabling item
+views. It takes precedence over the legacy `itemDetails.queryParameter` option;
+the fallback is `q`. Restoration, edit synchronization, collection Save/Share,
+and item links use this same parameter. Give simultaneously mounted tables
+distinct parameters, such as `q_library` and `q_tool_calls`.
+
 `httpQuerySnapshotStore` uses `PUT endpoint?dataset=<key>&code=<code>` with a snapshot JSON body, and GET on that same URL. A missing code returns 404; an immutable-code conflict returns 409. Query state never goes in the creation request URL. A code is a lookup identifier and does not grant dataset access.
 
+HTTP failures throw `QuerySnapshotHttpError` with `status`, a stable `code`
+(`quota`, `forbidden`, `conflict`, `unavailable`, `storage`, or `http`), and an
+actionable plain-text `message`. Hosts can inspect bounded `detail` and optional
+`serverCode` when formatting their own errors. JSON and plain-text reasons are
+read with a 4-KiB budget; HTML and oversized error bodies are ignored. Internal
+500-series details stay out of the default message. A missing reference still
+resolves to `null` in the store; the link resolver reports it as unavailable.
+HTTP 507 prevents new saves while existing links and idempotent retries retain
+their normal behavior. Failed promotions retain the same logical snapshot code
+for retry and do not replace the previous named query or default.
+
 The Go backend exports `QuerySnapshotsDDL`, `SQLQuerySnapshotStore`, and `NewQuerySnapshotsHandler`. The DDL/store work with PostgreSQL and SQLite. Hosts provide their driver, database, quota/retention policy, and an authorization callback that checks read/write dataset access and CSRF for cookie-authenticated writes. The callback supplies the trusted actor/tenant scope; nil authorization denies access. HTTP bodies, encoded token size, and expanded token JSON are bounded before persistence. Persisted tokens are metadata and are not executed by the snapshot handler.
+
+Custom write paths can call `ValidateQuerySnapshot` directly. The SQL store also
+exposes `ResolveIn` and `SaveIn` for an authorized host-owned `*sql.Tx`. Resolve
+the code first so same-token retries return the original timestamp even when
+the quota is full; otherwise serialize the quota check and `SaveIn` in that
+transaction. Hosts own commit/rollback and the serialization policy (for
+example a SQLite write transaction or a PostgreSQL lock on the quota owner).
+`SaveIn` validates the snapshot, uses the server timestamp for new codes, and
+rejects a different token for an existing code. These methods do not grant
+authorization or enforce a quota independently of the host.
 
 The PostgreSQL demo creates the table during seeding and exposes `/api/postgres/query-snapshots` behind its existing local-only guard. Its `StorageAdapter` uses the HTTP store. Named search names/default selections still live in browser storage in this demo, while shared snapshot payloads persist in PostgreSQL.
 

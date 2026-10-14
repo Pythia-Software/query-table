@@ -290,7 +290,7 @@ describe("standard grouping model", () => {
       { field: "@computed/missing", op: "=", value: "1" },
     ];
     expect(() => applyQuery(rows, invalid, schema)).toThrow(
-      /cannot be executed exactly/,
+      /unavailable field/,
     );
     const model = createGroupingModel(schema);
     expect(() =>

@@ -1,5 +1,11 @@
 # SQLite + Go integration
 
+For grouped result rows, calendar/timezone metrics, canonical source predicates
+and narrow source dependency plans, use the opt-in `QueryDatasetV3` executor.
+The existing v1/v2 APIs below remain compatible. See the
+[next-release host integration guide](host-integration-next-release.md) for the
+versioned transport, transaction/budget contract and migration examples.
+
 The dependency-free `github.com/Pythia-Software/query-table/backends/go` module
 supports SQLite 3.38+ with JSON functions. The application supplies the driver,
 connection pool, authorized dataset scope, HTTP endpoints, and deadlines.

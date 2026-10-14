@@ -71,6 +71,8 @@ import * as ui from "@pythia-software/query-table-ui";
 import * as codegen from "@pythia-software/query-table-codegen";
 
 if (typeof core.normalizeQueryState !== "function") throw new Error("core runtime export missing");
+for (const name of ["toQueryRequestV3", "validateQueryResultV3", "sourceDependencies", "QuerySnapshotHttpError"])
+  if (typeof core[name] !== "function") throw new Error("next-release core export missing: " + name);
 if (typeof react.useQueryTable !== "function") throw new Error("react runtime export missing");
 if (typeof ui.DataTable !== "function") throw new Error("ui runtime export missing");
 if (typeof codegen.generateTypeScript !== "function") throw new Error("codegen runtime export missing");
@@ -81,8 +83,10 @@ if (!import.meta.resolve("@pythia-software/query-table-ui/theme.css").endsWith("
 
   writeFileSync(
     join(consumerDirectory, "types.ts"),
-    `import type { QueryState } from "@pythia-software/query-table-core";
-import type { QueryTableApi } from "@pythia-software/query-table-react";
+    `import { sourceDependencies, toQueryRequestV3, QuerySnapshotHttpError,
+  type QueryState, type FieldSchema, type QueryRequestV3, type QueryResultV3,
+  type Transport } from "@pythia-software/query-table-core";
+import type { QueryTableApi, UseQueryTableOptions } from "@pythia-software/query-table-react";
 import type { DataTableProps } from "@pythia-software/query-table-ui";
 import type { GoGenerationOptions } from "@pythia-software/query-table-codegen";
 
@@ -90,7 +94,18 @@ declare const query: QueryState;
 declare const table: QueryTableApi<{ id: number }>;
 declare const props: DataTableProps<{ id: number }>;
 declare const go: GoGenerationOptions;
-void [query, table, props, go];
+declare const schema: FieldSchema<{ id: number }>;
+declare const transport: Transport<{ id: number }>;
+declare const request: QueryRequestV3;
+declare const result: QueryResultV3;
+const options: UseQueryTableOptions<{ id: number }> = {
+  schema, transport, queryParameter: "q_runs", active: true,
+};
+void table.restoreLocation("https://example.test/?q=2j.e30", new AbortController().signal);
+const status: "resolving" | "ready" | "error" = table.restoration.status;
+const ready: boolean = table.restoration.ready;
+void [query, table, props, go, options, request, result, status, ready, sourceDependencies,
+  toQueryRequestV3, QuerySnapshotHttpError];
 `,
   );
   run(

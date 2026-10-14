@@ -116,15 +116,24 @@ and ROW badges appear only while grouping. All role colors use the library's
 
 ## Current execution boundary
 
-Row-producing grouping currently executes only over complete `clientRows`
-without a transport. It is disabled for backend tables; loading a grouped query
-into one reports an explicit error before fetching. Neither the Go PostgreSQL
-nor SQLite row/metric transport has a grouped-row protocol yet. Passing a
-server page as `clientRows` does not make it a complete population.
+Remote row-producing grouping executes through a negotiated `fetchQueryV3`
+transport. Local grouping accepts `clientRows` already available in memory. The Go
+`QueryDatasetV3` adapter executes groups and metrics in SQLite/PostgreSQL.
+Unextended v1/v2 transports still reject grouping before fetching. Passing a
+server page as `clientRows` does not make it complete. There is no bulk-download
+fallback for unsupported remote queries. Backend draft previews
+use the same versioned executor. See the
+[host integration guide](host-integration-next-release.md) for setup, budgets,
+source dependency planning and simultaneous-checkout development.
 
 There are no nested stages, joins, arbitrary SQL, or calendar bucketing of table
-rows. Source computed-field filters and regex source filters are rejected;
-regex aggregate formulas require isolated execution and are not enabled here.
+rows. Canonical computed keys, formulas, predicates and representative ordering
+use the host's healthy capability/revision envelope. Backend source filtering
+requires the independent `ComputedFilterable` allowlist. Complete local sources
+can supply approved materialized canonical fields; ordinary unapproved computed
+predicates remain disabled. SQLite source regex predicates use its bounded RE2
+profile; PostgreSQL/local grouping retain rejection. Regex aggregate formulas
+require isolated execution and are not enabled here.
 Ordinary supported aggregate formulas use the same compiler, reductions, numeric
 checks and null semantics as the metric engine. Datetime reductions return ISO
 instants. Group keys preserve scalar types and distinguish null from empty text.

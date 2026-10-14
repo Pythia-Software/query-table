@@ -256,7 +256,7 @@ describe("reusable computed definitions", () => {
     expect(notifications).toBe(2);
     off();
   });
-  it("round-trips computed IDs and retains sorts/metrics for capability validation", () => {
+  it("round-trips computed IDs and retains predicates/sorts/metrics for capability validation", () => {
     const query = normalizeQueryState({
       ...EMPTY_QUERY,
       select: [{ field: "@computed/domain", width: 180 }],
@@ -265,7 +265,7 @@ describe("reusable computed definitions", () => {
       aggregations: [{ id: "x", op: "count", groupBy: ["@computed/domain"] }],
     });
     expect(decodeQuery(encodeQuery(query))).toEqual(query);
-    expect(query.where).toEqual([]);
+    expect(query.where).toEqual([{ field: "@computed/domain", op: "=", value: "x" }]);
     expect(query.orderBy).toEqual([{ field: "@computed/domain", dir: "asc" }]);
     expect(query.aggregations?.[0]?.groupBy).toEqual(["@computed/domain"]);
     const schema: FieldSchema = {

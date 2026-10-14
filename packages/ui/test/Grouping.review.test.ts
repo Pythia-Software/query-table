@@ -2,7 +2,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { MAX_GROUP_BY_FIELDS, normalizeQueryState, type FieldSchema, type GroupedRow, type QueryState, type SummaryColumn } from "@pythia-software/query-table-core";
+import { MAX_GROUP_BY_FIELDS, normalizeQueryState, createGroupingModel, type FieldSchema, type GroupedRow, type QueryState, type SummaryColumn, type QueryRequestV3, type QueryResultV3, type Transport } from "@pythia-software/query-table-core";
 import { useQueryTable, type QueryTableApi } from "@pythia-software/query-table-react";
 import { QueryBuilder } from "../src/QueryBuilder";
 
@@ -22,6 +22,37 @@ function Fixture({ initialQuery, sourceSchema = schema }: { initialQuery: QueryS
   api = useQueryTable({ schema: sourceSchema, initialQuery, clientRows: rows, debounceMs: 0 });
   return createElement(QueryBuilder<GroupedRow>, { api, fields: api.schema!.fields, total: api.total });
 }
+
+it("previews server group drafts, cancels superseded requests and ignores late responses", async () => {
+  const requests: {request:QueryRequestV3;signal:AbortSignal | undefined;resolve:(result:QueryResultV3)=>void}[]=[];
+  const response = (request:QueryRequestV3, team="fresh", total=77):QueryResultV3 => {
+    const projection=createGroupingModel(schema).resultSchema(request.grouping!.keys,request.grouping!.summaries);
+    return {version:3,now:request.now,sourceTotal:100,total:1,rows:request.rows?[{__qt_group_id__:'[["team","a"]]',team,total}]:[],metrics:[],
+      schema:{name:projection.name,idField:projection.idField,fields:projection.fields.map(({name,type})=>({name,type}))},
+      execution:{profile:request.profile,planToken:"",resolvedRevisions:{},fields:{}}};
+  };
+  const transport:Transport<GroupedRow>={fetchRows:async()=>({rows:[],total:0}),
+    queryCapabilities:{version:3,profile:"qt-sqlite-v1",groupedRows:true,calendarGrouping:true,computedSourceFilters:false,regex:false,maxRows:10000,maxGroups:2000,maxPopulation:250000},
+    fetchQueryV3:async(request,signal)=>request.rows&&request.result.limit===8
+      ?new Promise(resolve=>requests.push({request,signal,resolve})):response(request)};
+  const initialQuery=normalizeQueryState({select:[{field:"team"},{field:"total"}],grouping:{keys:["team"],summaries:[{id:"total",op:"sum",field:"amount"}],representative:null,source:normalizeQueryState({})}});
+  function RemoteFixture(){api=useQueryTable({schema,initialQuery,transport,debounceMs:0});return createElement(QueryBuilder<GroupedRow>,{api,fields:api.schema!.fields,total:api.total})}
+  await act(async()=>root.render(createElement(RemoteFixture)));
+  await act(async()=>{await vi.advanceTimersByTimeAsync(25)});
+  await click("Customize columns");
+  expect(requests).toHaveLength(1);
+  expect(document.querySelector(".qt-columns-editor")?.textContent).toContain("Loading server preview");
+  const column=document.querySelector<HTMLButtonElement>('.qt-column-item-name[title="Total Amount"]')!;
+  await act(async()=>column.click());
+  const average=Array.from(document.querySelectorAll<HTMLButtonElement>('[aria-label="Summary choices"] button')).find(button=>button.querySelector("strong")?.textContent==="Average")!;
+  expect(average).toBeDefined();await act(async()=>average.click());
+  expect(requests).toHaveLength(2);expect(requests[0]!.signal?.aborted).toBe(true);
+  await act(async()=>requests[1]!.resolve(response(requests[1]!.request)));
+  expect(document.querySelector(".qt-group-preview-table")?.textContent ?? document.querySelector(".qt-columns-editor")?.textContent).toContain("fresh");
+  await act(async()=>requests[0]!.resolve(response(requests[0]!.request,"stale",1)));
+  expect(document.querySelector(".qt-columns-editor")?.textContent).not.toContain("stale");
+  await click("Close column editor");await clickText("Discard changes");expect(requests[1]!.signal?.aborted).toBe(true);
+});
 async function mount(keys: string[], sourceSchema = schema, diagnostics?: string[], summaries: SummaryColumn[] = []) {
   const initialQuery = normalizeQueryState({
     select: [...keys.map(field => ({ field })), ...summaries.map(s => ({ field: s.id }))],

@@ -17,6 +17,7 @@ export interface RequestActivityApi {
 const methods = new Set([
   "fetchRows",
   "fetchRowsV2",
+  "fetchQueryV3",
   "fetchMetrics",
   "fetchAggregations",
   "fetchRow",

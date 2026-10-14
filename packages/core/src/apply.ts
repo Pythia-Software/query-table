@@ -62,11 +62,11 @@ export function applyQuery<Row>(
   // evaluates those separately; `byName` has no opinion on them anyway). An OR
   // group is all-or-nothing, so a single computed member drops the whole term.
   const whereTerms = q.where
-    .filter((term) => !predicatesOf(term).some((c) => isComputedField(c.field)))
+    .filter((term) => !predicatesOf(term).some((c) => isComputedField(c.field) && !computedInputAllowed(schema, c.field, "filter")))
     .map((term) => prepareWhereTerm(term, resolveField, now));
   prepareDatetimePredicates(whereTerms, byName);
   const orderBy = q.orderBy
-    .filter((term) => !isComputedField(term.field))
+    .filter((term) => !isComputedField(term.field) || computedInputAllowed(schema, term.field, "sort"))
     .map((term) => ({ ...term, field: resolveField(term.field) }));
 
   let out = rows.filter((row) =>
@@ -112,6 +112,13 @@ export function applyQuery<Row>(
   const start = q.offset > 0 ? q.offset : 0;
   const end = q.limit > 0 ? start + q.limit : out.length;
   return { rows: out.slice(start, end), total };
+}
+
+/** Explicit host bindings or approved evaluated accessors can participate in
+ * local source stages. Ordinary unapproved computed controls stay disabled. */
+export function computedInputAllowed(schema: FieldSchema, name: string, operation: "filter" | "sort"): boolean {
+  const field = schema.fields.find(field => field.name === name);
+  return !!field && (field.source.kind === "backend" && field[operation]?.enabled !== false || field[operation]?.enabled === true);
 }
 
 /** Does one row satisfy one clause? Exposed for the CellMenu preview + tests. */

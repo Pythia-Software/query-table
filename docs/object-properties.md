@@ -110,7 +110,8 @@ the current tab; `_blank` opens a new tab. Page settings live in
 Supply an options object instead of `true` to restrict creator-approved `modes`,
 provide property `storage`, `objectType`, a detail-only `schema`, `relationships`,
 or a custom `loadRow(id, signal)`. Hosts managing their own table URL parameter can
-set `queryParameter` (default `q`). Optional `DataTable.itemRenderers` overrides
+set `useQueryTable.queryParameter` (default `q`). The legacy
+`itemDetails.queryParameter` remains a fallback. Optional `DataTable.itemRenderers` overrides
 are layered over its table renderer registry. A standalone `ObjectInspector` can
 share the modal view using `propertyApi={api.itemDetails!.properties}` (the
 compatibility alias) or select any controller from `propertiesByMode`. Detail

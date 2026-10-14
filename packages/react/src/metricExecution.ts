@@ -28,6 +28,8 @@ import {
 } from "./formulaWorker";
 
 export interface MetricExecutionContext<Row> {
+  executeV3?: (query: QueryState, signal?: AbortSignal) => Promise<AggregationResult>;
+  queryContextKey?: string;
   schema: FieldSchema<Row>;
   /** One clock shared by source grouping, HAVING, rows and local metrics. */
   now?: number;
@@ -213,6 +215,7 @@ export async function executeMetrics<Row>(
   abort(signal);
   const clauses = query.aggregations ?? [];
   if (!clauses.length) return { metrics: [] };
+  if (context.executeV3) return context.executeV3(query, signal);
   const supportsV2 =
     !!context.transport?.fetchMetrics &&
     context.transport.metricCapabilities?.version === 2;
@@ -292,7 +295,7 @@ export async function executeMetrics<Row>(
   if (matching.length) {
     if (matching.some((c) => c.dateGrouping))
       throw Error(
-        "Date grouping currently requires a complete client dataset or local shown-row execution. This metric server does not support it.",
+        "This server does not support calendar grouping. Enable the v3 query executor.",
       );
     const transport = context.transport;
     const scoped = { ...query, aggregations: matching };
@@ -375,7 +378,7 @@ export async function executeMetrics<Row>(
       );
     } else
       throw Error(
-        "All-matching metrics require a complete client dataset or a metric-capable server transport.",
+        "Remote all-matching metrics require a metric-capable server transport.",
       );
   }
   abort(signal);

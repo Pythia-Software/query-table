@@ -249,7 +249,7 @@ export function useComputedColumns<Row>(options: Options<Row>): {
       for (const id of activeIds.split(",").filter(Boolean)) {
         if (
           options.execution?.fields[computedFieldName(id)]?.select &&
-          transport?.fetchRowsV2
+          (transport?.fetchRowsV2 || transport?.fetchQueryV3)
         )
           continue;
         const entry = plans.get(id);
@@ -305,7 +305,7 @@ export function useComputedColumns<Row>(options: Options<Row>): {
             if (entry?.error) return { computedError: entry.error };
             if (
               options.execution?.fields[computedFieldName(def.id)]?.select &&
-              transport?.fetchRowsV2
+              (transport?.fetchRowsV2 || transport?.fetchQueryV3)
             ) {
               if (
                 options.serverExecution?.profile !==
@@ -349,10 +349,11 @@ export function useComputedColumns<Row>(options: Options<Row>): {
                 : { computedError: "Calculating…" };
           },
         },
-        filter: { enabled: false },
+        filter: { enabled: options.execution?.fields[computedFieldName(def.id)]?.filter === true &&
+          executionRevision(options.execution, def.id) === def.revision && !!entry?.plan && !hasRegex(entry.plan) },
         sort: {
           enabled:
-            !!transport?.fetchRowsV2 &&
+            !!(transport?.fetchRowsV2 || transport?.fetchQueryV3) &&
             !!options.execution?.fields[computedFieldName(def.id)]?.sort &&
             executionRevision(options.execution, def.id) === def.revision &&
             !!entry?.plan &&
@@ -361,8 +362,7 @@ export function useComputedColumns<Row>(options: Options<Row>): {
         aggregate: {
           measure: !!entry?.plan,
           groupable:
-            !!transport?.fetchMetrics &&
-            transport.metricCapabilities?.version === 2 &&
+            (!!transport?.fetchMetrics && transport.metricCapabilities?.version === 2 || !!transport?.fetchQueryV3) &&
             !!options.execution?.fields[computedFieldName(def.id)]?.group &&
             executionRevision(options.execution, def.id) === def.revision &&
             !!entry?.plan &&
