@@ -516,3 +516,57 @@ existing property-view controls.
 See the [cell display guide](../../docs/cell-displays.md) for typed configuration,
 units, examples, and inspection limits. `JsonCell` and the embedded `JsonValueView`
 are also exported for standalone use.
+
+## Compact metric covers
+
+`<MetricCard compact clause={clause} result={result} fields={fields} />` uses
+sparse round numeric ticks and short unit labels for a small chart. Calendar
+charts keep the computation timezone and use sparse local calendar boundaries;
+bar timelines render chronologically. This is a rendering option, so saved query
+formats and full data values are unchanged. Explicit axis bounds are respected.
+
+Compact Cartesian charts put both axis titles below the plot on one line,
+with ↑ for the vertical axis and → for the horizontal axis. The compact plot
+reserves only the tick gutter, allowing more width for data. Full charts retain
+their usual title placement. Metric loading uses an accessible spinner and
+respects reduced-motion preferences.
+
+Compact box plots label each row above its glyph and show its median. Each row
+uses an independent linear scale focused on its whiskers, omitting outlier
+markers. A visible guide explains that the box spans the middle 50%, the line
+marks the median, and scales differ between rows. Full statistics and outlier
+counts remain in accessible mark descriptions and the data table. Allow at least
+52px per plotted row plus the guide; constrain the supplied bucket count when
+using a fixed-height cover. The default full chart retains its shared scale.
+
+### Underline list bars
+
+Use `display: { kind: "list", list: { barPosition: "below" } }` to put a thin
+bar under each label and value. Labels wrap across the available row instead of
+being ellipsized in a narrow column. The default `"inline"` layout keeps the bar
+beside the label. The metric editor exposes both under **Bar placement**. This
+setting survives query links and saved views; it does not change computation,
+sort order, values, or the `showBars` / `showValues` switches.
+
+Set `display.list.maxLabelLines` to a positive integer to cap the wrapped label
+height when `barPosition` is `"below"`, for example
+`list: { barPosition: "below", maxLabelLines: 2 }`. Omit it for unlimited lines;
+the editor's **Maximum label lines** input accepts a blank value for unlimited.
+The limit has no effect on inline bars. Truncated labels keep their full text in
+the tooltip, and the limit survives query links and saved views.
+
+### Visible groups and remainder
+
+`display.maxGroups` caps displayed groups in result order without changing the
+metric computation or its server `groupLimit`. It is a positive integer, and
+the editor exposes it as **Maximum displayed groups**. Omission retains the
+automatic layout limits (for example eight pie slices and six histogram series).
+
+`display.showOther` controls the synthetic remainder in pie/donut charts
+(default true) and lists (default false). Lists combine only exact additive
+counts or sums, with complete results or an exact server remainder. Averages,
+rates, missing values, and partial results never produce an invented remainder.
+Hiding a pie remainder retains the full denominator and leaves its angular
+share empty; it does not rescale the selected groups to 100%. A real group named
+Other remains visible. Both settings survive query links and saved views.
+Use `display.legendPosition: "none"` to hide the chart key.

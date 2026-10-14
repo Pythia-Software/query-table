@@ -772,3 +772,69 @@ it("uses Escape to discard a numeric draft first, then closes the unmodified wor
     host.remove();
   }
 });
+
+it("saves underline bar placement and keeps other list settings", async () => {
+  const host = document.createElement("div"); document.body.append(host);
+  const root = createRoot(host), setQuery = vi.fn(), onClose = vi.fn();
+  const clause: AggregationClause = { id: "m", op: "count", groupBy: ["group"], display: { kind: "list", list: { showValues: false } } };
+  const fields: FieldDef<unknown>[] = [{ name: "group", type: "text", label: "Group", source: { kind: "backend" } }];
+  const api = { aggregations: { clauses: [clause] }, setQuery, rows: [], total: 0, query: { where: [] } } as unknown as QueryTableApi<unknown>;
+  try {
+    await act(async () => root.render(createElement(MetricsEditor, { api, fields, onClose })));
+    const select = host.querySelector<HTMLSelectElement>('[aria-label="List bar placement"]')!;
+    expect(select.value).toBe("inline");
+    expect(host.querySelector('[aria-label="Maximum label lines"]')).toBeNull();
+    act(() => { select.value = "below"; select.dispatchEvent(new Event("change", { bubbles: true })); });
+    const limit = host.querySelector<HTMLInputElement>('[aria-label="Maximum label lines"]')!;
+    expect(limit.value).toBe("");
+    expect(limit.placeholder).toBe("Unlimited");
+    editInput(limit, "3");
+    commitInput(limit);
+    expect(clause.display!.list!.barPosition).toBeUndefined();
+    const apply = [...host.querySelectorAll("button")].find(b => b.textContent === "Apply metrics")!;
+    expect(apply.disabled).toBe(false);
+    act(() => apply.click());
+    expect(setQuery.mock.calls[0]![0]({ where: [] }).aggregations[0].display.list).toEqual({ showValues: false, barPosition: "below", maxLabelLines: 3 });
+  } finally { act(() => root.unmount()); host.remove(); }
+});
+
+it("clears a stored label limit to unlimited and preserves a numeric draft until commit", async () => {
+  const host = document.createElement("div"); document.body.append(host);
+  const root = createRoot(host), setQuery = vi.fn();
+  const clause: AggregationClause = { id: "m", op: "count", groupBy: ["group"], display: { kind: "list", list: { barPosition: "below", maxLabelLines: 2 } } };
+  const fields: FieldDef<unknown>[] = [{ name: "group", type: "text", label: "Group", source: { kind: "backend" } }];
+  const api = { aggregations: { clauses: [clause] }, setQuery, rows: [], total: 0, query: { where: [] } } as unknown as QueryTableApi<unknown>;
+  try {
+    await act(async () => root.render(createElement(MetricsEditor, { api, fields, onClose: vi.fn() })));
+    const input = host.querySelector<HTMLInputElement>('[aria-label="Maximum label lines"]')!;
+    expect(input.value).toBe("2");
+    editInput(input, "0");
+    expect(input.value).toBe("0");
+    commitInput(input);
+    expect(input.value).toBe("1");
+    editInput(input, "");
+    commitInput(input);
+    expect(input.value).toBe("");
+    act(() => [...host.querySelectorAll("button")].find(b => b.textContent === "Apply metrics")!.click());
+    expect(setQuery.mock.calls[0]![0]({ where: [] }).aggregations[0].display.list).toEqual({ barPosition: "below" });
+    expect(clause.display!.list!.maxLabelLines).toBe(2);
+  } finally { act(() => root.unmount()); host.remove(); }
+});
+
+it("saves display group limits and remainder visibility separately from the query group limit", async () => {
+  const host = document.createElement("div"); document.body.append(host);
+  const root = createRoot(host), setQuery = vi.fn();
+  const clause: AggregationClause = { id: "m", op: "count", groupBy: ["group"], groupLimit: 12, display: { kind: "list" } };
+  const fields: FieldDef<unknown>[] = [{ name: "group", type: "text", label: "Group", source: { kind: "backend" } }];
+  const api = { aggregations: { clauses: [clause] }, setQuery, rows: [], total: 0, query: { where: [] } } as unknown as QueryTableApi<unknown>;
+  try {
+    await act(async () => root.render(createElement(MetricsEditor, { api, fields, onClose: vi.fn() })));
+    const input = host.querySelector<HTMLInputElement>('[aria-label="Maximum displayed groups"]')!;
+    editInput(input, "2"); commitInput(input);
+    act(() => host.querySelector<HTMLInputElement>('[aria-label="Show Other remainder"]')!.click());
+    act(() => [...host.querySelectorAll("button")].find(b => b.textContent === "Apply metrics")!.click());
+    const saved = setQuery.mock.calls[0]![0]({ where: [] }).aggregations[0];
+    expect(saved.display).toMatchObject({ maxGroups: 2, showOther: true });
+    expect(saved.groupLimit).toBe(12);
+  } finally { act(() => root.unmount()); host.remove(); }
+});

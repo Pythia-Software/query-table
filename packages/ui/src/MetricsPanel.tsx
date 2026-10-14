@@ -35,6 +35,9 @@ import {
   metricScale,
   metricGroupKeyLabel,
   metricGroupLabel,
+  metricDisplayBuckets,
+  isMetricOtherBucket,
+  metricKeyedLimit,
 } from "./metricChartHelpers";
 import { formatMetricOutput } from "./metricFormat";
 import type {
@@ -173,6 +176,8 @@ export function MetricsPanel<Row>({
 }
 
 export interface MetricCardProps<Row> {
+  /** Sparse cover axes and labelled box rows with independent whisker scales. */
+  compact?: boolean | undefined;
   onEdit?: (() => void) | undefined;
   clause: AggregationClause;
   buckets?: AggregationBucket[] | undefined;
@@ -190,6 +195,7 @@ export interface MetricCardProps<Row> {
 }
 
 export function MetricCard<Row>({
+  compact = false,
   clause,
   buckets: explicitBuckets,
   onEdit,
@@ -203,7 +209,10 @@ export function MetricCard<Row>({
   classNames,
   onInspect,
 }: MetricCardProps<Row>): ReactNode {
-  const buckets = explicitBuckets ?? result?.buckets ?? [];
+  const allBuckets = explicitBuckets ?? result?.buckets ?? [];
+  const buckets = ["pie", "donut", "value"].includes(clause.display?.kind ?? "") ? allBuckets
+    : metricDisplayBuckets(clause, allBuckets, result?.groupCount, result?.other, result?.coverage === "partial");
+  const keyedLimit = metricKeyedLimit(clause);
   const byName = useMemo(
     () => new Map(fields.map((f) => [f.name, f])),
     [fields],
@@ -275,12 +284,13 @@ export function MetricCard<Row>({
       </div>
     );
   else if (loading && buckets.length === 0)
-    body = <div className="qt-metric-loading">…</div>;
+    body = <div className="qt-metric-loading" role="status"><span className="qt-metric-spinner" aria-hidden="true" /><span className="qt-sr-only">Loading metric</span></div>;
   else if (!buckets.length)
     body = <div className="qt-metric-empty">no data</div>;
   else if (chart)
     body = (
       <MetricChart
+        compact={compact}
         clause={clause}
         buckets={buckets}
         result={result}
@@ -360,10 +370,17 @@ export function MetricCard<Row>({
         </p>
       )}
       {body}
+      {keyedLimit
+        ? buckets !== allBuckets && (
+            <p className="qt-metric-note">Showing the first {clause.display?.maxGroups} {keyedLimit.unit} in result order.</p>
+          )
+        : buckets !== allBuckets && allBuckets.length > (clause.display?.maxGroups ?? allBuckets.length) && (
+            <p className="qt-metric-note">Showing the first {clause.display?.maxGroups} groups in result order{buckets.length > clause.display!.maxGroups! ? " plus Other" : ""}.</p>
+          )}
       {result?.groupCount !== undefined &&
-        result.groupCount > buckets.length && (
+        result.groupCount > allBuckets.length && (
           <p className="qt-metric-note">
-            {buckets.length} of {result.groupCount} groups returned. Increase
+            {allBuckets.length} of {result.groupCount} groups returned. Increase
             the group limit to see more.
           </p>
         )}
@@ -409,6 +426,11 @@ function BarList({
 }) {
   const colors = createMetricColorResolver(theme),
     options = clause.display?.list;
+  const below = options?.barPosition === "below", showValues = options?.showValues !== false;
+  const requestedLines = options?.maxLabelLines;
+  const maxLabelLines = below && typeof requestedLines === "number"
+    && Number.isSafeInteger(requestedLines) && requestedLines > 0 && requestedLines <= 1000000
+    ? requestedLines : undefined;
   const showBars =
     options?.showBars !== false &&
     !buckets.some((b) => typeof b.value === "number" && b.value < 0);
@@ -428,24 +450,24 @@ function BarList({
             : 0;
         return (
           <div
-            className="qt-metric-bar-row"
+            className={`qt-metric-bar-row${below ? " qt-metric-bar-row--below" : ""}`}
             style={{
-              gridTemplateColumns: `minmax(3.375rem, 38%) ${showBars ? "1fr " : ""}${options?.showValues !== false ? "auto" : ""}`,
+              gridTemplateColumns: below ? `minmax(0, 1fr)${showValues ? " auto" : ""}` : `minmax(3.375rem, 38%) ${showBars ? "1fr " : ""}${showValues ? "auto" : ""}`,
             }}
             key={`${keyText(b.keys[0])}-${i}`}
           >
             <span
-              className="qt-metric-bar-label"
+              className={`qt-metric-bar-label${maxLabelLines ? " qt-metric-bar-label--clamped" : ""}`}
+              style={maxLabelLines ? { WebkitLineClamp: maxLabelLines } : undefined}
               title={metricGroupLabel(b, clause, locale, true)}
             >
               {options?.useGroupColors && (
                 <span
                   className="qt-metric-swatch"
                   style={{
-                    background: colors.color(
-                      clause.groupBy[0] ?? "",
-                      b.keys[0] ?? null,
-                    ),
+                    background: isMetricOtherBucket(b)
+                      ? colors.token("other")
+                      : colors.color(clause.groupBy[0] ?? "", b.keys[0] ?? null),
                     marginInlineEnd: ".35rem",
                   }}
                 />
@@ -460,17 +482,16 @@ function BarList({
                     width: `${pct}%`,
                     ...(options?.useGroupColors
                       ? {
-                          background: colors.color(
-                            clause.groupBy[0] ?? "",
-                            b.keys[0] ?? null,
-                          ),
+                          background: isMetricOtherBucket(b)
+                            ? colors.token("other")
+                            : colors.color(clause.groupBy[0] ?? "", b.keys[0] ?? null),
                         }
                       : {}),
                   }}
                 />
               </span>
             )}
-            {options?.showValues !== false && (
+            {showValues && (
               <span className="qt-metric-bar-value">
                 {b.error ?? fmt(b.value)}
               </span>

@@ -59,7 +59,19 @@ export interface MetricDisplay {
   xFormat?: MetricValueFormat;
   yFormat?: MetricValueFormat;
   legendPosition?: "left" | "right" | "top" | "bottom" | "none";
-  list?: { showBars?: boolean; useGroupColors?: boolean; showValues?: boolean };
+  /** Maximum displayed groups; does not change the computed result or ordering. */
+  maxGroups?: number;
+  /** Show the exact additive remainder in pie/donut (default true) or list (default false). */
+  showOther?: boolean;
+  list?: {
+    showBars?: boolean;
+    useGroupColors?: boolean;
+    showValues?: boolean;
+    /** Place the line bar beside the label (default) or underneath a wrapping label. */
+    barPosition?: "inline" | "below";
+    /** Maximum wrapped label lines for below bars (positive integer); omitted means unlimited. */
+    maxLabelLines?: number;
+  };
   pivot?: {
     swap?: boolean;
     rowDir?: "asc" | "desc";

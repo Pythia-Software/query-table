@@ -11,7 +11,7 @@ export function normalizeMetricOptions(
     input: Record<string, unknown>,
     specs: Record<
       string,
-      readonly string[] | "string" | "boolean" | "integer" | "number"
+      readonly string[] | "string" | "boolean" | "integer" | "positiveInteger" | "number"
     >,
   ): Record<string, unknown> => {
     const result: Record<string, unknown> = {};
@@ -25,10 +25,10 @@ export function normalizeMetricOptions(
             ? typeof v === "number" && Number.isFinite(v)
             : spec === "boolean"
               ? typeof v === "boolean"
-              : spec === "integer"
+              : spec === "integer" || spec === "positiveInteger"
                 ? typeof v === "number" &&
                   Number.isSafeInteger(v) &&
-                  v >= 0 &&
+                  v >= (spec === "positiveInteger" ? 1 : 0) &&
                   v <= 1000000
                 : typeof v === "string" && spec.includes(v)
       )
@@ -92,6 +92,8 @@ export function normalizeMetricOptions(
         xLabel: "string",
         yLabel: "string",
         legendPosition: ["left", "right", "top", "bottom", "none"],
+        maxGroups: "positiveInteger",
+        showOther: "boolean",
         boxMean: "boolean",
       });
       for (const k of ["xScale", "yScale"]) {
@@ -130,6 +132,8 @@ export function normalizeMetricOptions(
           showBars: "boolean",
           useGroupColors: "boolean",
           showValues: "boolean",
+          barPosition: ["inline", "below"],
+          maxLabelLines: "positiveInteger",
         });
       if (record(raw.display.pivot))
         d.pivot = copy(raw.display.pivot, {

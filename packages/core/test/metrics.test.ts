@@ -504,7 +504,7 @@ describe("metric boundaries and computation identity", () => {
       display: {
         kind: "scatter",
         format: { kind: "percent", decimals: 2 },
-        list: { showValues: true },
+        list: { showValues: true, barPosition: "below" },
         xScale: { mode: "log", min: 0.001, max: 1000 },
         yScale: { mode: "linear", min: -100, max: 500 },
       },
@@ -1198,4 +1198,37 @@ describe("MEDIAN aggregate expressions", () => {
       }),
     ).toThrow(/does not allow/);
   });
+});
+
+it("list bar placement survives query links without changing computation identity", () => {
+  const inline = metric("COUNT()", { groupBy: ["platform"], display: { kind: "list", list: { barPosition: "inline" } } });
+  const below: AggregationClause = { ...inline, display: { ...inline.display!, list: { barPosition: "below" } } };
+  expect(decodeQuery(encodeQuery(query(below))).aggregations?.[0]?.display?.list?.barPosition).toBe("below");
+  expect(metricComputationKey([inline])).toBe(metricComputationKey([below]));
+  const invalid = normalizeQueryState(query({ ...below, display: { kind: "list", list: { barPosition: "sideways" } } } as unknown as AggregationClause));
+  expect(invalid.aggregations?.[0]?.display?.list?.barPosition).toBeUndefined();
+});
+
+it("wrapped label limits round-trip as presentation settings and reject invalid limits", () => {
+  const base = metric("COUNT()", { groupBy: ["platform"], display: { kind: "list", list: { barPosition: "below" } } });
+  for (const maxLabelLines of [1, 2, 3, 1000000]) {
+    const limited: AggregationClause = { ...base, display: { ...base.display!, list: { ...base.display!.list, maxLabelLines } } };
+    expect(decodeQuery(encodeQuery(query(limited))).aggregations?.[0]?.display?.list?.maxLabelLines).toBe(maxLabelLines);
+    expect(metricComputationKey([limited])).toBe(metricComputationKey([base]));
+  }
+  expect(decodeQuery(encodeQuery(query(base))).aggregations?.[0]?.display?.list?.maxLabelLines).toBeUndefined();
+  for (const maxLabelLines of [0, -1, 1.5, NaN, Infinity, 1000001, "2", null]) {
+    const normalized = normalizeQueryState(query({ ...base, display: { kind: "list", list: { barPosition: "below", maxLabelLines } } } as unknown as AggregationClause));
+    expect(normalized.aggregations?.[0]?.display?.list?.maxLabelLines).toBeUndefined();
+    expect(normalized.aggregations?.[0]?.diagnostics).toContain("Invalid metric maxLabelLines.");
+  }
+});
+
+it("displayed group limits, remainder visibility and legend round-trip without changing computation", () => {
+  const base = metric("COUNT()", { groupBy: ["platform"] });
+  const changed: AggregationClause = { ...base, display: { kind: "list", maxGroups: 2, showOther: false, legendPosition: "none" } };
+  expect(decodeQuery(encodeQuery(query(changed))).aggregations?.[0]?.display).toEqual(changed.display);
+  expect(metricComputationKey([changed])).toBe(metricComputationKey([base]));
+  const invalid = normalizeQueryState(query({ ...base, display: { kind: "list", maxGroups: 0, showOther: "true" } } as unknown as AggregationClause));
+  expect(invalid.aggregations?.[0]?.diagnostics).toEqual(expect.arrayContaining(["Invalid metric maxGroups.", "Invalid metric showOther."]));
 });

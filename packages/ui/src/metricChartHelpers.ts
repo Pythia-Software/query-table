@@ -5,6 +5,7 @@ import type {
   MetricValueFormat,
 } from "./metricTypes";
 import { metricTimestamp, formatMetricOutput } from "./metricFormat";
+import { metricTupleKey } from "./metricColors";
 /** Calendar group labels must describe the same local dates as the computation. */
 export function metricDateGroupFormat(
   clause: RenderingClause,
@@ -51,13 +52,18 @@ export function metricGroupKeyLabel(
     : metricDateGroupFormat(clause);
   return formatMetricOutput(value, format, locale).text;
 }
+/** Synthetic remainder rows, labelled verbatim rather than as group keys. */
+const otherBuckets = new WeakSet<MetricBucket>();
+export const isMetricOtherBucket = (b: MetricBucket): boolean => otherBuckets.has(b);
 export const metricGroupLabel = (
   b: MetricBucket,
   clause?: RenderingClause,
   locale?: string,
   detailed = false,
 ): string =>
-  b.keys.length
+  otherBuckets.has(b)
+    ? String(b.keys[0])
+    : b.keys.length
     ? b.keys
         .map((v, axis) =>
           metricGroupKeyLabel(v, axis, clause, locale, detailed),
@@ -125,6 +131,7 @@ export function metricPieSlices(
   groupCount?: number,
   other?: MetricBucket,
   limit = 8,
+  showOther = true,
 ): { slices: MetricPieSlice[]; total: number; error?: string } {
   const fail = (error: string) => ({ slices: [], total: 0, error });
   if (!additiveMetric(clause))
@@ -151,7 +158,7 @@ export function metricPieSlices(
   const remainder =
     tail.reduce((n, b) => n + (b.value as number), 0) +
     ((other?.value as number) ?? 0);
-  if (tail.length || other)
+  if (showOther && (tail.length || other))
     slices.push({
       bucket: {
         keys: ["Other"],
@@ -162,6 +169,53 @@ export function metricPieSlices(
       other: true,
     });
   return { slices, total };
+}
+
+/**
+ * Line buckets are (time, series) points and pivot buckets are (row, column)
+ * cells, so their limit applies to series or rows rather than to buckets.
+ */
+export function metricKeyedLimit(clause: RenderingClause): { unit: "series" | "rows"; key: (b: MetricBucket) => string } | undefined {
+  const kind = clause.display?.kind ?? "auto";
+  if (kind === "line") return { unit: "series", key: b => metricTupleKey(b.keys.slice(1)) };
+  if ((kind === "table" || kind === "auto") && clause.groupBy.length === 2) {
+    const axis = clause.display?.pivot?.swap ? 1 : 0;
+    return { unit: "rows", key: b => metricTupleKey([b.keys[axis] ?? null]) };
+  }
+  return undefined;
+}
+
+/** Presentation limit, with an exact additive remainder only when requested. */
+export function metricDisplayBuckets(clause: RenderingClause, buckets: MetricBucket[], groupCount?: number, other?: MetricBucket, partial = false): MetricBucket[] {
+  const requested = clause.display?.maxGroups;
+  const limited = Number.isSafeInteger(requested) && !!requested && requested >= 1 && requested <= 1000000;
+  if (!limited && (!other || !clause.display?.showOther)) return buckets;
+  const keyed = metricKeyedLimit(clause);
+  if (keyed) {
+    if (!limited) return buckets;
+    const kept = new Set<string>(), all = new Set<string>();
+    for (const b of buckets) {
+      const key = keyed.key(b);
+      all.add(key);
+      if (kept.size < requested!) kept.add(key);
+    }
+    return kept.size < all.size ? buckets.filter(b => kept.has(keyed.key(b))) : buckets;
+  }
+  const limit = limited ? requested! : buckets.length;
+  const head = buckets.slice(0, limit), tail = buckets.slice(limit);
+  const all = other ? [...buckets, other] : buckets;
+  const list = clause.display?.kind === "list" || ((clause.display?.kind ?? "auto") === "auto" && clause.groupBy.length === 1);
+  if (!list || !clause.display?.showOther || !additiveMetric(clause) || partial
+    || (groupCount !== undefined && groupCount > buckets.length && !other)
+    || all.some(b => b.error || !finiteMetricNumber(b.value) || b.value < 0)) return head;
+  const remainder = tail.reduce((n, b) => n + Number(b.value), Number(other?.value ?? 0));
+  if ((tail.length || other) && Number.isFinite(remainder)) {
+    const row: MetricBucket = { keys: ["Other (combined remainder)"], value: remainder,
+      count: tail.reduce((n, b) => n + b.count, other?.count ?? 0) };
+    otherBuckets.add(row);
+    head.push(row);
+  }
+  return head;
 }
 
 /** Unit-interval coordinate without overflowing for opposite signed finite extremes. */

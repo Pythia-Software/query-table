@@ -173,3 +173,52 @@ func TestV3StagingBudgetsBeforeMaterialization(t *testing.T) {
 		t.Fatalf("population budget created=%d err=%v", created, err)
 	}
 }
+
+func TestFormulaGroupErrorsHaveDistinctIdentities(t *testing.T) {
+	db, d := setupV3(t)
+	if _, err := db.Exec("DELETE FROM grouped; INSERT INTO grouped(id,n,label) VALUES('null',NULL,'null label'),('error',0,'error label'),('valid',2,'valid label')"); err != nil {
+		t.Fatal(err)
+	}
+	q := groupedRequest()
+	q.ExpectedRevisions = map[string]string{"inv": "1"}
+	q.Grouping = &qt.GroupingDefinition{Keys: []string{"@computed/inv"}, Summaries: []qt.SummaryColumn{{ID: "num", Op: "count"}, {ID: "total", Op: "sum", Field: "n"}, {ID: "example", Op: "row", Field: "label"}}, Representative: &qt.RepresentativeRow{OrderBy: qt.OrderBys{{Field: "id", Dir: "asc"}}}}
+	q.Result = qt.WireQuery{Select: []string{"@computed/inv", "num", "total", "example"}, Limit: 10}
+	d.ComputedGroupable = map[string]bool{"inv": true}
+	options := qt.PlanOptions{Resolver: qt.DefinitionResolverFunc(func(_ context.Context, id string) (qt.ComputedColumn, error) {
+		return qt.ComputedColumn{ID: id, Label: "Inverse", Revision: "1", Expression: qt.ComputedExpression{Language: "qt-expr", Version: 1, Source: "1/[n]"}}, nil
+	})}
+	out, err := d.Execute(context.Background(), db, q, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Total != 3 || len(out.Rows) != 3 {
+		t.Fatal(out)
+	}
+	identities := map[any]bool{}
+	for _, row := range out.Rows {
+		identity := row[qt.GroupIdentityField]
+		if identities[identity] {
+			t.Fatalf("duplicate identity: %#v", out.Rows)
+		}
+		identities[identity] = true
+		if row["example"] != "error label" && row["num"] != float64(1) {
+			t.Fatal(row)
+		}
+		switch row["example"] {
+		case "null label":
+			if row["@computed/inv"] != nil || row["total"] != nil {
+				t.Fatal(row)
+			}
+		case "error label":
+			if !reflect.DeepEqual(row["@computed/inv"], map[string]any{"computedError": "divide_by_zero"}) || !reflect.DeepEqual(row["total"], map[string]any{"computedError": "divide_by_zero"}) || !reflect.DeepEqual(row["num"], map[string]any{"computedError": "divide_by_zero"}) {
+				t.Fatal(row)
+			}
+		case "valid label":
+			if row["@computed/inv"] != float64(.5) || row["total"] != float64(2) {
+				t.Fatal(row)
+			}
+		default:
+			t.Fatal(row)
+		}
+	}
+}
