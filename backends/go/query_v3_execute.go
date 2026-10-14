@@ -107,17 +107,7 @@ func (d QueryDatasetV3) ExecuteIn(ctx context.Context, tx *sql.Tx, q QueryReques
 	}
 	// Inspect the bounded narrow projection in the same authorized snapshot
 	// before copying it. An oversized source must never fill our temp table.
-	sizeParts := []string{}
-	for _, column := range plan.Columns {
-		for _, alias := range []string{column.ValueAlias, column.ErrorAlias} {
-			length := "length(CAST(CAST(" + queryIdent(alias) + " AS TEXT) AS BLOB))"
-			if d.Dialect == "postgres" {
-				length = "octet_length(CAST(" + queryIdent(alias) + " AS TEXT))"
-			}
-			sizeParts = append(sizeParts, "COALESCE("+length+",0)")
-		}
-	}
-	sizeSQL := "COALESCE(SUM(" + strings.Join(sizeParts, "+") + "),0)"
+	sizeSQL := d.stagingSizeSQL(plan.Columns)
 	var count, bytes int64
 	if err = tx.QueryRowContext(ctx, "SELECT COUNT(*),"+sizeSQL+" FROM ("+plan.SQL+") AS qt_source_budget", plan.Args...).Scan(&count, &bytes); err != nil {
 		return out, err

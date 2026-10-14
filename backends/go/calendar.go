@@ -225,7 +225,7 @@ func calendarRange(config MetricDateGrouping, q MetricQuery, observed []time.Tim
 		return start, end, true, nil
 	}
 	for _, term := range q.Where {
-		if term.IsGroup() || term.Negated || term.Field != config.Field || !containsString([]string{"=", ">", ">=", "<", "<="}, term.Op) {
+		if term.Value == "" || term.IsGroup() || term.Negated || term.Field != config.Field || !containsString([]string{"=", ">", ">=", "<", "<="}, term.Op) {
 			continue
 		}
 		resolved, err := ResolveRelativeDatetime(term.Value, now)
@@ -295,19 +295,58 @@ func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggS
 		rowQuery.Limit = q.Limit
 		rowQuery.Offset = q.Offset
 	}
-	names := []string{}
-	for name := range s.Fields {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	rowQuery.Select = names
-	p, err := compileComputedRowsDialect(ctx, rowQuery, s, o, d.Dialect == "sqlite")
+	// Select only this metric's expression, key, filter and window dependencies.
+	// The source/result projection can include many unrelated, large values.
+	plain := spec
+	plain.DateGrouping = nil
+	dependencyPlan, err := compileMetricDialect(ctx, q, plain, s, o, d.Dialect == "sqlite")
 	if err != nil {
+		return SQLiteMetricV2{}, err
+	}
+	names := append([]string{s.IDField, config.Field}, dependencyPlan.Dependencies...)
+	sort.Strings(names)
+	rowQuery.Select = uniqueStrings(names)
+	_, _, maxPopulation, maxBytes, err := d.limits()
+	if err != nil {
+		return SQLiteMetricV2{}, err
+	}
+	var p SQLPlan
+	if spec.Scope == "shownRows" {
+		p, err = compileComputedRowsDialect(ctx, rowQuery, s, o, d.Dialect == "sqlite")
+	} else {
+		// An all-matching reduction has no row ordering semantics.
+		rowQuery.OrderBy = nil
+		rowQuery.Limit = maxPopulation + 1
+		p, err = compileQuerySource(ctx, rowQuery, s, o, d.Dialect == "sqlite")
+	}
+	if err != nil {
+		return SQLiteMetricV2{}, err
+	}
+	dateAlias := ""
+	for _, column := range p.Columns {
+		if column.Field == config.Field {
+			dateAlias = column.ValueAlias
+		}
+	}
+	// Include the ordinal and 24-byte ISO key in this metric's scratch budget.
+	sizeSQL := d.stagingSizeSQL(p.Columns, "8", "CASE WHEN "+queryIdent(dateAlias)+" IS NULL THEN 0 ELSE 24 END")
+	if err = d.checkCalendarStaging(ctx, tx, "("+p.SQL+") AS qt_calendar_budget", sizeSQL, p.Args, maxPopulation, maxBytes); err != nil {
 		return SQLiteMetricV2{}, err
 	}
 	table := queryTableName()
 	*tables = append(*tables, table)
 	if _, err = tx.ExecContext(ctx, "CREATE TEMP TABLE "+queryIdent(table)+" AS SELECT *,ROW_NUMBER() OVER () AS qt_calendar_row FROM ("+p.SQL+") AS qt_calendar_source", p.Args...); err != nil {
+		return SQLiteMetricV2{}, err
+	}
+	// A calendar scratch relation lives for one metric, rather than accumulating
+	// with every calendar clause in the request. ExecuteIn also retains a fallback
+	// cleanup entry for failures/cancelled transactions.
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		defer cancel()
+		_, _ = tx.ExecContext(cleanup, "DROP TABLE IF EXISTS "+queryIdent(table))
+	}()
+	if err = d.checkCalendarStaging(ctx, tx, queryIdent(table), sizeSQL, nil, maxPopulation, maxBytes); err != nil {
 		return SQLiteMetricV2{}, err
 	}
 	if _, err = tx.ExecContext(ctx, "CREATE UNIQUE INDEX "+queryIdent(table+"_index")+" ON "+queryIdent(table)+" (qt_calendar_row)"); err != nil {
@@ -317,7 +356,6 @@ func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggS
 		return SQLiteMetricV2{}, err
 	}
 	calendarSchema := Schema{Name: s.Name, IDField: s.IDField, Fields: map[string]FieldSpec{}}
-	dateAlias := ""
 	for _, column := range p.Columns {
 		original := s.Fields[column.Field]
 		original.Expr = "r." + queryIdent(column.ValueAlias)
@@ -331,52 +369,8 @@ func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggS
 			dateAlias = column.ValueAlias
 		}
 	}
-	rows, err := tx.QueryContext(ctx, "SELECT qt_calendar_row,"+queryIdent(dateAlias)+" FROM "+queryIdent(table))
-	if err != nil {
+	if err = d.keyCalendarRows(ctx, tx, table, dateAlias, config.Interval, loc); err != nil {
 		return SQLiteMetricV2{}, err
-	}
-	type update struct {
-		id    int64
-		value string
-	}
-	updates := []update{}
-	for rows.Next() {
-		var id int64
-		var raw any
-		if err = rows.Scan(&id, &raw); err != nil {
-			rows.Close()
-			return SQLiteMetricV2{}, err
-		}
-		if raw == nil {
-			continue
-		}
-		value := typedQueryValue(raw, "datetime")
-		instant, e := calendarInput(fmt.Sprint(value), time.UTC)
-		if e != nil {
-			rows.Close()
-			return SQLiteMetricV2{}, e
-		}
-		floor, e := calendarFloor(instant, config.Interval, loc)
-		if e != nil {
-			rows.Close()
-			return SQLiteMetricV2{}, e
-		}
-		updates = append(updates, update{id, floor.Format("2006-01-02T15:04:05.000Z")})
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return SQLiteMetricV2{}, err
-	}
-	stmt, err := tx.PrepareContext(ctx, "UPDATE "+queryIdent(table)+" SET qt_calendar_key="+d.param(1)+" WHERE qt_calendar_row="+d.param(2))
-	if err != nil {
-		return SQLiteMetricV2{}, err
-	}
-	defer stmt.Close()
-	for _, u := range updates {
-		if _, err = stmt.ExecContext(ctx, u.value, u.id); err != nil {
-			return SQLiteMetricV2{}, err
-		}
 	}
 	bucketName := "__qt_calendar_bucket__"
 	if _, exists := calendarSchema.Fields[bucketName]; exists {
@@ -648,4 +642,59 @@ func sortCalendarBuckets(buckets []SQLiteMetricV2Bucket, spec AggSpec) {
 		}
 		return false
 	})
+}
+
+// Read and write bounded batches with the cursor closed between them. Neither
+// Go memory nor SQLite/PostgreSQL statement count grows by one per source row.
+func (d QueryDatasetV3) keyCalendarRows(ctx context.Context, tx *sql.Tx, table, dateAlias, interval string, loc *time.Location) error {
+	const batchSize = 400 // Two parameters per key fit SQLite's legacy 999 limit.
+	var after int64
+	for {
+		rows, err := tx.QueryContext(ctx, "SELECT qt_calendar_row,"+queryIdent(dateAlias)+" FROM "+queryIdent(table)+" WHERE qt_calendar_row>"+d.param(1)+" ORDER BY qt_calendar_row LIMIT "+strconv.Itoa(batchSize), after)
+		if err != nil {
+			return err
+		}
+		values := []string{}
+		args := []any{}
+		scanned := 0
+		for rows.Next() {
+			var id int64
+			var raw any
+			if err = rows.Scan(&id, &raw); err != nil {
+				rows.Close()
+				return err
+			}
+			scanned++
+			after = id
+			if raw == nil {
+				continue
+			}
+			instant, e := calendarInput(fmt.Sprint(typedQueryValue(raw, "datetime")), time.UTC)
+			if e != nil {
+				rows.Close()
+				return e
+			}
+			floor, e := calendarFloor(instant, interval, loc)
+			if e != nil {
+				rows.Close()
+				return e
+			}
+			values = append(values, "(CAST("+d.param(len(args)+1)+" AS bigint),CAST("+d.param(len(args)+2)+" AS text))")
+			args = append(args, id, floor.Format("2006-01-02T15:04:05.000Z"))
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		if len(values) > 0 {
+			update := "WITH qt_calendar_keys(ordinal,bucket) AS (VALUES " + strings.Join(values, ",") + ") UPDATE " + queryIdent(table) + " AS target SET qt_calendar_key=keys.bucket FROM qt_calendar_keys AS keys WHERE target.qt_calendar_row=keys.ordinal"
+			if _, err = tx.ExecContext(ctx, update, args...); err != nil {
+				return err
+			}
+		}
+		if scanned < batchSize {
+			return nil
+		}
+	}
 }
