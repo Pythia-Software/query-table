@@ -111,6 +111,7 @@ export type { QueryEvaluationOptions } from "./relativeTime";
 export * from "./metricTypes";
 export * from "./metrics";
 export * from "./metricDistributions";
+export * from "./metricDates";
 export * from "./execution";
 export * from "./properties";
 export * from "./propertyStorage";

@@ -1,0 +1,17 @@
+{
+  "id": "trips",
+  "file": "trips.parquet",
+  "rows": 34406,
+  "bytes": 1518637,
+  "sha256": "3bf7f117098c3e039977cc9c43f244379393e8b3ff0f652ffde2174c970536d4",
+  "preparedAt": "2026-10-14T14:45:18.883Z",
+  "title": "NYC yellow taxi trips",
+  "source": "NYC Taxi & Limousine Commission",
+  "sourceUrl": "https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page",
+  "downloadUrl": "https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2025-01.parquet",
+  "sourceSha256": "9af277e4c0d3f9deb30644da822981e1e7df6af58313170fd3aa8a474485488a",
+  "license": "NYC TLC public trip records",
+  "licenseUrl": "https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page",
+  "cohort": "Every 101st source record with a January 2025 pickup. Cash tips are not recorded. This is a sample, not citywide totals.",
+  "transformations": "Zone lookup joined before export; EST timestamp offsets, duration, tip ratio, dollars per mile and speed derived. Source anomalies retained."
+}

@@ -57,6 +57,7 @@ jobs:
             fi
           }
           publish_workspace "@pythia-software/query-table-core"
+          publish_workspace "@pythia-software/query-table-duckdb"
           publish_workspace "@pythia-software/query-table-react"
           publish_workspace "@pythia-software/query-table-ui"
           publish_workspace "@pythia-software/query-table-codegen"
