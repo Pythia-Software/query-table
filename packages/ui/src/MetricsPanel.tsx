@@ -176,7 +176,7 @@ export function MetricsPanel<Row>({
 }
 
 export interface MetricCardProps<Row> {
-  /** Sparse cover axes and labelled box rows with independent whisker scales. */
+  /** Sparse cover axes and dense labelled box rows sharing one scale and observed extremes. */
   compact?: boolean | undefined;
   onEdit?: (() => void) | undefined;
   clause: AggregationClause;
@@ -340,6 +340,7 @@ export function MetricCard<Row>({
         "qt-metric",
         `qt-metric--gb${Math.min(clause.groupBy.length, 3)}`,
         chart && "qt-metric--chart",
+        compact && "qt-metric--compact",
         className,
         classNames?.metric,
       )}

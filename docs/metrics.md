@@ -200,3 +200,24 @@ memory, or over committed shown rows. Legacy v1/v2 server execution rejects date
 grouping explicitly. An unsupported server operation never triggers a population
 download. Settings are
 serialized with the query and participate in metric computation identity.
+
+
+### Compact chart integration
+
+`MetricCard compact` uses one shared axis for all visible box rows, with
+30px rows and an axis based on the full observed ranges. It honors `xScale`,
+keeps sampled outliers and actual extrema visible, and reports nonpositive
+log-axis omissions. Sparse interpolated quartiles can exceed observed Tukey
+inliers; visual whiskers meet the quartile edge while tooltips retain the
+observed endpoints. This affects rendering only, not TypeScript/Go reductions
+or the serialized metric protocol.
+
+Chart tooltip state is isolated from plot rendering; hover/focus changes do not
+rebuild axes or reformat marks. Tooltips show each mark's actual series color,
+including multi-series lines. Compact histogram hovers give interval counts
+without repeating the whole population; full views retain that context.
+Compact top/bottom composition legends align category/value/share fields in
+two columns. Hosts may set `--qt-metric-legend-columns: 1` or style the existing
+legend class hook for a narrower cover. Dataset-specific cohort thresholds,
+model palettes, conversation lineage, zero-retention policies, headlines,
+sparklines, and review forms remain host responsibilities.

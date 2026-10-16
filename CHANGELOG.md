@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Changed
+
+- Compact box covers use a shared axis, honor linear/log settings, draw denser
+  rows, and retain sampled outliers and actual extrema. Sparse interpolated
+  quartiles no longer leave whisker caps inside the box in compact or full charts;
+  observed statistical endpoints remain available in tooltips and data tables.
+- Isolate chart tooltip state so hovering or focusing marks does not reconstruct
+  axes or formatted labels. Tooltips include the actual series color, including
+  multi-series lines. Compact histogram tooltips omit the repeated population
+  denominator while full charts retain it.
+- Give compact top/bottom pie/ring legends aligned category/value/share fields
+  and two-column layout, configurable through `--qt-metric-legend-columns`.
+  Query definitions, exact denominators, computation, and backend protocols are
+  unchanged.
+
 ## 0.7.0 — 2026-10-14
 
 ### Added

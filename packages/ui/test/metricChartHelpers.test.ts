@@ -144,3 +144,19 @@ it("keeps extreme values finite when explicit bounds zoom into a narrow range", 
   });
   expect(Number.isFinite(axis.fraction(Number.MAX_VALUE) * 1000)).toBe(true);
 });
+
+
+it("keeps interpolated whiskers outside quartiles and sampled extremes complete without mutating summaries", async () => {
+  const { boxSummary }=await import("@pythia-software/query-table-core");
+  const { metricBoxWhiskers,metricBoxOutliers }=await import("../src/metricChartHelpers");
+  for(const values of [[30000,750000,3200000,1700000000],[0,100,101,102],[5,5,5]]) {
+    const summary=boxSummary(values,"tukey")!,before=structuredClone(summary);
+    const {low,high}=metricBoxWhiskers(summary);
+    expect(low).toBeLessThanOrEqual(summary.q1);expect(low).toBeGreaterThanOrEqual(summary.min);
+    expect(high).toBeGreaterThanOrEqual(summary.q3);expect(high).toBeLessThanOrEqual(summary.max);
+    const sampled={...summary,outliers:[]};
+    if(summary.max>summary.high)expect(metricBoxOutliers(sampled)).toContain(summary.max);
+    if(summary.min<summary.low)expect(metricBoxOutliers(sampled)).toContain(summary.min);
+    expect(summary).toEqual(before);
+  }
+});

@@ -3,6 +3,7 @@ import type {
   RenderingClause,
   MetricValue,
   MetricValueFormat,
+  BoxSummary,
 } from "./metricTypes";
 import { metricTimestamp, formatMetricOutput } from "./metricFormat";
 import { metricTupleKey } from "./metricColors";
@@ -284,4 +285,22 @@ export function metricScale(
     baseline: log ? min : Math.max(min, Math.min(max, 0)),
     omitted: values.length - valid.length,
   };
+}
+
+/** Interpolated quartiles can exceed observed Tukey inliers in sparse samples.
+ * Keep visual whiskers outside the box without changing the returned statistics. */
+export function metricBoxWhiskers(summary: BoxSummary) {
+  return {
+    low: Math.min(summary.low, summary.q1),
+    high: Math.max(summary.high, summary.q3),
+  };
+}
+
+/** Bounded backend samples must not hide the actual observed extremes. */
+export function metricBoxOutliers(summary: BoxSummary): number[] {
+  return [...new Set([
+    ...summary.outliers,
+    ...(summary.min < summary.low ? [summary.min] : []),
+    ...(summary.max > summary.high ? [summary.max] : []),
+  ])];
 }

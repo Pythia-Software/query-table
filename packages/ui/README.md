@@ -531,13 +531,32 @@ reserves only the tick gutter, allowing more width for data. Full charts retain
 their usual title placement. Metric loading uses an accessible spinner and
 respects reduced-motion preferences.
 
-Compact box plots label each row above its glyph and show its median. Each row
-uses an independent linear scale focused on its whiskers, omitting outlier
-markers. A visible guide explains that the box spans the middle 50%, the line
-marks the median, and scales differ between rows. Full statistics and outlier
-counts remain in accessible mark descriptions and the data table. Allow at least
-52px per plotted row plus the guide; constrain the supplied bucket count when
-using a fixed-height cover. The default full chart retains its shared scale.
+Compact box plots label each row above its glyph and show its median. All
+visible rows share one axis spanning their full observed range, including
+sampled outliers and true extremes. `display.xScale` selects linear or log
+coordinates and retains explicit bounds; as in full charts, nonpositive boxes
+are omitted on a log axis with a visible explanation. Allow about 30px per row,
+20px for the shared ticks, and room for the guide; constrain the supplied bucket
+count when using a fixed-height cover.
+
+Linear-interpolated quartiles in sparse samples can extend past the last
+observed Tukey inlier. Visual whiskers meet the box edge in that case rather
+than ending inside it. Hover retains the original quartiles, observed whisker
+endpoints, full range, mean, sample count, and outlier count. Neither the
+computation nor the returned summary is modified.
+
+Tooltips include the hovered series color. Their hover/focus state is isolated
+from plot construction, so moving between marks does not rebuild axes or
+reformat chart labels. Escape dismisses the tooltip before reaching an enclosing
+dialog. Compact histogram tooltips show the interval and its frequency; full
+charts and data tables retain population and NULL counts.
+
+Compact pie/ring legends in top/bottom positions use aligned category, value,
+and share slots in two columns. Set `--qt-metric-legend-columns: 1` on the card
+for a single column, or use the `MetricClassNames.legend` CSS hook. These are
+host presentation choices and do not change the saved query or exact pie
+denominator. Native SVG charts preserve the viewport aspect ratio, including
+circular pie/ring geometry and circular scatter markers.
 
 ### Underline list bars
 
