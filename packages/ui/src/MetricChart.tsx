@@ -885,7 +885,7 @@ export function MetricChart({
         </div>
         {position !== "none" && legend.length > 0 && (
           <ul
-            className={`qt-metric-legend ${classNames?.legend ?? ""}`}
+            className={`qt-metric-legend ${legend.some((e) => e.value !== undefined) ? "qt-metric-legend--composition" : ""} ${classNames?.legend ?? ""}`}
             aria-label="Legend"
           >
             {legend.map((e) => (

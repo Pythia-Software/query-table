@@ -824,6 +824,12 @@ it("compact composition legends separate labels, values and shares and keep the 
   expect([...host.querySelectorAll(".qt-metric-legend-value")].map(el=>el.textContent)).toEqual(["60","40"]);
   expect([...host.querySelectorAll(".qt-metric-legend-share")].map(el=>el.textContent)).toEqual(["60.0%","40.0%"]);
   expect(host.querySelector(".qt-metric-mark")?.getAttribute("aria-label")).toContain("of 100");
+  expect(host.querySelector(".qt-metric-legend")?.classList.contains("qt-metric-legend--composition")).toBe(true);
+  host.innerHTML=renderToStaticMarkup(createElement(MetricCard, {
+    compact:true,fields,clause:{...clause,display:{kind:"bar-vertical",legendPosition:"bottom"}},
+    buckets:[{keys:["First category"],value:60,count:1},{keys:["Second"],value:30,count:1}],
+  }));
+  expect(host.querySelector(".qt-metric-legend")?.classList.contains("qt-metric-legend--composition")).toBe(false);
 });
 
 it("compact histogram hover shows the bin count without repeating its population denominator", () => {

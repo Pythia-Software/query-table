@@ -342,7 +342,7 @@
 
 /* Compact composition keys keep category, value, and share in aligned slots.
  * The host may request a single column without changing a saved query. */
-.qt-metric--compact :is(.qt-metric-legend-top,.qt-metric-legend-bottom)>.qt-metric-legend {
+.qt-metric--compact :is(.qt-metric-legend-top,.qt-metric-legend-bottom)>.qt-metric-legend--composition {
   display:grid; grid-template-columns:repeat(var(--qt-metric-legend-columns,2),minmax(0,1fr));
   flex:none; width:100%; max-width:100%; max-height:none; gap:.25rem .75rem;
 }
