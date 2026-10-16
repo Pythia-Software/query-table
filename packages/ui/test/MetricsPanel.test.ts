@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MetricCard } from "../src/MetricsPanel";
 import { defaultRenderers } from "../src/renderers";
 import type { MetricBucket, RenderingClause } from "../src/metricTypes";
-import type { FieldDef } from "@pythia-software/query-table-core";
+import { boxSummary, type FieldDef } from "@pythia-software/query-table-core";
 (
   globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
@@ -248,7 +248,7 @@ describe("shared metric card", () => {
         },
       },
     ]);
-    expect(box).toContain("Whiskers 1 – 4");
+    expect(box).toContain("Observed whiskers 1 – 4");
     expect(box).toContain("4 samples · 1 NULL");
     const histogram = render(
       {
@@ -693,7 +693,7 @@ it("lets Escape bubble after dismissing a chart tooltip and never inspects a syn
   expect(onKeyDown).toHaveBeenCalledOnce();
 });
 
-it("compact box covers label readable independent whisker scales and retain full summaries", () => {
+it("compact box covers share one axis and retain observed extremes and full summaries", () => {
   const boxes: MetricBucket[] = ["Fast command with a long descriptive label", "Slow command", "Third command"].map((key, i) => {
     const factor = 10 ** i;
     return { keys: [key], value: null, count: 10, nullCount: 1, distribution: { kind: "box", summary: {
@@ -706,11 +706,15 @@ it("compact box covers label readable independent whisker scales and retain full
   const html = renderToStaticMarkup(createElement(MetricCard, { clause: c, buckets: boxes, fields, compact: true }));
   const host = document.createElement("div"); host.innerHTML = html;
   expect(host.querySelectorAll(".qt-metric-box-row")).toHaveLength(3);
-  expect(host.querySelectorAll("svg circle")).toHaveLength(0);
+  expect(host.querySelectorAll(".qt-metric-box-outlier")).toHaveLength(3);
   expect(host.querySelectorAll(".qt-metric-box-label title")[0]?.textContent).toBe(boxes[0]!.keys[0]);
-  expect(host.querySelector(".qt-metric-compact-guide")?.textContent).toContain("Per-row scales · outliers omitted");
-  for (const box of host.querySelectorAll(".qt-metric-box-row .qt-metric-mark > rect:not([fill=transparent])"))
-    expect(Number(box.getAttribute("width"))).toBeGreaterThan(50);
+  expect(host.querySelector(".qt-metric-compact-guide")?.textContent).toContain("Shared axis");
+  const boxesDrawn = [...host.querySelectorAll(".qt-metric-box-quartiles")];
+  expect(Number(boxesDrawn[1]!.getAttribute("width"))).toBeGreaterThanOrEqual(Number(boxesDrawn[0]!.getAttribute("width")));
+  const outliers = [...host.querySelectorAll(".qt-metric-box-outlier")].map(mark => Number(mark.getAttribute("cx")));
+  expect(outliers[0]).toBeLessThan(outliers[1]!);
+  expect(outliers[1]).toBeLessThan(outliers[2]!);
+  expect(host.querySelectorAll(".qt-metric-box-axis-tick")).toHaveLength(3);
   expect(html).toContain("9 samples · 1 NULL · 1 outliers");
   expect(html).toContain("Max 1d3h");
   expect(render(c, boxes)).toContain("Scale includes all returned summaries");
@@ -770,4 +774,102 @@ it("limits rendered list groups and exposes an accessible animated loading state
   expect(html).toContain("qt-metric-spinner");
   expect(html).toContain('role="status"');
   expect(html).toContain("Loading metric");
+});
+
+
+it("keeps sparse interpolated boxes inside true extremes with outward whiskers in compact and full charts", () => {
+  const summary = boxSummary([30000,750000,3200000,1700000000], "tukey")!;
+  for (const compact of [false,true]) {
+    const host = document.createElement("div");
+    host.innerHTML = renderToStaticMarkup(createElement(MetricCard, {
+      compact, fields, clause: { ...clause, display: {kind:"box",boxMean:false,xScale:{mode:"log"}} },
+      buckets: [{keys:["Ultra"], value:summary.median,count:summary.n,distribution:{kind:"box",summary}}],
+    }));
+    const mark = host.querySelector(".qt-metric-mark")!;
+    const box = mark.querySelector("rect:not([fill=transparent])")!;
+    const cap = mark.querySelectorAll("line")[2]!;
+    const edge = Number(box.getAttribute("x"))+Number(box.getAttribute("width"));
+    expect(Number(cap.getAttribute("x1"))).toBeCloseTo(edge);
+    const extreme = mark.querySelector("circle")!;
+    expect(Number(extreme.getAttribute("cx"))).toBeGreaterThan(edge);
+    expect(mark.getAttribute("aria-label")).toContain("Max 1,700,000,000");
+    expect(mark.getAttribute("aria-label")).toContain("3,200,000");
+  }
+});
+
+it("honors compact logarithmic boxes and keeps zero-valued boxes on an explicitly linear shared axis", () => {
+  for (const mode of ["linear","log"] as const) {
+    const host = document.createElement("div");
+    const values = [[0,10,100],[10,100,1000],[100,1000,10000]];
+    host.innerHTML = renderToStaticMarkup(createElement(MetricCard, {
+      compact:true,fields,clause:{...clause,display:{kind:"box",boxMean:false,xScale:{mode}}},
+      buckets:values.map((values,i)=>({keys:[String(i)],value:null,count:3,distribution:{kind:"box" as const,summary:boxSummary(values)}})),
+    }));
+    expect(host.querySelectorAll(".qt-metric-mark")).toHaveLength(mode==="log"?2:3);
+    if(mode==="log") {
+      expect(host.textContent).toContain("Nonpositive samples");
+      const medians = [...host.querySelectorAll(".qt-metric-mark")].map(mark=>Number(mark.querySelectorAll("line")[3]!.getAttribute("x1")));
+      expect(medians[1]!-medians[0]!).toBeGreaterThan(0);
+    } else expect(host.textContent).not.toContain("Nonpositive samples");
+  }
+});
+
+it("compact composition legends separate labels, values and shares and keep the exact Other", () => {
+  const host=document.createElement("div");
+  host.innerHTML=renderToStaticMarkup(createElement(MetricCard, {
+    compact:true,fields,clause:{...clause,display:{kind:"pie",maxGroups:1,legendPosition:"bottom"}},
+    buckets:[{keys:["First category"],value:60,count:1},{keys:["Second"],value:30,count:1},{keys:["Third"],value:10,count:1}],
+  }));
+  expect([...host.querySelectorAll(".qt-metric-legend-label")].map(el=>el.textContent)).toEqual(["First category","Other"]);
+  expect([...host.querySelectorAll(".qt-metric-legend-value")].map(el=>el.textContent)).toEqual(["60","40"]);
+  expect([...host.querySelectorAll(".qt-metric-legend-share")].map(el=>el.textContent)).toEqual(["60.0%","40.0%"]);
+  expect(host.querySelector(".qt-metric-mark")?.getAttribute("aria-label")).toContain("of 100");
+  expect(host.querySelector(".qt-metric-legend")?.classList.contains("qt-metric-legend--composition")).toBe(true);
+  host.innerHTML=renderToStaticMarkup(createElement(MetricCard, {
+    compact:true,fields,clause:{...clause,display:{kind:"bar-vertical",legendPosition:"bottom"}},
+    buckets:[{keys:["First category"],value:60,count:1},{keys:["Second"],value:30,count:1}],
+  }));
+  expect(host.querySelector(".qt-metric-legend")?.classList.contains("qt-metric-legend--composition")).toBe(false);
+});
+
+it("compact histogram hover shows the bin count without repeating its population denominator", () => {
+  const host=document.createElement("div");
+  const props={fields,clause:{...clause,display:{kind:"histogram" as const}},buckets:[{keys:["A"],value:2,count:3,distribution:{kind:"histogram" as const,edges:[0,1,2],counts:[1,2],n:3}}]};
+  host.innerHTML=renderToStaticMarkup(createElement(MetricCard,{...props,compact:true}));
+  expect(host.querySelector(".qt-metric-mark")?.getAttribute("aria-label")).toBe("A\n0 ≤ value < 1\n1 rows");
+  host.innerHTML=renderToStaticMarkup(createElement(MetricCard,props));
+  expect(host.querySelector(".qt-metric-mark")?.getAttribute("aria-label")).toContain("3 numeric samples");
+});
+
+it("tooltip transitions keep chart nodes and formatted axes intact and show the actual multi-series color", async () => {
+  container=document.createElement("div");document.body.append(container);root=createRoot(container);
+  const theme={dimensions:{series:{layer:"series",overrides:[{value:"blue",color:"#123456"}]}},layers:[{id:"series",colors:["#abcdef"]}]};
+  await act(async()=>root!.render(createElement(MetricCard,{
+    fields,theme,clause:{...clause,groupBy:["date","series"],display:{kind:"line"}},
+    buckets:[{keys:["2026-10-01","blue"],value:10,count:1},{keys:["2026-10-02","blue"],value:20,count:1}],
+  })));
+  const svg=container.querySelector("svg"),mark=container.querySelector(".qt-metric-mark")!;
+  const formatter=vi.spyOn(Number.prototype,"toLocaleString");
+  try {
+    act(()=>mark.dispatchEvent(new MouseEvent("mouseover",{bubbles:true})));
+    expect(container.querySelector('[role="tooltip"] .qt-metric-swatch')?.getAttribute("style")).toContain("rgb(18, 52, 86)");
+    expect(container.querySelector("svg")).toBe(svg);
+    expect(formatter).not.toHaveBeenCalled();
+    act(()=>mark.dispatchEvent(new MouseEvent("mouseout",{bubbles:true,relatedTarget:svg})));
+    expect(container.querySelector('[role="tooltip"]')).toBeNull();
+    act(()=>mark.dispatchEvent(new FocusEvent("focusin",{bubbles:true})));
+    expect(container.querySelector('[role="tooltip"]')).not.toBeNull();
+    act(()=>mark.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true})));
+    expect(container.querySelector('[role="tooltip"]')).toBeNull();
+    expect(formatter).not.toHaveBeenCalled();
+  } finally {formatter.mockRestore();}
+});
+
+
+it("counts omitted outliers after supplementing a transport sample with actual extremes", () => {
+  const html=render({...clause,display:{kind:"box"}},[{keys:["sampled"],value:3,count:30,distribution:{kind:"box",summary:{
+    n:30,min:0,q1:2,median:3,q3:4,max:100,mean:10,low:1,high:10,outliers:[11],outlierCount:5,whiskers:"tukey",method:"exact-linear",
+  }}}]);
+  expect(html).toContain("2 outlier markers omitted.");
+  expect(html).toContain("5 outliers (3 retained markers)");
 });
