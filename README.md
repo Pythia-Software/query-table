@@ -33,7 +33,7 @@ canonical computed metadata and development across linked checkouts.
 Build the static public showcase with `npm run build:showcase`. It uses real NYC
 311, NYC taxi and Open Food Facts cohorts with the reusable
 [`query-table-duckdb` backend](packages/duckdb/README.md), entirely in the browser.
-See [GitHub Pages setup and data refresh](docs/public-demo.md).
+See [local verification, static hosting and data refresh](docs/public-demo.md).
 
 Run `npm run demo:postgres` and open [the PostgreSQL playground](http://localhost:5179/postgres)
 for 500,000 records, 20 seeded metrics, the Go backend, and adjustable latency.
