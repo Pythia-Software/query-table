@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.7.1 — 2026-10-16
+
 ### Changed
 
 - Compact box covers use a shared axis, honor linear/log settings, draw denser
