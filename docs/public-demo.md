@@ -28,14 +28,33 @@ updating the Wasm package, update that lock's engine/package versions and run
 binary hashes and rerun the browser checks. Upstream runtime license notices
 are included under the output's `duckdb/` directory.
 
-## GitHub Pages synchronization
+## Local verification and static hosting
 
-`.github/workflows/demo-pages.yml` checks native DuckDB execution, builds the
-demo and deploys it on every push to `main`. In repository **Settings → Pages**,
-select **GitHub Actions** as the source. After the feature branch is merged,
-the workflow publishes the current components automatically. The workflow can
-also be run manually. It does not fetch new source datasets during ordinary
-builds, so library updates cannot change counts or break upstream downloads.
+Demo builds and browser checks run locally; pushes to `main` do not trigger a
+GitHub Actions demo build or deployment. The tag-only npm release workflow is
+retained for trusted publishing; see [Releasing](../RELEASING.md).
+
+From the repository root, install dependencies and the browser once, then run
+the same native DuckDB, production build and browser checks together:
+
+```sh
+npm ci
+npx playwright install chromium
+npm run check:showcase
+```
+
+On Linux, use `npx playwright install --with-deps chromium` to install required
+system libraries as well. Checks use Playwright's bundled Chromium by default;
+set `QT_BROWSER_CHANNEL=chrome` to use an installed Chrome instead.
+
+After verification, upload the **contents** of `demo/dist-showcase/` to your
+static host. No deployment provider or credentials are configured in this
+repository; publishing is a separate maintainer operation. The build works
+at a host root or under `/query-table/`, and the browser
+suite verifies subpath hosting locally.
+
+Ordinary builds use the committed datasets and do not fetch new source data,
+so library updates cannot change counts or break upstream downloads.
 
 Data refresh is a separate reviewed operation:
 
@@ -179,3 +198,6 @@ Build the showcase first; the
 test starts its own static server under `/query-table/`. To use an existing
 preview instead, set `QT_SHOWCASE_URL` to its URL or a project subpath. Test screenshots
 are saved under `.context/`.
+On failure, the suite saves `showcase-failure.json` with the error, browser
+errors and requested URLs, plus `showcase-failure-*.png` screenshots of open
+pages in the same directory.

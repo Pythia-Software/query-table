@@ -31,6 +31,7 @@ npm run build:demo       # production Vite build
 npm run package:check    # tarballs, exports, types, runtime imports, CLI
 npm run release:check    # complete pre-release gate, including audits
 npm run demo             # local playground on http://localhost:5179
+npm run check:showcase   # DuckDB tests, static showcase build and browser checks
 ```
 
 The Go package can also be checked directly:
@@ -40,6 +41,12 @@ cd backends/go
 go test ./...
 go vet ./...
 ```
+
+For showcase changes, install the browser with `npx playwright install chromium`
+and run `npm run check:showcase`. Demo verification runs locally; it is not
+triggered by pushes to `main`. See [the public demo guide](docs/public-demo.md)
+for static hosting and Linux browser dependencies. Only version tags trigger
+the GitHub Actions npm release workflow.
 
 ## Pull requests
 

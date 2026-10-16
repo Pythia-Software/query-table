@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -53,9 +53,9 @@ if (!base) {
   base = `http://127.0.0.1:${server.address().port}/query-table/`;
 }
 const browser = await chromium.launch({
-  ...(process.env.CI
-    ? {}
-    : { channel: process.env.QT_BROWSER_CHANNEL ?? "chrome" }),
+  ...(process.env.QT_BROWSER_CHANNEL
+    ? { channel: process.env.QT_BROWSER_CHANNEL }
+    : {}),
   headless: true,
 });
 const errors = [],
@@ -1137,6 +1137,23 @@ try {
   console.log(
     "Chart drilldown, mobile layout, subpath hosting and same-origin runtime passed",
   );
+} catch (error) {
+  // Keep evidence when an action stalls, including browser errors that would
+  // otherwise only be asserted after the entire suite completes.
+  await writeFile(
+    resolve(screenshots, "showcase-failure.json"),
+    JSON.stringify({ error: String(error.stack ?? error), errors, network }, null, 2),
+  ).catch((failure) => console.error("Could not save showcase diagnostics:", failure));
+  let index = 0;
+  for (const context of browser.contexts()) {
+    for (const page of context.pages()) {
+      await page.screenshot({
+        path: resolve(screenshots, `showcase-failure-${++index}.png`),
+        timeout: 5000,
+      }).catch((failure) => console.error("Could not capture the failed page:", failure));
+    }
+  }
+  throw error;
 } finally {
   await browser.close();
   if (server) await new Promise((resolve) => server.close(resolve));

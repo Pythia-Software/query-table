@@ -56,6 +56,7 @@
     "demo:postgres": "node demo/start-postgres-demo.mjs",
     "test:postgres-demo": "node demo/postgres-test.mjs",
     "test:duckdb": "vitest run packages/duckdb/test",
+    "check:showcase": "npm run test:duckdb && npm run build:showcase && npm run test:showcase",
     "build:showcase": "npm run build --workspace @pythia-software/query-table-demo -- --mode showcase && node demo/scripts/prepare-showcase-runtime.mjs",
     "preview:showcase": "npm run preview --workspace @pythia-software/query-table-demo -- --outDir dist-showcase --host 127.0.0.1",
     "data:showcase": "node demo/scripts/prepare-showcase-data.mjs",

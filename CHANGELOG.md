@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Changed
+
+- Run public demo verification locally with `npm run check:showcase` instead
+  of building and deploying on every push through GitHub Actions. Keep
+  tag-triggered npm releases and save browser diagnostics when showcase checks
+  fail.
+
 ## 0.7.1 — 2026-10-16
 
 ### Changed
