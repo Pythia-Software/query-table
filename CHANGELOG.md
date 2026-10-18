@@ -21,6 +21,13 @@
   override as an optional third argument.
 - `{ kind: "text", lines: n }` (1–20) wraps and clamps cell text to `n` lines.
   Clamped rows are measured by the virtualized table.
+- `filter.editor: "set"` works on `enum` fields and on `text` fields with static
+  options. ANY compiles to an OR group of `=`; NONE compiles to one
+  `(is_null OR != value)` group per value, so rows with no value are kept on
+  every executor. ALL and EMPTY are hidden for these fields. New
+  `setFilterTarget` and `setFilterModes` helpers; `createSetFilter` takes an
+  optional `"scalar"` target and `readSetFilter` reports the target. No new
+  operators or backend changes.
 
 ### Changed
 

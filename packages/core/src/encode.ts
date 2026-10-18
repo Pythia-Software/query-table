@@ -106,7 +106,9 @@ function packQuery(c: CompactQuery): Record<string, unknown> {
     const terms: unknown[] = [];
     for (let i = 0; i < c.w.length; i++) {
       const set = readSetFilter(c.w, i);
-      if (set) {
+      // Scalar sets stay as plain marked terms: the packed tuple always means
+      // array membership, so older decoders must not rebuild them as includes.
+      if (set?.target === "array") {
         terms.push(["set", set.field, set.metadata.mode, set.metadata.values, set.metadata.id]);
         i += set.count - 1;
       } else terms.push(c.w[i]);

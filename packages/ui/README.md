@@ -241,7 +241,10 @@ multi-select editor, with ANY / ALL / NONE / EMPTY modes, badge presentation,
 removable tags, keyboard controls, and a mobile bottom sheet. For stable tag
 keys, also set `arrayCaseSensitive: true` and provide static `{ value, label }`
 options. NONE includes empty/missing arrays while excluding every selected key.
-Other fields and existing predicates keep their current editors.
+`enum` fields, and `text` fields with static `filter.values.options`, can opt in
+too: they get ANY ("is one of") and NONE ("is none of", keeping empty rows)
+without writing one `!=` term per value. Other fields and existing predicates
+keep their current editors.
 
 ```ts
 filter: {
