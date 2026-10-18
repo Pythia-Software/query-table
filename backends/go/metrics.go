@@ -55,37 +55,61 @@ func CompileMetrics(ctx context.Context, q MetricQuery, s Schema, o PlanOptions)
 	return compileMetricsDialect(ctx, q, s, o, false)
 }
 func compileMetricsDialect(ctx context.Context, q MetricQuery, s Schema, o PlanOptions, sqlite bool) (MetricBatchPlan, error) {
+	result, failures, err := compileMetricsPartial(ctx, q, s, o, sqlite)
+	if err != nil {
+		return MetricBatchPlan{}, err
+	}
+	for i, failure := range failures {
+		if failure != nil {
+			return MetricBatchPlan{}, fmt.Errorf("metric %s: %w", q.Metrics[i].ID, failure)
+		}
+	}
+	return result, nil
+}
+
+// compileMetricsPartial validates the request as a whole, then compiles each
+// metric. Clause-level failures are returned per index (aligned with
+// q.Metrics, whose failed entries are omitted from the batch); request-level
+// failures return err.
+func compileMetricsPartial(ctx context.Context, q MetricQuery, s Schema, o PlanOptions, sqlite bool) (MetricBatchPlan, []error, error) {
 	result := MetricBatchPlan{RequiresSharedSnapshot: true}
+	failures := make([]error, len(q.Metrics))
 	var optionErr error
 	o, optionErr = requestOptionsDialect(ctx, sqlite, q.Profile, q.PlanToken, q.Snapshot, q.ExpectedRevisions, o)
 	if optionErr != nil {
-		return result, optionErr
+		return result, nil, optionErr
 	}
 	if o.Now.IsZero() {
 		o.Now = time.Now()
 	}
 	if q.Version != 2 {
-		return result, diagnostic("version", "metric protocol version must be 2")
+		return result, nil, diagnostic("version", "metric protocol version must be 2")
 	}
 	if len(q.Diagnostics) > 0 {
-		return result, diagnostic("residual_query", "query contains unresolved client diagnostics")
+		return result, nil, diagnostic("residual_query", "query contains unresolved client diagnostics")
 	}
 	if err := (WireQuery{Where: q.Where, OrderBy: q.OrderBy, Limit: q.Limit, Offset: q.Offset, Aggregations: q.Metrics}).Validate(); err != nil {
-		return result, err
+		return result, nil, err
 	}
 	ids := map[string]bool{}
 	for _, spec := range q.Metrics {
 		if ids[spec.ID] {
-			return result, diagnostic("duplicate_metric", "duplicate metric ID")
+			return result, nil, diagnostic("duplicate_metric", "duplicate metric ID")
 		}
 		ids[spec.ID] = true
+	}
+	for i, spec := range q.Metrics {
 		p, e := compileMetricDialect(ctx, q, spec, s, o, sqlite)
 		if e != nil {
-			return MetricBatchPlan{}, fmt.Errorf("metric %s: %w", spec.ID, e)
+			if _, clause := metricClauseError(ctx, e); !clause {
+				return MetricBatchPlan{}, nil, fmt.Errorf("metric %s: %w", spec.ID, e)
+			}
+			failures[i] = e
+			continue
 		}
 		result.Metrics = append(result.Metrics, MetricSQLPlan{spec.ID, p})
 	}
-	return result, nil
+	return result, failures, nil
 }
 func MetricExpression(spec AggSpec) string {
 	if spec.Expression != "" {

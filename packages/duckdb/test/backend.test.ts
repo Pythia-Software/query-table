@@ -730,6 +730,79 @@ describe("DuckDB native conformance", () => {
   });
 });
 
+describe("DuckDB metric failure isolation", () => {
+  const clauses = () => [
+    metric("SUM([amount])", { id: "sum", groupBy: [] }),
+    metric("MEDIAN([amount])", { id: "middle" }),
+    metric("COUNT()", { id: "count", groupBy: [] }),
+  ];
+  const tempTables = async () =>
+    (
+      await native.runAndReadAll(
+        "SELECT COUNT(*)::INTEGER AS n FROM duckdb_tables() WHERE temporary",
+      )
+    ).getRowObjectsJS()[0]!.n;
+
+  it("keeps later metrics and the commit working after a failed statement", async () => {
+    // Abort the real transaction, as a conversion error or interrupt would.
+    backend = new DuckDBBackend({
+      relation: "runs",
+      schema,
+      connection: {
+        query: async (sql, args) => {
+          if (/median|quantile/i.test(sql))
+            await native.run("SELECT CAST('x' AS INTEGER)");
+          return (
+            await native.runAndReadAll(sql, args as any[])
+          ).getRowObjectsJS();
+        },
+      },
+    });
+    const actual = await execute({ aggregations: clauses() });
+    expect(actual.rows).toHaveLength(6);
+    expect(actual.metrics.map((entry) => entry.id)).toEqual([
+      "sum",
+      "middle",
+      "count",
+    ]);
+    expect(actual.metrics[0]).toMatchObject({ buckets: [{ value: 265 }] });
+    expect(actual.metrics[0]?.error).toBeUndefined();
+    expect(actual.metrics[1]).toMatchObject({ buckets: [] });
+    expect(actual.metrics[1]?.error).toMatch(/Conversion Error/);
+    expect(actual.metrics[2]).toMatchObject({ buckets: [{ value: 6 }] });
+    expect(await tempTables()).toBe(0);
+  });
+
+  it("reports a sample budget on that metric only", async () => {
+    backend = new DuckDBBackend({
+      relation: "runs",
+      schema,
+      maxSamples: 1,
+      connection: {
+        query: async (sql, args) =>
+          (await native.runAndReadAll(sql, args as any[])).getRowObjectsJS(),
+      },
+    });
+    const actual = await execute({
+      aggregations: [
+        clauses()[0]!,
+        metric("COUNT()", {
+          id: "middle",
+          display: { kind: "box" },
+          distribution: { kind: "box", input: "[amount]", whiskers: "tukey" },
+        }),
+        clauses()[2]!,
+      ],
+    });
+    expect(actual.metrics.map((entry) => entry.error)).toEqual([
+      undefined,
+      "The box distribution exceeded the 1-sample budget for one or more groups.",
+      undefined,
+    ]);
+    expect(await tempTables()).toBe(0);
+  });
+});
+
 function createGroupingSchema(query: ReturnType<typeof normalizeQueryState>) {
   return createGroupingModel(schema).resultSchema(
     query.grouping!.keys,

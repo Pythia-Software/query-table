@@ -305,6 +305,10 @@ export class DuckDBBackend {
         return result;
       } catch (error) {
         await this.sql("ROLLBACK").catch(() => {});
+        // Metrics commit staged relations before isolating each clause, so a
+        // rollback alone may not remove them.
+        for (const table of tables.reverse())
+          await this.sql(`DROP TABLE IF EXISTS ${id(table)}`).catch(() => {});
         abort(signal);
         throw error;
       }
@@ -544,21 +548,30 @@ export class DuckDBBackend {
     signal?: AbortSignal,
   ): Promise<AggregationResultEntry[]> {
     const output: AggregationResultEntry[] = [];
+    // A failed DuckDB statement aborts its transaction, and DuckDB has no
+    // savepoints. Clauses read only staged temporary relations, so commit
+    // them and give each clause its own transaction.
+    await this.sql("COMMIT", [], signal);
     for (const clause of clauses) {
       abort(signal);
+      const created = tables.length;
+      await this.sql("BEGIN TRANSACTION", [], signal);
       try {
-        output.push(
-          await this.metric(
-            relation,
-            schema,
-            query,
-            clause,
-            now,
-            tables,
-            signal,
-          ),
+        const entry = await this.metric(
+          relation,
+          schema,
+          query,
+          clause,
+          now,
+          tables,
+          signal,
         );
+        await this.sql("COMMIT", [], signal);
+        output.push(entry);
       } catch (error) {
+        await this.sql("ROLLBACK").catch(() => {});
+        // The rollback discarded this clause's scratch relations.
+        tables.splice(created);
         abort(signal);
         output.push({
           id: clause.id,
@@ -567,6 +580,7 @@ export class DuckDBBackend {
         });
       }
     }
+    await this.sql("BEGIN TRANSACTION", [], signal);
     return output;
   }
   private async metric(
@@ -675,7 +689,9 @@ export class DuckDBBackend {
           (row.samples as unknown[]).length > this.maxSamples,
       )
     )
-      throw Error("DuckDB exact sample budget exceeded.");
+      throw Error(
+        `The ${distribution.kind} distribution exceeded the ${this.maxSamples.toLocaleString("en-US")}-sample budget${clause.groupBy.length ? " for one or more groups" : ""}.`,
+      );
     const edges =
       distribution?.kind === "histogram"
         ? histogramEdges(

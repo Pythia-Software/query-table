@@ -205,8 +205,8 @@ func TestV3ComputedPoliciesSamplesAndSnapshotValidation(t *testing.T) {
 	q.Grouping = nil
 	q.Result = qt.WireQuery{Select: []string{"id"}, Limit: 10}
 	q.Metrics = []qt.AggSpec{{ID: "median", Expression: "MEDIAN([n])"}}
-	if _, err := d.Execute(context.Background(), db, q, qt.PlanOptions{}); err == nil {
-		t.Fatal("metric sample budget ignored")
+	if out, err := d.Execute(context.Background(), db, q, qt.PlanOptions{}); err != nil || out.Metrics[0].Error != "MEDIAN exceeded the 2-sample budget" {
+		t.Fatal("metric sample budget ignored", err)
 	}
 	d.MaxSamplesPerGroup = 0
 	field := d.Schema.Fields["n"]
@@ -221,8 +221,8 @@ func TestV3ComputedPoliciesSamplesAndSnapshotValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	q.Metrics[0].Op = "avg"
-	if _, err := d.Execute(context.Background(), db, q, qt.PlanOptions{Resolver: resolver}); err == nil {
-		t.Fatal("materializing computed values bypassed base aggregate policy")
+	if out, err := d.Execute(context.Background(), db, q, qt.PlanOptions{Resolver: resolver}); err != nil || out.Metrics[0].Error == "" {
+		t.Fatal("materializing computed values bypassed base aggregate policy", err)
 	}
 	field.AggregateOps = nil
 	d.Schema.Fields["n"] = field

@@ -33,6 +33,22 @@
   applies to formula inputs, where it remains a per-value `text_range` error.
   Invalid UTF-8 in SQLite source text still rejects the request, now with
   `text_encoding`.
+- One failing metric no longer fails the whole metric batch. In Go SQLite v2,
+  v3 and PostgreSQL, clause-level failures become that metric's `error`, with
+  empty buckets, while sibling metrics and rows still return. This covers
+  budgets, invalid inputs and failed statements. Malformed requests, duplicate
+  IDs, invalid scopes, stale revisions, handshake and snapshot failures, and
+  cancellation still fail the request. PostgreSQL runs each metric in a
+  savepoint so a failed statement does not abort the transaction. SQLite
+  reductions shared between metrics are rebuilt after a failed sibling.
+- DuckDB isolates failed metric statements, which previously aborted the
+  transaction for every later metric and failed the request.
+- The React client sends the clauses a v2 metric server supports and reports
+  an error only on the clauses that need a missing capability (shown-row
+  scope, computed fields, composed expressions, distributions or calendar
+  grouping).
+- Sample budget errors name the reduction and the budget, for example
+  "MEDIAN exceeded the 100,000-sample budget for one or more groups".
 
 ## 0.7.1 — 2026-10-16
 

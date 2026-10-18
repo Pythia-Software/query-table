@@ -296,11 +296,18 @@ This differs from the anonymous `?` fragments in the v1 API. No client source,
 SQL, scope, or definition text is trusted.
 
 Either request may be nil. Combined requests must carry the same filters,
-ordering, window, revision envelope, and token/snapshot binding. All plans are
-validated before execution. Identical metric fingerprints and scopes share a
+ordering, window, revision envelope, and token/snapshot binding. The request
+(version, profile, token/snapshot, filters, ordering, window, metric IDs and
+scopes) is validated before execution. Each metric then compiles and runs in its
+own savepoint: a clause-level failure (an invalid or unsupported input, a
+budget, or a failed statement) is returned as that metric's `error` with empty
+buckets, and sibling metrics and rows still return. Request-level diagnostics,
+stale revisions and cancellation still fail the request. Identical metric fingerprints and scopes share a
 result within that execution, with independent mutable bucket/distribution
 payloads. Scalar cards with exactly matching compiler input stages and grouping
-share grouped reductions; compatible SUM/AVG/MIN and other scalar reductions
+share grouped reductions. A failed metric's savepoint discards the reductions it
+created, so later metrics rebuild them, and a failing fused statement falls back
+to per-metric reductions. Compatible SUM/AVG/MIN and other scalar reductions
 fuse into one grouped SELECT, limited to 128 projected expressions. Final
 formulas, group sorting, and top-N still run per plan. Distributions retain their
 existing exact sampling/streaming paths. No cache crosses requests or snapshots.
@@ -323,7 +330,7 @@ canonical definitions in that same snapshot.
 Computed values are separate sidecars indexed by stable row ID, with **bare
 computed IDs** inside `values`, e.g. `values.duration.value`; per-value row errors
 are `{code:"divide_by_zero"}`. `result.Metrics` matches the existing aggregation
-result wire format: `{metrics:[{id,buckets,scope,processedRows,groupCount,coverage}]}`.
+result wire format: `{metrics:[{id,buckets,scope,processedRows,groupCount,coverage,error?}]}`.
 Metric bucket `error`/`yError` are strings. X and Y share one grouped population;
 null measures never realign buckets. Group counts are computed before the final
 sort/top-N. Returned coverage is exact for the requested scope, including when
@@ -333,8 +340,9 @@ for ratios, medians, or distinct counts.
 Default execution budgets are 10,000 page rows, 2,000 total groups, and 250,000
 matching source rows. The population check reads at most budget+1 matching rows
 before sorting/formulas. A source SELECT with its own expensive joins/sorts
-still needs host indexes and a context deadline. Exceeding any executor budget
-fails the entire request. A top-N limit cannot hide an exceeded group budget.
+still needs host indexes and a context deadline. Exceeding the row or population
+budget fails the entire request; exceeding a metric's group or sample budget
+fails only that metric. A top-N limit cannot hide an exceeded group budget.
 Standalone compilers do not enforce these executor budgets; their callers own
 population/result limits and typed mapping.
 

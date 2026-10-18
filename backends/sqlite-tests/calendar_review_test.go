@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
-	"errors"
 	qt "github.com/Pythia-Software/query-table/backends/go"
 	"io"
 	"reflect"
@@ -152,8 +151,7 @@ func TestCalendarScratchBudgetIncludesKeysBeforeCopy(t *testing.T) {
 	q.Rows = false
 	q.Result = qt.WireQuery{Select: []string{"id"}, Limit: 10}
 	q.Metrics = []qt.AggSpec{{ID: "day", Op: "count", GroupBy: []string{"at"}, DateGrouping: &qt.MetricDateGrouping{Field: "at", Interval: "day", TimeZone: "UTC", Range: "observed"}}}
-	var diag *qt.PlanDiagnostic
-	if _, err := d.Execute(context.Background(), db, q, qt.PlanOptions{}); !errors.As(err, &diag) || diag.Code != "resource_limit" || !strings.Contains(diag.Message, "calendar") {
+	if out, err := d.Execute(context.Background(), db, q, qt.PlanOptions{}); err != nil || !strings.Contains(out.Metrics[0].Error, "calendar") {
 		t.Fatalf("calendar budget: %v", err)
 	}
 	if created != 1 {

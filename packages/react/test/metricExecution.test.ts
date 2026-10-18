@@ -221,12 +221,15 @@ describe("metric execution boundary", () => {
       expressionY: "SUM([y])",
       display: { kind: "scatter" as const },
     };
-    await expect(
-      executeMetrics(
+    const clauseError = async (
+      ...args: Parameters<typeof executeMetrics<Row>>
+    ) => (await executeMetrics(...args)).metrics.map((m) => m.error);
+    expect(
+      await clauseError(
         { ...EMPTY_QUERY, aggregations: [paired] },
         { schema, transport: base },
       ),
-    ).rejects.toThrow("composed");
+    ).toEqual([expect.stringContaining("composed")]);
     const execution = {
       profile: "qt-postgres-v1",
       planToken: "same",
@@ -246,12 +249,12 @@ describe("metric execution boundary", () => {
       op: "count" as const,
       groupBy: ["@computed/category"],
     };
-    await expect(
-      executeMetrics(
+    expect(
+      await clauseError(
         { ...EMPTY_QUERY, aggregations: [grouped] },
         { schema, transport: base, execution },
       ),
-    ).rejects.toThrow("computed fields");
+    ).toEqual([expect.stringContaining("computed fields")]);
     await expect(
       executeMetrics(
         { ...EMPTY_QUERY, aggregations: [grouped] },
@@ -270,6 +273,49 @@ describe("metric execution boundary", () => {
       ),
     ).rejects.toThrow("profiles");
     expect(fetchMetrics).not.toHaveBeenCalled();
+  });
+  it("fails only the clauses that need a missing server capability", async () => {
+    const fetchMetrics = vi.fn<NonNullable<Transport<Row>["fetchMetrics"]>>(
+      async (request) => ({
+        metrics: request.metrics.map((m) => ({
+          id: m.id,
+          buckets: [{ keys: [], value: 1, count: 3 }],
+        })),
+      }),
+    );
+    const transport: Transport<Row> = {
+      fetchRows: async () => ({ rows, total: 3 }),
+      fetchMetrics,
+      metricCapabilities: { version: 2, expressions: true },
+    };
+    const result = await executeMetrics(
+      {
+        ...EMPTY_QUERY,
+        aggregations: [
+          { id: "first", op: "sum", field: "x", groupBy: [] },
+          {
+            id: "box",
+            op: "count",
+            groupBy: [],
+            display: { kind: "box" },
+            distribution: { kind: "box", input: "[x]", whiskers: "tukey" },
+          },
+          { id: "last", op: "count", groupBy: [] },
+        ],
+      },
+      { schema, transport },
+    );
+    expect(result.metrics.map((m) => [m.id, m.error])).toEqual([
+      ["first", undefined],
+      ["box", "This server does not support distributions."],
+      ["last", undefined],
+    ]);
+    expect(result.metrics[1]!.buckets).toEqual([]);
+    expect(fetchMetrics).toHaveBeenCalledTimes(1);
+    expect(fetchMetrics.mock.calls[0]![0].metrics.map((m) => m.id)).toEqual([
+      "first",
+      "last",
+    ]);
   });
   it("ignores inactive formula alternatives when gating server features", async () => {
     const fetchMetrics = vi.fn<NonNullable<Transport<Row>["fetchMetrics"]>>(
