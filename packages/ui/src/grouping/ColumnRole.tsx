@@ -26,7 +26,8 @@ export function columnRole(
       title: "Group key · shared by every row in this group",
     };
   const column = view.summaries.find((s) => s.id === field);
-  if (!column) return undefined;
+  // Links present the group; they are not values of it.
+  if (!column || column.op === "link") return undefined;
   if (column.op === "row")
     return {
       kind: "row",

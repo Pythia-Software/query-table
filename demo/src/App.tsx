@@ -1,8 +1,11 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import {
+  decodeQuery,
+  encodeQuery,
   loadSchema,
   localStorageAdapter,
   normalizeQueryState,
+  type LinkTargets,
   type RowId,
 } from "@pythia-software/query-table-core";
 import { useQueryTable } from "@pythia-software/query-table-react";
@@ -110,6 +113,14 @@ const renderers: RenderRegistry<Run> = {
   detail_link: () => <button>view</button>,
 };
 
+/** Group link columns with `to: { kind: "query", target: "runs" }` open the
+ * composed query in this table, on whichever route mounted it. The href is a
+ * real URL, so modifier clicks open it in a new tab; plain clicks stay
+ * client-side via onNavigate. */
+const LINK_TARGETS: LinkTargets = {
+  runs: (query) => `${window.location.pathname}?q=${encodeQuery(query)}`,
+};
+
 export function App({ dateExample = false, savedQueriesPrototype = false }: {
   dateExample?: boolean;
   savedQueriesPrototype?: boolean;
@@ -123,6 +134,14 @@ export function App({ dateExample = false, savedQueriesPrototype = false }: {
     storage: savedQueriesPrototype ? prototypeStorage : demoStorage,
     syncUrl: true,
   });
+  const { setQuery } = api;
+  const navigate = useCallback((href: string) => {
+    const url = new URL(href, window.location.href);
+    const token = url.searchParams.get("q");
+    if (url.origin !== window.location.origin || url.pathname !== window.location.pathname || !token) return false;
+    setQuery(decodeQuery(token));
+    return true;
+  }, [setQuery]);
   const metricCount = api.aggregations.clauses.length;
   const metricLabel = `${metricCount} metric${metricCount === 1 ? "" : "s"}`;
   const tableSummary = `${api.rows.length} row${api.rows.length === 1 ? "" : "s"}${api.total != null ? ` (of ${api.total} total)` : ""}`;
@@ -235,6 +254,8 @@ export function App({ dateExample = false, savedQueriesPrototype = false }: {
           onQueryChange={api.setQuery}
           total={api.total}
           renderers={renderers}
+          linkTargets={LINK_TARGETS}
+          onNavigate={navigate}
           rowId={api.rowId}
           selection={api.selection}
           columnDrag={api.columnDrag}

@@ -5,7 +5,8 @@
 export type { CellContext, CellRenderer, RenderRegistry } from "./renderers";
 export { Icon } from "./Icon";
 export type { IconName, IconProps } from "./Icon";
-export { defaultRenderers, resolveRenderer, safeLinkHref } from "./renderers";
+export { defaultRenderers, resolveRenderer, safeLinkHref, createGroupLinkRenderer } from "./renderers";
+export type { GroupLinkOptions } from "./renderers";
 export { JsonCell, JsonValueView } from "./JsonCell";
 export type { JsonCellProps } from "./JsonCell";
 export { inspectJsonValue, searchJsonEntries } from "./jsonValue";

@@ -376,7 +376,7 @@ describe("grouping diagnostics", () => {
 
   it("names the summary and the problem instead of a generic message", () => {
     expect(diagnostics({ summaries: [{ id: "p50", op: "median", field: "duration" }] })).toEqual([
-      'Invalid grouping: summary "p50" has unsupported op "median"; use count, count_distinct, sum, avg, min, max, row, or formula (for a median, use op "formula" with expression "MEDIAN([field])").',
+      'Invalid grouping: summary "p50" has unsupported op "median"; use count, count_distinct, sum, avg, min, max, row, formula, or link (for a median, use op "formula" with expression "MEDIAN([field])").',
     ]);
     expect(diagnostics({ summaries: [{ op: "count" }] })).toEqual(["Invalid grouping: summary 1 needs an id of 1–256 characters."]);
     expect(diagnostics({ keys: ["customer", "customer"] })).toEqual(["Invalid grouping: keys must list 1–20 distinct field names."]);

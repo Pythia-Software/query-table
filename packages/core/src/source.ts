@@ -26,6 +26,8 @@ export function sourceDependencies<Row>(query: QueryState, schema: FieldSchema<R
     model.validate(query.grouping);
     for (const key of query.grouping.keys) fields.add(key);
     for (const summary of query.grouping.summaries) {
+      // Link columns read result fields only; they have no source inputs.
+      if (summary.op === "link") continue;
       if (summary.op === "row") fields.add(summary.field!);
       else for (const dependency of compileMetric(model.summaryExpression(summary), schema, resolveComputed).dependencies) fields.add(dependency);
     }

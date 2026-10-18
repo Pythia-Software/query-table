@@ -106,7 +106,7 @@ Supported infix operators are `+ - * / %`, `= != <> < <= > >=`, `AND OR NOT`, `I
 
 | Category | Functions |
 | --- | --- |
-| Text | LEFT, RIGHT, SUBSTRING, LENGTH, LOWER, UPPER, TRIM, LTRIM, RTRIM, REPLACE, LPAD, RPAD, SPLIT_PART, CONCAT, CONCAT_WS |
+| Text | LEFT, RIGHT, SUBSTRING, LENGTH, LOWER, UPPER, TRIM, LTRIM, RTRIM, REPLACE, LPAD, RPAD, SPLIT_PART, CONCAT, CONCAT_WS, URL_ENCODE |
 | Matching | CONTAINS, STARTS_WITH, ENDS_WITH, REGEX_TEST, REGEX_EXTRACT, REGEX_REPLACE |
 | Numbers | ABS, ROUND, FLOOR, CEIL, TRUNC, POWER, SQRT, CLAMP, LEAST, GREATEST |
 | Conditions | IF, IFS, SWITCH, COALESCE, NULLIF, IS_NULL, IS_EMPTY, IFERROR |
@@ -124,6 +124,7 @@ Rules worth knowing:
 - `IF`, `IFS`, `SWITCH`, `COALESCE`, and `IFERROR` evaluate lazily. Invalid conversions, division by zero, and invalid arguments produce per-cell errors. `IFERROR` catches expression errors, not worker termination/timeouts.
 - `CONCAT_WS` skips null arguments. `IS_EMPTY` accepts null, empty text, or an empty array.
 - Text slicing counts Unicode code points (not grapheme clusters); positions are one-based. Negative lengths/indices are errors. Out-of-range split parts/array elements are null.
+- `URL_ENCODE` percent-encodes the UTF-8 bytes of its text, keeping only RFC 3986 unreserved characters (letters, digits, `-`, `.`, `_`, `~`). It matches DuckDB's `url_encode`. The Go SQLite/PostgreSQL server profile does not execute text functions, so it rejects `URL_ENCODE` as it rejects `LENGTH`.
 - Literal text matching is case-sensitive unless its optional third argument is true.
 - Regex uses native JavaScript Unicode semantics. Optional flags are `i`, `m`, and `s`; extraction group defaults to 0, the entire match. No match returns null. Replacement replaces all matches and supports `$$`, `$&`, and numbered captures. Prefix/suffix substitutions are unsupported.
 - Dates use ISO date-only strings or ISO timestamps with explicit timezone. They are normalized to UTC. Date addition clamps month/year overflow to the last valid day. Weeks start Monday. `DATE_DIFF` measures elapsed whole units (week through millisecond), not calendar-boundary counts. Formatting tokens are `YYYY MM DD HH mm ss`.

@@ -4,6 +4,24 @@
 
 ### Added
 
+- Link columns on grouped tables: a summary column with `op: "link"` renders
+  each group as a real `<a href>`. A link either fills a URL template with the
+  group's keys and summaries or composes a query (the grouping source or an
+  empty query, plus the group's key filters and an optional query patch) that
+  the host routes through `DataTable`'s new `linkTargets`. `onNavigate` lets
+  the host handle unmodified primary clicks; other clicks keep native link
+  behavior. Every href goes through `safeLinkHref`, and blocked or unresolvable
+  links render as muted text. Invalid definitions are reported by
+  `table.grouping.diagnostics` instead of failing the table. Link cells are
+  computed on the client, are stripped from v3 server requests, and cannot be
+  sorted, filtered or measured. Specs round-trip through `?q=` links, saved
+  queries and snapshots. The column editor shows, reorders and removes them;
+  hosts author them through the API. See
+  [link columns](docs/grouping.md#link-columns).
+- `URL_ENCODE(text)` formula function: percent-encodes UTF-8 text, keeping
+  only RFC 3986 unreserved characters. The client runtime, DuckDB and the
+  native macOS runtime agree byte for byte. The Go server profile rejects it,
+  as it rejects other text functions.
 - Add per-metric `where` filters and a `minCount` minimum group size to
   `AggregationClause`. `where` narrows one metric's rows ("error kinds among
   errors only") with the table filter's fields, operators and request clock;

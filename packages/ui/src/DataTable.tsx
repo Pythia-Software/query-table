@@ -11,13 +11,13 @@ import { Icon } from "./Icon";
 // and emits intents through onQueryChange. Its props mirror a conventional
 // schema-driven table so adoption is mechanical.
 
-import { GROUP_ID_FIELD, ITEM_DETAILS_COLUMN, isComputedCellError } from "@pythia-software/query-table-core";
+import { GROUP_ID_FIELD, GROUP_LINK_RENDER, ITEM_DETAILS_COLUMN, isComputedCellError, isGroupLinkValue, type LinkTargets } from "@pythia-software/query-table-core";
 import { useId, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type SetStateAction } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { OrderByClause, QueryState, FieldDef, RowId, SelectColumn, WhereClause } from "@pythia-software/query-table-core";
 import { isSortable, readFieldValue } from "@pythia-software/query-table-core";
 import { useColumnDrag, type SelectionApi, type ColumnDragApi } from "@pythia-software/query-table-react";
-import { resolveRenderer, type RenderRegistry } from "./renderers";
+import { createGroupLinkRenderer, resolveRenderer, type RenderRegistry } from "./renderers";
 import type { TableClassNames } from "./classNames";
 import { CellMenu } from "./CellMenu";
 import { cellValueText } from "./jsonValue";
@@ -38,6 +38,15 @@ export interface DataTableProps<Row> {
 
   /** Resolves FieldDef.render keys. Pass `{ ...defaultRenderers, ...yours }`. */
   renderers: RenderRegistry<Row>;
+  /** Host routes for grouped link columns whose destination is a query
+   * (`to: { kind: "query", target }`). The host turns the composed query into
+   * an href; it is safety-checked before rendering. */
+  linkTargets?: LinkTargets;
+  /** Called when a link column is clicked without modifiers. Return true when
+   * the host handled navigation (e.g. client-side routing); the browser's
+   * default is then prevented. Modifier, middle and "open in new tab" clicks
+   * keep native link behavior. */
+  onNavigate?: (href: string, event: MouseEvent) => boolean;
   /** Row → stable id (defaults to reading the schema's idField). */
   rowId: (row: Row) => RowId | null;
 
@@ -106,7 +115,9 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     rows,
     query,
     onQueryChange,
-    renderers,
+    renderers: hostRenderers,
+    linkTargets,
+    onNavigate,
     rowId: sourceRowId,
     selection,
     trailing,
@@ -128,6 +139,17 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     return typeof id === "string" ? id : null;
   }, [Boolean(query.grouping), sourceRowId]);
   const details = query.grouping ? undefined : props.itemDetails;
+  // Link columns route through the host's targets. Read them through a ref so
+  // inline host callbacks do not change the registry (and refit) every render.
+  const linkOptions = useRef({ linkTargets, onNavigate });
+  linkOptions.current = { linkTargets, onNavigate };
+  const renderers = useMemo<RenderRegistry<Row>>(() => {
+    const link = createGroupLinkRenderer({
+      get linkTargets() { return linkOptions.current.linkTargets; },
+      onNavigate: (href, event) => linkOptions.current.onNavigate?.(href, event) ?? false,
+    });
+    return { ...hostRenderers, [GROUP_LINK_RENDER]: link };
+  }, [hostRenderers]);
   const detailRenderers = useMemo(() => props.itemRenderers ? { ...renderers, ...props.itemRenderers } : renderers, [renderers, props.itemRenderers]);
   const expandedPanelId = useId();
   const expandedRowIndex = details?.active?.mode === "expand" ? rows.findIndex((row) => rowId(row) === details.active?.id) : -1;
@@ -264,7 +286,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     setMenu(null);
     try {
       if (navigator.clipboard) {
-        await navigator.clipboard.writeText(f.display?.kind === "json" || f.render === "json" ? cellValueText(value) : valueToString(value));
+        await navigator.clipboard.writeText(isGroupLinkValue(value) ? value.label : f.display?.kind === "json" || f.render === "json" ? cellValueText(value) : valueToString(value));
       }
     } catch {
       /* clipboard denial is non-fatal */
@@ -602,7 +624,8 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
   function openMenu(e: React.MouseEvent, f: FieldDef<Row>, row: Row) {
     if (isInteractiveTarget(e.target)) return;
     e.preventDefault();
-    setMenu({ kind: "cell", field: f, value: readFieldValue(f, row), x: e.clientX, y: e.clientY, trigger: e.currentTarget as HTMLElement });
+    const value = readFieldValue(f, row);
+    setMenu({ kind: "cell", field: f, value: isGroupLinkValue(value) ? value.label : value, x: e.clientX, y: e.clientY, trigger: e.currentTarget as HTMLElement });
   }
   function openHeaderMenu(e: React.MouseEvent, f: FieldDef<Row>) {
     if (isInteractiveTarget(e.target)) return;

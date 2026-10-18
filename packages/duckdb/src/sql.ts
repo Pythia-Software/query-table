@@ -257,6 +257,7 @@ export class SQLBuilder {
       return `${name.toLowerCase()}(CASE WHEN ${c ?? "FALSE"} THEN lower(${a}) ELSE ${a} END, CASE WHEN ${c ?? "FALSE"} THEN lower(${b}) ELSE ${b} END)`;
     if (name === "TO_NUMBER") return safeNumber(`CAST(${a} AS DOUBLE)`);
     if (name === "TO_TEXT") return `CAST(${a} AS VARCHAR)`;
+    if (name === "URL_ENCODE") return `url_encode(${a})`;
     if (name === "TO_BOOLEAN") return `CAST(${a} AS BOOLEAN)`;
     if (name === "TO_DATETIME") return `CAST(${a} AS TIMESTAMPTZ)`;
     if (name === "SPLIT") return `string_split(${a}, ${b})`;

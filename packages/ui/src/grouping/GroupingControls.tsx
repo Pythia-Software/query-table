@@ -159,7 +159,7 @@ export function useGroupingPresentation<Row>(
         renderChip: (field, label) => {
           const role = columnRole(field, view, model);
           const column = view.summaries.find((c) => c.id === field);
-          if (!column || column.op === "formula" || column.op === "row")
+          if (!column || column.op === "formula" || column.op === "row" || column.op === "link")
             return (
               <span className="qt-column-label" data-column-role={role?.kind}>
                 <ColumnRoleBadge role={role} />

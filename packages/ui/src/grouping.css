@@ -289,6 +289,28 @@
   font-size: 12px;
   line-height: 1.5;
 }
+.qt-column-link-spec {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0 12px;
+  font-size: 12px;
+}
+.qt-column-link-spec > div {
+  display: grid;
+  grid-template-columns: minmax(90px, max-content) minmax(0, 1fr);
+  gap: 10px;
+}
+.qt-column-link-spec dt {
+  color: var(--qt-muted);
+}
+.qt-column-link-spec dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.qt-column-link > .qt-muted {
+  font-size: 11px;
+  line-height: 1.5;
+}
 .qt-column-another {
   margin-top: 18px;
   font-size: 12px;

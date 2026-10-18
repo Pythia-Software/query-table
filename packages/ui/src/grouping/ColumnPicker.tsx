@@ -21,6 +21,7 @@ export const SUMMARY_NAMES: Record<SummaryOp, string> = {
   max: "Largest",
   row: "Representative row",
   formula: "Custom aggregate…",
+  link: "Link",
 };
 export const SUMMARY_DETAILS: Record<SummaryOp, string> = {
   count: "Number of rows with a value",
@@ -31,6 +32,7 @@ export const SUMMARY_DETAILS: Record<SummaryOp, string> = {
   max: "Highest value in the group",
   row: "Use the shared GROUP BY ordering",
   formula: "Write an aggregate formula",
+  link: "Open the rows or a page for this group",
 };
 
 /** A hidden summary can be restored; a selected one cannot be added twice.
@@ -108,7 +110,9 @@ export function ColumnPicker({
           ? (f.group ?? "Computed columns")
           : summaries.find((s) => s.id === f.name)?.op === "row"
             ? "From representative row"
-            : "Aggregate values",
+            : summaries.find((s) => s.id === f.name)?.op === "link"
+              ? "Links"
+              : "Aggregate values",
     }));
   const availableOps = (field?: string) =>
     availableSummaryOps(model, field, summaries, selected, representative);
