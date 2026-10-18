@@ -44,6 +44,7 @@ export function normalizeMetricOptions(
       expressionY: "string",
       scope: ["allMatching", "shownRows"],
       groupLimit: "integer",
+      minCount: "positiveInteger",
     }),
   );
   if (raw.dateGrouping !== undefined) {

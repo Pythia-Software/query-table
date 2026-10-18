@@ -116,6 +116,16 @@ func compileMetricDialect(ctx context.Context, q MetricQuery, spec AggSpec, s Sc
 	if e = b.filter(q.Where); e != nil {
 		return SQLPlan{}, e
 	}
+	for _, term := range spec.Where {
+		for _, p := range term.Predicates() {
+			if p.Op == "matches_regex" || p.Op == "not_matches_regex" {
+				return SQLPlan{}, diagnostic("unsupported_regex", "regex is unavailable in metric filters")
+			}
+		}
+	}
+	if spec.MinCount > 0 && len(spec.GroupBy) == 0 {
+		return SQLPlan{}, diagnostic("min_count_grouping", "minCount requires at least one grouping field")
+	}
 	scope := spec.Scope
 	if scope == "" {
 		scope = "allMatching"
@@ -146,6 +156,11 @@ func compileMetricDialect(ctx context.Context, q MetricQuery, spec AggSpec, s Sc
 			b.stage("SELECT * FROM " + b.rel)
 			b.lateStage = len(b.stages) - 1
 		}
+	}
+	// A metric predicate narrows the scoped rows: the whole filtered relation,
+	// or the already-selected page. It never changes which rows are shown.
+	if e = b.filter(spec.Where); e != nil {
+		return SQLPlan{}, e
 	}
 	groups := []ValueSQL{}
 	for _, name := range spec.GroupBy {
@@ -354,10 +369,7 @@ func compileMetricDialect(ctx context.Context, q MetricQuery, spec AggSpec, s Sc
 	if e != nil {
 		return SQLPlan{}, e
 	}
-	sql := "SELECT *, COUNT(*) OVER () AS group_count FROM " + b.rel + order
-	if spec.GroupLimit > 0 {
-		sql += " LIMIT " + b.param(spec.GroupLimit, "integer")
-	}
+	sql := b.metricResult(spec, order)
 	cols := []OutputColumn{}
 	{
 		for i, g := range groups {
@@ -383,6 +395,24 @@ func compileMetricDialect(ctx context.Context, q MetricQuery, spec AggSpec, s Sc
 		plan.SQLiteReductionColumns = plan.reduction.columns
 	}
 	return plan, nil
+}
+// metricResult ranks and limits reduced groups. MinCount first removes groups
+// below the threshold; group_count then counts only the kept groups. The kept
+// rows are LEFT JOINed to a one-row hidden_groups count, so a result whose
+// every group is hidden still returns that count in one row whose count is
+// NULL (no bucket). Hidden groups never reach the ranking, LIMIT or Other.
+func (b *planBuilder) metricResult(spec AggSpec, order string) string {
+	limit := ""
+	if spec.GroupLimit > 0 {
+		limit = " LIMIT " + b.param(spec.GroupLimit, "integer")
+	}
+	if spec.MinCount <= 0 {
+		return "SELECT *,COUNT(*) OVER () AS group_count FROM " + b.rel + order + limit
+	}
+	groups := b.rel
+	threshold := b.param(spec.MinCount, "bigint")
+	b.stage("SELECT *,COUNT(*) OVER () AS group_count FROM " + groups + " WHERE count>=" + threshold)
+	return "SELECT k.*,h.hidden_groups FROM (SELECT COUNT(*) AS hidden_groups FROM " + groups + " WHERE count<" + threshold + ") AS h LEFT JOIN " + b.rel + " AS k ON 1=1" + order + limit
 }
 func groupSQL(groups []ValueSQL) ([]string, string) {
 	sels := []string{}

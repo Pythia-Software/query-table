@@ -4,6 +4,8 @@ import {
   evaluateMetrics,
   metricPlans,
   hasRegex,
+  metricPopulationError,
+  predicatesOf,
   toAggregationQuery,
   toMetricQuery,
   validateMetric,
@@ -72,7 +74,9 @@ async function localMetrics<Row>(
       c.scope !== undefined ||
       c.distribution ||
       c.sort ||
-      c.groupLimit !== undefined,
+      c.groupLimit !== undefined ||
+      c.where !== undefined ||
+      c.minCount !== undefined,
   );
   if (
     advanced.length &&
@@ -232,7 +236,7 @@ export async function executeMetrics<Row>(
       c.scope === "shownRows" &&
       (!supportsV2 || needsWorker(c) || !!c.dateGrouping),
   );
-  const matching = clauses.filter(
+  let matching = clauses.filter(
     (c) =>
       c.scope !== "shownRows" ||
       (supportsV2 && !needsWorker(c) && !c.dateGrouping),
@@ -248,6 +252,9 @@ export async function executeMetrics<Row>(
     const names = new Set(
       shown.flatMap((clause) => [
         ...clause.groupBy,
+        ...(clause.where ?? []).flatMap((term) =>
+          predicatesOf(term).map((predicate) => predicate.field),
+        ),
         ...metricPlans(clause, context.schema, context.resolveComputed).flatMap(
           (p) => p.dependencies,
         ),
@@ -297,6 +304,22 @@ export async function executeMetrics<Row>(
       throw Error(
         "This server does not support calendar grouping. Enable the v3 query executor.",
       );
+    const transport = context.transport;
+    // Population controls are negotiated per clause: an executor that does not
+    // advertise them fails only those cards and never drops the predicate.
+    if (transport?.fetchMetrics || transport?.fetchAggregations) {
+      const support =
+        transport.fetchMetrics && transport.metricCapabilities?.version === 2
+          ? transport.metricCapabilities
+          : {};
+      matching = matching.filter((c) => {
+        const error = metricPopulationError(c, support);
+        if (error) results.push({ id: c.id, buckets: [], error });
+        return !error;
+      });
+    }
+  }
+  if (matching.length) {
     const transport = context.transport;
     const scoped = { ...query, aggregations: matching };
     if (

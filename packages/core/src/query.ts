@@ -156,6 +156,15 @@ export interface AggregationClause {
   groupBy: string[];
   /** Panel header override; defaults to a derived label like "avg total". */
   label?: string;
+  /** This metric's own row predicate (CNF, like `QueryState.where`), ANDed with
+   *  the table WHERE before grouping. The table rows are unchanged. In grouped
+   *  mode it refers to grouped-result fields. Shown-row metrics apply it inside
+   *  the shown page. */
+  where?: WhereTerm[];
+  /** Drop groups with fewer than this many rows (counted after `where`) before
+   *  sorting, `groupLimit` and Other. Requires at least one grouping field;
+   *  integer 1–1,000,000. Removed groups are reported as `hiddenGroups`. */
+  minCount?: number;
 }
 
 /** Detail affordances are presentation state, never backend SELECT fields. */
@@ -302,6 +311,52 @@ function normalizeSetFilter(item: unknown): SetFilterMetadata | undefined {
   return { id, mode: item.mode as SetFilterMode, values: [...item.values] as string[] };
 }
 
+function normalizeWhereTerms(input: readonly unknown[]): WhereTerm[] {
+  const where: WhereTerm[] = [];
+  let literalBudget = MAX_WHERE_CLAUSES;
+  for (const item of input) {
+    if (literalBudget <= 0) break;
+    const start = where.length;
+    if (isRecord(item) && Array.isArray((item as { any?: unknown }).any)) {
+      const members: WhereClause[] = [];
+      for (const inner of (item as { any: unknown[] }).any) {
+        if (literalBudget <= 0) break;
+        const clause = normalizeWhereClause(inner);
+        if (clause) {
+          members.push(clause);
+          literalBudget--;
+        }
+      }
+      if (members.length === 1) where.push(members[0]!);
+      else if (members.length > 1) where.push({ any: members });
+      // 0 members → drop the term entirely
+    } else {
+      const clause = normalizeWhereClause(item);
+      if (clause) {
+        where.push(clause);
+        literalBudget--;
+      }
+    }
+    if (where.length > start && isRecord(item)) {
+      const metadata = normalizeSetFilter(item.setFilter);
+      if (metadata) where[start]!.setFilter = metadata;
+    }
+  }
+  return where;
+}
+
+/** A metric WHERE narrows its population. Dropping a malformed predicate would
+ * silently widen it, so any loss is retained as a clause diagnostic instead. */
+function normalizeMetricWhere(value: unknown): { where?: WhereTerm[]; invalid: boolean } {
+  if (value === undefined) return { invalid: false };
+  if (!Array.isArray(value)) return { invalid: true };
+  const where = normalizeWhereTerms(value);
+  const supplied = value.reduce((count: number, term: unknown) =>
+    count + (isRecord(term) && Array.isArray(term.any) ? term.any.length : 1), 0);
+  const kept = where.reduce((count, term) => count + predicatesOf(term).length, 0);
+  return { ...(where.length ? { where } : {}), invalid: supplied !== kept };
+}
+
 /** Convert unknown input into a bounded, structurally valid QueryState.
  * Invalid members are dropped; invalid scalar paging values use the supplied
  * fallback. This function is intentionally schema-agnostic—field allowlisting
@@ -329,40 +384,9 @@ export function normalizeQueryState(input: unknown, fallback: QueryState = EMPTY
   // group. MAX_WHERE_CLAUSES bounds the TOTAL predicate count across all terms
   // (legacy flat lists are all literals, so the cap is unchanged for them).
   // Singleton/empty groups are canonicalized (flattened / dropped).
-  const where: WhereTerm[] = [];
-  if (Array.isArray(raw.where)) {
-    let literalBudget = MAX_WHERE_CLAUSES;
-    for (const item of raw.where) {
-      if (literalBudget <= 0) break;
-      const start = where.length;
-      if (isRecord(item) && Array.isArray((item as { any?: unknown }).any)) {
-        const members: WhereClause[] = [];
-        for (const inner of (item as { any: unknown[] }).any) {
-          if (literalBudget <= 0) break;
-          const clause = normalizeWhereClause(inner);
-          if (clause) {
-            members.push(clause);
-            literalBudget--;
-          }
-        }
-        if (members.length === 1) where.push(members[0]!);
-        else if (members.length > 1) where.push({ any: members });
-        // 0 members → drop the term entirely
-      } else {
-        const clause = normalizeWhereClause(item);
-        if (clause) {
-          where.push(clause);
-          literalBudget--;
-        }
-      }
-      if (where.length > start && isRecord(item)) {
-        const metadata = normalizeSetFilter(item.setFilter);
-        if (metadata) where[start]!.setFilter = metadata;
-      }
-    }
-  } else {
-    where.push(...fallback.where.map(cloneWhereTerm));
-  }
+  const where: WhereTerm[] = Array.isArray(raw.where)
+    ? normalizeWhereTerms(raw.where)
+    : fallback.where.map(cloneWhereTerm);
 
   const orderBy: OrderByClause[] = [];
   if (Array.isArray(raw.orderBy)) {
@@ -417,6 +441,9 @@ export function normalizeQueryState(input: unknown, fallback: QueryState = EMPTY
       if (field) aggregation.field = field;
       if (label) aggregation.label = label;
       Object.assign(aggregation, normalizeMetricOptions(item));
+      const metricWhere = normalizeMetricWhere(item.where);
+      if (metricWhere.where) aggregation.where = metricWhere.where;
+      if (metricWhere.invalid) aggregation.diagnostics = [...(aggregation.diagnostics ?? []), "Invalid metric filter."];
       if (!Array.isArray(item.groupBy) || rawGroups.length > MAX_GROUP_BY_FIELDS || groupBy.length !== rawGroups.length) aggregation.diagnostics = [...(aggregation.diagnostics ?? []), "Invalid metric grouping fields or grouping budget exceeded."];
       const unsupportedOp = boundedString(item.unsupportedOp ?? (!validOp ? item.op : undefined), MAX_FIELD_NAME_LENGTH);
       if (unsupportedOp) aggregation.unsupportedOp = unsupportedOp;

@@ -374,6 +374,9 @@ export interface AggregationResultEntry {
   processedRows?: number;
   groupCount?: number;
   coverage?: "exact" | "partial";
+  /** Groups removed by AggregationClause.minCount (present whenever it is set).
+   *  They are not part of `groupCount`, `buckets` or `other`. */
+  hiddenGroups?: number;
   /** Echoes AggregationClause.id. */
   id: string;
   buckets: AggregationBucket[];
@@ -393,7 +396,7 @@ export function toAggregationQuery<Row>(q: QueryState, schema: FieldSchema<Row>)
   const suppliedPredicateCount = q.where.reduce((n,t)=>n+predicatesOf(t).length,0);
   q = normalizeQueryState(q);
   if (q.aggregations?.some(a => a.dateGrouping)) throw new Error("Date grouping currently requires local metric execution.");
-  if (q.aggregations?.some(a => a.diagnostics?.length || a.expression !== undefined || a.expressionY !== undefined || a.distribution || a.scope === "shownRows" || a.sort?.length || a.groupLimit)) throw new Error("Metric definition requires the version 2 metric transport.");
+  if (q.aggregations?.some(a => a.diagnostics?.length || a.expression !== undefined || a.expressionY !== undefined || a.distribution || a.scope === "shownRows" || a.sort?.length || a.groupLimit || a.where?.length || a.minCount !== undefined)) throw new Error("Metric definition requires the version 2 metric transport.");
   const byName = indexFields(schema);
   const resolveField = (name: string) => resolveFieldName(schema, name) ?? name;
 

@@ -14,6 +14,10 @@ export interface QueryCapabilitiesV3 {
   regex: boolean;
   regexSourceFilters?: boolean;
   regexAggregateExpressions?: boolean;
+  /** Executes AggregationClause.where; clauses using it are refused otherwise. */
+  metricFilters?: boolean;
+  /** Executes AggregationClause.minCount and reports hiddenGroups. */
+  metricMinCount?: boolean;
   maxRows: number;
   maxGroups: number;
   maxPopulation: number;

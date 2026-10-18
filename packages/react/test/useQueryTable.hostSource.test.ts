@@ -255,3 +255,25 @@ it("keeps legacy local metric behavior when a transport also exposes v3",async()
   expect(api().aggregations.error).toBeNull();expect(api().aggregations.results?.metrics[0]?.buckets[0]?.value).toBe(1);
   expect(transport.fetchQueryV3).not.toHaveBeenCalled();
 });
+
+it("refuses unsupported metric population controls per card on the v3 transport",async()=>{
+  const rows:Row[]=[{id:"1",k:"a",n:1,at:"2026-10-13T12:00:00Z"},{id:"2",k:"a",n:3,at:"2026-10-13T12:00:00Z"},{id:"3",k:"b",n:10,at:"2026-10-13T12:00:00Z"}];
+  const capabilities:QueryCapabilitiesV3={version:3,groupedRows:true,calendarGrouping:true,computedSourceFilters:true,regex:false,metricMinCount:true,maxRows:10000,maxGroups:2000,maxPopulation:250000,profile:"qt-sqlite-v1"};
+  const fetchQueryV3=vi.fn(async(request:QueryRequestV3):Promise<QueryResultV3>=>{
+    const source={...EMPTY_QUERY,...request.source,select:request.source.select.map(field=>({field}))};
+    const query:QueryState={...EMPTY_QUERY,...request.result,select:request.result.select.map(field=>({field})),aggregations:request.metrics,...(request.grouping?{grouping:{...request.grouping,source}}:{})};
+    const resultSchema=request.grouping?createGroupingModel(schema).resultSchema(request.grouping.keys,request.grouping.summaries):schema;
+    const result=applyQuery(rows,query,schema,{now:request.now});
+    return {version:3,now:request.now,sourceTotal:rows.length,rows:request.rows?result.rows:[],total:result.total,schema:{name:resultSchema.name,idField:resultSchema.idField,fields:resultSchema.fields.map(field=>({name:field.name,type:field.type}))},metrics:evaluateMetrics(rows,query,schema,{now:request.now}).metrics,execution:{profile:request.profile,planToken:"",resolvedRevisions:{},fields:{}}};
+  });
+  const query:QueryState={...EMPTY_QUERY,grouping:{source:{...EMPTY_QUERY},keys:["k"],summaries:[{id:"total",op:"sum",field:"n"},{id:"rows",op:"count"}],representative:null},select:[{field:"k"},{field:"total"}],
+    aggregations:[{id:"big",op:"count",groupBy:["k"],minCount:1},{id:"filtered",op:"count",groupBy:[],where:[{field:"total",op:">=" as const,value:"5"}]}]};
+  const transport={fetchRows:vi.fn(async()=>({rows:[],total:0})),queryCapabilities:capabilities,fetchQueryV3};
+  const api=mount({schema,transport,initialQuery:query,debounceMs:0});await settle();
+  expect(api().aggregations.error).toBeNull();
+  const metrics=api().aggregations.results?.metrics??[];
+  expect(metrics.map(metric=>metric.id)).toEqual(["big","filtered"]);
+  expect(metrics[0]).toMatchObject({hiddenGroups:0,groupCount:2});
+  expect(metrics[1]).toEqual({id:"filtered",buckets:[],error:"This server does not support metric filters."});
+  for(const [request] of fetchQueryV3.mock.calls) expect(request.metrics.some(metric=>metric.id==="filtered")).toBe(false);
+});

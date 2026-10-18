@@ -378,6 +378,14 @@ export function MetricCard<Row>({
         : buckets !== allBuckets && allBuckets.length > (clause.display?.maxGroups ?? allBuckets.length) && (
             <p className="qt-metric-note">Showing the first {clause.display?.maxGroups} groups in result order{buckets.length > clause.display!.maxGroups! ? " plus Other" : ""}.</p>
           )}
+      {!!result?.hiddenGroups && clause.minCount !== undefined && (
+        <p className="qt-metric-note">
+          {result.hiddenGroups.toLocaleString()}{" "}
+          {result.hiddenGroups === 1 ? "group" : "groups"} hidden (fewer than{" "}
+          {clause.minCount.toLocaleString()}{" "}
+          {clause.minCount === 1 ? "row" : "rows"})
+        </p>
+      )}
       {result?.groupCount !== undefined &&
         result.groupCount > allBuckets.length && (
           <p className="qt-metric-note">

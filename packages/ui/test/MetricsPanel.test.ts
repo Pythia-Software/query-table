@@ -873,3 +873,27 @@ it("counts omitted outliers after supplementing a transport sample with actual e
   expect(html).toContain("2 outlier markers omitted.");
   expect(html).toContain("5 outliers (3 retained markers)");
 });
+describe("metric population notes", () => {
+  it("states how many groups minCount hid", () => {
+    const markup = renderToStaticMarkup(
+      createElement(MetricCard, {
+        clause: { ...clause, minCount: 3 },
+        buckets,
+        fields,
+        renderers: defaultRenderers,
+        result: { buckets, groupCount: 2, hiddenGroups: 4 },
+      }),
+    );
+    expect(markup).toContain("4 groups hidden (fewer than 3 rows)");
+    const none = renderToStaticMarkup(
+      createElement(MetricCard, {
+        clause: { ...clause, minCount: 3 },
+        buckets,
+        fields,
+        renderers: defaultRenderers,
+        result: { buckets, groupCount: 2, hiddenGroups: 0 },
+      }),
+    );
+    expect(none).not.toContain("hidden (fewer");
+  });
+});

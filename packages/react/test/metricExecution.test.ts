@@ -462,3 +462,42 @@ it("does not bypass the mixed-dashboard card cap by partitioning engines", async
     ),
   ).toBe(true);
 });
+describe("metric population capability negotiation", () => {
+  const plain = { id: "plain", op: "count" as const, groupBy: ["group"] };
+  const filtered = { id: "filtered", op: "count" as const, groupBy: ["group"], where: [{ field: "name", op: "=" as const, value: "alpha" }] };
+  const small = { id: "small", op: "count" as const, groupBy: ["group"], minCount: 2 };
+  it("fails only the clauses a v2 server cannot execute exactly", async () => {
+    const fetchMetrics = vi.fn(async (request: { metrics: { id: string }[] }) => ({
+      metrics: request.metrics.map((m) => ({ id: m.id, buckets: [{ keys: ["a"], value: 2, count: 2 }] })),
+    }));
+    const transport = { fetchRows: async () => ({ rows: [], total: 0 }), fetchMetrics, metricCapabilities: { version: 2 as const, minCount: true } } as unknown as Transport<Row>;
+    const result = await executeMetrics({ ...EMPTY_QUERY, aggregations: [plain, filtered, small] }, { schema, transport });
+    expect(fetchMetrics).toHaveBeenCalledOnce();
+    expect(fetchMetrics.mock.calls[0]![0].metrics.map((m) => m.id)).toEqual(["plain", "small"]);
+    expect(result.metrics.map((m) => [m.id, m.error ?? null])).toEqual([
+      ["plain", null],
+      ["filtered", "This server does not support metric filters."],
+      ["small", null],
+    ]);
+  });
+  it("never sends population controls to the version 1 aggregation endpoint", async () => {
+    const fetchAggregations = vi.fn(async (request: { aggregations: { id: string }[] }) => ({
+      metrics: request.aggregations.map((a) => ({ id: a.id, buckets: [] })),
+    }));
+    const transport = { fetchRows: async () => ({ rows: [], total: 0 }), fetchAggregations } as unknown as Transport<Row>;
+    const result = await executeMetrics({ ...EMPTY_QUERY, aggregations: [plain, small] }, { schema, transport });
+    expect(fetchAggregations.mock.calls[0]![0].aggregations.map((a) => a.id)).toEqual(["plain"]);
+    expect(result.metrics[1]).toEqual({ id: "small", buckets: [], error: "This server does not support a minimum rows per group." });
+  });
+  it("evaluates both controls on the local engine, including shown rows", async () => {
+    const result = await executeMetrics(
+      { ...EMPTY_QUERY, aggregations: [filtered, small, { ...filtered, id: "page", scope: "shownRows" as const }] },
+      { schema, clientRows: rows, shownRows: rows, rowsReady: true },
+    );
+    expect(result.metrics.map((m) => [m.id, m.buckets.map((b) => [b.keys[0], b.count]), m.hiddenGroups])).toEqual([
+      ["filtered", [["a", 1]], undefined],
+      ["small", [["a", 2]], 1],
+      ["page", [["a", 1]], undefined],
+    ]);
+  });
+});

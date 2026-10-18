@@ -47,13 +47,81 @@ const ratio: AggregationClause = {
 
 Aggregate formulas reduce row expressions and then compute once per group. `SUM([x]) / SUM([y])` is a ratio of sums, not an average of row ratios. Use `NULLIF` for an intentionally nullable denominator. Nested aggregates and bare row references outside reductions are invalid. `COUNT()`, `COUNT(expr)`, `COUNT_DISTINCT`, `SUM`, `AVG`, `MIN`, `MAX`, and `MEDIAN` retain scalar semantics. `MEDIAN` accepts numeric expressions, ignores nulls, and averages the middle two values for even populations; an empty population returns null. It is available in aggregate formulas, not the legacy `AggOp` selector. The local expression compiler also supports its documented row functions; each server profile advertises a narrower subset.
 
-`sort` is a stable multi-term order over `value`, scatter `y`, `count`, distribution `samples`, or `group0`, `group1`, etc. Each term has ascending/descending direction and optional null placement. `groupLimit` (1–10,000) applies after reductions, formulas, and sorting. Results expose total group count/coverage so truncated charts can be identified. An Other bucket is available only when the engine can derive an exact additive remainder; ratios are not treated as additive.
+`sort` is a stable multi-term order over `value`, scatter `y`, `count`, distribution `samples`, or `group0`, `group1`, etc. Each term has ascending/descending direction and optional null placement. `groupLimit` (1–10,000) applies after reductions, formulas, `minCount`, and sorting. Results expose total group count/coverage so truncated charts can be identified. An Other bucket is available only when the engine can derive an exact additive remainder; ratios are not treated as additive.
 
 Scatter stores the primary reduction in `expression` and the second in `expressionY`, with `display.kind: "scatter"`. Each typed group tuple produces one X/Y pair from the same population. Format X/Y independently through `xFormat`/`yFormat`, and label them through `xLabel`/`yLabel`.
 
 Box and histogram definitions use `distribution: { kind, input, ... }`, where `input` is a numeric **row** expression, not an aggregate formula. Box options select `whiskers: "minmax" | "tukey"`; optional `display.boxMean` shows a mean marker. Histograms use `bins` (2–30). Quartiles interpolate at `(n-1)*p`. Tukey whiskers end at observed in-fence values; both outlier tails are retained in a bounded sample with a total outlier count. Histograms derive shared equal-width edges from the full scoped population before ranking/limiting groups; the final upper bound is inclusive. Constants and empty populations have explicit results. Distribution response types are exported by core.
 
 Legend placement for pie, ring, and scatter is `left`, `right`, `top`, `bottom`, or `none`. List options are `showBars`, `useGroupColors`, and `showValues`. These affect presentation only. Saved inactive alternatives can be retained during editing; the computation projector sends only the active scalar, scatter, or distribution definition.
+
+## Metric filters and minimum group size
+
+Two clause fields change which rows and groups one metric reduces, without
+changing the table's rows or any other metric:
+
+```ts
+const errorKinds: AggregationClause = {
+  id: "error-kinds",
+  op: "count",
+  groupBy: ["kind"],
+  // "Error kinds among errors only": a pre-group predicate for this metric.
+  where: [{ field: "status", op: "=", value: "error" }],
+  // Hide kinds observed fewer than 20 times instead of ranking them.
+  minCount: 20,
+  groupLimit: 10,
+};
+```
+
+`where` has the table WHERE's shape (CNF terms with optional OR groups), field
+allowlist, operators per type and relative datetime values, and is ANDed with
+the table WHERE before grouping. Relative values resolve against the same
+request clock as the table WHERE. Regex operators are unavailable in metric
+filters, and remote executors require server-filterable (pushdown) fields; a
+residual predicate is an explicit `residual_metric_filter` diagnostic. With
+`scope: "shownRows"` the table query selects the page first and the metric
+filter narrows rows inside it; it never selects a different page. In grouped
+mode metrics run over group rows, so `where` refers to grouped-result fields.
+At most 100 predicates are allowed. Use
+`where: [{ field, op: "is_not_null", value: "" }]` to exclude the null group.
+Unlike `IF(...)` inside an aggregate formula, non-matching rows do not form a
+group at all.
+
+`minCount` (an integer from 1 to 1,000,000) drops groups whose row count, after
+`where`, is below the threshold. It counts rows in the group regardless of the
+metric's operation or formula, including rows whose measure is null. Groups are
+removed before sorting, `groupLimit` and Other, so a top-N list still returns N
+qualifying groups. Removed groups are reported as `hiddenGroups` on the result
+(present whenever `minCount` is set) and are **not** folded into Other:
+`groupCount`, `buckets` and `other` describe only the qualifying groups. Folding
+them would mix "too small to trust" groups into a remainder that is presented as
+exact, so every engine follows this one rule. `minCount` requires at least one
+grouping field; on a grand-total metric it is a clause diagnostic rather than
+being ignored.
+
+- **Calendar grouping.** `includeEmpty` fills empty buckets after `minCount`
+  selects the observed groups, and those empty buckets are never hidden or
+  counted. An observed bucket below the threshold is hidden and leaves a gap; it
+  is not replaced by an empty bucket. An `observed` range still spans the dates
+  of hidden buckets.
+- **Distributions.** `where` filters box and histogram samples, so histogram
+  edges come from the filtered population. `minCount` hides box cohorts (and
+  histogram groups) by their row count; like `groupLimit`, it does not change
+  the shared histogram extent.
+- **Execution metadata.** `processedRows` remains the scope population before
+  the metric's own filter. Host group budgets count hidden groups too.
+
+Executors advertise support explicitly: `metricCapabilities.filters` and
+`metricCapabilities.minCount` for v2 transports, and
+`queryCapabilities.metricFilters` and `queryCapabilities.metricMinCount` for the
+v3 executor. A clause that uses an unadvertised control gets its own error
+result; the other metrics in the batch still run, and the control is never
+silently dropped. The v1 `fetchAggregations` endpoint never receives either
+field. The bundled DuckDB, Go SQLite and Go v3 executors advertise both.
+
+The metric editor exposes **Only rows where…** (the table's filter chips scoped
+to the metric) under *Data scope* and **Minimum rows per group** under
+*Ordering & limits*. Cards note "N groups hidden (fewer than M rows)".
 
 ## Population scope
 
@@ -92,6 +160,7 @@ const transport: Transport<Row> = {
   metricCapabilities: {
     version: 2, expressions: true, shownRows: true,
     distributions: true, computedFields: true, profile: "qt-postgres-v1",
+    filters: true, minCount: true, // only if the service executes them
   },
   fetchMetrics: (request, signal) => fetchMetricBatch(request, signal),
   fetchRowsV2: (request, signal) => fetchComputedRows(request, signal),

@@ -619,7 +619,7 @@ func (s *demoServer) metrics(ctx context.Context, tx *sql.Tx, r *http.Request, t
 			entries = append(entries, entry)
 			continue
 		}
-		plan, e = qt.CompileMetrics(ctx, one, narrowSchema(s.schema, plan.Metrics[0].Dependencies, q.Where), s.options(tx))
+		plan, e = qt.CompileMetrics(ctx, one, narrowSchema(s.schema, plan.Metrics[0].Dependencies, append(append([]qt.WhereTerm{}, q.Where...), spec.Where...)), s.options(tx))
 		if e != nil {
 			entry["error"] = e.Error()
 			entries = append(entries, entry)
@@ -649,8 +649,14 @@ func (s *demoServer) metrics(ctx context.Context, tx *sql.Tx, r *http.Request, t
 			return nil, e
 		}
 		buckets := []map[string]any{}
-		groupCount := int64(0)
+		groupCount, hidden := int64(0), int64(0)
 		for _, raw := range data {
+			if spec.MinCount > 0 {
+				hidden = number(raw["hidden_groups"])
+				if raw["count"] == nil {
+					continue // every group was below minCount
+				}
+			}
 			groupCount = number(raw["group_count"])
 			keys := []any{}
 			for i := range spec.GroupBy {
@@ -664,11 +670,14 @@ func (s *demoServer) metrics(ctx context.Context, tx *sql.Tx, r *http.Request, t
 			}
 			buckets = append(buckets, bucket)
 		}
-		if groupCount > 10000 {
+		if groupCount+hidden > 10000 {
 			entry["error"] = "More than 10,000 groups; narrow the scope or choose coarser grouping."
 		} else {
 			entry["buckets"] = buckets
 			entry["groupCount"] = groupCount
+			if spec.MinCount > 0 {
+				entry["hiddenGroups"] = hidden
+			}
 		}
 		entries = append(entries, entry)
 	}

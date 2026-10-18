@@ -140,6 +140,10 @@ export interface MetricCapabilities {
   shownRows?: boolean;
   distributions?: boolean;
   computedFields?: boolean;
+  /** Executes AggregationClause.where. Clauses using it are refused otherwise. */
+  filters?: boolean;
+  /** Executes AggregationClause.minCount and reports hiddenGroups. */
+  minCount?: boolean;
   maxGroups?: number;
   profile?: string;
 }

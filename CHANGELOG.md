@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+### Added
+
+- Add per-metric `where` filters and a `minCount` minimum group size to
+  `AggregationClause`. `where` narrows one metric's rows ("error kinds among
+  errors only") with the table filter's fields, operators and request clock;
+  `minCount` hides groups with too few rows before sorting, `groupLimit` and
+  Other and reports them as `hiddenGroups`. Hidden groups are never folded into
+  Other. The local engine, DuckDB, Go SQLite and Go PostgreSQL (v2, v3 and
+  combined batches) execute both identically against a shared fixture
+  (`schema/fixtures/metric-population.json`). Executors advertise
+  `metricCapabilities.filters`/`minCount` and
+  `queryCapabilities.metricFilters`/`metricMinCount`; a clause using an
+  unadvertised control fails on its own card instead of failing the batch or
+  dropping the control. The metric editor adds **Only rows where…** and
+  **Minimum rows per group**, and cards note how many groups are hidden.
+  Links and saved queries round-trip both fields; existing links decode
+  unchanged.
+- Export `useQueryFilters` from the React package so filter chips can be bound
+  to any query stage.
+
+### Fixed
+
+- The Go v3 executor no longer panics on PostgreSQL box and histogram metrics,
+  which return valid-sample counts and `jsonb` payloads instead of SQLite's
+  input-error column and JSON text.
+- DuckDB calendar metrics default to chronological order like the other
+  engines, instead of value-descending.
+
 ### Changed
 
 - Run public demo verification locally with `npm run check:showcase` instead
