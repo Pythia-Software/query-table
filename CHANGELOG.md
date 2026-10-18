@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Added
+
+- Grouped summary columns accept `display` (any `CellDisplay`, such as
+  `{ kind: "percent", decimals: 1 }`). It is validated during normalization
+  (invalid values become grouping diagnostics), round-trips through `?q=` links
+  and saved queries, replaces the source field's inherited presentation, and is
+  stripped from v3 grouped-query requests. The column editor has a compact
+  Number/Percent/Duration format control.
+- Builder metrics measuring a field with a numeric cell display (`number` with
+  `decimals`, `percent`, or `duration`) default their value format from it,
+  unless the metric sets `display.format`. Counts and expressions are unchanged.
+
 ### Changed
 
 - Run public demo verification locally with `npm run check:showcase` instead

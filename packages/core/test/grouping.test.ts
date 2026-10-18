@@ -325,3 +325,48 @@ describe("standard grouping model", () => {
     expect(() => toMetricQuery(q, schema)).toThrow(/group/);
   });
 });
+
+describe("summary column display", () => {
+  const rate = { id: "rate", op: "avg", field: "duration", display: { kind: "percent", decimals: 1 } } as const;
+
+  it("projects the summary format onto the grouped field, replacing inherited presentation", () => {
+    const model = createGroupingModel<GroupedRow>({
+      ...schema,
+      fields: schema.fields.map(field => field.name === "duration" ? { ...field, display: { kind: "duration" } } : field),
+    });
+    const projected = model.resultSchema(["customer"], [
+      rate,
+      { id: "plain", op: "avg", field: "duration" },
+      { id: "custom", op: "formula", expression: "MEDIAN([duration])", display: { kind: "number", decimals: 2 } },
+    ]);
+    const field = (name: string) => projected.fields.find(f => f.name === name)!;
+    expect(field("rate").display).toEqual({ kind: "percent", decimals: 1 });
+    expect(field("rate").render).toBeUndefined();
+    expect(field("plain")).toMatchObject({ render: "client-duration", display: { kind: "duration" } });
+    expect(field("custom").display).toEqual({ kind: "number", decimals: 2 });
+  });
+
+  it("normalizes valid displays and turns invalid ones into diagnostics", () => {
+    const valid = normalizeQueryState({ ...query(), grouping: { ...stage(), summaries: [rate] } });
+    expect(valid.grouping!.summaries[0]!.display).toEqual({ kind: "percent", decimals: 1 });
+    expect(valid.grouping!.diagnostics).toBeUndefined();
+    const invalid = normalizeQueryState({ ...query(), grouping: { ...stage(), summaries: [
+      { ...rate, display: { kind: "percent", decimals: 40 } },
+      { id: "other", op: "count", display: { kind: "sparkline" } },
+    ] } });
+    expect(invalid.grouping!.summaries.map(s => s.display)).toEqual([undefined, undefined]);
+    expect(invalid.grouping!.diagnostics).toEqual([
+      'Grouped column "rate" display: decimals must be an integer from 0 to 20.',
+      'Grouped column "other" display: unsupported kind.',
+    ]);
+    expect(() => applyQuery(rows, invalid, schema)).toThrow(/decimals must be an integer/);
+  });
+
+  it("round-trips summary displays through URLs and saved queries", async () => {
+    const q = normalizeQueryState({ ...query(), grouping: { ...stage(), summaries: [...stage().summaries, rate] } });
+    expect(decodeQuery(encodeQuery(q))).toEqual(q);
+    const storage = memoryStorageAdapter();
+    await storage.saveNamed(schema.name, "Rates", q, 1);
+    expect((await storage.listSaved(schema.name))[0]!.query.grouping!.summaries.at(-1)).toEqual(rate);
+  });
+});

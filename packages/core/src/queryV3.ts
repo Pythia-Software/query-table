@@ -95,7 +95,9 @@ export function toQueryRequestV3<Row>(query: QueryState, baseSchema: FieldSchema
   }
   return { version: 3, profile: capabilities.profile, now, expectedRevisions: revisions,
     ...(execution?.planToken ? { planToken: execution.planToken } : {}), ...(execution?.snapshot !== undefined ? { snapshot: execution.snapshot } : {}),
-    source: sourceRequest, result, ...(q.grouping ? { grouping: { keys: q.grouping.keys, summaries: q.grouping.summaries, representative: q.grouping.representative,
+    source: sourceRequest, result, ...(q.grouping ? { grouping: { keys: q.grouping.keys,
+      // Summary display is presentation only; the wire contract is unchanged.
+      summaries: q.grouping.summaries.map(({ display: _display, ...summary }) => summary), representative: q.grouping.representative,
       ...(q.grouping.diagnostics ? { diagnostics: q.grouping.diagnostics } : {}) } } : {}), rows: options.rows !== false, metrics, diagnostics: [...new Set(diagnostics)] };
 }
 export function validateQueryResultV3(result: QueryResultV3, request: QueryRequestV3, schema: FieldSchema): void {

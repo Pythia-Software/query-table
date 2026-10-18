@@ -57,3 +57,9 @@ it("groups approved materialized computed keys and retains source predicates",()
   expect(toQueryRequestV3(regex,schema,capabilities,execution).diagnostics.join(" ")).toContain("regex");
   expect(()=>applyQuery(rows,regex,approved)).toThrow("isolated");
 });
+
+it("keeps summary display presentation-only in v3 grouped requests", () => {
+  const capabilities:QueryCapabilitiesV3={version:3,profile:"qt-sqlite-v1",groupedRows:true,calendarGrouping:true,computedSourceFilters:false,regex:false,maxRows:10000,maxGroups:2000,maxPopulation:250000};
+  const formatted={...query,grouping:{...query.grouping!,summaries:[{id:"total",op:"sum" as const,field:"n",display:{kind:"percent" as const}}]}};
+  expect(toQueryRequestV3(formatted,schema,capabilities,undefined,{now:1}).grouping!.summaries).toEqual([{id:"total",op:"sum",field:"n"}]);
+});

@@ -39,7 +39,7 @@ import {
   isMetricOtherBucket,
   metricKeyedLimit,
 } from "./metricChartHelpers";
-import { formatMetricOutput } from "./metricFormat";
+import { formatMetricOutput, metricFormatFromMeasure } from "./metricFormat";
 import type {
   MetricBucket as AggregationBucket,
   RenderingClause as AggregationClause,
@@ -196,7 +196,7 @@ export interface MetricCardProps<Row> {
 
 export function MetricCard<Row>({
   compact = false,
-  clause,
+  clause: sourceClause,
   buckets: explicitBuckets,
   onEdit,
   result,
@@ -209,15 +209,25 @@ export function MetricCard<Row>({
   classNames,
   onInspect,
 }: MetricCardProps<Row>): ReactNode {
-  const allBuckets = explicitBuckets ?? result?.buckets ?? [];
-  const buckets = ["pie", "donut", "value"].includes(clause.display?.kind ?? "") ? allBuckets
-    : metricDisplayBuckets(clause, allBuckets, result?.groupCount, result?.other, result?.coverage === "partial");
-  const keyedLimit = metricKeyedLimit(clause);
   const byName = useMemo(
     () => new Map(fields.map((f) => [f.name, f])),
     [fields],
   );
-  const measure = clause.field ? byName.get(clause.field) : undefined;
+  const measure = sourceClause.field ? byName.get(sourceClause.field) : undefined;
+  // A measure's numeric cell display (e.g. a percent summary column) is the
+  // default value format; an explicit metric format always wins.
+  const clause = useMemo(() => {
+    const format = sourceClause.display?.format
+      ? undefined
+      : metricFormatFromMeasure(sourceClause, measure);
+    return format
+      ? { ...sourceClause, display: { ...(sourceClause.display ?? { kind: "auto" as const }), format } }
+      : sourceClause;
+  }, [sourceClause, measure]);
+  const allBuckets = explicitBuckets ?? result?.buckets ?? [];
+  const buckets = ["pie", "donut", "value"].includes(clause.display?.kind ?? "") ? allBuckets
+    : metricDisplayBuckets(clause, allBuckets, result?.groupCount, result?.other, result?.coverage === "partial");
+  const keyedLimit = metricKeyedLimit(clause);
   const groupLabels = clause.groupBy.map((g) => byName.get(g)?.label ?? g);
   const decimals = cardDecimals(buckets);
   const fmt = (v: MetricValue): ReactNode => {
@@ -297,7 +307,7 @@ export function MetricCard<Row>({
         theme={theme}
         locale={locale}
         classNames={classNames}
-        onInspect={onInspect ? (b) => onInspect(b, clause) : undefined}
+        onInspect={onInspect ? (b) => onInspect(b, sourceClause) : undefined}
       />
     );
   else if (kind === "value" || (kind === "auto" && clause.groupBy.length === 0))

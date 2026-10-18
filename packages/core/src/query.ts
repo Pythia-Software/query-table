@@ -2,6 +2,7 @@ import { normalizePropertyView, type PropertyViewState } from "./properties";
 import type { MetricDisplay, MetricLayout, MetricDistribution, MetricSort, MetricScope, MetricDateGrouping } from "./metricTypes";
 import { normalizeMetricOptions } from "./metricNormalize";
 import type { GroupingState, SummaryColumn, RepresentativeOrder } from "./grouping";
+import { parseCellDisplay } from "./cellDisplay";
 // query.ts — the canonical query state shape.
 //
 // We lean into SQL vocabulary at every layer (per design feedback): a QueryState
@@ -468,7 +469,7 @@ export function normalizeQueryState(input: unknown, fallback: QueryState = EMPTY
 function normalizeGroupingState(value: unknown): GroupingState {
   const raw = isRecord(value) ? value : {};
   const diagnostics: string[] = [];
-  const fail = () => { diagnostics.push("Invalid grouping definition."); };
+  const fail = (message = "Invalid grouping definition.") => { diagnostics.push(message); };
   const keys = Array.isArray(raw.keys) ? raw.keys.slice(0, MAX_GROUP_BY_FIELDS).filter((key): key is string => !!boundedString(key, MAX_FIELD_NAME_LENGTH)) : [];
   if (!Array.isArray(raw.keys) || !keys.length || keys.length !== raw.keys.length || new Set(keys).size !== keys.length) fail();
   const summaries: SummaryColumn[] = [];
@@ -487,6 +488,10 @@ function normalizeGroupingState(value: unknown): GroupingState {
     if (item.label !== undefined) {
       if (typeof item.label !== "string" || item.label.length > MAX_LABEL_LENGTH) fail();
       else column.label = item.label;
+    }
+    if (item.display !== undefined) {
+      try { column.display = parseCellDisplay(item.display, `Grouped column "${column.id}" display`); }
+      catch (error) { fail(`${error instanceof Error ? error.message : String(error)}.`); }
     }
     summaries.push(column);
   }

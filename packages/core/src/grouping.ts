@@ -10,6 +10,7 @@ import {
 } from "./metrics";
 import { formulaRuntime, type FormulaNode, type FormulaValue } from "./formula";
 import { isComputedField } from "./computed";
+import type { CellDisplay } from "./cellDisplay";
 import { type QueryEvaluationOptions } from "./relativeTime";
 import type { MetricPlan } from "./metrics";
 import {
@@ -44,6 +45,10 @@ export interface SummaryColumn {
   field?: string;
   expression?: string;
   label?: string;
+  /** Cell format for this output column (for example `{ kind: "percent" }` for
+   * a weighted rate). Replaces any render/display inherited from the source
+   * field; metrics measuring the column default their value format from it. */
+  display?: CellDisplay;
 }
 export interface GroupingView {
   version: 2;
@@ -212,6 +217,7 @@ export function createGroupingModel<InputRow>(
           source: { kind: "backend" },
           group: "Aggregates",
           select: { align: type === "number" ? "right" : "left" },
+          ...(column.display ? { display: column.display } : {}),
         });
         continue;
       }
@@ -231,10 +237,15 @@ export function createGroupingModel<InputRow>(
         ...(!numeric && input?.aggregate?.groupable !== undefined
           ? { aggregate: { groupable: input.aggregate.groupable } }
           : {}),
-        ...(typeof input?.render === "string" && !counting
-          ? { render: input.render }
-          : {}),
-        ...(input?.display && !counting ? { display: input.display } : {}),
+        // An explicit summary format replaces the inherited source presentation.
+        ...(column.display
+          ? { display: column.display }
+          : {
+              ...(typeof input?.render === "string" && !counting
+                ? { render: input.render }
+                : {}),
+              ...(input?.display && !counting ? { display: input.display } : {}),
+            }),
       });
     }
     return {

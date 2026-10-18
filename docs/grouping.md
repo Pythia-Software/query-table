@@ -93,6 +93,34 @@ selection requires unique string or finite numeric source IDs within each group;
 the ID need not be a selectable catalogue field. There is no separate filter
 or second representative strategy.
 
+### Summary column formats
+
+A summary column can carry the same [`CellDisplay`](cell-displays.md) contract
+as `FieldDef.display`. Use it for rates and durations instead of scaling values
+by hand:
+
+```ts
+summaries: [
+  { id: "failure_rate", op: "formula",
+    expression: "SUM(IF([failed], 1, 0)) / COUNT()",
+    display: { kind: "percent", decimals: 1 } },  // 0.0743 → 7.4%
+  { id: "p50_ms", op: "formula", expression: "MEDIAN([duration])",
+    display: { kind: "duration", sourceUnit: "milliseconds" } },
+]
+```
+
+The grouped schema's field for that column gets this `display`, replacing any
+`render` or `display` the column would otherwise inherit from its source field.
+Normalization validates it with `parseCellDisplay`; an invalid value is dropped
+and recorded in `grouping.diagnostics`, so the stage reports the problem instead
+of executing. The format travels with `?q=` links and saved queries, and is not
+sent to grouped-query backends. A builder metric (`op`/`field`, not an
+expression) that measures the column with SUM/AVG/MIN/MAX uses a `number` (with
+`decimals`), `percent` or `duration` display as its default value format;
+`display.format` on the metric still wins. Counts are never formatted this way.
+The column editor offers Number, Percent and Duration with optional decimals
+and a duration source unit.
+
 ## State, saved views, and authoring
 
 `QueryState.grouping` travels through normal normalization, URL encoding (`?q=`),
