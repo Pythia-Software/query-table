@@ -47,6 +47,21 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe("shared metric card", () => {
+  it("shows a per-metric server error instead of an empty result", () => {
+    const message =
+      "MEDIAN exceeded the 100,000-sample budget for one or more groups";
+    const html = renderToStaticMarkup(
+      createElement(MetricCard, {
+        clause,
+        result: { buckets: [], error: message },
+        fields,
+        renderers: defaultRenderers,
+      }),
+    );
+    expect(html).toContain(message);
+    expect(html).toContain("qt-metrics-error");
+    expect(html).not.toContain("no data");
+  });
   it("formats explicitly calendar-grouped line and vertical bar axes without changing raw groups", () => {
     const dateBuckets: MetricBucket[] = [
       { keys: ["2026-10-01T00:00:00.000Z"], value: 0, count: 0 },

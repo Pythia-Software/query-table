@@ -29,6 +29,18 @@ func runMetric(t *testing.T, db *sql.DB, d qt.SQLiteV2Dataset, q qt.MetricQuery)
 	}
 	return r.Metrics.Metrics[0]
 }
+// metricFailure asserts that a request succeeded but its only metric failed.
+func metricFailure(t *testing.T, r qt.SQLiteV2ExecutionResult, e error) string {
+	t.Helper()
+	if e != nil {
+		t.Fatalf("clause failure failed the request: %v", e)
+	}
+	m := r.Metrics.Metrics[0]
+	if m.Error == "" || len(m.Buckets) != 0 {
+		t.Fatalf("clause failure not reported on the metric: %#v", m)
+	}
+	return m.Error
+}
 func TestV2Formulas(t *testing.T) {
 	db, d := setupV2(t)
 	for _, c := range []struct {
@@ -172,14 +184,21 @@ func TestV2ComputedRowsAndRevisionSnapshot(t *testing.T) {
 }
 func TestV2ValidationAndBudgets(t *testing.T) {
 	db, d := setupV2(t)
-	for _, change := range []func(*qt.MetricQuery){func(q *qt.MetricQuery) { q.Profile = qt.ServerExpressionProfile }, func(q *qt.MetricQuery) { q.Diagnostics = []any{"residual"} }, func(q *qt.MetricQuery) { q.PlanToken = "unvalidated" }, func(q *qt.MetricQuery) { q.Snapshot = "unbound" }, func(q *qt.MetricQuery) {
-		q.Metrics[0].Distribution = &qt.MetricDistribution{Kind: "unknown", Input: "[n]"}
-	}, func(q *qt.MetricQuery) { q.Metrics[0].Expression = "SUM(SUM([n]))" }, func(q *qt.MetricQuery) { q.Metrics[0].Expression = "SUM([n])+[n]" }} {
+	for _, change := range []func(*qt.MetricQuery){func(q *qt.MetricQuery) { q.Profile = qt.ServerExpressionProfile }, func(q *qt.MetricQuery) { q.Diagnostics = []any{"residual"} }, func(q *qt.MetricQuery) { q.PlanToken = "unvalidated" }, func(q *qt.MetricQuery) { q.Snapshot = "unbound" }} {
 		q := metricV2("SUM([n])")
 		change(&q)
 		if _, e := d.ExecuteV2(context.Background(), db, nil, &q, qt.PlanOptions{}); e == nil {
 			t.Fatal("invalid query accepted", q)
 		}
+	}
+	// An invalid clause fails only its own metric.
+	for _, change := range []func(*qt.MetricQuery){func(q *qt.MetricQuery) {
+		q.Metrics[0].Distribution = &qt.MetricDistribution{Kind: "unknown", Input: "[n]"}
+	}, func(q *qt.MetricQuery) { q.Metrics[0].Expression = "SUM(SUM([n]))" }, func(q *qt.MetricQuery) { q.Metrics[0].Expression = "SUM([n])+[n]" }} {
+		q := metricV2("SUM([n])")
+		change(&q)
+		r, e := d.ExecuteV2(context.Background(), db, nil, &q, qt.PlanOptions{})
+		metricFailure(t, r, e)
 	}
 	d.MaxPopulation = 3
 	q := metricV2("COUNT()")
@@ -190,7 +209,7 @@ func TestV2ValidationAndBudgets(t *testing.T) {
 	d.MaxGroups = 2
 	q.Metrics[0].GroupBy = []string{"flag"}
 	q.Metrics[0].GroupLimit = 1
-	if _, e := d.ExecuteV2(context.Background(), db, nil, &q, qt.PlanOptions{}); e == nil {
+	if r, e := d.ExecuteV2(context.Background(), db, nil, &q, qt.PlanOptions{}); metricFailure(t, r, e) != "group population exceeds host budget" {
 		t.Fatal("group budget ignored before topN")
 	}
 	d.MaxGroups = 0
