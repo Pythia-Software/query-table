@@ -507,7 +507,7 @@ func representativePlan(ctx context.Context, g *GroupingDefinition, s Schema, o 
 	}
 	for i, summary := range g.Summaries {
 		if summary.Op == "row" {
-			v, e := b.field(summary.Field)
+			v, e := b.sourceValue(summary.Field)
 			if e != nil {
 				return SQLPlan{}, e
 			}

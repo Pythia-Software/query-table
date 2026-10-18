@@ -505,7 +505,7 @@ func compileQuerySource(ctx context.Context, q WireQuery, s Schema, o PlanOption
 	columns := []OutputColumn{}
 	selects := []string{}
 	for i, name := range q.Select {
-		value, err := b.field(name)
+		value, err := b.sourceValue(name)
 		if field, ok := s.Fields[name]; ok && field.Kind == FieldTextArray {
 			value = b.fields[name]
 			value.Type, err = "textarray", nil

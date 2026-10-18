@@ -9,6 +9,15 @@
   tag-triggered npm releases and save browser diagnostics when showcase checks
   fail.
 
+### Fixed
+
+- Go SQLite v2, v3 and PostgreSQL row execution return plain text values over
+  100,000 bytes intact instead of failing the page with `text_range`. Sorting
+  and representative `ROW()` values use the full text too. The bound still
+  applies to formula inputs, where it remains a per-value `text_range` error.
+  Invalid UTF-8 in SQLite source text still rejects the request, now with
+  `text_encoding`.
+
 ## 0.7.1 — 2026-10-16
 
 ### Changed
