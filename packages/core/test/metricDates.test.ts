@@ -228,6 +228,11 @@ describe("calendar metric grouping", () => {
       ],
     };
     expect(result({}, rows, orQuery).error).toContain("bounded date filter");
+    expect(result({}, rows, { ...query(), where: [] }).error).toBe(
+      'Include empty dates with range "query" needs a bounded date filter on at: add a lower bound (>= or >) and an upper bound (<= or <) as top-level filters (bounds inside OR groups do not count). Otherwise use range "observed" to fill from the first to the last observed date, or range "custom" with start and end.',
+    );
+    expect(result({}, rows, { ...query(), where: [{ field: "at", op: ">=", value: "2026-10-01" }] }).error)
+      .toContain("needs a bounded date filter on at: add an upper bound (<= or <) as");
   });
   it("respects group, memory and operation budgets and cancellation during completion", () => {
     for (const [options, message] of [

@@ -31,6 +31,18 @@
 
 ### Changed
 
+- Clearer errors for common authoring mistakes. Single-quoted formula text
+  suggests the double-quoted form; `NOT IN`, `IN` without a parenthesized list,
+  and `IN` on an array suggest `NOT (x IN (...))`, `OR`, or `ARRAY_CONTAINS`.
+  Grouping normalization names the summary and problem instead of
+  "Invalid grouping definition." (including `op: "median"`, duplicate ids, and
+  ids that reuse a group key), keeps earlier diagnostics through
+  re-normalization, and validation names a summary id that collides with a
+  source field. Include-empty date grouping names the missing bound and the
+  `range: "observed"` / `"custom"` alternatives.
+- Documented `!=` and NULL (SQL backends exclude NULL rows in WHERE and HAVING;
+  the local executor currently keeps them for non-datetime fields), MEDIAN as a
+  formula summary, `IN` support per executor, and `includeEmpty` ranges.
 - Run public demo verification locally with `npm run check:showcase` instead
   of building and deploying on every push through GitHub Actions. Keep
   tag-triggered npm releases and save browser diagnostics when showcase checks

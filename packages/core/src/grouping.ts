@@ -581,7 +581,16 @@ export function createGroupingModel<InputRow>(
       GROUP_ID_FIELD,
       ...inputSchema.fields.map((field) => field.name),
     ]);
+    const sourceNames = new Set(inputSchema.fields.map((field) => field.name));
     for (const column of definition.summaries) {
+      if (sourceNames.has(column.id))
+        throw new Error(
+          `Aggregate column ID "${column.id}" is already a source field name. Choose a different id, such as "${column.op === "formula" || column.op === "row" ? "summary" : column.op}_${column.id}".`,
+        );
+      if (ids.has(column.id) && column.id !== GROUP_ID_FIELD)
+        throw new Error(
+          `Aggregate column ID "${column.id}" is used by more than one column.`,
+        );
       if (
         !column.id ||
         column.id.length > 256 ||
@@ -590,7 +599,7 @@ export function createGroupingModel<InputRow>(
         ["__proto__", "constructor", "prototype"].includes(column.id)
       )
         throw new Error(
-          "Aggregate column IDs must be unique and distinct from source fields.",
+          "Aggregate column IDs must be 1–256 characters and cannot be reserved names or @computed/ references.",
         );
       ids.add(column.id);
       if (column.op === "formula") {

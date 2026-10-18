@@ -179,6 +179,24 @@ ops without one (`contains`/`starts_with`/`ends_with`/`includes`) carry a
 CellMenu lays candidate filters out as positive/negative pairs. NOT is
 null-exclusive: a NULL value satisfies neither a predicate nor its negation.
 
+**`!=` and NULL.** The SQL backends (bundled Go SQLite/PostgreSQL compilers and
+DuckDB) compile `!=` to SQL `<>`, which never matches NULL. A filter such as
+`status != "done"` therefore drops rows whose status is NULL, in WHERE and in
+grouped HAVING alike. The local executor (`applyQuery` over `clientRows`)
+currently keeps NULL rows for `!=` on text, enum, number and bool fields (it
+excludes them for datetime), so do not rely on either result. State the intent
+explicitly, which behaves the same everywhere:
+
+```ts
+// keep rows with no status
+{ any: [{ field: "status", op: "!=", value: "done" }, { field: "status", op: "is_null", value: "" }] }
+// exclude rows with no status as well
+{ field: "status", op: "!=", value: "done" }, { field: "status", op: "is_not_null", value: "" }
+```
+
+For "none of several values", the [set-filter editor](docs/set-filters.md#scalar-set-filters)
+on an enum field produces the null-keeping form for you.
+
 ```ts
 const query: QueryState = {
   ...EMPTY_QUERY,

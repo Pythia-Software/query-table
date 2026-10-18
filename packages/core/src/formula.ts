@@ -478,6 +478,17 @@ export function compileFormula(
       } catch {
         throw new FormulaError("Invalid JSON string literal.", from, pos);
       }
+    } else if (source[pos] === "'") {
+      // A common habit from SQL and spreadsheets; say what to write instead.
+      const end = source.indexOf("'", pos + 1);
+      const text = end < 0 ? "" : source.slice(pos + 1, end);
+      throw new FormulaError(
+        end < 0 || text.length > 40 || /["\\\n]/.test(text)
+          ? 'Text literals use double quotes ("text"), not single quotes.'
+          : `Text literals use double quotes: write "${text}" instead of '${text}'.`,
+        from,
+        end < 0 ? pos + 1 : end + 1,
+      );
     } else if (
       (match = source
         .slice(pos)
@@ -583,6 +594,12 @@ export function compileFormula(
       const op = take();
       const p = priority[op.text]!;
       if (op.text === "IN") {
+        if (peek().text !== "(")
+          throw new FormulaError(
+            'IN takes a parenthesized list, e.g. [status] IN ("a", "b"). To test array membership, use ARRAY_CONTAINS([tags], "a").',
+            op.from,
+            peek().to,
+          );
         expect("(");
         const args = [node];
         do {
@@ -601,6 +618,12 @@ export function compileFormula(
         node = call(`op:${op.text}`, [node, right], node.from, right.to);
       }
     }
+    if (peek().text === "NOT" && tokens[i + 1]?.text === "IN")
+      throw new FormulaError(
+        'NOT IN is not supported. Write NOT ([status] IN ("a", "b")), or combine != comparisons with AND.',
+        peek().from,
+        tokens[i + 1]!.to,
+      );
     depth--;
     return node;
   }
@@ -670,6 +693,12 @@ export function compileFormula(
         ts.forEach((_, j) => need(j, "number"));
         return "number";
       }
+      if (op === "IN" && ts.some((t) => t === "textarray"))
+        throw new FormulaError(
+          'IN compares one value with a list of values. For arrays, use ARRAY_CONTAINS([tags], "a"), or OR several ARRAY_CONTAINS calls.',
+          n.from,
+          n.to,
+        );
       same(ts, n);
       return "bool";
     }

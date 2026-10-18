@@ -65,6 +65,12 @@ const groupedQuery = normalizeQueryState({
 });
 ```
 
+HAVING predicates use the same operators as WHERE, including their NULL
+behavior: `!=` is SQL `<>` on the server backends, so a group whose summary is
+NULL (for example `AVG` over only NULL values) does not match `avg != 0`. Add
+an `is_null` predicate in an OR group to keep such groups, or `is_not_null` to
+drop them explicitly; see [`!=` and NULL](../README.md#the-contracts-at-a-glance).
+
 Execution is source WHERE → grouping → HAVING → result ORDER BY → result
 OFFSET/LIMIT. Source paging and sorting do not truncate the group population.
 All-matching metrics operate on groups after HAVING; shown-row metrics operate
@@ -92,6 +98,22 @@ Source ID descending breaks ties unless ID is explicitly ordered. Representative
 selection requires unique string or finite numeric source IDs within each group;
 the ID need not be a selectable catalogue field. There is no separate filter
 or second representative strategy.
+
+### Median and other formula summaries
+
+`SummaryOp` intentionally has no `"median"`: the built-in ops mirror the
+backend `AggOp` matrix (`count`, `count_distinct`, `sum`, `avg`, `min`, `max`)
+plus `row`. Medians, percent-of-total ratios and conditional counts are formula
+summaries that use the [aggregate formula language](metrics.md):
+
+```ts
+{ id: "median_duration", op: "formula", expression: "MEDIAN([duration])", label: "Median duration" }
+```
+
+`MEDIAN` ignores NULLs and averages the middle two values for even-sized
+groups. Normalization reports `op: "median"` as a diagnostic that points to this
+form. Summary ids must differ from source field names (including the group
+keys); for example, use `median_duration` rather than `duration`.
 
 ### Summary column formats
 

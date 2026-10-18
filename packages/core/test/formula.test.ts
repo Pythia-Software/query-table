@@ -129,6 +129,22 @@ describe("computed formula language", () => {
       compileFormula("(".repeat(100) + "1" + ")".repeat(100), fields),
     ).toThrow("nesting");
   });
+  it("suggests the supported syntax for common mistakes", () => {
+    const message = (source: string) => {
+      try { compileFormula(source, fields); } catch (error) { return error as Error & { from: number; to: number }; }
+      throw new Error(`${source} compiled`);
+    };
+    expect(message("[name] = 'done'").message).toBe('Text literals use double quotes: write "done" instead of \'done\'.');
+    expect(message("[name] = 'done'")).toMatchObject({ from: 9, to: 15 });
+    expect(message("[name] = 'unterminated").message).toBe('Text literals use double quotes ("text"), not single quotes.');
+    expect(message(`[name] = '${"x".repeat(41)}'`).message).toBe('Text literals use double quotes ("text"), not single quotes.');
+    expect(message('[name] NOT IN ("a", "b")').message).toMatch(/^NOT IN is not supported\. Write NOT \(\[status\] IN/);
+    expect(message('IF([name] NOT IN ("a"), 1, 0)').message).toMatch(/^NOT IN is not supported/);
+    expect(message('"a" IN [tags]').message).toMatch(/IN takes a parenthesized list.*ARRAY_CONTAINS/);
+    expect(message('[tags] IN ("a", "b")').message).toMatch(/^IN compares one value.*ARRAY_CONTAINS/);
+    expect(compileFormula('NOT ([name] IN ("a", "b"))', fields).type).toBe("bool");
+    expect(run('NOT ("c" IN ("a", "b"))')).toEqual({ value: true });
+  });
   it("isolates errors and preserves nulls", () => {
     expect(run("1/0").error).toMatch(/zero/);
     expect(run('REGEX_EXTRACT("x","z")')).toEqual({ value: null });
