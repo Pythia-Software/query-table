@@ -23,6 +23,7 @@ import { EMPTY_QUERY, MAX_QUERY_TOKEN_LENGTH, normalizeQueryState, predicatesOf 
 import { stripSetFilter } from "./setFilter";
 import type { QueryState, WhereTerm, OrderByClause, SelectColumn, AggregationClause, SetFilterMode } from "./query";
 import type { FieldSchema, FieldDef } from "./schema";
+import type { CellDisplay } from "./cellDisplay";
 import { indexFields, isFilterable, isPushdownFilter, isSortable, resolveFieldName, selectedFields } from "./schema";
 
 // ---- base64url (browser + node) -------------------------------------------
@@ -50,12 +51,15 @@ function fromBase64Url(s: string): string {
 
 // ---- compact wire form ----------------------------------------------------
 // Keys are short to keep `?q=` small; any field at its default is omitted.
-//   s = select (as [field] or [field, width] tuples)
+//   s = select (as [field], [field, width] or [field, width | null, display]
+//       tuples; older decoders read the first two members and ignore display)
 //   w = where, o = orderBy, l = limit, f = offset
 //   fs = fit to the viewer's screen
 
+type CompactColumn = [string] | [string, number] | [string, number | null, CellDisplay];
+
 interface CompactQuery {
-  s?: Array<[string] | [string, number]> | string[]; // string[] = legacy
+  s?: CompactColumn[] | string[]; // string[] = legacy
   w?: WhereTerm[];
   o?: OrderByClause[] | OrderByClause; // object accepted for legacy decode
   l?: number;
@@ -72,7 +76,9 @@ function compactQuery(q: QueryState): CompactQuery {
   q = normalizeQueryState(q);
   const c: CompactQuery = {};
   if (q.select.length)
-    c.s = q.select.map((col): [string] | [string, number] => (col.width != null ? [col.field, col.width] : [col.field]));
+    c.s = q.select.map((col): CompactColumn =>
+      col.display ? [col.field, col.width ?? null, col.display]
+        : col.width != null ? [col.field, col.width] : [col.field]);
   if (q.where.length) c.w = q.where;
   if (q.orderBy.length) c.o = q.orderBy;
   c.l = q.limit;
@@ -243,7 +249,11 @@ function normalizeSelect(s: CompactQuery["s"] | CompactQuery["c"]): SelectColumn
     .map((item): SelectColumn | null => {
       if (typeof item === "string") return { field: item }; // legacy string[]
       if (Array.isArray(item) && typeof item[0] === "string") {
-        return typeof item[1] === "number" ? { field: item[0], width: item[1] } : { field: item[0] };
+        const column: SelectColumn = { field: item[0] };
+        if (typeof item[1] === "number") column.width = item[1];
+        // normalizeQueryState validates the display and drops a malformed one.
+        if (item[2] !== undefined) column.display = item[2] as CellDisplay;
+        return column;
       }
       return null;
     })

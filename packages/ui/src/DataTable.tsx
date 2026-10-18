@@ -482,7 +482,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     setMenu(null);
     setSelectionColumnWidth(DEFAULT_SELECTION_WIDTH);
     onQueryChange((prev) => {
-      const next = { ...prev, select: prev.select.map((c) => ({ field: c.field })) };
+      const next = { ...prev, select: prev.select.map(({ width: _width, ...c }) => c) };
       delete next.fitToScreen;
       return next;
     });
@@ -518,6 +518,8 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
   }
 
   const fieldByName = useMemo(() => new Map(fields.map((f) => [f.name, f])), [fields]);
+  // Per-layout presentation overrides travel with the SELECT list, like widths.
+  const columnDisplays = useMemo(() => new Map(query.select.flatMap((c) => c.display ? [[c.field, c.display] as const] : [])), [query.select]);
   const fieldNames = useMemo(() => fields.map((f) => f.name), [fields]);
   const tableColumnNames = useMemo(() => {
     if (!showSel) return fieldNames;
@@ -965,7 +967,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                       className={cx("qt-cell", "qt-item-detail-column", dragSource === name && "qt-cell--dragging", classNames?.cell)}>
                       {details && <ItemDetailsActions api={details} query={query} id={id} row={row} renderers={detailRenderers} expandedId={expandedPanelId} />}
                     </td>;
-                    const render = resolveRenderer(f, renderers);
+                    const render = resolveRenderer(f, renderers, columnDisplays.get(f.name));
                     const value = readFieldValue(f, row);
                     const key = cellKey(id, i, f.name);
                     return (

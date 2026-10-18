@@ -171,7 +171,7 @@
       "type": "object",
       "required": ["field"],
       "additionalProperties": false,
-      "properties": { "field": { "type": "string" }, "width": { "type": "number", "minimum": 1 } }
+      "properties": { "field": { "type": "string" }, "width": { "type": "number", "minimum": 1 }, "display": { "$ref": "#/$defs/cellDisplay" } }
     },
     "field": {
       "type": "object",
@@ -527,6 +527,11 @@
             },
             "truncate": {
               "type": "boolean"
+            },
+            "lines": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20
             }
           }
         }

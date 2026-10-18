@@ -2,7 +2,7 @@ import { normalizePropertyView, type PropertyViewState } from "./properties";
 import type { MetricDisplay, MetricLayout, MetricDistribution, MetricSort, MetricScope, MetricDateGrouping } from "./metricTypes";
 import { normalizeMetricOptions } from "./metricNormalize";
 import type { GroupingState, SummaryColumn, RepresentativeOrder } from "./grouping";
-import { parseCellDisplay } from "./cellDisplay";
+import { parseCellDisplay, type CellDisplay } from "./cellDisplay";
 // query.ts — the canonical query state shape.
 //
 // We lean into SQL vocabulary at every layer (per design feedback): a QueryState
@@ -118,6 +118,10 @@ export interface SelectColumn {
   field: string; // FieldDef.name, or @computed/<id> (source lives in ComputedColumnStore)
   /** Pixel width override. Omitted = FieldDef.select.width, else the type default. */
   width?: number;
+  /** Table-cell presentation for this column in this layout, e.g.
+   *  `{ kind: "text", lines: 3 }`. Takes precedence over the field's `render`
+   *  and `display`; other surfaces (details, menus, metrics) keep the field's. */
+  display?: CellDisplay;
 }
 
 /** A single aggregate operation. `count` is the only op that needs no measure
@@ -320,10 +324,15 @@ export function normalizeQueryState(input: unknown, fallback: QueryState = EMPTY
       if (typeof item.width === "number" && Number.isFinite(item.width)) {
         column.width = boundedInteger(item.width, MIN_COLUMN_WIDTH, MIN_COLUMN_WIDTH, MAX_COLUMN_WIDTH);
       }
+      if (item.display !== undefined) {
+        // A malformed presentation hint never hides the column; it falls back
+        // to the field's own presentation.
+        try { column.display = parseCellDisplay(item.display, `column ${field} display`); } catch { /* dropped */ }
+      }
       select.push(column);
     }
   } else {
-    select.push(...fallback.select.map((column) => ({ ...column })));
+    select.push(...fallback.select.map((column) => ({ ...column, ...(column.display ? { display: JSON.parse(JSON.stringify(column.display)) as CellDisplay } : {}) })));
   }
 
   // WHERE is CNF: an array of terms, each a literal or an `{ any: [...] }` OR

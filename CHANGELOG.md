@@ -13,6 +13,14 @@
 - Builder metrics measuring a field with a numeric cell display (`number` with
   `decimals`, `percent`, or `duration`) default their value format from it,
   unless the metric sets `display.format`. Counts and expressions are unchanged.
+- `SelectColumn.display` overrides a column's table-cell presentation for one
+  layout, taking precedence over the field's `render` and `display`. It is
+  validated during normalization and encoded as an optional third member of
+  compact select tuples; tokens and saved queries without overrides are
+  unchanged and older links decode as before. `resolveRenderer` accepts the
+  override as an optional third argument.
+- `{ kind: "text", lines: n }` (1–20) wraps and clamps cell text to `n` lines.
+  Clamped rows are measured by the virtualized table.
 
 ### Changed
 

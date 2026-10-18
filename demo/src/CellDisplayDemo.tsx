@@ -23,13 +23,45 @@ const schema: FieldSchema<Sample> = {
     { name: "status", label: "Status", type: "enum", source: { kind: "backend" }, display: { kind: "chip", labels: { ready: "Ready", waiting: "Waiting", failed: "Failed" }, tones: { ready: "success", waiting: "warning", failed: "danger" } }, select: { width: 100 } },
   ],
 };
+interface Run { id: number; name: string; command: string; message: string; }
+const words = ["--profile", "release", "--features", "duckdb,sqlite,postgres", "--target-dir", "/var/cache/build/query-table", "--jobs", "16", "--verbose", "--locked"];
+const runs: Run[] = Array.from({ length: 400 }, (_, id) => ({
+  id,
+  name: `Run ${id + 1}`,
+  // Lengths vary so clamped rows have different measured heights.
+  command: `cargo test ${words.slice(0, 2 + (id % 9)).join(" ")} -- shard ${id}; `.repeat(1 + (id % 4)).trim(),
+  message: id % 5 ? `Shard ${id} passed` : `Shard ${id} failed:\nassertion failed at src/encode.rs:${100 + id}\nleft: 3, right: 4`,
+}));
+const runSchema: FieldSchema<Run> = {
+  name: "cell-display-layout", idField: "id",
+  fields: [
+    { name: "name", label: "Run", type: "text", source: { kind: "backend" }, select: { width: 90 } },
+    { name: "command", label: "Command", type: "text", source: { kind: "backend" }, select: { width: 360 } },
+    { name: "message", label: "Message", type: "text", source: { kind: "backend" }, select: { width: 260 } },
+  ],
+};
+/** A host "reading layout": per-column overrides travel in QueryState.select. */
+function ReadingLayoutDemo() {
+  const api = useQueryTable({ schema: runSchema, clientRows: runs, initialQuery: { select: [
+    { field: "name" },
+    { field: "command", display: { kind: "text", lines: 3 } },
+    { field: "message", display: { kind: "text", lines: 2 } },
+  ], where: [], orderBy: [], limit: 400, offset: 0 } });
+  return <section aria-label="Reading layout" style={{ marginTop: 32 }}>
+    <h2>Reading layout</h2>
+    <p>The Command and Message columns clamp to three and two lines through <code>SelectColumn.display</code>.</p>
+    <DataTable fields={api.visibleFields} rows={api.rows} query={api.query} onQueryChange={api.setQuery} renderers={defaultRenderers} rowId={(row) => row.id} total={api.total} maxHeight={480} />
+  </section>;
+}
 export function CellDisplayDemo() {
   const api = useQueryTable({ schema, clientRows: rows, syncUrl: true, itemDetails: { modes: ["hover", "modal", "expand"], defaultModes: ["hover", "modal", "expand"] } });
-  return <section aria-label="Cell displays" style={{ marginTop: 32 }}>
+  return <><section aria-label="Cell displays" style={{ marginTop: 32 }}>
     <p><a href="/">← Main playground</a></p>
     <h1>Cell displays</h1>
     <p>Open a payload to search keys, paths and values, or use Detail to explore the same value inline in a popover, modal or expanded row.</p>
     <QueryBuilder api={api} fields={schema.fields} total={api.total} />
     <DataTable fields={api.visibleFields} rows={api.rows} query={api.query} onQueryChange={api.setQuery} renderers={defaultRenderers} rowId={(row) => row.id} total={api.total} {...(api.itemDetails ? { itemDetails: api.itemDetails } : {})} />
-  </section>;
+  </section>
+  <ReadingLayoutDemo />
+  </>;
 }

@@ -2,6 +2,60 @@
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { mkdir } from "node:fs/promises";
+/** SelectColumn.display clamps long text; measured virtual rows must tile
+ * exactly (no overlaps or gaps) while scrolling and after a column resize. */
+async function verifyReadingLayout(page, mobile) {
+  const layout = page.getByRole("region", { name: "Reading layout", exact: true });
+  await layout.scrollIntoViewIfNeeded();
+  const commands = layout.locator('.qt-cell[data-qt-field="command"] .qt-line-clamp');
+  await commands.first().waitFor();
+  const clamp = await commands.first().evaluate(el => ({ clamp: getComputedStyle(el).webkitLineClamp, lineHeight: parseFloat(getComputedStyle(el).lineHeight) || 16, height: el.getBoundingClientRect().height, scroll: el.scrollHeight }));
+  assert.equal(clamp.clamp, "3");
+  const wrap = layout.locator(".qt-table-wrap");
+  const rowsTile = async () => wrap.evaluate(root => {
+    const rows = [...root.querySelectorAll("tbody tr.qt-row")].map(row => row.getBoundingClientRect());
+    return { count: rows.length, gaps: rows.slice(1).map((r, i) => Math.round((r.top - rows[i].bottom) * 10) / 10).filter(gap => Math.abs(gap) > 1), heights: [...new Set(rows.map(r => Math.round(r.height)))] };
+  });
+  let tiling = await rowsTile();
+  assert.ok(tiling.count > 0 && tiling.count < 100, "Rows stay virtualized");
+  assert.deepEqual(tiling.gaps, [], "Clamped rows tile without overlaps or gaps");
+  assert.ok(tiling.heights.length > 1, "Clamped rows have measured, varying heights");
+  await wrap.evaluate(root => { root.scrollTop = (root.scrollHeight - root.clientHeight) / 2; });
+  await page.waitForTimeout(150);
+  tiling = await rowsTile();
+  assert.deepEqual(tiling.gaps, [], "Rows tile after scrolling to the middle");
+  // Measured rows replace the 37px estimate, so the total grows while
+  // scrolling. Keep scrolling to the end until the size settles.
+  for (let previous = -1, i = 0; i < 20; i++) {
+    const top = await wrap.evaluate(root => { root.scrollTop = root.scrollHeight; return root.scrollTop; });
+    await page.waitForTimeout(100);
+    if (top === previous) break;
+    previous = top;
+  }
+  tiling = await rowsTile();
+  assert.deepEqual(tiling.gaps, [], "Rows tile at the end");
+  const last = await wrap.evaluate(root => {
+    const row = [...root.querySelectorAll("tbody tr.qt-row")].at(-1);
+    const bounds = root.getBoundingClientRect(), r = row.getBoundingClientRect();
+    return { text: row.querySelector('[data-qt-field="name"]').textContent, inside: r.bottom <= bounds.bottom + 1 };
+  });
+  assert.equal(last.text, "Run 400", "The final measured row is reachable");
+  assert.ok(last.inside, "The final row is fully visible at the bottom");
+  if (!mobile) {
+    // Narrowing a clamped column reflows every row; measurements must follow.
+    const before = await commands.last().evaluate(el => el.closest("tr").getBoundingClientRect().height);
+    await layout.getByRole("separator", { name: "Resize Command column", exact: true }).focus();
+    for (let i = 0; i < 6; i++) await page.keyboard.press("Shift+ArrowLeft");
+    await page.waitForTimeout(150);
+    tiling = await rowsTile();
+    assert.deepEqual(tiling.gaps, [], "Rows tile after resizing a clamped column");
+    assert.ok(await commands.count() > 0, "Writing a width keeps the column's display override");
+    const after = await commands.last().evaluate(el => el.closest("tr").getBoundingClientRect().height);
+    assert.ok(after >= before, "Narrower clamped cells re-measure to equal or taller rows");
+  }
+  await layout.screenshot({ path: `.context/cell-display-clamp-${mobile ? "mobile" : "desktop"}.png` });
+}
+
 const browser = await chromium.launch({ headless: true, ...(process.env.QT_BROWSER_CHANNEL ? { channel: process.env.QT_BROWSER_CHANNEL } : {}) });
 await mkdir(".context", { recursive: true });
 try {
@@ -63,7 +117,8 @@ try {
       assert.equal(geometry.padding, 0);
       assert.ok(geometry.searchLeft >= geometry.actionsRight, "Search stays at the right of the toolbar");
       assert.ok(geometry.searchTop >= geometry.toolbarTop && geometry.searchBottom <= geometry.toolbarBottom);
-      assert.ok(Math.abs(geometry.footerBottom - geometry.bottom) <= 1, "The footer is flush with the modal");
+      // The 1px border plus sub-pixel sheet offsets (e.g. 1.00003px) on mobile.
+      assert.ok(Math.abs(geometry.footerBottom - geometry.bottom) < 1.5, "The footer is flush with the modal " + JSON.stringify({ mobile, i, ...geometry }));
       await dialog.getByRole("searchbox").fill("42");
       assert.ok((await dialog.locator(".qt-json-entry").count()) > 0);
       assert.match(await dialog.innerText(), /matching paths/);
@@ -196,8 +251,10 @@ try {
     await restored.locator(".qt-json-value--string").waitFor();
     assert.equal(await restored.locator(".qt-json-entry").count(), 1);
     await restored.getByRole("button", { name: "Close item details", exact: true }).click();
+    await page.goto(process.env.QT_DEMO_URL || "http://localhost:5179/cells");
+    await verifyReadingLayout(page, mobile);
     assert.deepEqual(errors, []);
     await context.close();
   }
-  console.log("Cell displays: desktop/mobile decoding, copy, list buckets, search modes/navigation, inline item details, view editing and shared restoration passed.");
+  console.log("Cell displays: per-column line clamping under virtualization, desktop/mobile decoding, copy, list buckets, search modes/navigation, inline item details, view editing and shared restoration passed.");
 } finally { await browser.close(); }

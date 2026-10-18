@@ -46,3 +46,21 @@ describe("declarative cell displays", () => {
     expect(render(null, { kind: "json" })).toContain("—");
   });
 });
+
+describe("per-column display overrides", () => {
+  const field: FieldDef = { ...base, render: "link", display: { kind: "text", truncate: true } };
+  const cell = (override?: CellDisplay, f: FieldDef = field) => renderToStaticMarkup(createElement("div", null,
+    resolveRenderer(f, defaultRenderers, override)({ value: "https://a.example/run --flag", field: f, row: {}, query: EMPTY_QUERY })));
+  it("takes precedence over the field's render key, inline renderer and display", () => {
+    expect(cell()).toContain('class="qt-link"');
+    const clamped = cell({ kind: "text", lines: 3 });
+    expect(clamped).toContain('class="qt-line-clamp"');
+    expect(clamped).toContain("-webkit-line-clamp:3");
+    expect(clamped).not.toContain("qt-link");
+    expect(cell({ kind: "text", lines: 2 }, { ...field, render: () => "custom" })).toContain("qt-line-clamp");
+  });
+  it("clamps with lines in preference to single-line truncation", () => {
+    expect(render("long", { kind: "text", truncate: true, lines: 2 })).toContain("qt-line-clamp");
+    expect(render("long", { kind: "text", truncate: true })).toContain("qt-truncate");
+  });
+});
