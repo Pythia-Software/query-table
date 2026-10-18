@@ -1,7 +1,8 @@
 import { normalizePropertyView, type PropertyViewState } from "./properties";
 import type { MetricDisplay, MetricLayout, MetricDistribution, MetricSort, MetricScope, MetricDateGrouping } from "./metricTypes";
 import { normalizeMetricOptions } from "./metricNormalize";
-import type { GroupingState, SummaryColumn, RepresentativeOrder } from "./grouping";
+import type { GroupingState, SummaryColumn, RepresentativeOrder, LinkSpec, LinkDestination } from "./grouping";
+import type { QueryFacet, QueryPatch } from "./queryPatch";
 // query.ts — the canonical query state shape.
 //
 // We lean into SQL vocabulary at every layer (per design feedback): a QueryState
@@ -362,6 +363,11 @@ function normalizeMetricWhere(value: unknown): { where?: WhereTerm[]; invalid: b
  * fallback. This function is intentionally schema-agnostic—field allowlisting
  * still happens in toServerQuery and in the backend compiler. */
 export function normalizeQueryState(input: unknown, fallback: QueryState = EMPTY_QUERY): QueryState {
+  return normalizeQuery(input, fallback, true);
+}
+
+/** `links` is false inside a link's patch, which bounds nesting at one level. */
+function normalizeQuery(input: unknown, fallback: QueryState, links: boolean): QueryState {
   const raw = isRecord(input) ? input : {};
 
   const select: SelectColumn[] = [];
@@ -421,7 +427,7 @@ export function normalizeQueryState(input: unknown, fallback: QueryState = EMPTY
 
   if (raw.fitToScreen === true) out.fitToScreen = true;
 
-  if (raw.grouping != null) out.grouping = normalizeGroupingState(raw.grouping);
+  if (raw.grouping != null) out.grouping = normalizeGroupingState(raw.grouping, links);
 
   if (Array.isArray(raw.aggregations)) {
     const aggregations: AggregationClause[] = [];
@@ -492,7 +498,7 @@ export function normalizeQueryState(input: unknown, fallback: QueryState = EMPTY
 
 /** Retain an invalid stage as a diagnostic rather than silently executing an
  * ungrouped query. Strip nesting before normalizing the source snapshot. */
-function normalizeGroupingState(value: unknown): GroupingState {
+function normalizeGroupingState(value: unknown, links: boolean): GroupingState {
   const raw = isRecord(value) ? value : {};
   const diagnostics: string[] = [];
   const fail = () => { diagnostics.push("Invalid grouping definition."); };
@@ -501,8 +507,19 @@ function normalizeGroupingState(value: unknown): GroupingState {
   const summaries: SummaryColumn[] = [];
   if (!Array.isArray(raw.summaries) || raw.summaries.length > 64) fail();
   for (const item of Array.isArray(raw.summaries) ? raw.summaries.slice(0, 64) : []) {
-    if (!isRecord(item) || !boundedString(item.id, MAX_FIELD_NAME_LENGTH) || typeof item.op !== "string" || (!AGG_OPS.has(item.op) && item.op !== "row" && item.op !== "formula")) { fail(); continue; }
+    if (!isRecord(item) || !boundedString(item.id, MAX_FIELD_NAME_LENGTH) || typeof item.op !== "string" || (!AGG_OPS.has(item.op) && item.op !== "row" && item.op !== "formula" && (item.op !== "link" || !links))) { fail(); continue; }
     const column: SummaryColumn = { id: item.id as string, op: item.op as SummaryColumn["op"] };
+    if (item.op === "link") {
+      // A malformed spec is isolated to its column (see linkDiagnostics).
+      const link = normalizeLinkSpec(item.link);
+      if (link) column.link = link;
+      if (item.label !== undefined) {
+        if (typeof item.label !== "string" || item.label.length > MAX_LABEL_LENGTH) fail();
+        else column.label = item.label;
+      }
+      summaries.push(column);
+      continue;
+    }
     if (item.field !== undefined) {
       if (!boundedString(item.field, MAX_FIELD_NAME_LENGTH)) fail();
       else column.field = item.field as string;
@@ -537,6 +554,62 @@ function normalizeGroupingState(value: unknown): GroupingState {
     if (supplied !== normalizedSource.where.reduce((count, term) => count + predicatesOf(term).length, 0)) fail();
   }
   return { keys, summaries, representative, source: normalizedSource, ...(diagnostics.length ? { diagnostics: [...new Set(diagnostics)] } : {}) };
+}
+
+const QUERY_FACETS: ReadonlySet<string> = new Set(["filters", "columns", "order", "grouping", "metrics", "limit"]);
+const PATCH_QUERY_KEYS = ["select", "where", "orderBy", "limit", "aggregations", "grouping", "fitToScreen"] as const;
+const MAX_LINK_PARAMS = 50;
+
+/** A link spec, or undefined when any part is malformed. Never partially kept:
+ * dropping a key filter or patch term would silently widen the destination. */
+function normalizeLinkSpec(value: unknown): LinkSpec | undefined {
+  if (!isRecord(value) || !isRecord(value.to)) return undefined;
+  let label: LinkSpec["label"];
+  if (typeof value.label === "string" && value.label.length <= MAX_LABEL_LENGTH) label = value.label;
+  else if (isRecord(value.label) && boundedString(value.label.column, MAX_FIELD_NAME_LENGTH)) label = { column: value.label.column as string };
+  else return undefined;
+  const to = value.to;
+  if (to.kind === "template") {
+    if (typeof to.template !== "string" || to.template.length > 8000) return undefined;
+    return { label, to: { kind: "template", template: to.template } };
+  }
+  if (to.kind !== "query" || !boundedString(to.target, MAX_FIELD_NAME_LENGTH)) return undefined;
+  const destination: Extract<LinkDestination, { kind: "query" }> = { kind: "query", target: to.target as string };
+  if (to.base !== undefined) {
+    if (to.base !== "source" && to.base !== "empty") return undefined;
+    destination.base = to.base;
+  }
+  if (to.keyFilters !== undefined) {
+    if (typeof to.keyFilters !== "boolean") return undefined;
+    destination.keyFilters = to.keyFilters;
+  }
+  if (to.patch !== undefined) {
+    const patch = normalizeLinkPatch(to.patch);
+    if (!patch) return undefined;
+    destination.patch = patch;
+  }
+  if (to.params !== undefined) {
+    if (!isRecord(to.params)) return undefined;
+    const entries = Object.entries(to.params);
+    if (entries.length > MAX_LINK_PARAMS || entries.some(([key, item]) => !boundedString(key, MAX_FIELD_NAME_LENGTH) || typeof item !== "string" || item.length > MAX_FILTER_VALUE_LENGTH))
+      return undefined;
+    destination.params = Object.fromEntries(entries) as Record<string, string>;
+  }
+  return { label, to: destination };
+}
+
+/** Keep only the facets the patch supplies, each normalized like any query. */
+function normalizeLinkPatch(value: unknown): QueryPatch | undefined {
+  if (!isRecord(value) || !boundedString(value.id, MAX_FIELD_NAME_LENGTH) || !Array.isArray(value.owns) || !isRecord(value.query)) return undefined;
+  if (value.owns.length > QUERY_FACETS.size || value.owns.some((facet) => typeof facet !== "string" || !QUERY_FACETS.has(facet))) return undefined;
+  const raw = value.query;
+  const normalized = normalizeQuery(raw, EMPTY_QUERY, false);
+  if (normalized.grouping?.diagnostics) return undefined;
+  const query: Partial<QueryState> = {};
+  for (const key of PATCH_QUERY_KEYS) {
+    if (raw[key] !== undefined && normalized[key] !== undefined) (query as Record<string, unknown>)[key] = normalized[key];
+  }
+  return { id: value.id as string, owns: [...new Set(value.owns as QueryFacet[])], query };
 }
 
 /** Structural equality on two queries — used to decide whether a `?q=` write or a

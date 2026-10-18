@@ -178,6 +178,29 @@ it("executes grouped rows and shown-group metrics through the negotiated v3 tran
   expect(new Set(fetchQueryV3.mock.calls.map(([request])=>request.now)).size).toBe(1);
 });
 
+it("computes link columns on the client and never sends them to the v3 server",async()=>{
+  const rows:Row[]=[{id:"1",k:"a",n:1,at:"2026-10-13T12:00:00Z"},{id:"2",k:"b",n:3,at:"2026-10-13T12:00:00Z"}];
+  const capabilities:QueryCapabilitiesV3={version:3,groupedRows:true,calendarGrouping:true,computedSourceFilters:false,regex:false,maxRows:10000,maxGroups:2000,maxPopulation:250000,profile:"qt-sqlite-v1"};
+  const fetchQueryV3=vi.fn(async(request:QueryRequestV3):Promise<QueryResultV3>=>{
+    if(JSON.stringify(request).includes('"link"'))throw Error("The server received a link column.");
+    const source={...EMPTY_QUERY,...request.source,select:request.source.select.map(field=>({field}))};
+    const query:QueryState={...EMPTY_QUERY,...request.result,select:request.result.select.map(field=>({field})),...(request.grouping?{grouping:{...request.grouping,source}}:{})};
+    const resultSchema=createGroupingModel(schema).resultSchema(request.grouping!.keys,request.grouping!.summaries);
+    const result=applyQuery(rows,query,schema,{now:request.now});
+    return {version:3,now:request.now,sourceTotal:rows.length,rows:request.rows?result.rows.map(row=>Object.fromEntries(request.result.select.concat(resultSchema.idField).map(name=>[name,(row as Record<string,unknown>)[name]]))):[],total:result.total,schema:{name:resultSchema.name,idField:resultSchema.idField,fields:resultSchema.fields.map(field=>({name:field.name,type:field.type}))},metrics:[],execution:{profile:request.profile,planToken:"",resolvedRevisions:{},fields:{}}};
+  });
+  const query:QueryState={...EMPTY_QUERY,grouping:{source:EMPTY_QUERY,keys:["k"],summaries:[{id:"total",op:"sum",field:"n"},
+    {id:"open",op:"link",link:{label:{column:"total"},to:{kind:"query",target:"rows"}}}],representative:null},select:[{field:"open"}],orderBy:[{field:"k",dir:"asc"}]};
+  const transport={fetchRows:vi.fn(async()=>({rows:[],total:0})),queryCapabilities:capabilities,fetchQueryV3};
+  const api=mount({schema,transport,initialQuery:query,debounceMs:0});await settle();
+  expect(api().error).toBeNull();expect(fetchQueryV3).toHaveBeenCalled();
+  for(const [request] of fetchQueryV3.mock.calls){expect(request.grouping!.summaries).toEqual([{id:"total",op:"sum",field:"n"}]);expect(request.result.select).toEqual(expect.arrayContaining(["k","total"]))}
+  const field=api().schema!.fields.find(f=>f.name==="open")!;
+  expect(api().rows.map(row=>(field.source.kind==="derived"?field.source.accessor!(row):null))).toMatchObject([
+    {label:"1",terms:[{field:"k",op:"=",value:"a"}]},{label:"3",terms:[{field:"k",op:"=",value:"b"}]}]);
+  expect(api().grouping!.diagnostics).toEqual([]);
+});
+
 it("reports unsupported remote metrics without downloading the matching population",async()=>{
   const transport:Transport<Row>={fetchRows:vi.fn(async()=>({rows:[],total:1_000_000}))};
   const initialQuery:QueryState={...EMPTY_QUERY,select:[{field:"id"}],limit:2,offset:7,

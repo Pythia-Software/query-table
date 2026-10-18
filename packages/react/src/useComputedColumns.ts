@@ -1,6 +1,7 @@
 import { executionRevision } from "./computedExecution";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  isGroupLinkField,
   applyQuery,
   compileFormula,
   computedFieldName,
@@ -141,7 +142,7 @@ export function useComputedColumns<Row>(options: Options<Row>): {
         .filter(
           (f) =>
             f.source.kind === "backend" ||
-            (f.source.accessor && f.source.dependencies),
+            (f.source.accessor && f.source.dependencies && !isGroupLinkField(f)),
         ),
     [schema],
   );

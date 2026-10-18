@@ -183,7 +183,8 @@ const clone = <T>(value: T): T => structuredClone(value);
 
 // ---- comparison -------------------------------------------------------------
 
-const summaryMeaning = ({ id, op, field, expression }: SummaryColumn) => JSON.stringify([id, op, field, expression]);
+const summaryMeaning = ({ id, op, field, expression, link }: SummaryColumn) =>
+  JSON.stringify(op === "link" ? [id, op, link ?? null] : [id, op, field, expression]);
 
 function summarySignature(summaries: readonly SummaryColumn[]): string {
   return JSON.stringify(summaries.map(summaryMeaning));

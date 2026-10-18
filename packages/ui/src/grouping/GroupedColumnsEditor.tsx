@@ -10,8 +10,10 @@ import {
   applyQuery,
   compileMetric,
   FORMULA_FUNCTIONS,
+  GROUP_LINK_RENDER,
   METRIC_FUNCTIONS,
   isComputedCellError,
+  isGroupLinkValue,
   predicatesOf,
   readFieldValue,
   isSelectable,
@@ -46,6 +48,7 @@ import {
 } from "./ColumnPicker";
 import {
   OP_LABEL,
+  type LinkSpec,
   type SummaryColumn,
   type SummaryOp,
   type GroupedRow as Row,
@@ -75,6 +78,20 @@ const aggregateFunctions = [...METRIC_FUNCTIONS, ...FORMULA_FUNCTIONS];
 const copy = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
 const valueText = (value: unknown) =>
   value == null ? "—" : Array.isArray(value) ? value.join(", ") : String(value);
+/** One-line summary of a link column for the column list. */
+function linkSummary(link: LinkSpec | undefined): string {
+  if (!link) return "Link · invalid definition";
+  return link.to.kind === "template"
+    ? `Link · ${link.to.template}`
+    : `Link · ${link.to.target}`;
+}
+/** Previews show link labels; following a link would leave the editor. */
+const previewLinkRenderer: RenderRegistry<Row>[string] = ({ value }) =>
+  isGroupLinkValue(value) ? (
+    <span title={value.problem}>{value.label || "—"}</span>
+  ) : (
+    "—"
+  );
 
 export function GroupedColumnsEditor({
   controller,
@@ -88,6 +105,10 @@ export function GroupedColumnsEditor({
   renderers?: RenderRegistry<Row>;
 }) {
   const { api, view, model } = controller;
+  const previewRenderers = useMemo(
+    () => ({ ...renderers, [GROUP_LINK_RENDER]: previewLinkRenderer }),
+    [renderers],
+  );
   const {
     groupRows,
     inputSchema,
@@ -399,10 +420,12 @@ export function GroupedColumnsEditor({
       index,
       ...(summary ? { summary } : {}),
     });
-    const invalid = (column: SummaryColumn) => column.op === "formula"
+    // Link columns cannot be re-added from the picker, so removing one drops
+    // its definition (Undo below restores it).
+    const invalid = (column: SummaryColumn) => column.op === "link" || (column.op === "formula"
       ? Boolean(summaryProblem(column))
       : !model.allowedOps(column.field).includes(column.op) ||
-        (column.op === "row" && (!column.field || !representative));
+        (column.op === "row" && (!column.field || !representative)));
     const original = initial.current.summaries.find((s) => s.id === field);
     // Removing a new column cancels its definition. Existing valid summaries
     // stay in the catalogue; invalid edits revert to a valid original. Undo
@@ -599,7 +622,9 @@ export function GroupedColumnsEditor({
                       {grouping && view.keys.includes(item.id)
                         ? "Group key"
                         : s
-                          ? s.op === "formula"
+                          ? s.op === "link"
+                            ? linkSummary(s.link)
+                            : s.op === "formula"
                             ? s.expression
                             : s.field
                               ? `${sourceField(s.field)?.label} · ${OP_LABEL[s.op]}`
@@ -728,7 +753,15 @@ export function GroupedColumnsEditor({
                 <ColumnRoleBadge role={chosenRole} />
                 {chosen.label}
               </h3>
-              {selected?.op === "formula" ? (
+              {selected?.op === "link" ? (
+                <LinkDefinition
+                  column={selected}
+                  problem={model.linkProblem(selected, view.keys, summaries)}
+                  fieldLabel={(name) =>
+                    fields.find((f) => f.name === name)?.label ?? name
+                  }
+                />
+              ) : selected?.op === "formula" ? (
                 <div className="qt-column-formula">
                   <label className="qt-column-name">
                     Column name
@@ -1047,7 +1080,7 @@ export function GroupedColumnsEditor({
                                 ) : (
                                   resolveRenderer(
                                     f,
-                                    renderers,
+                                    previewRenderers,
                                   )({
                                     value: readFieldValue(f, row),
                                     row,
@@ -1137,5 +1170,72 @@ export function GroupedColumnsEditor({
         />
       )}
     </EditorModal>
+  );
+}
+
+/** Link columns are authored through the API (`SummaryColumn.link`); the
+ * editor shows their definition and can reorder or remove them. */
+function LinkDefinition({
+  column,
+  problem,
+  fieldLabel,
+}: {
+  column: SummaryColumn;
+  problem: string | null;
+  fieldLabel: (name: string) => string;
+}) {
+  const link = column.link;
+  const rows: Array<[string, string]> = link
+    ? [
+        [
+          "Label",
+          typeof link.label === "string"
+            ? link.label || "—"
+            : `Value of ${fieldLabel(link.label.column)}`,
+        ],
+        ...(link.to.kind === "template"
+          ? ([["URL template", link.to.template]] as Array<[string, string]>)
+          : ([
+              ["Opens", link.to.target],
+              [
+                "Starts from",
+                link.to.base === "empty" ? "An empty query" : "The source rows",
+              ],
+              [
+                "Group filters",
+                link.to.keyFilters === false ? "Off" : "One per group key",
+              ],
+              ...(link.to.patch
+                ? ([["Preset", link.to.patch.id]] as Array<[string, string]>)
+                : []),
+              ...Object.entries(link.to.params ?? {}).map(
+                ([key, value]): [string, string] => [`Parameter ${key}`, value],
+              ),
+            ] as Array<[string, string]>)),
+      ]
+    : [];
+  return (
+    <div className="qt-column-link" data-testid="link-definition">
+      <div className="qt-column-field-label">Link</div>
+      <dl className="qt-column-link-spec">
+        {rows.map(([term, value]) => (
+          <div key={term}>
+            <dt>{term}</dt>
+            <dd>
+              <code>{value}</code>
+            </dd>
+          </div>
+        ))}
+      </dl>
+      {problem && (
+        <p className="qt-column-impact" role="status">
+          {problem} This column shows plain text until it is fixed.
+        </p>
+      )}
+      <p className="qt-muted">
+        Link columns are defined by the host application. You can reorder or
+        remove them here.
+      </p>
+    </div>
   );
 }

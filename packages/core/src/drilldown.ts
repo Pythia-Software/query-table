@@ -7,34 +7,11 @@
 import { compileFormula } from "./formula";
 import { createGroupingModel, exitGrouping, GROUP_ID_FIELD, type GroupedRow } from "./grouping";
 import { metricDateNext, metricDateTime } from "./metricDates";
-import { isFilterable, resolveField, type FieldDef, type FieldSchema } from "./schema";
+import { isFilterable, resolveField, type FieldSchema } from "./schema";
+import { groupKeyTerms, keyClause } from "./groupKeys";
 import type { AggregationBucket } from "./encode";
-import type { AggregationClause, QueryState, WhereClause, WhereTerm } from "./query";
+import type { AggregationClause, QueryState, WhereTerm } from "./query";
 import { appendWhereTerms } from "./queryPatch";
-
-/** Filters accept datetimes as ISO instants with an explicit offset. */
-function datetimeValue(value: unknown): string | null {
-  const time =
-    value instanceof Date ? value.getTime()
-    : typeof value === "number" ? value
-    : typeof value === "string" && value !== "" ? Date.parse(value)
-    : NaN;
-  return Number.isFinite(time) ? new Date(time).toISOString() : null;
-}
-
-/** One equality (or `is_null`) predicate selecting a group key, or null when
- * the field cannot express it exactly. */
-function keyClause(field: FieldDef | undefined, value: unknown): WhereClause | null {
-  if (!field || field.type === "textarray" || !isFilterable(field)) return null;
-  if (value == null) return { field: field.name, op: "is_null", value: "" };
-  if (field.type === "datetime") {
-    const iso = datetimeValue(value);
-    return iso === null ? null : { field: field.name, op: "=", value: iso };
-  }
-  if (typeof value === "number" ? !Number.isFinite(value) : typeof value !== "string" && typeof value !== "boolean")
-    return null;
-  return { field: field.name, op: "=", value: String(value) };
-}
 
 /** Metrics over a grouped query read the group schema. Accept either that
  * schema or the source schema it is derived from. */
@@ -125,12 +102,8 @@ export function inspectBucketQuery(
  * `is_null` for a null key) and the offset resets. */
 export function groupSourceQuery(query: QueryState, group: GroupedRow, schema: FieldSchema): QueryState | null {
   if (!query.grouping) return null;
-  const terms: WhereClause[] = [];
-  for (const key of query.grouping.keys) {
-    const term = keyClause(resolveField(schema, key), group[key]);
-    if (!term) return null;
-    terms.push(term);
-  }
+  const terms = groupKeyTerms(query.grouping.keys, group, schema);
+  if (!terms) return null;
   const source = exitGrouping(query);
   return { ...source, where: appendWhereTerms(source.where, terms), offset: 0 };
 }

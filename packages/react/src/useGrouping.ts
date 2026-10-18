@@ -35,6 +35,10 @@ export interface GroupingApi<Row> {
   grouped: QueryTableApi<Row>;
   schema: FieldSchema<Row>;
   view: GroupingView;
+  /** Problems with link columns. They never block the grouped table: an
+   * invalid link renders as plain text. Unregistered host targets are
+   * reported when rendering. */
+  diagnostics: string[];
   inputs: Row[];
   notice: string;
   setNotice: (notice: string) => void;
@@ -249,6 +253,7 @@ export function useGroupingController<Row>(
     grouped: api,
     schema: api.schema!,
     view,
+    diagnostics: stage ? model.linkDiagnostics(stage) : [],
     inputs,
     notice,
     setNotice,

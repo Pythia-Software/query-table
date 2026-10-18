@@ -7,9 +7,10 @@ import { Icon } from "./Icon";
 // A FieldDef.render is either a key resolved
 // against `{ ...defaultRenderers, ...consumerRenderers }` or an inline function.
 
-import type { ReactNode } from "react";
+import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { createElement } from "react";
-import type { FieldDef, QueryState } from "@pythia-software/query-table-core";
+import type { FieldDef, LinkTargets, QueryState } from "@pythia-software/query-table-core";
+import { isGroupLinkValue, resolveGroupLink } from "@pythia-software/query-table-core";
 import { renderCellDisplay } from "./cellFormatting";
 import { JsonCell, JsonValueView } from "./JsonCell";
 
@@ -137,6 +138,48 @@ export const defaultRenderers: RenderRegistry = {
     );
   },
 };
+
+export interface GroupLinkOptions {
+  /** Host routes for query-kind link columns. */
+  linkTargets?: LinkTargets | undefined;
+  /** Called for unmodified primary clicks only. Return true when the host
+   * handled navigation (for example with its router); the default action is
+   * then prevented. Modifier and middle clicks keep native link behavior. */
+  onNavigate?: (href: string, event: MouseEvent) => boolean;
+}
+
+/** Absolute and protocol-relative URLs leave the app; do not send the
+ * current URL (which may carry `?q=` filters) as a referrer. */
+const EXTERNAL_HREF = /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i;
+
+/** Renders group link columns (`SummaryColumn` with `op: "link"`) as real
+ * `<a href>` elements. Every href goes through `safeLinkHref`; blocked or
+ * unresolvable links render as muted text whose title explains why. */
+export function createGroupLinkRenderer(options: GroupLinkOptions = {}): CellRenderer {
+  return ({ value, query }) => {
+    if (!isGroupLinkValue(value)) return muted(EMPTY);
+    const resolved = resolveGroupLink(query, value, options.linkTargets);
+    const label = resolved.label || EMPTY;
+    const href = resolved.href === null ? null : safeLinkHref(resolved.href);
+    if (!href)
+      return createElement("span", { className: "qt-muted qt-group-link--blocked", title: resolved.problem ?? "Unsafe link blocked" }, label);
+    return createElement(
+      "a",
+      {
+        className: "qt-link qt-group-link",
+        href,
+        title: href,
+        ...(EXTERNAL_HREF.test(href) ? { rel: "noopener noreferrer" } : {}),
+        onClick: (event: ReactMouseEvent<HTMLAnchorElement>) => {
+          if (!options.onNavigate || event.defaultPrevented || event.button !== 0 ||
+            event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          if (options.onNavigate(href, event.nativeEvent)) event.preventDefault();
+        },
+      },
+      label,
+    );
+  };
+}
 
 /** Resolve a FieldDef's renderer: inline fn wins, else registry lookup, else
  *  declarative display, else the `text` fallback. */

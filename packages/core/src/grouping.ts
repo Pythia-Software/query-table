@@ -9,10 +9,14 @@ import {
   selectMetricShownRows,
 } from "./metrics";
 import { formulaRuntime, type FormulaNode, type FormulaValue } from "./formula";
-import { isComputedField } from "./computed";
+import { isComputedCellError, isComputedField } from "./computed";
+import { datetimeValue, groupKeyTerms } from "./groupKeys";
+import { fillUrlTemplate, templateFields, urlTemplateProblem } from "./itemPage";
+import type { QueryPatch } from "./queryPatch";
 import { type QueryEvaluationOptions } from "./relativeTime";
 import type { MetricPlan } from "./metrics";
 import {
+  isFilterable,
   isSortable,
   isSelectable,
   readFieldValue,
@@ -25,11 +29,12 @@ import {
   predicatesOf,
   type AggOp,
   type QueryState,
+  type WhereClause,
 } from "./query";
 
 export type GroupedRow = Record<string, unknown>;
 type Row = GroupedRow;
-export type SummaryOp = AggOp | "row" | "formula";
+export type SummaryOp = AggOp | "row" | "formula" | "link";
 export interface RepresentativeOrder {
   field: string;
   dir: "asc" | "desc";
@@ -44,6 +49,60 @@ export interface SummaryColumn {
   field?: string;
   expression?: string;
   label?: string;
+  /** Required for `op: "link"`; ignored otherwise. */
+  link?: LinkSpec;
+}
+
+/** Where a link column points. Placeholders and key filters read the group
+ * row: its keys and non-link summaries. */
+export type LinkDestination =
+  /** `{field:name}` placeholders over keys and summaries; values are
+   * percent-encoded. The result must be an HTTP(S) or relative URL. */
+  | { kind: "template"; template: string }
+  /** A query composed by query-table and routed by the host's
+   * `linkTargets[target](query, params)`. */
+  | {
+      kind: "query";
+      target: string;
+      /** "source" (default) starts from `grouping.source`, keeping its
+       * filters, columns and order; "empty" starts from `EMPTY_QUERY`. */
+      base?: "source" | "empty";
+      /** Add `=`/`is_null` per group key, as `groupSourceQuery` does. Default true. */
+      keyFilters?: boolean;
+      /** Applied last, with `applyPatch`. */
+      patch?: QueryPatch;
+      /** Static parameters passed to the host target. */
+      params?: Record<string, string>;
+    };
+
+/** A group-grain link column (`SummaryColumn` with `op: "link"`). Computed on
+ * the client from the returned group row; never sent to a server. */
+export interface LinkSpec {
+  /** Static text, or the value of a group key or summary column. */
+  label: string | { column: string };
+  to: LinkDestination;
+}
+
+/** The value of a link column for one group row: everything that depends on
+ * the row. `resolveGroupLink` combines it with the current query and the
+ * host's link targets. */
+export interface GroupLinkValue {
+  kind: "group-link";
+  label: string;
+  to: LinkDestination | null;
+  /** Template links: the substituted, not yet safety-checked href. */
+  href?: string;
+  /** Query links with key filters: the group's key predicates. */
+  terms?: WhereClause[];
+  /** Why the link cannot be followed for this row. */
+  problem?: string;
+}
+export const GROUP_LINK_RENDER = "qt_group_link";
+export function isGroupLinkValue(value: unknown): value is GroupLinkValue {
+  return value != null && typeof value === "object" && (value as GroupLinkValue).kind === "group-link";
+}
+export function isGroupLinkField(field: Pick<FieldDef, "render"> | undefined): boolean {
+  return field?.render === GROUP_LINK_RENDER;
 }
 export interface GroupingView {
   version: 2;
@@ -131,6 +190,7 @@ export const OP_LABEL: Record<SummaryOp, string> = {
   max: "MAX",
   row: "ROW",
   formula: "ƒx",
+  link: "LINK",
 };
 
 /** Bind aggregation helpers to this instance's source catalogue. */
@@ -167,6 +227,7 @@ export function createGroupingModel<InputRow>(
   }
   function summaryExpression(column: SummaryColumn): string {
     if (column.op === "formula") return column.expression ?? "";
+    if (column.op === "link") return "";
     const field = column.field ? `[${column.field.replace(/\]/g, "]]")}]` : "";
     return `${column.op === "row" ? "COUNT" : column.op.toUpperCase()}(${field})`;
   }
@@ -188,6 +249,8 @@ export function createGroupingModel<InputRow>(
   function summaryLabel(column: SummaryColumn): string {
     if (column.op === "formula")
       return column.label?.trim() || "Custom aggregate";
+    if (column.op === "link")
+      return column.label?.trim() || (typeof column.link?.label === "string" && column.link.label.trim()) || "Link";
     if (!column.field) return "Row count";
     const label = sourceField(column.field)?.label ?? column.field;
     const prefix: Record<SummaryOp, string> = {
@@ -199,8 +262,93 @@ export function createGroupingModel<InputRow>(
       max: "Max",
       row: "Representative ·",
       formula: "",
+      link: "",
     };
     return `${prefix[column.op]} ${label}`;
+  }
+
+  /** Group-row fields a link column reads, in a stable order. */
+  function linkReferences(column: SummaryColumn, keys: string[]): string[] {
+    const link = column.link;
+    if (!link) return [];
+    const names = new Set<string>();
+    if (typeof link.label === "object") names.add(link.label.column);
+    if (link.to.kind === "template")
+      for (const name of templateFields(link.to.template)) names.add(name);
+    else if (link.to.keyFilters !== false)
+      for (const key of keys) names.add(key);
+    return [...names];
+  }
+
+  /** Why a link column is invalid for this definition, or null. Problems are
+   * diagnostics: the column renders as plain text and the rest of the grouped
+   * table runs. Host target registration is checked when rendering. */
+  function linkProblem(
+    column: SummaryColumn,
+    keys: string[],
+    summaries: SummaryColumn[],
+  ): string | null {
+    const link = column.link;
+    if (column.op !== "link") return null;
+    if (!link) return "Invalid link definition.";
+    const readable = (name: string) =>
+      keys.includes(name) ||
+      summaries.some((other) => other.id === name && other.op !== "link");
+    if (typeof link.label === "object" && !readable(link.label.column))
+      return `Unknown link label column: ${link.label.column}.`;
+    if (link.to.kind === "template") {
+      if (!link.to.template.trim()) return "Enter a link URL template.";
+      return urlTemplateProblem(link.to.template, [], readable);
+    }
+    if (link.to.keyFilters !== false)
+      for (const key of keys) {
+        const field = sourceField(key);
+        if (field?.type === "textarray")
+          return `Key filters cannot match the textarray key ${field.label}.`;
+        if (!field || !isFilterable(field))
+          return `Key filters cannot match the key ${field?.label ?? key}.`;
+      }
+    return null;
+  }
+
+  /** One message per invalid link column, prefixed with its label. */
+  function linkDiagnostics(definition: Pick<GroupingDefinition, "keys" | "summaries">): string[] {
+    return definition.summaries.flatMap((column) => {
+      const problem = linkProblem(column, definition.keys, definition.summaries);
+      return problem ? [`${summaryLabel(column)}: ${problem}`] : [];
+    });
+  }
+
+  function linkValue(
+    column: SummaryColumn,
+    problem: string | null,
+    keys: string[],
+    schema: FieldSchema<Row>,
+    row: Row,
+  ): GroupLinkValue {
+    const link = column.link;
+    const read = (name: string): unknown => {
+      const field = schema.fields.find((f) => f.name === name);
+      const value = field ? readFieldValue(field, row) : undefined;
+      if (value == null || isComputedCellError(value)) return null;
+      if (field?.type === "datetime" || value instanceof Date)
+        return datetimeValue(value) ?? value;
+      return Array.isArray(value) ? value.join(", ") : value;
+    };
+    const label = !link
+      ? summaryLabel(column)
+      : typeof link.label === "string"
+        ? link.label
+        : String(read(link.label.column) ?? "");
+    const value: GroupLinkValue = { kind: "group-link", label, to: link?.to ?? null };
+    if (problem || !link) return { ...value, problem: problem ?? "Invalid link definition." };
+    if (link.to.kind === "template") {
+      const href = fillUrlTemplate(link.to.template, [], (token) => read(token.slice(6)));
+      return href === null ? { ...value, problem: "A value in this link is empty." } : { ...value, href };
+    }
+    if (link.to.keyFilters === false) return value;
+    const terms = groupKeyTerms(keys, row, inputSchema);
+    return terms ? { ...value, terms } : { ...value, problem: "This group cannot be matched exactly." };
   }
 
   function resultSchema(
@@ -240,7 +388,29 @@ export function createGroupingModel<InputRow>(
         }];
       }),
     ];
+    let schema: FieldSchema<Row>;
     for (const column of summaries) {
+      if (column.op === "link") {
+        const problem = linkProblem(column, keys, summaries);
+        // Client-only: toServerQuery requests the dependencies instead.
+        fields.push({
+          name: column.id,
+          label: summaryLabel(column),
+          type: "text",
+          source: {
+            kind: "derived",
+            dependencies: linkReferences(column, keys),
+            accessor: (row) => linkValue(column, problem, keys, schema, row),
+          },
+          select: { align: "left" },
+          filter: { enabled: false },
+          sort: { enabled: false },
+          aggregate: { measure: false, groupable: false },
+          render: GROUP_LINK_RENDER,
+          group: "Links",
+        });
+        continue;
+      }
       if (column.op === "formula") {
         let type: FieldDef<Row>["type"] = "number";
         try {
@@ -284,13 +454,14 @@ export function createGroupingModel<InputRow>(
         ...(input?.display && !counting ? { display: input.display } : {}),
       });
     }
-    return {
+    schema = {
       name: `${inputSchema.name}:groups`,
       idField: GROUP_ID_FIELD,
       fields,
       defaultSelect: keys.filter(key => sourceField(key)).map((field) => ({ field })),
       defaultLimit: 25,
     };
+    return schema;
   }
 
   // Typed tuples distinguish NULL, empty string, booleans and numbers. Key field
@@ -433,7 +604,7 @@ export function createGroupingModel<InputRow>(
     }
     const formulas = new Map<string, { plan?: MetricPlan; error?: string }>(
       summaries
-        .filter((c) => c.op !== "row")
+        .filter((c) => c.op !== "row" && c.op !== "link")
         .map((column) => {
           try {
             const problem = summaryProblem(column);
@@ -475,6 +646,7 @@ export function createGroupingModel<InputRow>(
           ? representative(members, rule, schema)
           : null;
       for (const column of summaries) {
+        if (column.op === "link") continue;
         if (column.op !== "row") {
           const compiled = formulas.get(column.id)!;
           if (!compiled.plan) {
@@ -629,6 +801,8 @@ export function createGroupingModel<InputRow>(
           "Aggregate column IDs must be unique and distinct from source fields.",
         );
       ids.add(column.id);
+      // Link problems are diagnostics (linkDiagnostics), never execution errors.
+      if (column.op === "link") continue;
       if (column.op === "formula") {
         const error = summaryProblem(column);
         if (error) throw new Error(error);
@@ -666,6 +840,8 @@ export function createGroupingModel<InputRow>(
     summaryExpression,
     summaryProblem,
     summaryLabel,
+    linkProblem,
+    linkDiagnostics,
     resultSchema,
     groupRows,
     filteredInput,
