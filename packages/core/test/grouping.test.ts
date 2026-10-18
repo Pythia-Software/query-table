@@ -325,3 +325,86 @@ describe("standard grouping model", () => {
     expect(() => toMetricQuery(q, schema)).toThrow(/group/);
   });
 });
+
+describe("summary column display", () => {
+  const rate = { id: "rate", op: "avg", field: "duration", display: { kind: "percent", decimals: 1 } } as const;
+
+  it("projects the summary format onto the grouped field, replacing inherited presentation", () => {
+    const model = createGroupingModel<GroupedRow>({
+      ...schema,
+      fields: schema.fields.map(field => field.name === "duration" ? { ...field, display: { kind: "duration" } } : field),
+    });
+    const projected = model.resultSchema(["customer"], [
+      rate,
+      { id: "plain", op: "avg", field: "duration" },
+      { id: "custom", op: "formula", expression: "MEDIAN([duration])", display: { kind: "number", decimals: 2 } },
+    ]);
+    const field = (name: string) => projected.fields.find(f => f.name === name)!;
+    expect(field("rate").display).toEqual({ kind: "percent", decimals: 1 });
+    expect(field("rate").render).toBeUndefined();
+    expect(field("plain")).toMatchObject({ render: "client-duration", display: { kind: "duration" } });
+    expect(field("custom").display).toEqual({ kind: "number", decimals: 2 });
+  });
+
+  it("normalizes valid displays and turns invalid ones into diagnostics", () => {
+    const valid = normalizeQueryState({ ...query(), grouping: { ...stage(), summaries: [rate] } });
+    expect(valid.grouping!.summaries[0]!.display).toEqual({ kind: "percent", decimals: 1 });
+    expect(valid.grouping!.diagnostics).toBeUndefined();
+    const invalid = normalizeQueryState({ ...query(), grouping: { ...stage(), summaries: [
+      { ...rate, display: { kind: "percent", decimals: 40 } },
+      { id: "other", op: "count", display: { kind: "sparkline" } },
+    ] } });
+    expect(invalid.grouping!.summaries.map(s => s.display)).toEqual([undefined, undefined]);
+    expect(invalid.grouping!.diagnostics).toEqual([
+      'Invalid grouping: summary "rate" display: decimals must be an integer from 0 to 20.',
+      'Invalid grouping: summary "other" display: unsupported kind.',
+    ]);
+    expect(() => applyQuery(rows, invalid, schema)).toThrow(/decimals must be an integer/);
+  });
+
+  it("round-trips summary displays through URLs and saved queries", async () => {
+    const q = normalizeQueryState({ ...query(), grouping: { ...stage(), summaries: [...stage().summaries, rate] } });
+    expect(decodeQuery(encodeQuery(q))).toEqual(q);
+    const storage = memoryStorageAdapter();
+    await storage.saveNamed(schema.name, "Rates", q, 1);
+    expect((await storage.listSaved(schema.name))[0]!.query.grouping!.summaries.at(-1)).toEqual(rate);
+  });
+});
+
+describe("grouping diagnostics", () => {
+  const diagnostics = (grouping: Record<string, unknown>) => normalizeQueryState({ grouping: { ...stage(), ...grouping } }).grouping!.diagnostics;
+
+  it("names the summary and the problem instead of a generic message", () => {
+    expect(diagnostics({ summaries: [{ id: "p50", op: "median", field: "duration" }] })).toEqual([
+      'Invalid grouping: summary "p50" has unsupported op "median"; use count, count_distinct, sum, avg, min, max, row, or formula (for a median, use op "formula" with expression "MEDIAN([field])").',
+    ]);
+    expect(diagnostics({ summaries: [{ op: "count" }] })).toEqual(["Invalid grouping: summary 1 needs an id of 1–256 characters."]);
+    expect(diagnostics({ keys: ["customer", "customer"] })).toEqual(["Invalid grouping: keys must list 1–20 distinct field names."]);
+    expect(diagnostics({ summaries: [{ id: "n", op: "count" }, { id: "n", op: "sum", field: "duration" }] }))
+      .toEqual(['Invalid grouping: summary "n" uses the same id as another summary column.']);
+    expect(diagnostics({ source: { ...stage().source, grouping: stage() } }))
+      .toEqual(["Invalid grouping: only one grouping stage is supported; the source query cannot itself be grouped."]);
+  });
+
+  it("reports summary ids that collide with group keys during normalization", () => {
+    expect(diagnostics({ summaries: [{ id: "customer", op: "count" }] })).toEqual([
+      'Invalid grouping: summary "customer" uses the same id as group key "customer"; summary ids must differ from source field names.',
+    ]);
+  });
+
+  it("reports summary ids that collide with other source fields when validating against the schema", () => {
+    const q = normalizeQueryState({ ...query(), grouping: { ...stage(), summaries: [{ id: "duration", op: "avg", field: "duration" }] } });
+    expect(q.grouping!.diagnostics).toBeUndefined();
+    expect(() => applyQuery(rows, q, schema)).toThrow(
+      'Aggregate column ID "duration" is already a source field name. Choose a different id, such as "avg_duration".',
+    );
+    expect(() => createGroupingModel(schema).validate({ ...stage(), summaries: [{ id: "x", op: "count" }, { id: "x", op: "count" }] }))
+      .toThrow('Aggregate column ID "x" is used by more than one column.');
+  });
+
+  it("keeps specific diagnostics through re-normalization and links", () => {
+    const once = normalizeQueryState({ ...query(), grouping: { ...stage(), summaries: [{ id: "p50", op: "median", field: "duration" }] } });
+    expect(normalizeQueryState(once)).toEqual(once);
+    expect(decodeQuery(encodeQuery(once))).toEqual(once);
+  });
+});

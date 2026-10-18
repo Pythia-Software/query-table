@@ -34,9 +34,45 @@
   matched structurally. See [query patches](docs/query-patches.md).
 - `withGroupingKeys` and `exitGrouping` expose the grouping controls' enter,
   re-key and exit transitions as pure functions.
+- Grouped summary columns accept `display` (any `CellDisplay`, such as
+  `{ kind: "percent", decimals: 1 }`). It is validated during normalization
+  (invalid values become grouping diagnostics), round-trips through `?q=` links
+  and saved queries, replaces the source field's inherited presentation, and is
+  stripped from v3 grouped-query requests. The column editor has a compact
+  Number/Percent/Duration format control.
+- Builder metrics measuring a field with a numeric cell display (`number` with
+  `decimals`, `percent`, or `duration`) default their value format from it,
+  unless the metric sets `display.format`. Counts and expressions are unchanged.
+- `SelectColumn.display` overrides a column's table-cell presentation for one
+  layout, taking precedence over the field's `render` and `display`. It is
+  validated during normalization and encoded as an optional third member of
+  compact select tuples; tokens and saved queries without overrides are
+  unchanged and older links decode as before. `resolveRenderer` accepts the
+  override as an optional third argument.
+- `{ kind: "text", lines: n }` (1–20) wraps and clamps cell text to `n` lines.
+  Clamped rows are measured by the virtualized table.
+- `filter.editor: "set"` works on `enum` fields and on `text` fields with static
+  options. ANY compiles to an OR group of `=`; NONE compiles to one
+  `(is_null OR != value)` group per value, so rows with no value are kept on
+  every executor. ALL and EMPTY are hidden for these fields. New
+  `setFilterTarget` and `setFilterModes` helpers; `createSetFilter` takes an
+  optional `"scalar"` target and `readSetFilter` reports the target. No new
+  operators or backend changes.
 
 ### Changed
 
+- Clearer errors for common authoring mistakes. Single-quoted formula text
+  suggests the double-quoted form; `NOT IN`, `IN` without a parenthesized list,
+  and `IN` on an array suggest `NOT (x IN (...))`, `OR`, or `ARRAY_CONTAINS`.
+  Grouping normalization names the summary and problem instead of
+  "Invalid grouping definition." (including `op: "median"`, duplicate ids, and
+  ids that reuse a group key), keeps earlier diagnostics through
+  re-normalization, and validation names a summary id that collides with a
+  source field. Include-empty date grouping names the missing bound and the
+  `range: "observed"` / `"custom"` alternatives.
+- Documented `!=` and NULL (SQL backends exclude NULL rows in WHERE and HAVING;
+  the local executor currently keeps them for non-datetime fields), MEDIAN as a
+  formula summary, `IN` support per executor, and `includeEmpty` ranges.
 - Run public demo verification locally with `npm run check:showcase` instead
   of building and deploying on every push through GitHub Actions. Keep
   tag-triggered npm releases and save browser diagnostics when showcase checks

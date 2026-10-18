@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
+import type { AggregationClause } from "@pythia-software/query-table-core";
 import {
   formatMetricOutput as format,
+  metricFormatFromMeasure,
   metricTimestamp,
   validateMetricFormat,
 } from "../src/metricFormat";
@@ -216,4 +218,17 @@ it("omits a duration sign when the custom pattern drops every nonzero unit", () 
       pattern: "{s}s",
     }).text,
   ).toBe("−59s");
+});
+
+describe("metricFormatFromMeasure", () => {
+  const avg: AggregationClause = { id: "m", op: "avg", field: "x", groupBy: [] };
+  it("maps numeric cell displays to metric value formats", () => {
+    expect(metricFormatFromMeasure(avg, { display: { kind: "percent" } })).toEqual({ kind: "percent", decimals: 2 });
+    expect(metricFormatFromMeasure(avg, { display: { kind: "number", decimals: 1 } })).toEqual({ kind: "number", decimals: 1 });
+    expect(metricFormatFromMeasure(avg, { display: { kind: "number" } })).toBeUndefined();
+    expect(metricFormatFromMeasure(avg, { display: { kind: "duration", sourceUnit: "seconds", style: "clock" } }))
+      .toEqual({ kind: "duration", sourceUnit: "seconds", style: "clock" });
+    expect(metricFormatFromMeasure(avg, { display: { kind: "text" } })).toBeUndefined();
+    expect(metricFormatFromMeasure({ ...avg, op: "count" }, { display: { kind: "percent" } })).toBeUndefined();
+  });
 });

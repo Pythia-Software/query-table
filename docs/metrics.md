@@ -284,7 +284,17 @@ offset changes can create partial-hour buckets. The local engine uses the
 side-effect-free `temporal-polyfill` dependency for timezone calendar operations.
 
 Query range completion requires conjunctive lower and upper date filters on
-this field. Query filters retain their absolute timestamp semantics, including
+this field. Without both bounds there is no finite range to fill, so the metric
+reports an error naming the missing bound. When the query has no bounded date
+filter, use `range: "observed"` (fill from the first to the last populated
+interval) or `range: "custom"` with `start` and `end`:
+
+```ts
+dateGrouping: { field: "enqueued_at", interval: "day", includeEmpty: true, range: "observed" }
+```
+
+Bounds inside an OR group do not count, nor do filters on other fields.
+Query filters retain their absolute timestamp semantics, including
 UTC interpretation of date-only filter values; grouping does not rewrite them.
 An exclusive upper bound exactly at a local boundary does not create the next
 bucket; partial local intervals are included. Observed range completes from the

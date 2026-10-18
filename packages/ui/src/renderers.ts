@@ -9,7 +9,7 @@ import { Icon } from "./Icon";
 
 import type { ReactNode } from "react";
 import { createElement } from "react";
-import type { FieldDef, QueryState } from "@pythia-software/query-table-core";
+import type { CellDisplay, FieldDef, QueryState } from "@pythia-software/query-table-core";
 import { renderCellDisplay } from "./cellFormatting";
 import { JsonCell, JsonValueView } from "./JsonCell";
 
@@ -138,12 +138,15 @@ export const defaultRenderers: RenderRegistry = {
   },
 };
 
-/** Resolve a FieldDef's renderer: inline fn wins, else registry lookup, else
- *  declarative display, else the `text` fallback. */
+/** Resolve a FieldDef's renderer: a per-column display override (from
+ *  `SelectColumn.display`) wins, then an inline fn, then a registry lookup, then
+ *  the field's declarative display, else the `text` fallback. */
 export function resolveRenderer<Row>(
   field: FieldDef<Row>,
   registry: RenderRegistry<Row>,
+  columnDisplay?: CellDisplay,
 ): CellRenderer<Row> {
+  if (columnDisplay) return (ctx) => renderCellDisplay(ctx, columnDisplay);
   const r = field.render;
   if (typeof r === "function") {
     // core's CellRenderer returns `unknown`; ours narrows that to ReactNode.

@@ -888,6 +888,38 @@ it("counts omitted outliers after supplementing a transport sample with actual e
   expect(html).toContain("2 outlier markers omitted.");
   expect(html).toContain("5 outliers (3 retained markers)");
 });
+
+describe("measure display defaults", () => {
+  const rateFields: FieldDef<unknown>[] = [
+    { name: "rate", label: "Rate", type: "number", source: { kind: "backend" }, display: { kind: "percent", decimals: 1 } },
+  ];
+  const card = (c: RenderingClause) => renderToStaticMarkup(createElement(MetricCard, {
+    clause: c, buckets: [{ keys: [], value: 0.0743, count: 4 }], fields: rateFields, renderers: defaultRenderers,
+  }));
+  it("formats a measured summary column with its cell display", () => {
+    expect(card({ id: "m", op: "avg", field: "rate", groupBy: [] })).toContain("7.4%");
+  });
+  it("keeps explicit formats, counts, and expressions unchanged", () => {
+    expect(card({ id: "m", op: "avg", field: "rate", groupBy: [], display: { kind: "auto", format: { kind: "number", decimals: 3 } } })).toContain("0.074");
+    expect(card({ id: "m", op: "count_distinct", field: "rate", groupBy: [] })).not.toContain("%");
+    expect(card({ id: "m", op: "avg", field: "rate", expression: "AVG([rate])", groupBy: [] })).not.toContain("%");
+  });
+  it("passes the host's own clause to onInspect, without the derived format", () => {
+    const host: RenderingClause = { id: "m", op: "avg", field: "rate", groupBy: [] };
+    const inspected: RenderingClause[] = [];
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    act(() => root.render(createElement(MetricCard, {
+      clause: host, buckets: [{ keys: [], value: 0.0743, count: 4 }], fields: rateFields,
+      renderers: defaultRenderers, onInspect: (_bucket, c) => inspected.push(c),
+    })));
+    act(() => container.querySelector<HTMLElement>(".qt-metric-inspectable")!.click());
+    expect(inspected).toEqual([host]);
+    act(() => root.unmount());
+    container.remove();
+  });
+});
 describe("metric population notes", () => {
   it("states how many groups minCount hid", () => {
     const markup = renderToStaticMarkup(

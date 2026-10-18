@@ -57,3 +57,15 @@ describe("DataTable row virtualization", () => {
     expect(markup).not.toContain("qt-virtual-spacer");
   });
 });
+
+describe("DataTable column display overrides", () => {
+  const text: FieldDef<{ id: number; command: string }> = { name: "command", label: "Command", type: "text", source: { kind: "backend" } };
+  const markup = (select: typeof EMPTY_QUERY.select) => renderToStaticMarkup(createElement(DataTable<{ id: number; command: string }>, {
+    fields: [text], rows: [{ id: 1, command: "make test" }], query: { ...EMPTY_QUERY, select },
+    onQueryChange: () => undefined, renderers: defaultRenderers, rowId: (row) => row.id,
+  }));
+  it("renders a column with its layout display and leaves other layouts unchanged", () => {
+    expect(markup([{ field: "command", display: { kind: "text", lines: 2 } }])).toContain('class="qt-line-clamp"');
+    expect(markup([{ field: "command" }])).not.toContain("qt-line-clamp");
+  });
+});

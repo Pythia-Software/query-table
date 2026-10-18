@@ -124,6 +124,17 @@ func TestV3FrontendParity(t *testing.T) {
 	run("calendar/grouped-result", base, q)
 	q = qt.QueryRequestV3{Version: 3, Profile: qt.SQLiteExpressionProfile, Now: time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC).UnixMilli(), Result: qt.WireQuery{Select: []string{"id"}, Where: []qt.WhereTerm{{Field: "at", Op: ">=", Value: "-2d"}, {Field: "at", Op: "<=", Value: "+0s"}}, Limit: 10}, Metrics: []qt.AggSpec{{ID: "window", Op: "count", GroupBy: []string{"at"}, DateGrouping: &qt.MetricDateGrouping{Field: "at", Interval: "day", TimeZone: "America/New_York", IncludeEmpty: true, Range: "query"}}}}
 	run("calendar/query-relative", base, q)
+	// Scalar set editors compile to existing predicates. NONE keeps NULL rows
+	// through an explicit is_null branch, so SQL and local results agree.
+	none := func(value string) qt.WhereTerm {
+		return qt.WhereTerm{Any: []qt.WhereClause{{Field: "label", Op: "is_null"}, {Field: "label", Op: "!=", Value: value}}}
+	}
+	for name, where := range map[string][]qt.WhereTerm{
+		"set/scalar-any":  {{Any: []qt.WhereClause{{Field: "label", Op: "=", Value: "old"}, {Field: "label", Op: "=", Value: "b"}}}},
+		"set/scalar-none": {none("old"), none("b")},
+	} {
+		run(name, base, qt.QueryRequestV3{Version: 3, Profile: qt.SQLiteExpressionProfile, Result: qt.WireQuery{Select: []string{"id", "label"}, Where: where, OrderBy: []qt.OrderBy{{Field: "id", Dir: "asc"}}, Limit: 10}})
+	}
 	body, err := json.Marshal(fixtures)
 	if err != nil {
 		t.Fatal(err)

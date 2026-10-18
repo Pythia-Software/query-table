@@ -1,3 +1,4 @@
+import type { AggregationClause, FieldDef } from "@pythia-software/query-table-core";
 import type { MetricValue, MetricValueFormat } from "./metricTypes";
 export interface MetricFormattedValue {
   text: string;
@@ -408,4 +409,32 @@ export function formatMetricOutput(
       raw: value,
     };
   }
+}
+
+/** Default value format for a builder metric whose measure field declares a
+ * numeric cell display, e.g. AVG over a grouped `{ kind: "percent" }` summary.
+ * Counts are dimensionless and expressions may change units, so neither inherits. */
+export function metricFormatFromMeasure(
+  clause: AggregationClause,
+  measure: Pick<FieldDef, "display"> | undefined,
+): MetricValueFormat | undefined {
+  const display = measure?.display;
+  if (
+    !display ||
+    clause.expression !== undefined ||
+    clause.op === "count" ||
+    clause.op === "count_distinct"
+  )
+    return undefined;
+  if (display.kind === "percent")
+    return { kind: "percent", decimals: display.decimals ?? 2 };
+  if (display.kind === "number")
+    return display.decimals === undefined
+      ? undefined
+      : { kind: "number", decimals: display.decimals };
+  if (display.kind === "duration") {
+    const { kind: _kind, ...options } = display;
+    return { kind: "duration", ...options };
+  }
+  return undefined;
 }

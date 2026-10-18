@@ -98,9 +98,11 @@ Render-only schema fields can be selected but cannot be formula inputs. Develope
 
 ## Language version 1
 
-Field references use canonical schema names in brackets: `[job_name]`. Escape a closing bracket as `]]`. Function names and keywords are case-insensitive; field names are exact. Strings are double-quoted JSON string literals. Numbers are finite IEEE-754 values. Literals include `TRUE`, `FALSE`, and `NULL`.
+Field references use canonical schema names in brackets: `[job_name]`. Escape a closing bracket as `]]`. Function names and keywords are case-insensitive; field names are exact. Strings are double-quoted JSON string literals: write `"done"`, not `'done'` (single quotes are a syntax error that suggests the double-quoted form). Numbers are finite IEEE-754 values. Literals include `TRUE`, `FALSE`, and `NULL`.
 
 Supported infix operators are `+ - * / %`, `= != <> < <= > >=`, `AND OR NOT`, `IN (...)`, and `BETWEEN ... AND ...`. Arithmetic precedes comparisons, comparisons precede AND, and AND precedes OR. Parentheses override precedence. `NOT` negates a comparison; unary `+`/`-` bind more tightly than multiplication.
+
+`IN` compares one scalar with a parenthesized list: `[status] IN ("done", "failed")`. There is no `NOT IN`; write `NOT ([status] IN ("done", "failed"))`. For array fields, test membership with `ARRAY_CONTAINS([tags], "bug")`, combining several calls with `OR`. The local compiler and DuckDB implement `IN` and `BETWEEN`; the bundled Go SQLite/PostgreSQL expression profiles do not, and reject them as a syntax error (for example "unexpected trailing token" or "expected )"). For formulas that run on those servers, write `[status] = "done" OR [status] = "failed"` instead.
 
 | Category | Functions |
 | --- | --- |

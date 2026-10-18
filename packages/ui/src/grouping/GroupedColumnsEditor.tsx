@@ -52,6 +52,7 @@ import {
 } from "@pythia-software/query-table-core";
 import type { GroupingApi } from "@pythia-software/query-table-react";
 import { columnRole, ColumnRoleBadge } from "./ColumnRole";
+import { SummaryFormatControl } from "./SummaryFormatControl";
 type Controller = GroupingApi<Row>;
 const panes: Array<{
   label: string;
@@ -107,7 +108,7 @@ export function GroupedColumnsEditor({
     columns: copy(api.select.visible),
     summaries: copy(view.summaries),
   });
-  const newFormula = useRef(
+  const newFormula = useRef<SummaryColumn | null>(
     initialFormulaField && initial.current.summaries.length < 64
       ? {
           id: `summary_${crypto.randomUUID().replace(/-/g, "")}`,
@@ -378,9 +379,16 @@ export function GroupedColumnsEditor({
     if (!existing) setSummaries((s) => [...s, next]);
     addField(next.id);
   }
-  function patchSummary(patch: Partial<SummaryColumn>) {
+  function patchSummary(patch: {
+    [K in keyof SummaryColumn]?: SummaryColumn[K] | undefined;
+  }) {
     setSummaries((s) =>
-      s.map((c) => (c.id === active ? { ...c, ...patch } : c)),
+      s.map((c) => {
+        if (c.id !== active) return c;
+        const next = { ...c, ...patch };
+        if (next.display === undefined) delete next.display;
+        return next as SummaryColumn;
+      }),
     );
   }
   function move(field: string, index: number) {
@@ -756,6 +764,10 @@ export function GroupedColumnsEditor({
                     ariaLabel="Aggregate column formula"
                     rows={5}
                   />
+                  <SummaryFormatControl
+                    display={selected.display}
+                    onChange={(display) => patchSummary({ display })}
+                  />
                 </div>
               ) : (
                 <>
@@ -827,6 +839,12 @@ export function GroupedColumnsEditor({
                             />
                           ))}
                       </div>
+                      {selected.op !== "row" && (
+                        <SummaryFormatControl
+                          display={selected.display}
+                          onChange={(display) => patchSummary({ display })}
+                        />
+                      )}
                       <button
                         type="button"
                         className="qt-btn qt-column-custom-choice"
@@ -862,7 +880,11 @@ export function GroupedColumnsEditor({
                               detail={representativeLabel(representative)}
                               code="ROW"
                               selected={selected.op === "row"}
-                              onClick={() => patchSummary({ op: "row" })}
+                              // Row values keep the source field's rendering;
+                              // the Format control is hidden for them.
+                              onClick={() =>
+                                patchSummary({ op: "row", display: undefined })
+                              }
                             />
                           </div>
                         )}

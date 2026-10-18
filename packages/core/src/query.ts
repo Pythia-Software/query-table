@@ -2,6 +2,7 @@ import { normalizePropertyView, type PropertyViewState } from "./properties";
 import type { MetricDisplay, MetricLayout, MetricDistribution, MetricSort, MetricScope, MetricDateGrouping } from "./metricTypes";
 import { normalizeMetricOptions } from "./metricNormalize";
 import type { GroupingState, SummaryColumn, RepresentativeOrder } from "./grouping";
+import { parseCellDisplay, type CellDisplay } from "./cellDisplay";
 // query.ts — the canonical query state shape.
 //
 // We lean into SQL vocabulary at every layer (per design feedback): a QueryState
@@ -117,6 +118,10 @@ export interface SelectColumn {
   field: string; // FieldDef.name, or @computed/<id> (source lives in ComputedColumnStore)
   /** Pixel width override. Omitted = FieldDef.select.width, else the type default. */
   width?: number;
+  /** Table-cell presentation for this column in this layout, e.g.
+   *  `{ kind: "text", lines: 3 }`. Takes precedence over the field's `render`
+   *  and `display`; other surfaces (details, menus, metrics) keep the field's. */
+  display?: CellDisplay;
 }
 
 /** A single aggregate operation. `count` is the only op that needs no measure
@@ -374,10 +379,15 @@ export function normalizeQueryState(input: unknown, fallback: QueryState = EMPTY
       if (typeof item.width === "number" && Number.isFinite(item.width)) {
         column.width = boundedInteger(item.width, MIN_COLUMN_WIDTH, MIN_COLUMN_WIDTH, MAX_COLUMN_WIDTH);
       }
+      if (item.display !== undefined) {
+        // A malformed presentation hint never hides the column; it falls back
+        // to the field's own presentation.
+        try { column.display = parseCellDisplay(item.display, `column ${field} display`); } catch { /* dropped */ }
+      }
       select.push(column);
     }
   } else {
-    select.push(...fallback.select.map((column) => ({ ...column })));
+    select.push(...fallback.select.map((column) => ({ ...column, ...(column.display ? { display: JSON.parse(JSON.stringify(column.display)) as CellDisplay } : {}) })));
   }
 
   // WHERE is CNF: an array of terms, each a literal or an `{ any: [...] }` OR
@@ -495,25 +505,42 @@ export function normalizeQueryState(input: unknown, fallback: QueryState = EMPTY
 function normalizeGroupingState(value: unknown): GroupingState {
   const raw = isRecord(value) ? value : {};
   const diagnostics: string[] = [];
-  const fail = () => { diagnostics.push("Invalid grouping definition."); };
+  // Each problem gets its own message; the stage still refuses to execute.
+  const fail = (message: string) => { diagnostics.push(`Invalid grouping: ${message}`); };
   const keys = Array.isArray(raw.keys) ? raw.keys.slice(0, MAX_GROUP_BY_FIELDS).filter((key): key is string => !!boundedString(key, MAX_FIELD_NAME_LENGTH)) : [];
-  if (!Array.isArray(raw.keys) || !keys.length || keys.length !== raw.keys.length || new Set(keys).size !== keys.length) fail();
+  if (!Array.isArray(raw.keys) || !keys.length || keys.length !== raw.keys.length || new Set(keys).size !== keys.length)
+    fail(`keys must list 1–${MAX_GROUP_BY_FIELDS} distinct field names.`);
   const summaries: SummaryColumn[] = [];
-  if (!Array.isArray(raw.summaries) || raw.summaries.length > 64) fail();
-  for (const item of Array.isArray(raw.summaries) ? raw.summaries.slice(0, 64) : []) {
-    if (!isRecord(item) || !boundedString(item.id, MAX_FIELD_NAME_LENGTH) || typeof item.op !== "string" || (!AGG_OPS.has(item.op) && item.op !== "row" && item.op !== "formula")) { fail(); continue; }
+  if (!Array.isArray(raw.summaries) || raw.summaries.length > 64) fail("summaries must be a list of at most 64 columns.");
+  const summaryIds = new Set<string>();
+  for (const [index, item] of (Array.isArray(raw.summaries) ? raw.summaries.slice(0, 64) : []).entries()) {
+    const name = isRecord(item) && boundedString(item.id, MAX_FIELD_NAME_LENGTH) ? `summary "${item.id as string}"` : `summary ${index + 1}`;
+    if (!isRecord(item) || !boundedString(item.id, MAX_FIELD_NAME_LENGTH)) { fail(`${name} needs an id of 1–${MAX_FIELD_NAME_LENGTH} characters.`); continue; }
+    if (typeof item.op !== "string" || (!AGG_OPS.has(item.op) && item.op !== "row" && item.op !== "formula")) {
+      fail(`${name} has unsupported op ${JSON.stringify(String(item.op).slice(0, 40))}; use count, count_distinct, sum, avg, min, max, row, or formula${String(item.op).toLowerCase() === "median" ? ' (for a median, use op "formula" with expression "MEDIAN([field])")' : ""}.`);
+      continue;
+    }
     const column: SummaryColumn = { id: item.id as string, op: item.op as SummaryColumn["op"] };
+    // Collisions with source fields need the schema and are reported by
+    // createGroupingModel().validate(); keys and duplicates are visible here.
+    if (summaryIds.has(column.id)) fail(`${name} uses the same id as another summary column.`);
+    else if (keys.includes(column.id)) fail(`${name} uses the same id as group key "${column.id}"; summary ids must differ from source field names.`);
+    summaryIds.add(column.id);
     if (item.field !== undefined) {
-      if (!boundedString(item.field, MAX_FIELD_NAME_LENGTH)) fail();
+      if (!boundedString(item.field, MAX_FIELD_NAME_LENGTH)) fail(`${name} has an invalid field name.`);
       else column.field = item.field as string;
     }
     if (item.op === "formula") {
-      if (typeof item.expression !== "string" || item.expression.length > 10_000) fail();
+      if (typeof item.expression !== "string" || item.expression.length > 10_000) fail(`${name} needs an expression of at most 10,000 characters.`);
       else column.expression = item.expression;
     }
     if (item.label !== undefined) {
-      if (typeof item.label !== "string" || item.label.length > MAX_LABEL_LENGTH) fail();
+      if (typeof item.label !== "string" || item.label.length > MAX_LABEL_LENGTH) fail(`${name} label must be text of at most ${MAX_LABEL_LENGTH.toLocaleString("en-US")} characters.`);
       else column.label = item.label;
+    }
+    if (item.display !== undefined) {
+      try { column.display = parseCellDisplay(item.display, `${name} display`); }
+      catch (error) { fail(`${error instanceof Error ? error.message : String(error)}.`); }
     }
     summaries.push(column);
   }
@@ -521,20 +548,27 @@ function normalizeGroupingState(value: unknown): GroupingState {
   if (raw.representative != null) {
     const ordering = isRecord(raw.representative) ? raw.representative.orderBy : undefined;
     const orderBy: RepresentativeOrder[] = [];
-    if (!Array.isArray(ordering) || !ordering.length || ordering.length > 8) fail();
+    if (!Array.isArray(ordering) || !ordering.length || ordering.length > 8) fail("representative ordering must list 1–8 fields.");
     for (const term of Array.isArray(ordering) ? ordering.slice(0, 8) : []) {
-      if (!isRecord(term) || !boundedString(term.field, MAX_FIELD_NAME_LENGTH) || !["asc", "desc"].includes(String(term.dir)) || (term.nulls !== undefined && !["first", "last"].includes(String(term.nulls)))) { fail(); continue; }
+      if (!isRecord(term) || !boundedString(term.field, MAX_FIELD_NAME_LENGTH) || !["asc", "desc"].includes(String(term.dir)) || (term.nulls !== undefined && !["first", "last"].includes(String(term.nulls)))) {
+        fail('each representative ordering term needs a field, dir "asc" or "desc", and optional nulls "first" or "last".');
+        continue;
+      }
       orderBy.push({ field: term.field as string, dir: term.dir as "asc" | "desc", nulls: term.nulls === "first" ? "first" : "last" });
     }
     representative = { orderBy };
   }
-  if (!isRecord(raw.source) || raw.source.grouping != null) fail();
+  if (!isRecord(raw.source)) fail("source must be the record query that is grouped.");
+  else if (raw.source.grouping != null) fail("only one grouping stage is supported; the source query cannot itself be grouped.");
   const { grouping: _nested, ...source } = isRecord(raw.source) ? raw.source : {};
-  if (Array.isArray(raw.diagnostics) && raw.diagnostics.length) fail();
+  // Retain earlier diagnostics (bounded) instead of collapsing them.
+  if (Array.isArray(raw.diagnostics))
+    for (const message of raw.diagnostics.slice(0, 20))
+      diagnostics.push(typeof message === "string" && message ? message.slice(0, MAX_LABEL_LENGTH) : "Invalid grouping definition.");
   const normalizedSource = normalizeQueryState(source);
   if (Array.isArray(source.where)) {
     const supplied = source.where.reduce((count: number, term: unknown) => count + (isRecord(term) && Array.isArray(term.any) ? term.any.length : 1), 0);
-    if (supplied !== normalizedSource.where.reduce((count, term) => count + predicatesOf(term).length, 0)) fail();
+    if (supplied !== normalizedSource.where.reduce((count, term) => count + predicatesOf(term).length, 0)) fail("source filters contain malformed predicates or exceed the predicate budget.");
   }
   return { keys, summaries, representative, source: normalizedSource, ...(diagnostics.length ? { diagnostics: [...new Set(diagnostics)] } : {}) };
 }

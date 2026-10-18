@@ -65,6 +65,12 @@ const groupedQuery = normalizeQueryState({
 });
 ```
 
+HAVING predicates use the same operators as WHERE, including their NULL
+behavior: `!=` is SQL `<>` on the server backends, so a group whose summary is
+NULL (for example `AVG` over only NULL values) does not match `avg != 0`. Add
+an `is_null` predicate in an OR group to keep such groups, or `is_not_null` to
+drop them explicitly; see [`!=` and NULL](../README.md#the-contracts-at-a-glance).
+
 Execution is source WHERE → grouping → HAVING → result ORDER BY → result
 OFFSET/LIMIT. Source paging and sorting do not truncate the group population.
 All-matching metrics operate on groups after HAVING; shown-row metrics operate
@@ -92,6 +98,52 @@ Source ID descending breaks ties unless ID is explicitly ordered. Representative
 selection requires unique string or finite numeric source IDs within each group;
 the ID need not be a selectable catalogue field. There is no separate filter
 or second representative strategy.
+
+### Median and other formula summaries
+
+`SummaryOp` intentionally has no `"median"`: the built-in ops mirror the
+backend `AggOp` matrix (`count`, `count_distinct`, `sum`, `avg`, `min`, `max`)
+plus `row`. Medians, percent-of-total ratios and conditional counts are formula
+summaries that use the [aggregate formula language](metrics.md):
+
+```ts
+{ id: "median_duration", op: "formula", expression: "MEDIAN([duration])", label: "Median duration" }
+```
+
+`MEDIAN` ignores NULLs and averages the middle two values for even-sized
+groups. Normalization reports `op: "median"` as a diagnostic that points to this
+form. Summary ids must differ from source field names (including the group
+keys); for example, use `median_duration` rather than `duration`.
+
+### Summary column formats
+
+A summary column can carry the same [`CellDisplay`](cell-displays.md) contract
+as `FieldDef.display`. Use it for rates and durations instead of scaling values
+by hand:
+
+```ts
+summaries: [
+  { id: "failure_rate", op: "formula",
+    expression: "SUM(IF([failed], 1, 0)) / COUNT()",
+    display: { kind: "percent", decimals: 1 } },  // 0.0743 → 7.4%
+  { id: "p50_ms", op: "formula", expression: "MEDIAN([duration])",
+    display: { kind: "duration", sourceUnit: "milliseconds" } },
+]
+```
+
+The grouped schema's field for that column gets this `display`, replacing any
+`render` or `display` the column would otherwise inherit from its source field.
+Normalization validates it with `parseCellDisplay`; an invalid value is dropped
+and recorded in `grouping.diagnostics`, so the stage reports the problem instead
+of executing. The format travels with `?q=` links and saved queries, and is not
+sent to grouped-query backends. A builder metric (`op`/`field`, not an
+expression) that measures the column with SUM/AVG/MIN/MAX uses a `number` (with
+`decimals`), `percent` or `duration` display as its default value format;
+`display.format` on the metric still wins. Counts are never formatted this way.
+The column editor offers Number, Percent and Duration with optional decimals
+and a duration source unit. Switching a summary to a representative-row value
+(in the editor or with `changeSummary(id, "row")`) clears its format, so the
+row value keeps its source field's presentation.
 
 ## State, saved views, and authoring
 

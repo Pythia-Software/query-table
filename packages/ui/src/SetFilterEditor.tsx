@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { filterValues, opsForField, type FieldDef, type SetFilterMode } from "@pythia-software/query-table-core";
+import { filterValues, opsForField, setFilterModes, setFilterTarget, type FieldDef, type SetFilterMode } from "@pythia-software/query-table-core";
 import type { QueryFilterApi } from "@pythia-software/query-table-react";
 import { PresentedFilterValue, useFilterValuePresentation } from "./FilterValuePresentation";
 import { ModalSurface } from "./AdaptiveOverlay";
@@ -27,7 +27,14 @@ export function SetFilterEditor<Row>({ api, field, returnFocus, classNames, mode
   const presentation = useFilterValuePresentation();
   const strategy = filterValues(field);
   const ops = opsForField(field);
-  const allowsMode = (candidate: SetFilterMode) => candidate === "empty" ? ops.includes("is_null") : ops.includes("includes") && (candidate !== "none" || ops.includes("is_null"));
+  const target = setFilterTarget(field) ?? "array";
+  const modes = setFilterModes(target);
+  // Scalar fields compile ANY to `=` and NONE to `is_null OR !=`.
+  const noun = target === "array" ? "tag" : "value";
+  const allowsMode = (candidate: SetFilterMode) => !modes.includes(candidate) ? false
+    : candidate === "empty" ? ops.includes("is_null")
+    : target === "scalar" ? (candidate === "any" ? ops.includes("=") : ops.includes("!=") && ops.includes("is_null"))
+    : ops.includes("includes") && (candidate !== "none" || ops.includes("is_null"));
   const predicateCount = mode === "empty" ? 1 : values.length * (mode === "none" ? 2 : 1);
   const exceedsBudget = predicateCount > maxPredicates;
   const options = strategy.source === "static" ? strategy.options.map((option) => typeof option === "string" ? { value: option, label: option } : option) : suggestions.map((value) => ({ value, label: value }));
@@ -68,20 +75,25 @@ export function SetFilterEditor<Row>({ api, field, returnFocus, classNames, mode
     className={["qt-set-editor", classNames?.setEditor].filter(Boolean).join(" ")}>
       <h3>Filter {field.label}</h3>
       <label>Match mode <select className={classNames?.select} aria-label="Match mode" value={mode} disabled={disabled} onChange={(event) => setMode(event.target.value as SetFilterMode)}>
-        <option value="any" disabled={!allowsMode("any")}>ANY — at least one selected tag</option>
-        <option value="all" disabled={!allowsMode("all")}>ALL — every selected tag</option>
-        <option value="none" disabled={!allowsMode("none")}>NONE — exclude selected tags, include empty rows</option>
-        <option value="empty" disabled={!allowsMode("empty")}>EMPTY — no tags</option>
+        {target === "array" ? <>
+          <option value="any" disabled={!allowsMode("any")}>ANY — at least one selected tag</option>
+          <option value="all" disabled={!allowsMode("all")}>ALL — every selected tag</option>
+          <option value="none" disabled={!allowsMode("none")}>NONE — exclude selected tags, include empty rows</option>
+          <option value="empty" disabled={!allowsMode("empty")}>EMPTY — no tags</option>
+        </> : <>
+          <option value="any" disabled={!allowsMode("any")}>ANY — one of the selected values</option>
+          <option value="none" disabled={!allowsMode("none")}>NONE — exclude selected values, include empty rows</option>
+        </>}
       </select></label>
       {mode !== "empty" && <>
-        <div className="qt-set-selected" aria-label="Selected tags">
+        <div className="qt-set-selected" aria-label={`Selected ${noun}s`}>
           {values.map((value) => <span className="qt-chip" key={value}>
             <PresentedFilterValue field={field.name} value={value} label={labelFor(value)} />
             {strategy.source === "static" && !options.some((option) => option.value === value) && <small> unavailable: {value}</small>}
             <button type="button" className="qt-chip-x" disabled={disabled} aria-label={`Remove ${labelFor(value)}`} onClick={() => toggle(value)}>✕</button>
           </span>)}
         </div>
-        <input ref={searchInput} className={classNames?.input} aria-label={`Search ${field.label} tags`} placeholder="Search names or keys" value={search} onChange={(event) => setSearch(event.target.value)} disabled={disabled} onKeyDown={(event) => {
+        <input ref={searchInput} className={classNames?.input} aria-label={`Search ${field.label} ${noun}s`} placeholder="Search names or keys" value={search} onChange={(event) => setSearch(event.target.value)} disabled={disabled} onKeyDown={(event) => {
           if (event.key !== "Enter" || event.nativeEvent.isComposing || disabled) return;
           event.preventDefault();
           if (!search.trim()) return;
@@ -89,18 +101,18 @@ export function SetFilterEditor<Row>({ api, field, returnFocus, classNames, mode
           if (value !== undefined) addValue(value);
           else if (canCreate) addValue(search);
         }} />
-        <div className="qt-set-options" role="group" aria-label="Available tags">
+        <div className="qt-set-options" role="group" aria-label={`Available ${noun}s`}>
           {visible.map((option) => <label key={option.value} className="qt-set-option">
             <input type="checkbox" checked={values.includes(option.value)} disabled={disabled} onChange={() => toggle(option.value)} />
             <PresentedFilterValue field={field.name} value={option.value} label={labelFor(option.value)} />
             {labelFor(option.value) !== option.value && <small>{option.value}</small>}
           </label>)}
-          {!visible.length && !loading && <span className="qt-muted">{strategy.source === "freeform" ? "Type a tag and press Enter" : "No matching tags"}</span>}
+          {!visible.length && !loading && <span className="qt-muted">{strategy.source === "freeform" ? `Type a ${noun} and press Enter` : `No matching ${noun}s`}</span>}
         </div>
         {showCreate && <button type="button" className={["qt-btn", classNames?.button].filter(Boolean).join(" ")} disabled={disabled} onClick={() => addValue(search)}>Add “{search}”</button>}
-        <span role="status">{loading ? "Loading tags…" : error}</span>
+        <span role="status">{loading ? `Loading ${noun}s…` : error}</span>
       </>}
-      {exceedsBudget && <span role="alert">Too many tags for this query. Remove tags or other filters before applying.</span>}
+      {exceedsBudget && <span role="alert">Too many {noun}s for this query. Remove {noun}s or other filters before applying.</span>}
       <div className="qt-set-actions">
         <button type="button" className={["qt-btn", classNames?.button].filter(Boolean).join(" ")} onClick={onClose}>Cancel</button>
         <button type="button" className={["qt-btn", classNames?.button].filter(Boolean).join(" ")} disabled={disabled || exceedsBudget || !allowsMode(mode) || (mode !== "empty" && values.length === 0)} onClick={() => onApply(mode, mode === "empty" ? [] : values)}>Apply filter</button>

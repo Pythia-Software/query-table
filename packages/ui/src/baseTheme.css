@@ -43,6 +43,7 @@
 .qt-muted { color: var(--qt-muted); }
 .qt-input { color: var(--qt-text); background: var(--qt-bg, #fff); border: 1px solid var(--qt-border); }
 .qt-truncate { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qt-line-clamp { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-line; overflow-wrap: anywhere; }
 .qt-link { color: var(--qt-accent); text-decoration: none; }
 .qt-link:hover { text-decoration: underline; }
 .qt-pills { display: inline-flex; flex-wrap: wrap; gap: 4px; }
