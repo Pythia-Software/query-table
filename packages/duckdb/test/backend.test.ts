@@ -483,6 +483,19 @@ describe("DuckDB native conformance", () => {
     expect(result.map((row) => normalizeDuckDBValue(row.weekday))).toEqual(expected);
     expect(dates.map((date) => formulaRuntime(plan.ast, { date }).value)).toEqual(expected);
   });
+  it("matches the client's URL_ENCODE byte for byte", async () => {
+    const texts = ["a b/c?d=e&f#g", "!'()*-._~", "é漢🦋", "", null, "100%+:@,;=$[]{}|\\^`\"<>"];
+    await native.run("CREATE TABLE url_texts (id INTEGER, category VARCHAR)");
+    for (const [index, category] of texts.entries())
+      await native.run("INSERT INTO url_texts VALUES ($1, $2)", [index, category]);
+    const { sql, plan } = new SQLBuilder(schema).expression("URL_ENCODE([category])");
+    const result = (
+      await native.runAndReadAll(`SELECT ${sql} AS encoded FROM url_texts ORDER BY id`)
+    ).getRowObjectsJS();
+    const expected = texts.map((category) => formulaRuntime(plan.ast, { category }).value);
+    expect(result.map((row) => normalizeDuckDBValue(row.encoded))).toEqual(expected);
+    expect(expected[1]).toBe("%21%27%28%29%2A-._~");
+  });
   it("resolves static computed fields with their execution revision", async () => {
     const computed = new DuckDBBackend({
       ...backend.options,

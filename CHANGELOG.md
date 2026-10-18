@@ -18,6 +18,10 @@
   queries and snapshots. The column editor shows, reorders and removes them;
   hosts author them through the API. See
   [link columns](docs/grouping.md#link-columns).
+- `URL_ENCODE(text)` formula function: percent-encodes UTF-8 text, keeping
+  only RFC 3986 unreserved characters. The client runtime, DuckDB and the
+  native macOS runtime agree byte for byte. The Go server profile rejects it,
+  as it rejects other text functions.
 - Add per-metric `where` filters and a `minCount` minimum group size to
   `AggregationClause`. `where` narrows one metric's rows ("error kinds among
   errors only") with the table filter's fields, operators and request clock;

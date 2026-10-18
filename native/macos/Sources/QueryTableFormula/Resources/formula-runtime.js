@@ -31,6 +31,7 @@ exports.FORMULA_FUNCTIONS = [
     f("LENGTH", "LENGTH(text)", "Count Unicode code points.", 1, 1, "number", [
         "text",
     ]),
+    f("URL_ENCODE", "URL_ENCODE(text)", "Percent-encode UTF-8 text for a URL. Only letters, digits and - . _ ~ are kept.", 1, 1, "text", ["text"]),
     ...["LOWER", "UPPER", "TRIM", "LTRIM", "RTRIM"].map((n) => f(n, `${n}(text)`, "Change case or remove surrounding whitespace.", 1, 1, "text", ["text"])),
     f("REPLACE", "REPLACE(text, search, replacement)", "Replace all literal occurrences.", 3, 3, "text", ["text", "text", "text"]),
     ...["LPAD", "RPAD"].map((n) => f(n, `${n}(text, length, padding)`, "Pad to a code-point length; default padding is a space.", 2, 3, "text", ["text", "number", "text"])),
@@ -82,7 +83,7 @@ class FormulaError extends Error {
     }
 }
 exports.FormulaError = FormulaError;
-function compileFormula(source, fields, resolve) {
+function compileFormula(source, fields, resolve, extension) {
     if (!source.trim() || source.length > 10000)
         throw new FormulaError("Formula must contain 1–10,000 characters.");
     const tokens = [];
@@ -298,6 +299,9 @@ function compileFormula(source, fields, resolve) {
             n.valueType = t === "enum" ? "text" : t;
             return n.valueType;
         }
+        const extended = extension?.(n, (arg) => check(arg, level + 1));
+        if (extended !== undefined)
+            return extended;
         const ts = n.args.map((a) => check(a, level + 1));
         const need = (index, t) => {
             if (ts[index] !== undefined && ts[index] !== "null" && ts[index] !== t)
@@ -380,7 +384,7 @@ function compileFormula(source, fields, resolve) {
     return { ast, dependencies: [...deps].sort(), type };
 }
 /** Self-contained runtime: serialized into the browser worker, never user code. */
-function formulaRuntime(ast, inputs) {
+function formulaRuntime(ast, inputs, extension) {
     const fail = (s) => {
         throw new Error(s);
     };
@@ -454,6 +458,12 @@ function formulaRuntime(ast, inputs) {
             if (n.valueType === "textarray")
                 return arr(v);
             return v;
+        }
+        const extended = extension?.(n);
+        if (extended) {
+            if (extended.error)
+                fail(extended.error);
+            return bound(extended.value);
         }
         const name = n.name;
         const args = n.args;
@@ -597,6 +607,12 @@ function formulaRuntime(ast, inputs) {
             }
             case "LENGTH":
                 out = Array.from(str(a)).length;
+                break;
+            case "URL_ENCODE":
+                // RFC 3986 unreserved characters only, matching DuckDB's url_encode.
+                if (!/^(?:[^\ud800-\udfff]|[\ud800-\udbff][\udc00-\udfff])*$/.test(str(a)))
+                    fail("Text is not valid Unicode.");
+                out = encodeURIComponent(str(a)).replace(/[!'()*]/g, (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`);
                 break;
             case "LOWER":
                 out = str(a).toLowerCase();

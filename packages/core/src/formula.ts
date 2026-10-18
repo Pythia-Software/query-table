@@ -90,6 +90,15 @@ export const FORMULA_FUNCTIONS: FormulaFunction[] = [
   f("LENGTH", "LENGTH(text)", "Count Unicode code points.", 1, 1, "number", [
     "text",
   ]),
+  f(
+    "URL_ENCODE",
+    "URL_ENCODE(text)",
+    "Percent-encode UTF-8 text for a URL. Only letters, digits and - . _ ~ are kept.",
+    1,
+    1,
+    "text",
+    ["text"],
+  ),
   ...["LOWER", "UPPER", "TRIM", "LTRIM", "RTRIM"].map((n) =>
     f(
       n,
@@ -980,6 +989,15 @@ export function formulaRuntime(
       }
       case "LENGTH":
         out = Array.from(str(a)).length;
+        break;
+      case "URL_ENCODE":
+        // RFC 3986 unreserved characters only, matching DuckDB's url_encode.
+        if (!/^(?:[^\ud800-\udfff]|[\ud800-\udbff][\udc00-\udfff])*$/.test(str(a)))
+          fail("Text is not valid Unicode.");
+        out = encodeURIComponent(str(a)).replace(
+          /[!'()*]/g,
+          (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`,
+        );
         break;
       case "LOWER":
         out = str(a).toLowerCase();

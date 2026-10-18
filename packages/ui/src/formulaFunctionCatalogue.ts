@@ -105,6 +105,7 @@ const SEARCH_ALIASES: Record<string, string> = {
   RIGHT: "suffix ending last characters",
   SUBSTRING: "slice middle characters",
   LENGTH: "size count characters",
+  URL_ENCODE: "percent escape encode link query parameter uri",
   LOWER: "lowercase",
   UPPER: "uppercase",
   CONCAT: "concatenate combine append",
