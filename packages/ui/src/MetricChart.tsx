@@ -482,8 +482,15 @@ export function MetricChart({
               x = binLeft + (j * binWidth) / series.length,
               w = binWidth / series.length;
             const label = `${groupLabel(b)}\n${fmt(edges[i], display.xFormat)} ≤ value ${i === bins - 1 ? "≤" : "<"} ${fmt(edges[i + 1], display.xFormat)}\n${n} rows${compact ? "" : ` · ${b.distribution?.kind === "histogram" ? b.distribution.n : 0} numeric samples · ${b.nullCount ?? 0} NULL`}`;
+            // Inspecting a bin targets its bounds within this cohort.
+            const bin: MetricBucket = {
+              keys: b.keys,
+              value: n,
+              count: n,
+              bin: { min: edges[i]!, max: edges[i + 1]!, inclusiveMax: i === bins - 1 },
+            };
             return (
-              <g key={`${j}-${i}`} {...interaction(b, label)}>
+              <g key={`${j}-${i}`} {...interaction(bin, label, true, shade(b))}>
                 <rect
                   x={x}
                   y={y(n)}

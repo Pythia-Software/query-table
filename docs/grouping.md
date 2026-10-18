@@ -102,6 +102,14 @@ the source query. Readding the same keys can restore the previous group layout
 when the source is unchanged; loading or saving another view clears that cache.
 The source snapshot includes record columns, metrics, paging and item details.
 
+The same transitions are pure core functions: `withGroupingKeys(query, keys)`
+enters, re-keys or (with no keys) leaves the stage, and `exitGrouping(query)`
+returns the source snapshot. `groupSourceQuery(query, groupRow, schema)` drills
+from one grouped row to its records: it starts from `exitGrouping(query)`, keeps
+the source WHERE, columns, order and item details, adds `=` per key (`is_null`
+for a null key, ISO instants for datetimes), and resets the offset. It returns
+`null` for ungrouped queries and for `textarray`, unknown or unfilterable keys.
+
 Headless controls are exposed through `table.grouping`: `changeKeys`,
 `addSummary`, `changeSummary`, `applyColumns`, and `changeRepresentative`.
 `table.grouping.source` exposes source-stage query/filter controls; normal
