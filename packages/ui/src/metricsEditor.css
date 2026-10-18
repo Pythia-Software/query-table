@@ -443,6 +443,15 @@
   flex-direction: column;
   gap: 10px;
 }
+.qt-metric-where {
+  display: grid;
+  gap: 6px;
+  margin-top: 4px;
+  min-width: 0;
+}
+.qt-metric-where > strong {
+  font-size: 0.85em;
+}
 .qt-metric-scope {
   display: flex;
   background: var(--qt-header-bg, #f6f8fa);

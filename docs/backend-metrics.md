@@ -2,7 +2,7 @@
 
 `backends/go` supplies an additive, dependency-free PostgreSQL 12+ planning API. It does **not** implement a metric HTTP endpoint, execute queries, negotiate frontend transport support, authorize datasets, or create snapshots. A successful browser preview is not evidence of server support. Hosts must implement and advertise their actual service capabilities.
 
-Existing `Compile`, `CompileAt`, `CompileAggregation`, query decoding, and computed-column storage remain available. `CompileAggregation` refuses modern expressions, paired measures, distributions, shown-row scope, and result ordering/limits rather than silently executing a different v1 request. Explicit schema aggregate restrictions apply to v1 too.
+Existing `Compile`, `CompileAt`, `CompileAggregation`, query decoding, and computed-column storage remain available. `CompileAggregation` refuses modern expressions, paired measures, distributions, shown-row scope, result ordering/limits, and metric `where`/`minCount` rather than silently executing a different v1 request. Explicit schema aggregate restrictions apply to v1 too.
 
 ## Integration entrypoints
 
@@ -15,7 +15,7 @@ Existing `Compile`, `CompileAt`, `CompileAggregation`, query decoding, and compu
   reductions. Independent `CompileMetrics` plans remain available.
 - `CompileExecution(ctx, rowQuery, metricQuery, schema, options)` compiles both using one reference time and cached authoritative definition graph, returning the union of resolved revisions. Supply identical table filters/order/window to both inputs when they describe the same view.
 
-`MetricQuery` mirrors the core computation request: `version: 2`, `where`, `orderBy`, `limit`, `offset`, `metrics`, and `diagnostics`, plus optional `profile`, `expectedRevisions`, `planToken`, and `snapshot`. `AggSpec` retains `id/op/field/groupBy` and adds `expression`, `expressionY`, `scope`, `sort`, `groupLimit`, and `distribution`. Nonempty client diagnostics are rejected. Presentation properties have no SQL or fingerprint effect; `display.kind: scatter` is retained only to reject a missing second expression. Explicit `expressionY` is always paired, and explicit `distribution` selects a distribution reduction. The frontend computation projection removes inactive saved alternatives.
+`MetricQuery` mirrors the core computation request: `version: 2`, `where`, `orderBy`, `limit`, `offset`, `metrics`, and `diagnostics`, plus optional `profile`, `expectedRevisions`, `planToken`, and `snapshot`. `AggSpec` retains `id/op/field/groupBy` and adds `expression`, `expressionY`, `scope`, `sort`, `groupLimit`, `distribution`, `where`, and `minCount`. Nonempty client diagnostics are rejected. Presentation properties have no SQL or fingerprint effect; `display.kind: scatter` is retained only to reject a missing second expression. Explicit `expressionY` is always paired, and explicit `distribution` selects a distribution reduction. The frontend computation projection removes inactive saved alternatives.
 
 ```go
 schema, err := querytable.LoadSchema(schemaJSON)
@@ -108,7 +108,8 @@ Row output uses `column0`, `column0_error`, etc. `SQLPlan.Columns` maps these al
 | `count` | Total scoped rows in the group |
 | `samples`, `null_count` | Distribution valid sample and excluded NULL counts |
 | `distribution` | JSON matching core distribution result shapes |
-| `group_count` | Total reduced groups before result limit |
+| `group_count` | Reduced groups kept by `minCount` (all groups without it), before the result limit |
+| `hidden_groups` | Only with `minCount`: groups removed for having fewer rows |
 
 Some box-stage statistical columns are also returned for inspection; adapters should select/map the protocol fields above rather than forward arbitrary columns. A group error nulls its scalar output. X/Y errors remain independent. Errors sort after valid groups, then requested value/Y/count/sample/key terms apply; the default is value descending, and complete group tuples break ties. NULL placement is independent of direction. No-group empty input produces one COUNT=0 or nullable scalar/empty-distribution bucket; grouped empty input produces no buckets.
 
@@ -116,13 +117,57 @@ Box results contain `{kind:"box",summary}`. Summary is null for zero numeric sam
 
 Histograms support zero or one grouping key and 2–30 equal-width bins (default ten). Global extent comes from all scoped values before group ranking/limits. Groups share one edge array; counts include zero bins. Edges use the browser’s double arithmetic order, `min + (max - min) * (i / bins)`, with endpoints pinned to the observed minimum and maximum. Bucket counts at floating boundaries must agree exactly; numeric tolerances do not excuse shifted counts. Lower edges are inclusive, upper edges exclusive except the final maximum. Constants produce `[value,value]` and one count; empty inputs produce empty edges/counts. Unsafe integral edges produce `unsafe_integer`; collapsed floating-point edges produce `histogram_precision`. Any input error invalidates every histogram group because the global extent is unknowable; never present the remaining counts as complete.
 
+## Metric filters and minimum group size
+
+`AggSpec.Where` is the metric's own predicate (`where` on the wire), using the
+same CNF terms, field allowlist, operator/type rules and reference clock as the
+table WHERE. It is compiled as a separate filter stage after the table WHERE for
+`allMatching`, and after the identity window for `shownRows`, so it narrows the
+selected page instead of choosing a different one. Regex predicates fail with
+`unsupported_regex`; computed predicates keep the `ComputedFilterable` policy.
+`WireQuery.Validate` bounds it to 100 predicates with the usual field-name and
+value sizes. The predicate is part of the plan SQL, arguments and fingerprint,
+so SQLite reduction reuse and fusion (which key on the stage prefix) and
+fingerprint-based result reuse never share results across different filters.
+
+`AggSpec.MinCount` (1–1,000,000; zero means unset) removes reduced groups whose
+`count` is below the threshold before ordering and `LIMIT`. It requires at least
+one group key (`min_count_grouping`). The final statement LEFT JOINs the kept,
+ranked groups to a one-row `hidden_groups` count:
+
+```sql
+SELECT k.*, h.hidden_groups
+FROM (SELECT COUNT(*) AS hidden_groups FROM groups WHERE count < $n) AS h
+LEFT JOIN kept AS k ON 1=1
+ORDER BY ... LIMIT ...
+```
+
+Every row carries `hidden_groups`. When every group is hidden (or there are
+none), the statement returns exactly one row whose `count` is NULL: read
+`hidden_groups` from it and emit no bucket. `group_count` counts only kept
+groups; check `group_count + hidden_groups` against host group budgets. Plans
+without `MinCount` keep their previous result shape. Calendar metrics in
+`QueryDatasetV3` apply `MinCount` in Go after empty buckets are filled; filled
+buckets (count 0) are never hidden or counted, and hidden observed buckets are
+not refilled. Hidden groups are not part of any additive Other remainder an
+adapter derives.
+
+`SQLiteV2Dataset`, `QueryDatasetV3` (both dialects) and the response decoder
+`readV2Metric` implement both controls and set `hiddenGroups` on the metric
+result. `SQLiteMetricCapabilities` advertises `filters`/`minCount` and
+`QueryCapabilitiesV3` advertises `metricFilters`/`metricMinCount`. Hosts that
+execute `CompileMetrics` plans themselves must decode `hidden_groups` and the
+bucketless row before advertising `metricCapabilities.filters`/`minCount`; the
+frontend refuses those clauses individually otherwise.
+
 ## Optional combined metric batches
 
 ```go
 combined, err := querytable.CompileCombinedMetrics(ctx, query, schema, options)
 if err != nil { return err }
 rows, err := tx.QueryContext(ctx, combined.SQL, combined.Args...)
-// Each row: metric_index (integer), buckets (JSONB array), group_count (bigint).
+// Each row: metric_index (integer), buckets (JSONB array), group_count (bigint),
+// hidden_groups (bigint; groups removed by minCount, otherwise 0).
 // Map index to combined.Metrics[index].ID and Scope. Decode the bucket array
 // using the ordinary metric SQL column mapping above; check group_count against
 // the host budget before returning the complete batch response.
@@ -147,6 +192,8 @@ identical input stages; no sample caps, input guards, or diagnostics are weakene
 
 The statement returns one envelope per requested metric in request order,
 including `buckets: []` and `group_count: 0` for empty grouped populations.
+`hidden_groups` reports groups removed by `minCount`; the bucketless row of an
+all-hidden result is excluded from `buckets`.
 Bucket order matches each metric's requested sort; `group_count` includes all
 groups before top-N. `buckets` contains the same SQL bucket columns as an
 independent plan, including optional inspection columns. Map only the protocol

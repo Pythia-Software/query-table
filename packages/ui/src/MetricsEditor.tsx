@@ -29,6 +29,7 @@ import {
   type MetricLayout,
   type MetricValueFormat,
   type MetricDateGrouping,
+  type WhereTerm,
 } from "@pythia-software/query-table-core";
 import type { QueryTableApi } from "@pythia-software/query-table-react";
 import { EditorContext } from "./EditorParts";
@@ -46,6 +47,7 @@ import type { MetricTheme } from "./metricColors";
 import { useMetricWorkbench } from "./useMetricWorkbench";
 import { useMetricResize } from "./useMetricResize";
 import { Icon, type IconName } from "./Icon";
+import { MetricWhereEditor } from "./MetricWhereEditor";
 import { FORMULA_FUNCTIONS } from "@pythia-software/query-table-core";
 
 const FormulaEditor = lazy(() => import("./FormulaEditor"));
@@ -423,6 +425,16 @@ export function MetricsEditor<Row>({
     );
   }
 
+  function patchWhere(id: string, update: (where: WhereTerm[]) => WhereTerm[]) {
+    setDrafts((previous) =>
+      previous.map((c) => {
+        if (c.id !== id) return c;
+        const { where: _where, ...rest } = c;
+        const where = update(c.where ?? []);
+        return where.length ? { ...rest, where } : rest;
+      }),
+    );
+  }
   function patch(
     id: string,
     values: {
@@ -1471,11 +1483,15 @@ export function MetricsEditor<Row>({
                 <Settings
                   title="Data scope"
                   {...settingsState("Data scope")}
-                  summary={
+                  summary={`${
                     selected.scope === "shownRows"
                       ? "Shown rows"
                       : "All matching rows"
-                  }
+                  }${
+                    selected.where?.length
+                      ? ` · only rows where ${selected.where.length} ${selected.where.length === 1 ? "filter matches" : "filters match"}`
+                      : ""
+                  }`}
                 >
                   <div
                     className="qt-metric-scope"
@@ -1502,6 +1518,23 @@ export function MetricsEditor<Row>({
                       ? "Uses only rows on the current page, after sorting and paging."
                       : "Uses every matching row; ignores the table’s limit and offset."}
                   </p>
+                  <div
+                    className="qt-metric-where"
+                    role="group"
+                    aria-label="Only rows where"
+                  >
+                    <strong>Only rows where…</strong>
+                    <MetricWhereEditor
+                      api={api}
+                      fields={fields}
+                      where={selected.where ?? []}
+                      onChange={(update) => patchWhere(selected.id, update)}
+                    />
+                    <p className="qt-metric-help">
+                      Narrows this metric only. The table’s rows and other
+                      metrics are unchanged.
+                    </p>
+                  </div>
                 </Settings>
                 <Settings
                   title="Grouping"
@@ -1761,11 +1794,15 @@ export function MetricsEditor<Row>({
                 <Settings
                   title="Ordering & limits"
                   {...settingsState("Ordering & limits")}
-                  summary={
+                  summary={`${
                     selected.sort?.length
-                      ? `${selected.sort.length} sort ${selected.sort.length === 1 ? "rule" : "rules"}${selected.groupLimit ? ` · first ${selected.groupLimit}` : ""}`
-                      : `Default ordering${selected.groupLimit ? ` · first ${selected.groupLimit}` : ""}`
-                  }
+                      ? `${selected.sort.length} sort ${selected.sort.length === 1 ? "rule" : "rules"}`
+                      : "Default ordering"
+                  }${selected.groupLimit ? ` · first ${selected.groupLimit}` : ""}${
+                    selected.minCount !== undefined
+                      ? ` · at least ${selected.minCount} rows`
+                      : ""
+                  }`}
                 >
                   {(selected.sort ?? []).map((sort, index) => (
                     <div className="qt-metric-sort-row" key={index}>
@@ -1886,6 +1923,37 @@ export function MetricsEditor<Row>({
                       }}
                     />
                   </label>
+                  {(selected.groupBy.length > 0 ||
+                    selected.minCount !== undefined) && (
+                    <label>
+                      Minimum rows per group
+                      <input
+                        aria-label="Minimum rows per group"
+                        type="number"
+                        min={1}
+                        max={1000000}
+                        placeholder="Any size"
+                        value={selected.minCount ?? ""}
+                        onChange={(e) => {
+                          const n = e.currentTarget.valueAsNumber;
+                          if (!e.currentTarget.value)
+                            patch(selected.id, { minCount: undefined });
+                          else if (
+                            Number.isInteger(n) &&
+                            n >= 1 &&
+                            n <= 1000000
+                          )
+                            patch(selected.id, { minCount: n });
+                        }}
+                      />
+                    </label>
+                  )}
+                  {selected.minCount !== undefined && (
+                    <p className="qt-metric-help">
+                      Groups with fewer rows are hidden before ordering and the
+                      group limit; they are not added to Other.
+                    </p>
+                  )}
                 </Settings>
                 <Settings
                   title="Display"
@@ -2458,6 +2526,9 @@ ${item.description}`}
                     rows · {selectedResult.buckets.length} of{" "}
                     {selectedResult.groupCount ?? selectedResult.buckets.length}{" "}
                     groups
+                    {selectedResult.hiddenGroups
+                      ? ` · ${selectedResult.hiddenGroups.toLocaleString(locale)} hidden`
+                      : ""}
                   </p>
                 )}
                 {inspectedBucket && (

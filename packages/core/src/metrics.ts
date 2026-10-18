@@ -15,18 +15,23 @@ import {
 import { aggOpsForField, isGroupable, isMeasurable } from "./agg";
 import {
   indexFields,
+  isFilterable,
   readFieldValue,
   resolveFieldName,
   type FieldDef,
   type FieldSchema,
 } from "./schema";
 import {
+  EMPTY_QUERY,
+  MAX_WHERE_CLAUSES,
   normalizeQueryState,
   predicatesOf,
   type AggregationClause,
   type AggOp,
   type QueryState,
+  type WhereTerm,
 } from "./query";
+import { opsForField } from "./ops";
 import { applyQuery } from "./apply";
 import { prepareGrouping, withoutGrouping, type GroupedRow } from "./grouping";
 import { computedInputAllowed } from "./apply";
@@ -477,6 +482,19 @@ export function validateMetric(
         c.groupLimit > 10000)
     )
       throw new FormulaError("Group limit must be 1–10,000.");
+    if (c.minCount !== undefined) {
+      if (
+        !Number.isInteger(c.minCount) ||
+        c.minCount < 1 ||
+        c.minCount > 1000000
+      )
+        throw new FormulaError("Minimum rows per group must be 1–1,000,000.");
+      if (!c.groupBy.length)
+        throw new FormulaError(
+          "Minimum rows per group requires at least one grouping field.",
+        );
+    }
+    validateMetricWhere(c.where, schema);
     for (const s of c.sort ?? []) {
       if (s.key === "y" && c.display?.kind !== "scatter")
         throw new FormulaError("Y sorting requires a scatter metric.");
@@ -503,6 +521,54 @@ export function validateMetric(
       },
     ];
   }
+}
+/** A metric WHERE follows the table WHERE's allowlist and operators. Regex is
+ * refused on every engine; local computed inputs need filter authority. */
+function validateMetricWhere(
+  where: readonly WhereTerm[] | undefined,
+  schema: FieldSchema,
+): void {
+  if (where === undefined) return;
+  if (!Array.isArray(where)) throw new FormulaError("Invalid metric filter.");
+  const predicates = where.flatMap((term) => predicatesOf(term));
+  if (predicates.length > MAX_WHERE_CLAUSES)
+    throw new FormulaError(
+      `A metric filter allows at most ${MAX_WHERE_CLAUSES} predicates.`,
+    );
+  const fields = indexFields(schema);
+  for (const p of predicates) {
+    const name = resolveFieldName(schema, p.field) ?? p.field;
+    const field = fields.get(name);
+    if (
+      !field ||
+      !isFilterable(field) ||
+      (isComputedField(name) && !computedInputAllowed(schema, name, "filter"))
+    )
+      throw new FormulaError(`Field ${p.field} cannot filter metrics.`);
+    if (p.op === "matches_regex" || p.op === "not_matches_regex")
+      throw new FormulaError("Regex is unavailable in metric filters.");
+    if (!opsForField(field).includes(p.op))
+      throw new FormulaError(
+        `Field ${p.field} does not support the ${p.op} filter.`,
+      );
+  }
+}
+/** Executor support for population controls, from either capability handshake. */
+export interface MetricPopulationSupport {
+  filters?: boolean | undefined;
+  minCount?: boolean | undefined;
+}
+/** A clause the executor cannot run exactly gets its own error; it is never
+ * sent with `where`/`minCount` silently dropped. */
+export function metricPopulationError(
+  clause: Pick<AggregationClause, "where" | "minCount">,
+  support: MetricPopulationSupport,
+): string | undefined {
+  if (clause.where?.length && !support.filters)
+    return "This server does not support metric filters.";
+  if (clause.minCount !== undefined && !support.minCount)
+    return "This server does not support a minimum rows per group.";
+  return undefined;
 }
 export function metricDependencies(
   c: AggregationClause,
@@ -532,6 +598,8 @@ export function metricComputationKey(
         dateGrouping: c.dateGrouping,
         sort: c.sort,
         groupLimit: c.groupLimit,
+        where: c.where,
+        minCount: c.minCount,
         distribution: distributionActive(c) ? c.distribution : undefined,
       }))
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
@@ -573,6 +641,13 @@ export function toMetricQuery<Row>(
   const raw = q;
   q = normalizeQueryState(q);
   const server = toServerQuery(q, schema);
+  const metricWhere = new Map<string, WhereTerm[]>();
+  for (const c of q.aggregations ?? [])
+    if (c.where?.length) {
+      const pushed = toServerQuery({ ...EMPTY_QUERY, where: c.where }, schema)
+        .where;
+      metricWhere.set(c.id, pushed);
+    }
   const metrics = (q.aggregations ?? []).map((c) => {
     const {
       label,
@@ -582,10 +657,12 @@ export function toMetricQuery<Row>(
       expression,
       expressionY,
       dateGrouping,
+      where,
       ...rest
     } = c;
     return {
       ...rest,
+      ...(where?.length ? { where: metricWhere.get(c.id) ?? [] } : {}),
       ...(!distributionActive(c) && expression !== undefined
         ? { expression }
         : {}),
@@ -605,6 +682,15 @@ export function toMetricQuery<Row>(
       code: "invalid_metric",
     })),
   );
+  for (const c of q.aggregations ?? [])
+    if (c.where?.length && metricWhere.get(c.id)?.length !== c.where.length)
+      diagnostics.push({
+        metricId: c.id,
+        code: "residual_metric_filter",
+        from: 0,
+        to: 1,
+        message: "Metric filters must use server-filterable fields.",
+      });
   for (const c of q.aggregations ?? [])
     if (c.dateGrouping)
       diagnostics.push({
@@ -956,6 +1042,20 @@ export function evaluateMetrics<Row>(
         }
         if (inputRows.length > (options.maxRows ?? 1000000))
           throw Error("Metric row budget exceeded.");
+        // processedRows retains the scope population; this metric's own
+        // predicate narrows the rows it reduces, inside a shown page as well.
+        const population = inputRows.length;
+        if (c.where?.length)
+          inputRows = applyQuery(
+            inputRows,
+            {
+              ...EMPTY_QUERY,
+              where: c.where,
+              limit: Number.MAX_SAFE_INTEGER,
+            },
+            schema,
+            { now },
+          ).rows;
         const groups = new Map<string, { keys: MetricValue[]; rows: Row[] }>();
         const keyLimit = options.maxGroupKeyLength ?? 65536,
           byteLimit = options.maxGroupBytes ?? 16000000;
@@ -1273,6 +1373,16 @@ export function evaluateMetrics<Row>(
             }
           }
         }
+        // Calendar fill-ins are the only empty groups; they are never hidden.
+        // Hidden groups leave the ranking, the result limit and Other.
+        let hiddenGroups: number | undefined;
+        if (c.minCount !== undefined) {
+          const kept = buckets.filter(
+            (b) => b.count === 0 || b.count >= c.minCount!,
+          );
+          hiddenGroups = buckets.length - kept.length;
+          buckets = kept;
+        }
         const ordering: MetricSort[] = c.sort?.length
           ? c.sort
           : c.dateGrouping
@@ -1342,9 +1452,10 @@ export function evaluateMetrics<Row>(
           id: c.id,
           buckets,
           scope: c.scope ?? "allMatching",
-          processedRows: inputRows.length,
+          processedRows: population,
           groupCount,
           coverage: "exact" as const,
+          ...(hiddenGroups !== undefined ? { hiddenGroups } : {}),
           ...(other ? { other } : {}),
         };
       } catch (e) {

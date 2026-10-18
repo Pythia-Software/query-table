@@ -1,7 +1,7 @@
 import { useQueryFilters } from "./useQueryFilters";
 import { useGroupingController, type GroupingApi, type GroupingSourceApi } from "./useGrouping";
 import { createGroupingModel, prepareGrouping, withoutGrouping,
-  sourceExecutionSchema, toQueryRequestV3, validateQueryResultV3 } from "@pythia-software/query-table-core";
+  sourceExecutionSchema, toQueryRequestV3, validateQueryResultV3, metricPopulationError } from "@pythia-software/query-table-core";
 import { ITEM_DETAILS_COLUMN, itemPageFields } from "@pythia-software/query-table-core";
 import { useItemDetails, initialDetailModes, type ItemDetailsApi, type ItemDetailsOptions } from "./useItemDetails";
 // useQueryTable — the one hook that owns everything.
@@ -1045,12 +1045,32 @@ export function useQueryTable<Row>(
   );
   const executeV3Metrics = useCallback(async (metricQuery: QueryState, signal?: AbortSignal) => {
     if (!transport?.fetchQueryV3 || transport.queryCapabilities?.version !== 3) throw Error("The v3 query executor is unavailable.");
-    const request = toQueryRequestV3(query.grouping ? { ...metricQuery, grouping: query.grouping } : metricQuery,
-      sourceSchema, transport.queryCapabilities, opts.computedExecution, { now: groupingNow ?? (opts.evaluationNow ?? Date.now)(), rows: false });
-    if (request.diagnostics.length) throw Error(request.diagnostics.join(" "));
-    const result = await transport.fetchQueryV3(request, signal);
-    validateQueryResultV3(result, request, query.grouping ? schema : sourceCatalogue);
-    return { metrics: result.metrics };
+    const capabilities = transport.queryCapabilities;
+    // Unsupported population controls fail their own cards, never the batch.
+    const refused = new Map<string, string>();
+    for (const clause of metricQuery.aggregations ?? []) {
+      const issue = metricPopulationError(clause, { filters: capabilities.metricFilters, minCount: capabilities.metricMinCount });
+      if (issue) refused.set(clause.id, issue);
+    }
+    const runnable = (metricQuery.aggregations ?? []).filter(clause => !refused.has(clause.id));
+    let metrics: AggregationResult["metrics"] = [];
+    if (runnable.length) {
+      const scoped = { ...metricQuery, aggregations: runnable };
+      const request = toQueryRequestV3(query.grouping ? { ...scoped, grouping: query.grouping } : scoped,
+        sourceSchema, capabilities, opts.computedExecution, { now: groupingNow ?? (opts.evaluationNow ?? Date.now)(), rows: false });
+      if (request.diagnostics.length) throw Error(request.diagnostics.join(" "));
+      const result = await transport.fetchQueryV3(request, signal);
+      validateQueryResultV3(result, request, query.grouping ? schema : sourceCatalogue);
+      metrics = result.metrics;
+    }
+    if (!refused.size) return { metrics };
+    const byId = new Map(metrics.map(metric => [metric.id, metric]));
+    return { metrics: (metricQuery.aggregations ?? []).flatMap((clause): AggregationResult["metrics"] => {
+      const issue = refused.get(clause.id);
+      if (issue) return [{ id: clause.id, buckets: [], error: issue }];
+      const metric = byId.get(clause.id);
+      return metric ? [metric] : [];
+    }) };
   }, [transport, sourceSchema, sourceCatalogue, schema, opts.computedExecution, groupKey, groupingNow, opts.evaluationNow]);
   const previewGrouping = useCallback(async (draft: QueryState, signal?: AbortSignal) => {
     if (!active || !storageReady || restoration.loading || restoration.error) throw Error("Wait for query restoration before previewing groups.");

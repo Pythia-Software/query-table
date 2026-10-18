@@ -4,6 +4,8 @@ import {
   evaluateMetrics,
   metricPlans,
   hasRegex,
+  metricPopulationError,
+  predicatesOf,
   toAggregationQuery,
   toMetricQuery,
   validateMetric,
@@ -72,7 +74,9 @@ async function localMetrics<Row>(
       c.scope !== undefined ||
       c.distribution ||
       c.sort ||
-      c.groupLimit !== undefined,
+      c.groupLimit !== undefined ||
+      c.where !== undefined ||
+      c.minCount !== undefined,
   );
   if (
     advanced.length &&
@@ -248,6 +252,9 @@ export async function executeMetrics<Row>(
     const names = new Set(
       shown.flatMap((clause) => [
         ...clause.groupBy,
+        ...(clause.where ?? []).flatMap((term) =>
+          predicatesOf(term).map((predicate) => predicate.field),
+        ),
         ...metricPlans(clause, context.schema, context.resolveComputed).flatMap(
           (p) => p.dependencies,
         ),
@@ -303,6 +310,22 @@ export async function executeMetrics<Row>(
       "This server does not support calendar grouping. Enable the v3 query executor.",
     );
   matching = matching.filter((c) => !c.dateGrouping);
+  // Population controls are never dropped: a v1 endpoint, or a v2 server that
+  // does not advertise them, fails only the clauses that use them.
+  {
+    const transport = context.transport;
+    if (transport?.fetchMetrics || transport?.fetchAggregations) {
+      const support =
+        transport.fetchMetrics && transport.metricCapabilities?.version === 2
+          ? transport.metricCapabilities
+          : {};
+      matching = matching.filter((c) => {
+        const error = metricPopulationError(c, support);
+        if (error) unsupported(c, error);
+        return !error;
+      });
+    }
+  }
   if (matching.length) {
     const transport = context.transport;
     if (

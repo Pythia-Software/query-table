@@ -9,7 +9,7 @@ import { createGroupingModel, exitGrouping, GROUP_ID_FIELD, type GroupedRow } fr
 import { metricDateNext, metricDateTime } from "./metricDates";
 import { isFilterable, resolveField, type FieldDef, type FieldSchema } from "./schema";
 import type { AggregationBucket } from "./encode";
-import type { AggregationClause, QueryState, WhereClause } from "./query";
+import type { AggregationClause, QueryState, WhereClause, WhereTerm } from "./query";
 import { appendWhereTerms } from "./queryPatch";
 
 /** Filters accept datetimes as ISO instants with an explicit offset. */
@@ -57,6 +57,8 @@ function distributionActive(clause: AggregationClause): boolean {
  * - A histogram bin (`bucket.bin`) adds `>= min` and `< max` (`<= max` for
  *   the final bin) on the distribution input, which must be a field reference.
  *   Box cohorts are their group keys.
+ * - The clause's own `where` is added first, so the records match the metric's
+ *   population. Groups hidden by `minCount` have no bucket to inspect.
  * - Over a grouped query the filters are HAVING terms on the group rows.
  * - `scope: "shownRows"`, a remainder bucket (keys that do not match the
  *   grouping) and keys on fields that cannot be filtered return null.
@@ -70,7 +72,7 @@ export function inspectBucketQuery(
 ): QueryState | null {
   if (clause.scope === "shownRows" || bucket.keys.length !== clause.groupBy.length) return null;
   const fields = metricSchema(query, schema);
-  const terms: WhereClause[] = [];
+  const terms: WhereTerm[] = [...(clause.where ?? [])];
   for (const [index, name] of clause.groupBy.entries()) {
     const field = resolveField(fields, name);
     const key = bucket.keys[index] ?? null;

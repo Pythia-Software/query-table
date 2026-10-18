@@ -1,0 +1,182 @@
+{
+  "description": "Per-metric where/minCount conformance. Every engine (local TypeScript, DuckDB, Go SQLite and Go PostgreSQL) executes each case and must return these buckets, groupCount and hiddenGroups. Bucket fields absent here are not compared.",
+  "now": "2026-03-08T00:00:00.000Z",
+  "schema": {
+    "name": "calls",
+    "idField": "id",
+    "fields": [
+      { "name": "id", "label": "ID", "type": "text", "source": { "kind": "backend" }, "aggregate": { "groupable": false } },
+      { "name": "kind", "label": "Kind", "type": "text", "source": { "kind": "backend" } },
+      { "name": "status", "label": "Status", "type": "text", "source": { "kind": "backend" } },
+      { "name": "ms", "label": "Duration", "type": "number", "source": { "kind": "backend" } },
+      { "name": "at", "label": "At", "type": "datetime", "source": { "kind": "backend" }, "aggregate": { "groupable": true } }
+    ]
+  },
+  "rows": [
+    { "id": "01", "kind": "timeout", "status": "error", "ms": 120, "at": "2026-03-01T10:00:00.000Z" },
+    { "id": "02", "kind": "timeout", "status": "error", "ms": 300, "at": "2026-03-01T11:00:00.000Z" },
+    { "id": "03", "kind": "timeout", "status": "ok", "ms": 80, "at": "2026-03-02T09:00:00.000Z" },
+    { "id": "04", "kind": "timeout", "status": "error", "ms": 410, "at": "2026-03-03T12:00:00.000Z" },
+    { "id": "05", "kind": "timeout", "status": "error", "ms": 90, "at": "2026-03-05T08:00:00.000Z" },
+    { "id": "06", "kind": "auth", "status": "error", "ms": 50, "at": "2026-03-01T12:30:00.000Z" },
+    { "id": "07", "kind": "auth", "status": "ok", "ms": 20, "at": "2026-03-02T13:00:00.000Z" },
+    { "id": "08", "kind": "auth", "status": "error", "ms": 70, "at": "2026-03-05T15:00:00.000Z" },
+    { "id": "09", "kind": "dns", "status": "error", "ms": 999, "at": "2026-03-04T01:00:00.000Z" },
+    { "id": "10", "kind": "disk", "status": "ok", "ms": 15, "at": "2026-03-02T02:00:00.000Z" },
+    { "id": "11", "kind": "disk", "status": "error", "ms": 33, "at": "2026-03-05T03:00:00.000Z" },
+    { "id": "12", "kind": null, "status": "error", "ms": 60, "at": "2026-03-03T04:00:00.000Z" },
+    { "id": "13", "kind": "timeout", "status": null, "ms": null, "at": null },
+    { "id": "14", "kind": "auth", "status": "ok", "ms": 25, "at": "2026-03-04T06:00:00.000Z" }
+  ],
+  "cases": [
+    {
+      "name": "where keeps non-matching rows out of every group",
+      "metric": { "id": "m", "op": "count", "groupBy": ["kind"], "where": [{ "field": "status", "op": "=", "value": "error" }] },
+      "expected": {
+        "groupCount": 5,
+        "buckets": [
+          { "keys": ["timeout"], "count": 4, "value": 4 },
+          { "keys": ["auth"], "count": 2, "value": 2 },
+          { "keys": ["disk"], "count": 1, "value": 1 },
+          { "keys": ["dns"], "count": 1, "value": 1 },
+          { "keys": [null], "count": 1, "value": 1 }
+        ]
+      }
+    },
+    {
+      "name": "minCount hides small groups and reports them",
+      "metric": { "id": "m", "op": "count", "groupBy": ["kind"], "minCount": 2 },
+      "expected": {
+        "groupCount": 3,
+        "hiddenGroups": 2,
+        "buckets": [
+          { "keys": ["timeout"], "count": 6, "value": 6 },
+          { "keys": ["auth"], "count": 4, "value": 4 },
+          { "keys": ["disk"], "count": 2, "value": 2 }
+        ]
+      }
+    },
+    {
+      "name": "minCount counts rows after where and applies before groupLimit",
+      "metric": { "id": "m", "op": "avg", "field": "ms", "groupBy": ["kind"], "where": [{ "field": "status", "op": "=", "value": "error" }], "minCount": 2, "groupLimit": 1 },
+      "expected": {
+        "groupCount": 2,
+        "hiddenGroups": 3,
+        "buckets": [{ "keys": ["timeout"], "count": 4, "value": 230 }]
+      }
+    },
+    {
+      "name": "every group hidden",
+      "metric": { "id": "m", "op": "count", "groupBy": ["kind"], "minCount": 100 },
+      "expected": { "groupCount": 0, "hiddenGroups": 5, "buckets": [] }
+    },
+    {
+      "name": "shown-row where filters inside the page without reselecting it",
+      "orderBy": [{ "field": "ms", "dir": "desc" }],
+      "limit": 5,
+      "metric": { "id": "m", "op": "count", "groupBy": ["kind"], "scope": "shownRows", "where": [{ "field": "ms", "op": "<", "value": "400" }] },
+      "expected": {
+        "groupCount": 1,
+        "processedRows": 5,
+        "buckets": [{ "keys": ["timeout"], "count": 3, "value": 3 }]
+      }
+    },
+    {
+      "name": "calendar fill-ins are never hidden; hidden days leave a gap",
+      "metric": {
+        "id": "m",
+        "op": "count",
+        "groupBy": ["at"],
+        "dateGrouping": { "field": "at", "interval": "day", "timeZone": "UTC", "includeEmpty": true, "range": "observed" },
+        "where": [{ "field": "status", "op": "=", "value": "error" }],
+        "minCount": 2
+      },
+      "expected": {
+        "groupCount": 4,
+        "hiddenGroups": 1,
+        "buckets": [
+          { "keys": ["2026-03-01T00:00:00.000Z"], "count": 3, "value": 3 },
+          { "keys": ["2026-03-02T00:00:00.000Z"], "count": 0, "value": 0 },
+          { "keys": ["2026-03-03T00:00:00.000Z"], "count": 2, "value": 2 },
+          { "keys": ["2026-03-05T00:00:00.000Z"], "count": 3, "value": 3 }
+        ]
+      }
+    },
+    {
+      "name": "box cohorts use where and minCount",
+      "metric": {
+        "id": "m",
+        "op": "count",
+        "groupBy": ["kind"],
+        "distribution": { "kind": "box", "input": "[ms]", "whiskers": "minmax" },
+        "where": [{ "field": "status", "op": "=", "value": "error" }],
+        "minCount": 2,
+        "sort": [{ "key": "group0", "dir": "asc" }]
+      },
+      "expected": {
+        "groupCount": 2,
+        "hiddenGroups": 3,
+        "buckets": [
+          { "keys": ["auth"], "count": 2, "box": { "n": 2, "min": 50, "q1": 55, "median": 60, "q3": 65, "max": 70 } },
+          { "keys": ["timeout"], "count": 4, "box": { "n": 4, "min": 90, "q1": 112.5, "median": 210, "q3": 327.5, "max": 410 } }
+        ]
+      }
+    },
+    {
+      "name": "histogram extent comes from the filtered population",
+      "metric": {
+        "id": "m",
+        "op": "count",
+        "groupBy": [],
+        "distribution": { "kind": "histogram", "input": "[ms]", "bins": 2 },
+        "where": [{ "field": "status", "op": "=", "value": "ok" }]
+      },
+      "expected": {
+        "groupCount": 1,
+        "buckets": [{ "keys": [], "count": 4, "histogram": { "edges": [15, 47.5, 80], "counts": [3, 1], "n": 4 } }]
+      }
+    },
+    {
+      "name": "relative datetime filters resolve against the request clock",
+      "metric": { "id": "m", "op": "count", "groupBy": ["kind"], "where": [{ "field": "at", "op": ">=", "value": "-5d" }] },
+      "expected": {
+        "groupCount": 5,
+        "buckets": [
+          { "keys": ["auth"], "count": 2, "value": 2 },
+          { "keys": ["timeout"], "count": 2, "value": 2 },
+          { "keys": ["disk"], "count": 1, "value": 1 },
+          { "keys": ["dns"], "count": 1, "value": 1 },
+          { "keys": [null], "count": 1, "value": 1 }
+        ]
+      }
+    },
+    {
+      "name": "OR groups and the table filter combine",
+      "where": [{ "field": "ms", "op": "<", "value": "500" }],
+      "metric": {
+        "id": "m",
+        "op": "count",
+        "groupBy": ["status"],
+        "where": [{ "any": [{ "field": "kind", "op": "=", "value": "dns" }, { "field": "kind", "op": "=", "value": "disk" }] }]
+      },
+      "expected": {
+        "groupCount": 2,
+        "buckets": [
+          { "keys": ["error"], "count": 1, "value": 1 },
+          { "keys": ["ok"], "count": 1, "value": 1 }
+        ]
+      }
+    },
+    {
+      "name": "grouped mode filters grouped-result fields",
+      "grouping": { "keys": ["kind"], "summaries": [{ "id": "num", "op": "count" }] },
+      "metric": { "id": "m", "op": "count", "groupBy": [], "where": [{ "field": "num", "op": ">=", "value": "2" }] },
+      "expected": { "groupCount": 1, "buckets": [{ "keys": [], "count": 3, "value": 3 }] }
+    },
+    {
+      "name": "minCount requires a grouping field",
+      "metric": { "id": "m", "op": "count", "groupBy": [], "minCount": 2 },
+      "expected": { "error": true }
+    }
+  ]
+}

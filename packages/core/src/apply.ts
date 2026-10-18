@@ -168,7 +168,9 @@ export function applyAggregations<Row>(
       a.scope !== undefined ||
       a.distribution ||
       a.sort ||
-      a.groupLimit !== undefined,
+      a.groupLimit !== undefined ||
+      a.where !== undefined ||
+      a.minCount !== undefined,
   );
   if (advanced.length) {
     // Partitioning must not hide invalid IDs/shapes or the query-wide card cap.

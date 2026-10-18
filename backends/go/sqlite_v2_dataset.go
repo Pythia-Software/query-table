@@ -31,6 +31,8 @@ type SQLiteMetricCapabilities struct {
 	ShownRows      bool   `json:"shownRows"`
 	Distributions  bool   `json:"distributions"`
 	ComputedFields bool   `json:"computedFields"`
+	Filters        bool   `json:"filters"`
+	MinCount       bool   `json:"minCount"`
 	MaxGroups      int    `json:"maxGroups"`
 	Profile        string `json:"profile"`
 }
@@ -40,7 +42,7 @@ func (d SQLiteV2Dataset) Capabilities() SQLiteMetricCapabilities {
 	if groups == 0 {
 		groups = 2000
 	}
-	return SQLiteMetricCapabilities{2, true, true, true, true, groups, SQLiteExpressionProfile}
+	return SQLiteMetricCapabilities{Version: 2, Expressions: true, ShownRows: true, Distributions: true, ComputedFields: true, Filters: true, MinCount: true, MaxGroups: groups, Profile: SQLiteExpressionProfile}
 }
 
 type SQLiteValueError struct {
@@ -101,6 +103,8 @@ type SQLiteMetricV2 struct {
 	// Error reports a metric that could not be computed. Sibling metrics and
 	// rows in the same request are unaffected.
 	Error string `json:"error,omitempty"`
+	// HiddenGroups counts groups removed by AggSpec.MinCount; nil when unset.
+	HiddenGroups *int64 `json:"hiddenGroups,omitempty"`
 }
 type SQLiteMetricsV2Result struct {
 	Metrics []SQLiteMetricV2 `json:"metrics"`
@@ -445,12 +449,28 @@ func (d SQLiteV2Dataset) readV2Metric(ctx context.Context, tx *sql.Tx, p MetricS
 		for i, k := range cols {
 			v[k] = values[i]
 		}
+		hidden := int64(0)
+		if spec.MinCount > 0 {
+			var ok bool
+			if hidden, ok = v["hidden_groups"].(int64); !ok {
+				return out, fmt.Errorf("missing hidden group count")
+			}
+			out.HiddenGroups = &hidden
+			if hidden > int64(maxGroups) {
+				return out, diagnostic("resource_limit", "group population exceeds host budget")
+			}
+			// Only hidden groups (or none): the row carries no bucket.
+			if v["count"] == nil {
+				continue
+			}
+		}
 		groups, ok := v["group_count"].(int64)
 		if !ok {
 			return out, fmt.Errorf("missing group count")
 		}
 		out.GroupCount = groups
-		if groups > int64(maxGroups) {
+		// Group budgets apply to every reduced group, including hidden ones.
+		if groups+hidden > int64(maxGroups) {
 			return out, diagnostic("resource_limit", "group population exceeds host budget")
 		}
 		for _, c := range p.Columns {
@@ -463,12 +483,22 @@ func (d SQLiteV2Dataset) readV2Metric(ctx context.Context, tx *sql.Tx, p MetricS
 		}
 		if spec.Distribution != nil {
 			nulls := v["null_count"].(int64)
-			inputErrors := v["input_error_count"].(int64)
+			inputErrors, ok := v["input_error_count"].(int64)
+			if !ok {
+				// PostgreSQL plans expose valid samples instead; invalid samples
+				// are neither samples nor excluded NULLs.
+				samples, _ := v["samples"].(int64)
+				inputErrors = b.Count - samples - nulls
+			}
 			b.NullCount = &nulls
 			b.InputErrorCount = &inputErrors
 			if raw := v["distribution"]; raw != nil {
 				var header struct{ Kind string }
+				// SQLite returns JSON text; PostgreSQL drivers return jsonb bytes.
 				data, ok := raw.(string)
+				if bytes, isBytes := raw.([]byte); isBytes {
+					data, ok = string(bytes), true
+				}
 				if !ok {
 					return out, fmt.Errorf("distribution must be JSON text")
 				}
@@ -654,6 +684,10 @@ func (d SQLiteV2Dataset) capabilityForPlan(name string, p SQLPlan) SQLiteCompute
 // Reuse identical plans only within the transaction after validating every plan.
 // Return independent results so callers cannot mutate a sibling metric.
 func cloneSQLiteMetric(m SQLiteMetricV2) SQLiteMetricV2 {
+	if m.HiddenGroups != nil {
+		hidden := *m.HiddenGroups
+		m.HiddenGroups = &hidden
+	}
 	m.Buckets = append([]SQLiteMetricV2Bucket{}, m.Buckets...)
 	for i := range m.Buckets {
 		b := &m.Buckets[i]

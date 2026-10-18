@@ -31,4 +31,4 @@ export { useObjectReferences } from "./useObjectReferences";
 
 export type { ItemDetailsApi, ItemDetailsOptions, ItemDetailRecord } from "./useItemDetails";
 
-export type { QueryFilterApi } from "./useQueryFilters";
+export { useQueryFilters, type QueryFilterApi } from "./useQueryFilters";

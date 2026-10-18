@@ -101,7 +101,10 @@ samples are bounded by that population and their explicit per-group budget.
 DuckDB's database memory limit additionally governs scans, joins and scratch
 space. Budget failures return errors, not partial populations or approximate
 statistics. Metric `groupLimit` is applied after reductions/ranking and reports
-total group count and coverage.
+total group count and coverage. Metric `where` filters run as parameterized
+predicates inside the scoped population, and `minCount` hides small groups
+before ranking and reports `hiddenGroups`; both are advertised on the v2 and v3
+handshakes.
 
 For native execution conformance, run `npm run test:duckdb` from the repository.
 `npm run test:showcase` exercises the same adapter in browser Wasm over real
