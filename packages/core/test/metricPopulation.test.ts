@@ -11,10 +11,12 @@ import {
   normalizeQueryState,
   toAggregationQuery,
   toMetricQuery,
+  toQueryRequestV3,
   validateMetric,
   type AggregationClause,
   type AggregationResultEntry,
   type FieldSchema,
+  type QueryCapabilitiesV3,
   type QueryState,
 } from "../src/index";
 
@@ -157,6 +159,41 @@ describe("metric population semantics", () => {
     expect(residual.diagnostics.map((d) => d.code)).toContain("residual_metric_filter");
     expect(() => toAggregationQuery({ ...EMPTY_QUERY, aggregations: [{ ...base, minCount: 2 }] }, schema)).toThrow(/version 2/);
     expect(() => toAggregationQuery({ ...EMPTY_QUERY, aggregations: [{ ...base, where: [{ field: "kind", op: "=", value: "x" }] }] }, schema)).toThrow(/version 2/);
+  });
+});
+
+describe("v3 metric population requests", () => {
+  const capabilities: QueryCapabilitiesV3 = {
+    version: 3, groupedRows: true, calendarGrouping: true, computedSourceFilters: false, regex: false,
+    metricFilters: true, metricMinCount: true, maxRows: 10000, maxGroups: 2000, maxPopulation: 250000, profile: "qt-sqlite-v1",
+  };
+  const remote: FieldSchema<Row> = {
+    ...schema,
+    fields: [
+      ...schema.fields,
+      { name: "note", label: "Note", type: "text", source: { kind: "derived", dependencies: [] }, filter: { enabled: true } },
+      { name: "region", label: "Region", type: "text", source: { kind: "backend" }, filter: { enabled: true, pushdown: false } },
+    ],
+  };
+  it("refuses metric filters on non-pushdown fields instead of dropping them", () => {
+    for (const field of ["note", "region"]) {
+      const request = toQueryRequestV3(
+        { ...EMPTY_QUERY, aggregations: [{ ...base, where: [{ field, op: "=", value: "x" }] }] },
+        remote, capabilities, undefined, { now },
+      );
+      expect(request.diagnostics, field).toContain("Metric filters must use server-filterable fields.");
+    }
+  });
+  it("sends pushdown metric filters and calendar metrics without diagnostics", () => {
+    const request = toQueryRequestV3(
+      { ...EMPTY_QUERY, aggregations: [
+        { ...base, where: [{ field: "status", op: "=", value: "error" }], minCount: 2 },
+        { id: "days", op: "count", groupBy: ["at"], dateGrouping: { field: "at", interval: "day", includeEmpty: false, range: "observed" } },
+      ] },
+      remote, capabilities, undefined, { now },
+    );
+    expect(request.diagnostics).toEqual([]);
+    expect(request.metrics[0]).toMatchObject({ where: [{ field: "status", op: "=", value: "error" }], minCount: 2 });
   });
 });
 
