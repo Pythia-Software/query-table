@@ -223,6 +223,8 @@ describe("link columns in execution", () => {
     expect(request.result.select).toEqual(expect.arrayContaining(["fails", "repo", "tool"]));
     expect(request.result.select).not.toContain("triage");
     expect(sourceDependencies(query, schema).fields).not.toContain("triage");
+    const formatted = { ...query, grouping: { ...query.grouping!, summaries: query.grouping!.summaries.map((s) => s.id === "calls" ? { ...s, display: { kind: "percent" as const } } : s) } };
+    expect(toQueryRequestV3(formatted, schema, capabilities, undefined, { now: 1 }).grouping!.summaries).toEqual([{ id: "calls", op: "count" }, { id: "fails", op: "sum", field: "id" }]);
     const resultSchema = createGroupingModel(schema).resultSchema(query.grouping!.keys, query.grouping!.summaries);
     expect(toServerQuery({ ...withoutGrouping(query), orderBy: [{ field: "triage", dir: "asc" }], where: [{ field: "triage", op: "=", value: "x" }] }, resultSchema))
       .toMatchObject({ orderBy: [], where: [] });

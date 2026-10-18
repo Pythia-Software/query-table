@@ -189,9 +189,12 @@ export function useGroupingController<Row>(
   function changeSummary(id: string, op: SummaryOp) {
     if (!stage) return;
     applyColumns(
-      stage.summaries.map((column) =>
-        column.id === id ? { ...column, op } : column,
-      ),
+      stage.summaries.map((column) => {
+        if (column.id !== id) return column;
+        // A row value keeps the source field's rendering, not an aggregate format.
+        const { display: _display, ...rest } = column;
+        return op === "row" ? { ...rest, op } : { ...column, op };
+      }),
       api.select.visible,
     );
   }

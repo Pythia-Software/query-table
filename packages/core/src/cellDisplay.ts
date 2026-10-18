@@ -29,7 +29,9 @@ export type CellDisplay =
   | { kind: "duration"; sourceUnit?: "milliseconds" | "seconds" | "minutes" | "hours" | "days"; style?: "human" | "long" | "clock" | "custom"; pattern?: string; decimals?: number }
   | { kind: "number" | "percent"; decimals?: number; locale?: string }
   | { kind: "chip"; labels?: Record<string, string>; tones?: Record<string, "neutral" | "success" | "warning" | "danger"> }
-  | { kind: "text"; truncate?: boolean };
+  /** `truncate` keeps one line with an ellipsis. `lines` (1–20) wraps the text
+   * and clamps it to that many lines with an ellipsis; it takes precedence. */
+  | { kind: "text"; truncate?: boolean; lines?: number };
 
 const calendarOptions = {
   style: ["human", "iso", "custom"], pattern: "string", timeZone: "string", locale: "string",
@@ -44,7 +46,7 @@ const options: Record<string, Record<string, readonly string[] | readonly number
   duration: { sourceUnit: ["milliseconds", "seconds", "minutes", "hours", "days"], style: ["human", "long", "clock", "custom"], pattern: "string", decimals: [0, 20] },
   number: numberOptions, percent: numberOptions,
   chip: { labels: "labels", tones: "tones" },
-  text: { truncate: "boolean" },
+  text: { truncate: "boolean", lines: [1, 20] },
 };
 
 /** Validate the serializable contract at schema loading, before rendering cells. */

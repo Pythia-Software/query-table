@@ -784,6 +784,14 @@
   width: 100%;
   box-sizing: border-box;
 }
+.qt-column-format-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.qt-column-format-controls select { flex: 1 1 110px; min-width: 0; }
+.qt-column-format-controls input { flex: 0 0 72px; width: 72px; box-sizing: border-box; }
+.qt-column-format + .qt-column-custom-choice { margin-top: 12px; }
 .qt-column-formula .qt-formula-editor {
   min-width: 0;
 }

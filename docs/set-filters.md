@@ -1,7 +1,9 @@
 # Native tag/set filters
 
-Opt in with `filter.editor: "set"` on a `textarray` field. Scalar fields and
-unconfigured array fields retain the existing single-predicate UI. To preserve
+Opt in with `filter.editor: "set"` on a `textarray` field, an `enum` field, or a
+`text` field with static `filter.values.options` (see
+[scalar set filters](#scalar-set-filters)). Other fields and unconfigured
+fields retain the existing single-predicate UI. To preserve
 case-sensitive stable keys, set `filter.arrayCaseSensitive: true`. Static
 `filter.values.options` can contain strings or `{ value, label }` objects.
 The demo's **Error codes** field demonstrates adoption through schema config.
@@ -50,6 +52,38 @@ Custom backends must implement the same semantics; no new operators or wire
 capabilities are required. `filter.ops` must allow `includes` and `is_null` for
 all four modes. The editor disables unsupported modes and rejects selections
 that exceed the existing 100-predicate query budget (NONE costs two per key).
+
+## Scalar set filters
+
+On `enum` fields, and `text` fields with static options, the same editor
+replaces chains of hand-written `!=` terms. `setFilterTarget(field)` reports
+`"scalar"` for these fields (`"array"` for `textarray`), and
+`createSetFilter(field, mode, values, id, "scalar")` compiles to existing
+predicates only:
+
+| Mode | Top-level AND terms |
+| --- | --- |
+| ANY | `(status = a OR status = b)`; a single key is one `=` term |
+| NONE | `(is_null OR status != a) AND (is_null OR status != b)` |
+
+ALL and EMPTY describe arrays, so the editor hides them for scalar fields and
+`createSetFilter` throws for them. ANY needs `=` in `filter.ops`; NONE needs
+`!=` and `is_null`. NONE costs two predicates per key, as for arrays.
+
+**NONE keeps NULL rows.** "Status is none of done, failed" reads as "anything
+except those", and a run with no status is not done or failed. SQL backends
+compile `!=` to `<>`, which never matches NULL, so the compiler adds an
+explicit `is_null` branch per value (one CNF group each; `!=` alone cannot
+express it in one group). The result is the same on the local executor, the
+Go SQLite/PostgreSQL compilers and DuckDB, which the SQLite parity suite
+checks. To exclude NULL rows as well, add a separate `is_not_null` filter.
+
+No `in`/`not_in` operator, wire capability, or backend change is involved.
+Scalar sets are not compressed into the packed `["set", …]` link tuple, which
+always means array membership: their marked terms are stored as ordinary
+predicates with `setFilter` metadata. Older clients therefore still evaluate
+them correctly and show them as ordinary predicates. `readSetFilter` returns
+the `target` it recognised, and `mapSetFilterValues` preserves it.
 
 ## Editor identity, saved queries, and migration
 

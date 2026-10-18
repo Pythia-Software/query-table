@@ -271,3 +271,56 @@ describe("native tag set editing", () => {
     expect(api.query.where).toEqual([unrelated]);
   });
 });
+
+describe("scalar set editing", () => {
+  interface Run { id: number; status: string | null }
+  const runs: Run[] = ["queued", "running", "done", "failed", null].map((status, id) => ({ id, status }));
+  const runSchema: FieldSchema<Run> = {
+    name: "runs", idField: "id", fields: [
+      { name: "id", label: "Id", type: "number", source: { kind: "backend" } },
+      { name: "status", label: "Status", type: "enum", source: { kind: "backend" }, filter: { editor: "set", values: { source: "static", options: ["queued", "running", "done", "failed"] } } },
+    ],
+  };
+  let runApi: QueryTableApi<Run>;
+  async function mountRuns(query: QueryState) {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    function Table() {
+      runApi = useQueryTable({ schema: runSchema, clientRows: runs, initialQuery: query, syncUrl: false, debounceMs: 0 });
+      return createElement(QueryBuilder<Run>, { api: runApi, fields: runSchema.fields, total: runApi.total });
+    }
+    await act(async () => { root = createRoot(container); root.render(createElement(Table)); });
+  }
+  const pick = (value: string) => act(() => [...container.querySelectorAll<HTMLLabelElement>(".qt-set-option")].find((label) => label.textContent?.startsWith(value))!.querySelector("input")!.click());
+
+  it("offers only ANY and NONE and compiles NONE to null-keeping != groups", async () => {
+    await mountRuns(EMPTY_QUERY);
+    click("Add filter");
+    const fieldSearch = document.querySelector<HTMLInputElement>(".qt-picker-input")!;
+    inputValue(fieldSearch, "status");
+    pressEnter(fieldSearch);
+    expect([...container.querySelectorAll<HTMLOptionElement>("[aria-label='Match mode'] option")].map((option) => option.value)).toEqual(["any", "none"]);
+    expect(container.querySelector("[aria-label='Search Status values']")).not.toBeNull();
+    changeMode("none");
+    pick("done"); pick("failed");
+    click("Apply filter");
+    expect(runApi.query.where).toEqual(createSetFilter("status", "none", ["done", "failed"], readSetFilter(runApi.query.where, 0)!.metadata.id, "scalar"));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    expect(runApi.rows.map((row) => row.status)).toEqual(["queued", "running", null]);
+    expect(container.querySelector("[aria-label='Edit Status value filter']")?.textContent).toBe("Status NONE");
+    click("Remove value done");
+    expect(readSetFilter(runApi.query.where, 0)?.metadata).toMatchObject({ mode: "none", values: ["failed"] });
+    expect(readSetFilter(runApi.query.where, 0)?.target).toBe("scalar");
+  });
+
+  it("reopens ANY filters from links as one set chip", async () => {
+    const where = createSetFilter("status", "any", ["done", "failed"], "editor", "scalar");
+    await mountRuns(decodeQuery(encodeQuery({ ...EMPTY_QUERY, where })));
+    expect(runApi.rows.map((row) => row.status)).toEqual(["done", "failed"]);
+    click("Edit Status value filter");
+    expect(container.querySelector<HTMLSelectElement>("[aria-label='Match mode']")!.value).toBe("any");
+    pick("queued");
+    click("Apply filter");
+    expect(readSetFilter(runApi.query.where, 0)?.metadata.values).toEqual(["done", "failed", "queued"]);
+  });
+});

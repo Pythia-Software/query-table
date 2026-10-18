@@ -56,6 +56,8 @@ import {
   opsForField,
   createSetFilter,
   readSetFilter,
+  setFilterTarget,
+  type SetFilterTarget,
 } from "@pythia-software/query-table-core";
 import type { QueryTableApi } from "@pythia-software/query-table-react";
 import type { QueryBuilderClassNames } from "./classNames";
@@ -1354,15 +1356,15 @@ function WhereRow<Row>({
   const whereSignature = JSON.stringify(where);
   const setEditors = new Map<
     number,
-    { field: FieldDef<Row>; metadata: SetFilterMetadata; count: number }
+    { field: FieldDef<Row>; metadata: SetFilterMetadata; count: number; target: SetFilterTarget }
   >();
   const hiddenSetTerms = new Set<number>();
   for (let index = 0; index < where.length; index++) {
     const set = readSetFilter(where, index);
     const field = set && byName.get(set.field);
-    if (!set || field?.type !== "textarray" || field.filter?.editor !== "set")
+    if (!set || !field || setFilterTarget(field) !== set.target)
       continue;
-    setEditors.set(index, { field, metadata: set.metadata, count: set.count });
+    setEditors.set(index, { field, metadata: set.metadata, count: set.count, target: set.target });
     for (let offset = 1; offset < set.count; offset++)
       hiddenSetTerms.add(index + offset);
     index += set.count - 1;
@@ -1393,7 +1395,7 @@ function WhereRow<Row>({
   }
 
   function addClause(f: FieldDef<Row>) {
-    if (f.type === "textarray" && f.filter?.editor === "set") {
+    if (setFilterTarget(f)) {
       const anchor = addFilterButton.current;
       if (!anchor) return;
       setEditingSet({
@@ -1510,7 +1512,7 @@ function WhereRow<Row>({
                   type="button"
                   className="qt-link-btn"
                   disabled={disabled}
-                  aria-label={`Edit ${set.field.label} tag filter`}
+                  aria-label={`Edit ${set.field.label} ${set.target === "array" ? "tag" : "value"} filter`}
                   onClick={(event) =>
                     setEditingSet({
                       field: set.field,
@@ -1534,7 +1536,7 @@ function WhereRow<Row>({
                     <button
                       type="button"
                       className="qt-chip-x"
-                      aria-label={`Remove tag ${value}`}
+                      aria-label={`Remove ${set.target === "array" ? "tag" : "value"} ${value}`}
                       disabled={disabled}
                       onClick={() =>
                         replaceSet(
@@ -1544,6 +1546,7 @@ function WhereRow<Row>({
                             set.metadata.mode,
                             set.metadata.values.filter((key) => key !== value),
                             set.metadata.id,
+                            set.target,
                           ),
                         )
                       }
@@ -1555,7 +1558,7 @@ function WhereRow<Row>({
                 <button
                   type="button"
                   className="qt-chip-x"
-                  aria-label={`Remove ${set.field.label} tag filter`}
+                  aria-label={`Remove ${set.field.label} ${set.target === "array" ? "tag" : "value"} filter`}
                   disabled={disabled}
                   onClick={() => replaceSet(set.metadata.id, [])}
                 >
@@ -1610,6 +1613,7 @@ function WhereRow<Row>({
               mode,
               values,
               editingSet.metadata.id,
+              setFilterTarget(editingSet.field) ?? "array",
             );
             if (editingSet.count > 0) replaceSet(editingSet.metadata.id, terms);
             else

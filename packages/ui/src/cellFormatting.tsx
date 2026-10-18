@@ -13,6 +13,9 @@ export function renderCellDisplay({ value, field, presentation }: CellContext, d
   if (value == null || value === "" || (Array.isArray(value) && value.length === 0)) return <span className="qt-muted">—</span>;
   if (display.kind === "text") {
     const text = cellValueText(value);
+    // Clamped text wraps inside the cell; the virtualized table measures each
+    // rendered row, so taller rows keep correct scroll offsets.
+    if (display.lines) return <span className="qt-line-clamp" style={{ WebkitLineClamp: display.lines }} title={text}>{text}</span>;
     return display.truncate ? <span className="qt-truncate" title={text}>{text}</span> : text;
   }
   if (display.kind === "chip") {

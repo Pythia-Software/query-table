@@ -13,7 +13,7 @@ import {
   type SummaryColumn,
 } from "@pythia-software/query-table-core";
 import { DataTable } from "../src/DataTable";
-import { createGroupLinkRenderer, defaultRenderers } from "../src/renderers";
+import { createGroupLinkRenderer, defaultRenderers, resolveRenderer } from "../src/renderers";
 
 type Row = Record<string, unknown>;
 const schema: FieldSchema<Row> = {
@@ -103,6 +103,12 @@ describe("group link renderer", () => {
 });
 
 describe("DataTable link columns", () => {
+  it("keeps rendering links when a column display override is set", () => {
+    const registry = { ...defaultRenderers, [field("page").render as string]: createGroupLinkRenderer() };
+    const node = resolveRenderer(field("page"), registry, { kind: "percent" })({ value: value("page"), row: prepared.rows[0], field: field("page"), query });
+    expect(isValidElement(node) && node.type).toBe("a");
+  });
+
   it("renders link columns with the host's link targets", () => {
     const resultSchema = createGroupingModel(schema).resultSchema(["tool"], summaries);
     const markup = renderToStaticMarkup(createElement(DataTable<Row>, {

@@ -26,11 +26,52 @@ query `type`; display does not parse or mutate API rows. Choose query capabiliti
 explicitly for native objects: for a payload that cannot meaningfully be filtered
 or sorted by the backend, set `filter.enabled` and `sort.enabled` to `false`.
 
-`resolveRenderer` uses an inline `render` function first, then a registered
+`resolveRenderer(field, registry, columnDisplay?)` uses a per-column display
+override first (see below), then an inline `render` function, then a registered
 `render` key, then `display`, then the existing text fallback. Existing renderer
 keys remain supported. `{ kind: "text" }` is available to opt out of richer
 presentation. The bundled JSON inspector is also available as `render: "json"`.
 No display is guessed from arbitrary cell text.
+
+## Per-column overrides for layouts
+
+A host's "reading layout" (which columns, in which order, at which widths) can
+also choose how each column's cells look, without changing the field. Set
+`display` on a `SelectColumn`:
+
+```ts
+api.setQuery((query) => ({
+  ...query,
+  select: [
+    { field: "name" },
+    { field: "command", width: 360, display: { kind: "text", lines: 3 } },
+    { field: "message", display: { kind: "text", lines: 2 } },
+  ],
+}));
+```
+
+The override applies to that column's table cells and takes precedence over
+the field's `render` (key or function) and `display`. Item details, cell menus
+and metrics keep using the field's own presentation. Like widths, overrides
+live in `QueryState.select`: they travel with `?q=` links, saved queries and
+undo/redo, survive column resizing and reordering, and are never sent to a
+backend. Schema `defaultSelect` entries are not consulted for overrides (or
+widths) by `DataTable`. Normalization validates the override with the same
+rules as `FieldDef.display`; a malformed one is dropped and the column keeps
+the field's presentation.
+
+In compact links a column with an override encodes as
+`[field, width | null, display]`. Columns without one keep the existing
+`[field]` / `[field, width]` tuples, so tokens for existing views are
+byte-for-byte unchanged, and older clients ignore the third member.
+
+`{ kind: "text", lines: n }` (1–20) wraps the text and clamps it to `n` lines
+with an ellipsis; line breaks in the value are kept, and the full text is in
+the tooltip. It takes precedence over `truncate`. `DataTable` measures every
+rendered row, so clamped rows of different heights scroll, virtualize and
+re-measure after column resizes correctly. There is no unbounded wrap: one
+very long value would produce a row taller than the viewport, so use a large
+`lines` value instead.
 
 | Kind | Configuration | Defaults |
 | --- | --- | --- |
@@ -40,7 +81,7 @@ No display is guessed from arbitrary cell text.
 | `duration` | `sourceUnit`: milliseconds/seconds/minutes/hours/days; `style`: human/long/clock/custom; `pattern`, `decimals` | milliseconds, human output |
 | `number`, `percent` | `decimals`, `locale` | Numbers keep up to 6 fractional digits; percent defaults to 2 decimals; en-US; percent expects a ratio (0.125 → 12.50%) |
 | `chip` | `labels` and `tones` maps keyed by raw value | Raw label, neutral tone; scalar or array values |
-| `text` | `truncate` | Plain text |
+| `text` | `truncate`, `lines` (1–20) | Plain text; `truncate` keeps one line with an ellipsis; `lines` wraps and clamps |
 
 Temporal formatting shares the metric formatter. ISO timestamps require an
 explicit offset; calendar dates and civil clocks retain their civil values.
@@ -152,7 +193,9 @@ so search remains available in the toolbar.
 
 The `/cells` playground includes **Cell displays** with object, serialized, encoded,
 escaped, array, and malformed payload examples beside formatted timestamps,
-durations, and status chips. Its Detail buttons open inline JSON properties in
+durations, and status chips, followed by a 400-row **Reading layout** whose
+Command and Message columns are clamped through `SelectColumn.display`. Its Detail buttons open inline JSON properties in
 all three surfaces. With `npm run demo` running, `npm run test:cells` checks
-desktop/mobile interactions, property editing, and shared-link restoration,
-and writes screenshots to `.context/`.
+desktop/mobile interactions, property editing, shared-link restoration, and
+that clamped virtual rows tile without gaps while scrolling and after a column
+resize, and writes screenshots to `.context/`.

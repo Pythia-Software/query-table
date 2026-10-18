@@ -9,8 +9,8 @@ import { Icon } from "./Icon";
 
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { createElement } from "react";
-import type { FieldDef, LinkTargets, QueryState } from "@pythia-software/query-table-core";
-import { isGroupLinkValue, resolveGroupLink } from "@pythia-software/query-table-core";
+import type { CellDisplay, FieldDef, LinkTargets, QueryState } from "@pythia-software/query-table-core";
+import { isGroupLinkField, isGroupLinkValue, resolveGroupLink } from "@pythia-software/query-table-core";
 import { renderCellDisplay } from "./cellFormatting";
 import { JsonCell, JsonValueView } from "./JsonCell";
 
@@ -181,12 +181,16 @@ export function createGroupLinkRenderer(options: GroupLinkOptions = {}): CellRen
   };
 }
 
-/** Resolve a FieldDef's renderer: inline fn wins, else registry lookup, else
- *  declarative display, else the `text` fallback. */
+/** Resolve a FieldDef's renderer: a per-column display override (from
+ *  `SelectColumn.display`) wins, then an inline fn, then a registry lookup, then
+ *  the field's declarative display, else the `text` fallback. */
 export function resolveRenderer<Row>(
   field: FieldDef<Row>,
   registry: RenderRegistry<Row>,
+  columnDisplay?: CellDisplay,
 ): CellRenderer<Row> {
+  // Link columns always render as links; a display override cannot format them.
+  if (columnDisplay && !isGroupLinkField(field)) return (ctx) => renderCellDisplay(ctx, columnDisplay);
   const r = field.render;
   if (typeof r === "function") {
     // core's CellRenderer returns `unknown`; ours narrows that to ReactNode.

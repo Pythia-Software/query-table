@@ -228,10 +228,15 @@ export function metricDateRange(
     if (term.op === "<" || term.op === "<=" || term.op === "=")
       end = Math.min(end, time - (term.op === "<" ? 1 : 0));
   }
-  if (!Number.isFinite(start) || !Number.isFinite(end))
+  if (!Number.isFinite(start) || !Number.isFinite(end)) {
+    const missing = [
+      ...(Number.isFinite(start) ? [] : ["a lower bound (>= or >)"]),
+      ...(Number.isFinite(end) ? [] : ["an upper bound (<= or <)"]),
+    ].join(" and ");
     throw Error(
-      "Include empty dates needs a bounded date filter. Choose observed dates or a custom range.",
+      `Include empty dates with range "query" needs a bounded date filter on ${config.field}: add ${missing} as top-level filters (bounds inside OR groups do not count). Otherwise use range "observed" to fill from the first to the last observed date, or range "custom" with start and end.`,
     );
+  }
   if (end < start) return undefined;
   return [
     metricDateFloor(start, config.interval, config.timeZone),

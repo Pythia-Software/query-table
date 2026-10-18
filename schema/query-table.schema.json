@@ -171,7 +171,7 @@
       "type": "object",
       "required": ["field"],
       "additionalProperties": false,
-      "properties": { "field": { "type": "string" }, "width": { "type": "number", "minimum": 1 } }
+      "properties": { "field": { "type": "string" }, "width": { "type": "number", "minimum": 1 }, "display": { "$ref": "#/$defs/cellDisplay" } }
     },
     "field": {
       "type": "object",
@@ -203,7 +203,7 @@
           "additionalProperties": false,
           "properties": {
             "enabled": { "type": "boolean", "description": "Default: backend ⇒ true, derived ⇒ false." },
-            "editor": { "enum": ["set"], "description": "Native ANY/ALL/NONE/EMPTY editor for textarray fields." },
+            "editor": { "enum": ["set"], "description": "Native multi-value editor: ANY/ALL/NONE/EMPTY for textarray fields; ANY/NONE for enum fields and text fields with static options." },
             "arrayCaseSensitive": { "type": "boolean", "description": "Preserve case when matching textarray values. Default false." },
             "pushdown": { "type": "boolean", "description": "Evaluate on the backend? Default backend ⇒ true. false ⇒ applied client-side by applyQuery." },
             "ops": { "type": "array", "items": { "$ref": "#/$defs/filterOp" } },
@@ -527,6 +527,11 @@
             },
             "truncate": {
               "type": "boolean"
+            },
+            "lines": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20
             }
           }
         }
