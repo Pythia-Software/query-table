@@ -5,6 +5,7 @@ import {
   matchPatch,
   removePatch,
   withGroupingKeys,
+  type AggregationClause,
   type QueryPatch,
   type QueryState,
   type WhereTerm,
@@ -133,6 +134,29 @@ describe("matchPatch", () => {
       aggregations: [{ id: "b", op: "count", groupBy: ["status"], display: { kind: "pie" }, layout: { widthRem: 9, heightRem: 9, minWidthRem: 1, minHeightRem: 1 } }],
     };
     expect(matchPatch(query, metrics)).toEqual({ status: "active", modified: [] });
+  });
+
+  it("compares settings nested inside metrics", () => {
+    const dateGrouping = { field: "at", interval: "day" as const, timeZone: "UTC", includeEmpty: false, range: "observed" as const };
+    const daily: AggregationClause = { id: "a", op: "count", groupBy: ["at"], dateGrouping, sort: [{ key: "group0", dir: "asc" }] };
+    const histogram: AggregationClause = { id: "h", op: "count", groupBy: [], display: { kind: "histogram" }, distribution: { kind: "histogram", input: "[amount]", bins: 10 } };
+    const patch: QueryPatch = { id: "m", owns: ["metrics"], query: { aggregations: [daily, histogram] } };
+    const withMetrics = (aggregations: AggregationClause[]): QueryState => ({ ...base, aggregations });
+    // Key order inside nested objects is not significant.
+    const reordered = { range: "observed" as const, includeEmpty: false, timeZone: "UTC", interval: "day" as const, field: "at" };
+    expect(matchPatch(withMetrics([{ ...daily, id: "x", dateGrouping: reordered }, histogram]), patch).status).toBe("active");
+    for (const changed of [
+      [{ ...daily, dateGrouping: { ...dateGrouping, interval: "year" as const } }, histogram],
+      [{ ...daily, dateGrouping: { ...dateGrouping, timeZone: "America/Denver" } }, histogram],
+      [{ ...daily, sort: [{ key: "group0" as const, dir: "desc" as const }] }, histogram],
+      [daily, { ...histogram, distribution: { ...histogram.distribution!, bins: 20 } }],
+      [daily, { ...histogram, distribution: { ...histogram.distribution!, input: "[other]" } }],
+      [daily, { ...histogram, distribution: { kind: "box" as const, input: "[amount]" } }],
+    ])
+      expect(matchPatch(withMetrics(changed), patch)).toEqual({ status: "inactive", modified: [] });
+    // removePatch must not clear a metric the user has changed.
+    const yearly = withMetrics([{ ...daily, dateGrouping: { ...dateGrouping, interval: "year" } }, histogram]);
+    expect(removePatch(yearly, patch).aggregations).toEqual(yearly.aggregations);
   });
 
   it("is active with extra user filters", () => {

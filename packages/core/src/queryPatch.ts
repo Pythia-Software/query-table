@@ -189,9 +189,18 @@ function summarySignature(summaries: readonly SummaryColumn[]): string {
   return JSON.stringify(summaries.map(summaryMeaning));
 }
 
+/** JSON with object keys sorted at every depth; array order is kept. */
+function canonicalJson(value: unknown): string {
+  return JSON.stringify(value, (_key, item: unknown) =>
+    item && typeof item === "object" && !Array.isArray(item)
+      ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : item,
+  );
+}
+
 function metricSignature(metric: AggregationClause): string {
   const { id: _id, label: _label, display: _display, layout: _layout, ...rest } = metric;
-  return JSON.stringify(rest, Object.keys(rest).sort());
+  return canonicalJson(rest);
 }
 
 function facetMatches(query: QueryState, parts: PatchParts, facet: QueryFacet): boolean {
