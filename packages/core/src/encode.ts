@@ -1,4 +1,4 @@
-import type { MetricKey, MetricValue, MetricScope, MetricDistributionResult, MetricDiagnostic } from "./metricTypes";
+import type { MetricKey, MetricValue, MetricScope, MetricDistributionResult, MetricDiagnostic, MetricHistogramBin } from "./metricTypes";
 import { deflateSync, Inflate } from "fflate";
 import { createSetFilter, readSetFilter } from "./setFilter";
 // encode.ts — URL serialization + the server-bound query subset.
@@ -357,6 +357,10 @@ export interface AggregationBucket {
   nullCount?: number;
   inputErrorCount?: number;
   distribution?: MetricDistributionResult;
+  /** Client-side only: set by the metric UI when one histogram bin of this
+   *  cohort is inspected (`count`/`value` are then the bin's count). Never part
+   *  of a transport result. */
+  bin?: MetricHistogramBin;
   /** The metric: a number for count/sum/avg, or the column's value for min/max
    *  (which may be a string for text/datetime). null when undefined (e.g. avg of
    *  an all-null column). */

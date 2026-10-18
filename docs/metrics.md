@@ -20,7 +20,7 @@ The **Edit metrics** action opens a transactional workbench. Apply commits the w
 
 The desktop editor has independently resizable metric, expression/settings, reference, and preview panes, plus a modal resized by dragging its corner. The reference pane uses compact Type / Name / ID rows (Type / Name / Signature for functions), with full details on hover. Native selects switch between metric editing and dashboard layout, and between fields and functions. The formula input is a native textarea with diagnostics and cursor-aware reference insertion. It uses the existing formula compiler and worker infrastructure, with no CodeMirror or chart package.
 
-Grouping supports up to 20 fields. Automatic/table display uses a pivot for exactly two grouping fields and a flat table for three or more. Other displays include scalar value, list, horizontal/vertical bars, line, pie, ring, scatter, box plot, and histogram. Chart points expose keyboard and hover tooltips. Escape dismisses an open tooltip; another Escape reaches the enclosing dialog. Combined Other pie/ring slices expose totals but cannot open a single-group inspector. The always-visible **Edit** button opens the metric workbench when `MetricsPanel` receives `api`; the workbench also offers dashboard layout. Hover pencils open an individual metric; custom hosts can instead provide `onEditMetric` and `onEditDashboard`. Configured decimal precision applies to both pie/ring values and their percentage shares. Pie/ring require valid nonnegative numeric shares; invalid chart data is explained rather than drawn misleadingly.
+Grouping supports up to 20 fields. Automatic/table display uses a pivot for exactly two grouping fields and a flat table for three or more. Other displays include scalar value, list, horizontal/vertical bars, line, pie, ring, scatter, box plot, and histogram. Chart points expose keyboard and hover tooltips. Escape dismisses an open tooltip; another Escape reaches the enclosing dialog. Combined Other pie/ring slices and list rows expose totals but cannot open a single-group inspector. The always-visible **Edit** button opens the metric workbench when `MetricsPanel` receives `api`; the workbench also offers dashboard layout. Hover pencils open an individual metric; custom hosts can instead provide `onEditMetric` and `onEditDashboard`. Configured decimal precision applies to both pie/ring values and their percentage shares. Pie/ring require valid nonnegative numeric shares; invalid chart data is explained rather than drawn misleadingly.
 
 Dashboard layout supports wrapped pointer and keyboard reordering, card selection, inline names, and whole-rem desired/minimum widths and heights (including sizes below 8rem). Raising a minimum raises the desired dimension. Canvas presets and an editable width simulate available space. Card actions appear on hover or keyboard focus, including navigation back to that metric's editor. Very small cards may need scrolling for labels or raw data.
 
@@ -83,6 +83,50 @@ do not define this population. Grouped views use typed semantics for all metric
 definitions, including shorthand aggregates, and preserve null versus empty-text
 keys. Local shown-row evaluation preserves the table's input order for sort
 ties; it does not add a hidden identity sort.
+
+## Drilldown
+
+`MetricsPanel` and `MetricCard` accept `onInspect(bucket, clause)`. It fires
+from chart marks, list rows, pivot and flat-table values, value cards, box-plot
+cohorts and histogram bins, by click, Enter or Space. Inspectable elements get
+`role="button"` and the `qt-metric-inspectable` class (chart marks keep
+`qt-metric-mark`); synthetic Other rows are never inspectable. Without
+`onInspect` nothing changes. A histogram bin passes a bucket with the cohort's
+`keys`, the bin's `count`, and client-only `bin: { min, max, inclusiveMax }`.
+
+`inspectBucketQuery(query, bucket, clause, schema)` turns that into the query
+for the underlying records, or `null` when no exact query exists:
+
+```ts
+<MetricsPanel api={table} aggregations={table.aggregations} fields={fields}
+  onInspect={(bucket, clause) => {
+    const next = inspectBucketQuery(table.query, bucket, clause, schema);
+    if (next) table.setQuery(next);
+  }} />
+```
+
+- Each `groupBy` key adds `=`; a null key adds `is_null`. Legacy aggregates
+  put empty text in the NULL bucket, and `is_null` matches empty text locally,
+  so the two agree. Typed metrics keep an empty-text key distinct and drill to
+  `= ""`. Local filters treat NULL and empty text alike for both operators, so
+  with `clientRows` either drill returns both groups; the bundled backend
+  distinguishes them.
+- A date-grouped key adds `>= start` and `< next`, using the clause's interval
+  and timezone (`metricDateNext`), encoded as ISO instants (`…Z`). Filters
+  compare instants, so a date-only source value is read as UTC midnight; group
+  date-only columns in UTC to keep drilldown on the same day.
+- A histogram bin adds `>= min` and `< max` (`<= max` for the final bin) on the
+  distribution input. The input must be a single numeric field reference; a
+  computed expression returns `null`. A box cohort is its group keys.
+- Grouped queries: metrics run over group rows, so the terms are added to the
+  top-level `where` (HAVING). Pass the source schema or the group schema.
+- `scope: "shownRows"` returns `null`: re-filtering re-pages the population. An
+  additive Other remainder (no keys) returns `null`. Excluding the shown groups
+  would be exact only with null-safe negation of every key, so it is not built.
+- Keys on unknown, unfilterable or `textarray` fields return `null`.
+
+Existing terms are kept, terms already present are not repeated, and `offset`
+resets to 0. For grouped rows, see `groupSourceQuery` in [grouping](grouping.md).
 
 ## Transport and server computed fields
 

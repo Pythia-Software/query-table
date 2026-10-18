@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Added
+
+- `inspectBucketQuery` and `groupSourceQuery` build the exact record query
+  behind a metric bucket or grouped row (group keys, calendar buckets in their
+  timezone, histogram bins, box cohorts, HAVING over grouped queries), or
+  return `null` when no exact query exists. See
+  [metric drilldown](docs/metrics.md#drilldown).
+- `MetricsPanel`/`MetricCard` `onInspect` fires from list rows, pivot and
+  flat-table values, value cards, box cohorts and individual histogram bins, not
+  only chart marks. Histogram bins pass client-only `bucket.bin` bounds.
+- Query patches: `applyPatch`, `matchPatch` and `removePatch` apply, recognise
+  and remove partial queries that own selected facets, with additive filters
+  matched structurally. See [query patches](docs/query-patches.md).
+- `withGroupingKeys` and `exitGrouping` expose the grouping controls' enter,
+  re-key and exit transitions as pure functions.
+
 ### Changed
 
 - Run public demo verification locally with `npm run check:showcase` instead
