@@ -539,7 +539,7 @@ func (d QueryDatasetV3) checkMetricSamples(ctx context.Context, tx *sql.Tx, spec
 	}
 	for _, bucket := range metric.Buckets {
 		if bucket.Count > int64(limit) {
-			return diagnostic("resource_limit", "exact metric sample budget exceeded")
+			return diagnostic("resource_limit", sampleBudgetMessage(spec, limit))
 		}
 	}
 	return nil

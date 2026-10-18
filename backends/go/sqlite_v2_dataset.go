@@ -99,7 +99,10 @@ type SQLiteMetricV2 struct {
 	Scope         string                 `json:"scope"`
 	ProcessedRows int64                  `json:"processedRows"`
 	GroupCount    int64                  `json:"groupCount"`
-	Coverage      string                 `json:"coverage"`
+	Coverage      string                 `json:"coverage,omitempty"`
+	// Error reports a metric that could not be computed. Sibling metrics and
+	// rows in the same request are unaffected.
+	Error string `json:"error,omitempty"`
 	// HiddenGroups counts groups removed by AggSpec.MinCount; nil when unset.
 	HiddenGroups *int64 `json:"hiddenGroups,omitempty"`
 }
@@ -186,6 +189,7 @@ func (d SQLiteV2Dataset) ExecuteV2In(ctx context.Context, tx *sql.Tx, rows *Serv
 	o = d.options(tx, o)
 	var rowPlan SQLPlan
 	var batch MetricBatchPlan
+	var failures []error
 	var where []WhereTerm
 	if rows != nil {
 		copy := *rows
@@ -210,7 +214,7 @@ func (d SQLiteV2Dataset) ExecuteV2In(ctx context.Context, tx *sql.Tx, rows *Serv
 		if metrics.Limit > maxRows {
 			return out, diagnostic("resource_limit", "metric row window exceeds host budget")
 		}
-		batch, e = CompileSQLiteMetrics(ctx, *metrics, d.Schema, o)
+		batch, failures, e = compileMetricsPartial(ctx, *metrics, d.Schema, o, true)
 		if e != nil {
 			return out, e
 		}
@@ -299,7 +303,15 @@ func (d SQLiteV2Dataset) ExecuteV2In(ctx context.Context, tx *sql.Tx, rows *Serv
 				err = errors.Join(err, cleanupErr)
 			}
 		}()
-		for i, p := range batch.Metrics {
+		next := 0
+		for i, spec := range metrics.Metrics {
+			if failures[i] != nil {
+				message, _ := metricClauseError(ctx, failures[i])
+				r.Metrics = append(r.Metrics, failedMetric(spec.ID, spec.Scope, message))
+				continue
+			}
+			p := batch.Metrics[next]
+			next++
 			key := p.Fingerprint + "\x00" + p.Scope
 			if previous, ok := memo[key]; ok {
 				previous = cloneSQLiteMetric(previous)
@@ -307,15 +319,23 @@ func (d SQLiteV2Dataset) ExecuteV2In(ctx context.Context, tx *sql.Tx, rows *Serv
 				r.Metrics = append(r.Metrics, previous)
 				continue
 			}
-			p, err := reductions.plan(ctx, tx, p)
+			created := reductions.mark()
+			m, err := isolateMetric(ctx, tx, p.ID, p.Scope, func() (SQLiteMetricV2, error) {
+				p, err := reductions.plan(ctx, tx, p)
+				if err != nil {
+					return SQLiteMetricV2{}, err
+				}
+				return d.readV2Metric(ctx, tx, p, spec, total, *metrics, maxGroups)
+			})
 			if err != nil {
 				return SQLiteV2ExecutionResult{}, err
 			}
-			m, err := d.readV2Metric(ctx, tx, p, metrics.Metrics[i], total, *metrics, maxGroups)
-			if err != nil {
-				return SQLiteV2ExecutionResult{}, err
+			if m.Error != "" {
+				// The savepoint rollback dropped reductions created for this metric.
+				reductions.forget(created)
+			} else {
+				memo[key] = m
 			}
-			memo[key] = m
 			r.Metrics = append(r.Metrics, m)
 		}
 		out.Metrics = &r

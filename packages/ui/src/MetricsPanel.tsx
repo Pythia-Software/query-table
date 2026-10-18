@@ -15,7 +15,7 @@ import {
 // sense (so AVG(total_ms) reads "3.2s", not "3200"), falling back to a locale
 // number. Counts are always plain integers.
 
-import { useState, useMemo, type ReactNode } from "react";
+import { useState, useMemo, type HTMLAttributes, type ReactNode } from "react";
 import { EMPTY_QUERY } from "@pythia-software/query-table-core";
 import type { AggOp, FieldDef } from "@pythia-software/query-table-core";
 import type { AggregationsApi } from "@pythia-software/query-table-react";
@@ -240,6 +240,7 @@ export function MetricCard<Row>({
       ).text;
     return formatMetricValue(v, clause.op, measure, renderers, decimals);
   };
+  const inspect = onInspect ? (b: AggregationBucket) => onInspect(b, clause) : undefined;
   const kind = clause.display?.kind ?? "auto";
   const chart = [
     "bar-horizontal",
@@ -297,11 +298,11 @@ export function MetricCard<Row>({
         theme={theme}
         locale={locale}
         classNames={classNames}
-        onInspect={onInspect ? (b) => onInspect(b, clause) : undefined}
+        onInspect={inspect}
       />
     );
   else if (kind === "value" || (kind === "auto" && clause.groupBy.length === 0))
-    body = <BigNumber bucket={buckets[0]!} fmt={fmt} />;
+    body = <BigNumber bucket={buckets[0]!} fmt={fmt} onInspect={inspect} />;
   else if (kind === "list" || (kind === "auto" && clause.groupBy.length === 1))
     body = (
       <BarList
@@ -310,6 +311,7 @@ export function MetricCard<Row>({
         buckets={buckets}
         fmt={fmt}
         locale={locale}
+        onInspect={inspect}
       />
     );
   else if (clause.groupBy.length === 2)
@@ -321,6 +323,7 @@ export function MetricCard<Row>({
         fmt={fmt}
         rowLabel={groupLabels[0]!}
         colLabel={groupLabels[1]!}
+        onInspect={inspect}
       />
     );
   else
@@ -332,6 +335,7 @@ export function MetricCard<Row>({
         fmt={fmt}
         groupLabels={groupLabels}
         valueLabel={clause.display?.valueLabel ?? metricTitle(clause, measure)}
+        onInspect={inspect}
       />
     );
   return (
@@ -402,12 +406,15 @@ export function MetricCard<Row>({
 function BigNumber({
   bucket,
   fmt,
+  onInspect,
 }: {
   bucket: AggregationBucket;
   fmt: (v: MetricValue) => ReactNode;
+  onInspect: ((bucket: AggregationBucket) => void) | undefined;
 }) {
+  const inspect = inspectProps(bucket, onInspect);
   return (
-    <div className="qt-metric-big">
+    <div {...inspect} className={cx("qt-metric-big", inspect.className)}>
       <span className="qt-metric-big-value">
         {bucket.error ?? fmt(bucket.value)}
       </span>
@@ -426,12 +433,14 @@ function BarList({
   clause,
   theme,
   locale,
+  onInspect,
 }: {
   buckets: AggregationBucket[];
   fmt: (v: MetricValue) => ReactNode;
   clause: AggregationClause;
   theme: MetricTheme | undefined;
   locale: string | undefined;
+  onInspect: ((bucket: AggregationBucket) => void) | undefined;
 }) {
   const colors = createMetricColorResolver(theme),
     options = clause.display?.list;
@@ -457,9 +466,11 @@ function BarList({
           typeof b.value === "number" && !b.error && axis.accepts(b.value)
             ? Math.max(0, Math.min(1, axis.fraction(b.value))) * 100
             : 0;
+        const inspect = inspectProps(b, onInspect);
         return (
           <div
-            className={`qt-metric-bar-row${below ? " qt-metric-bar-row--below" : ""}`}
+            {...inspect}
+            className={cx("qt-metric-bar-row", below && "qt-metric-bar-row--below", inspect.className)}
             style={{
               gridTemplateColumns: below ? `minmax(0, 1fr)${showValues ? " auto" : ""}` : `minmax(3.375rem, 38%) ${showBars ? "1fr " : ""}${showValues ? "auto" : ""}`,
             }}
@@ -521,6 +532,7 @@ function Pivot({
   colLabel,
   clause,
   locale,
+  onInspect,
 }: {
   buckets: AggregationBucket[];
   fmt: (v: MetricValue) => ReactNode;
@@ -528,6 +540,7 @@ function Pivot({
   colLabel: string;
   clause: AggregationClause;
   locale: string | undefined;
+  onInspect: ((bucket: AggregationBucket) => void) | undefined;
 }) {
   const rowAxis = clause.display?.pivot?.swap ? 1 : 0,
     colAxis = 1 - rowAxis;
@@ -582,7 +595,9 @@ function Pivot({
                     {v === undefined ? (
                       <span className="qt-muted">·</span>
                     ) : (
-                      (v.error ?? fmt(v.value))
+                      <InspectableValue bucket={v} onInspect={onInspect}>
+                        {v.error ?? fmt(v.value)}
+                      </InspectableValue>
                     )}
                   </td>
                 );
@@ -604,6 +619,7 @@ function FlatTable({
   valueLabel,
   clause,
   locale,
+  onInspect,
 }: {
   buckets: AggregationBucket[];
   fmt: (v: MetricValue) => ReactNode;
@@ -611,6 +627,7 @@ function FlatTable({
   valueLabel: string;
   clause: AggregationClause;
   locale: string | undefined;
+  onInspect: ((bucket: AggregationBucket) => void) | undefined;
 }) {
   return (
     <div className="qt-metric-pivot-wrap">
@@ -633,7 +650,9 @@ function FlatTable({
                 <td key={j}>{keyNode(b.keys[j], j, clause, locale)}</td>
               ))}
               <td className="qt-metric-flat-value">
-                {b.error ?? fmt(b.value)}
+                <InspectableValue bucket={b} onInspect={onInspect}>
+                  {b.error ?? fmt(b.value)}
+                </InspectableValue>
               </td>
             </tr>
           ))}
@@ -644,6 +663,41 @@ function FlatTable({
 }
 
 // ---- helpers --------------------------------------------------------------
+
+/** Button semantics for an inspectable bucket, matching chart marks. Synthetic
+ *  Other rows and cards without `onInspect` get no attributes at all. */
+function inspectProps(
+  bucket: AggregationBucket,
+  onInspect: ((bucket: AggregationBucket) => void) | undefined,
+): HTMLAttributes<HTMLElement> {
+  if (!onInspect || isMetricOtherBucket(bucket)) return {};
+  return {
+    role: "button",
+    tabIndex: 0,
+    className: "qt-metric-inspectable",
+    onClick: () => onInspect(bucket),
+    onKeyDown: (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        onInspect(bucket);
+      }
+    },
+  };
+}
+
+/** Table cells keep their table semantics; the value inside becomes the button. */
+function InspectableValue({
+  bucket,
+  onInspect,
+  children,
+}: {
+  bucket: AggregationBucket;
+  onInspect: ((bucket: AggregationBucket) => void) | undefined;
+  children: ReactNode;
+}) {
+  const inspect = inspectProps(bucket, onInspect);
+  return inspect.role ? <span {...inspect}>{children}</span> : <>{children}</>;
+}
 
 function metricTitle<Row>(
   clause: AggregationClause,

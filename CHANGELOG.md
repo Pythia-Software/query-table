@@ -18,17 +18,22 @@
   dropping the control. The metric editor adds **Only rows where…** and
   **Minimum rows per group**, and cards note how many groups are hidden.
   Links and saved queries round-trip both fields; existing links decode
-  unchanged.
+  unchanged. `inspectBucketQuery` includes the clause's `where`.
 - Export `useQueryFilters` from the React package so filter chips can be bound
   to any query stage.
-
-### Fixed
-
-- The Go v3 executor no longer panics on PostgreSQL box and histogram metrics,
-  which return valid-sample counts and `jsonb` payloads instead of SQLite's
-  input-error column and JSON text.
-- DuckDB calendar metrics default to chronological order like the other
-  engines, instead of value-descending.
+- `inspectBucketQuery` and `groupSourceQuery` build the exact record query
+  behind a metric bucket or grouped row (group keys, calendar buckets in their
+  timezone, histogram bins, box cohorts, HAVING over grouped queries), or
+  return `null` when no exact query exists. See
+  [metric drilldown](docs/metrics.md#drilldown).
+- `MetricsPanel`/`MetricCard` `onInspect` fires from list rows, pivot and
+  flat-table values, value cards, box cohorts and individual histogram bins, not
+  only chart marks. Histogram bins pass client-only `bucket.bin` bounds.
+- Query patches: `applyPatch`, `matchPatch` and `removePatch` apply, recognise
+  and remove partial queries that own selected facets, with additive filters
+  matched structurally. See [query patches](docs/query-patches.md).
+- `withGroupingKeys` and `exitGrouping` expose the grouping controls' enter,
+  re-key and exit transitions as pure functions.
 
 ### Changed
 
@@ -36,6 +41,36 @@
   of building and deploying on every push through GitHub Actions. Keep
   tag-triggered npm releases and save browser diagnostics when showcase checks
   fail.
+
+### Fixed
+
+- Go SQLite v2, v3 and PostgreSQL row execution return plain text values over
+  100,000 bytes intact instead of failing the page with `text_range`. Sorting
+  and representative `ROW()` values use the full text too. The bound still
+  applies to formula inputs, where it remains a per-value `text_range` error.
+  Invalid UTF-8 in SQLite source text still rejects the request, now with
+  `text_encoding`.
+- One failing metric no longer fails the whole metric batch. In Go SQLite v2,
+  v3 and PostgreSQL, clause-level failures become that metric's `error`, with
+  empty buckets, while sibling metrics and rows still return. This covers
+  budgets, invalid inputs and failed statements. Malformed requests, duplicate
+  IDs, invalid scopes, stale revisions, handshake and snapshot failures, and
+  cancellation still fail the request. PostgreSQL runs each metric in a
+  savepoint so a failed statement does not abort the transaction. SQLite
+  reductions shared between metrics are rebuilt after a failed sibling.
+- DuckDB isolates failed metric statements, which previously aborted the
+  transaction for every later metric and failed the request.
+- The React client sends the clauses a v2 metric server supports and reports
+  an error only on the clauses that need a missing capability (shown-row
+  scope, computed fields, composed expressions, distributions or calendar
+  grouping).
+- Sample budget errors name the reduction and the budget, for example
+  "MEDIAN exceeded the 100,000-sample budget for one or more groups".
+- The Go v3 executor no longer panics on PostgreSQL box and histogram metrics,
+  which return valid-sample counts and `jsonb` payloads instead of SQLite's
+  input-error column and JSON text.
+- DuckDB calendar metrics default to chronological order like the other
+  engines, instead of value-descending.
 
 ## 0.7.1 — 2026-10-16
 

@@ -5,7 +5,9 @@ import {
   decodeQuery,
   decodeQueryStrict,
   encodeQuery,
+  applyQuery,
   evaluateMetrics,
+  inspectBucketQuery,
   metricComputationKey,
   metricPopulationError,
   normalizeQueryState,
@@ -159,6 +161,23 @@ describe("metric population semantics", () => {
     expect(residual.diagnostics.map((d) => d.code)).toContain("residual_metric_filter");
     expect(() => toAggregationQuery({ ...EMPTY_QUERY, aggregations: [{ ...base, minCount: 2 }] }, schema)).toThrow(/version 2/);
     expect(() => toAggregationQuery({ ...EMPTY_QUERY, aggregations: [{ ...base, where: [{ field: "kind", op: "=", value: "x" }] }] }, schema)).toThrow(/version 2/);
+  });
+});
+
+describe("metric population drilldown", () => {
+  it("inspects exactly the records a filtered bucket counted", () => {
+    const clause: AggregationClause = {
+      ...base,
+      where: [{ any: [{ field: "status", op: "=", value: "error" }, { field: "ms", op: ">", value: "500" }] }],
+      minCount: 2,
+    };
+    const table = { ...EMPTY_QUERY, where: [{ field: "at", op: "is_not_null" as const, value: "" }] };
+    const result = evaluateMetrics(fixture.rows, { ...table, aggregations: [clause] }, schema, { now }).metrics[0]!;
+    for (const bucket of result.buckets) {
+      const drill = inspectBucketQuery(table, bucket, clause, schema)!;
+      expect(drill.where.slice(0, 2)).toEqual([...table.where, ...clause.where!]);
+      expect(applyQuery(fixture.rows, drill, schema, { now }).total).toBe(bucket.count);
+    }
   });
 });
 

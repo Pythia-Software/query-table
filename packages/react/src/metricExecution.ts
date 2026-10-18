@@ -299,14 +299,21 @@ export async function executeMetrics<Row>(
         .metrics,
     );
   }
-  if (matching.length) {
-    if (matching.some((c) => c.dateGrouping))
-      throw Error(
-        "This server does not support calendar grouping. Enable the v3 query executor.",
-      );
+  // A capability the server lacks fails only the clauses that need it; the
+  // rest of the batch is still sent.
+  const unsupported = (clause: AggregationClause, error: string) =>
+    results.push({ id: clause.id, buckets: [], error });
+  const calendar = matching.filter((c) => c.dateGrouping);
+  for (const clause of calendar)
+    unsupported(
+      clause,
+      "This server does not support calendar grouping. Enable the v3 query executor.",
+    );
+  matching = matching.filter((c) => !c.dateGrouping);
+  // Population controls are never dropped: a v1 endpoint, or a v2 server that
+  // does not advertise them, fails only the clauses that use them.
+  {
     const transport = context.transport;
-    // Population controls are negotiated per clause: an executor that does not
-    // advertise them fails only those cards and never drops the predicate.
     if (transport?.fetchMetrics || transport?.fetchAggregations) {
       const support =
         transport.fetchMetrics && transport.metricCapabilities?.version === 2
@@ -314,30 +321,29 @@ export async function executeMetrics<Row>(
           : {};
       matching = matching.filter((c) => {
         const error = metricPopulationError(c, support);
-        if (error) results.push({ id: c.id, buckets: [], error });
+        if (error) unsupported(c, error);
         return !error;
       });
     }
   }
   if (matching.length) {
     const transport = context.transport;
-    const scoped = { ...query, aggregations: matching };
     if (
       transport?.fetchMetrics &&
       transport.metricCapabilities?.version === 2
     ) {
-      const request = toMetricQuery(scoped, context.schema, context.execution);
+      const capabilities = transport.metricCapabilities;
+      const request = toMetricQuery(
+        { ...query, aggregations: matching },
+        context.schema,
+        context.execution,
+      );
       if (request.diagnostics.length)
         throw Error(request.diagnostics.map((d) => d.message).join(" "));
       if (
-        matching.some((c) => c.scope === "shownRows") &&
-        !transport.metricCapabilities.shownRows
-      )
-        throw Error("This server does not support shown-row metrics.");
-      if (
         request.profile &&
-        transport.metricCapabilities.profile &&
-        request.profile !== transport.metricCapabilities.profile
+        capabilities.profile &&
+        request.profile !== capabilities.profile
       )
         throw Error(
           "Metric transport and computed execution profiles do not match. Refresh the handshake.",
@@ -359,41 +365,56 @@ export async function executeMetrics<Row>(
         ...context.schema,
         fields: [...remoteFields.values()],
       };
-      if (
-        matching.some((clause) =>
+      const wire = new Map(request.metrics.map((m) => [m.id, m]));
+      const limitation = (clause: AggregationClause): string | undefined => {
+        if (clause.scope === "shownRows" && !capabilities.shownRows)
+          return "This server does not support shown-row metrics.";
+        if (
+          !capabilities.computedFields &&
           [
             ...clause.groupBy,
             ...metricPlans(clause, remoteSchema).flatMap(
               (plan) => plan.dependencies,
             ),
-          ].some(isComputedField),
-        ) &&
-        !transport.metricCapabilities.computedFields
-      )
-        throw Error("This metric server does not support computed fields.");
-      if (
-        request.metrics.some(
-          (c) =>
-            !c.distribution &&
-            (c.expression !== undefined || c.expressionY !== undefined),
-        ) &&
-        !transport.metricCapabilities.expressions
-      )
-        throw Error(
-          "This server does not support composed metric expressions.",
+          ].some(isComputedField)
+        )
+          return "This metric server does not support computed fields.";
+        const sent = wire.get(clause.id);
+        if (
+          !capabilities.expressions &&
+          sent &&
+          !sent.distribution &&
+          (sent.expression !== undefined || sent.expressionY !== undefined)
+        )
+          return "This server does not support composed metric expressions.";
+        if (
+          !capabilities.distributions &&
+          clause.distribution &&
+          (!clause.display ||
+            ["box", "histogram"].includes(clause.display.kind))
+        )
+          return "This server does not support distributions.";
+        return undefined;
+      };
+      const rejected = new Set<string>();
+      for (const clause of matching) {
+        const error = limitation(clause);
+        if (error) {
+          rejected.add(clause.id);
+          unsupported(clause, error);
+        }
+      }
+      const metrics = request.metrics.filter((m) => !rejected.has(m.id));
+      if (metrics.length)
+        results.push(
+          ...(await transport.fetchMetrics({ ...request, metrics }, signal))
+            .metrics,
         );
-      if (
-        matching.some(
-          (c) =>
-            c.distribution &&
-            (!c.display || ["box", "histogram"].includes(c.display.kind)),
-        ) &&
-        !transport.metricCapabilities.distributions
-      )
-        throw Error("This server does not support distributions.");
-      results.push(...(await transport.fetchMetrics(request, signal)).metrics);
     } else if (transport?.fetchAggregations) {
-      const request = toAggregationQuery(scoped, context.schema);
+      const request = toAggregationQuery(
+        { ...query, aggregations: matching },
+        context.schema,
+      );
       if (request.diagnostics?.length)
         throw Error(request.diagnostics.map((d) => d.message).join(" "));
       results.push(

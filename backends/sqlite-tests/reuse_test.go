@@ -104,13 +104,21 @@ func TestV2ReductionReuse(t *testing.T) {
 		}
 		assertNoReductions(t, tx)
 	}
-	// A final top-N cannot mask the group budget; errors still clean up the tables.
+	// A final top-N cannot mask the group budget; errors still clean up the
+	// tables. Each failed metric rolls back the shared reduction it created,
+	// so fused siblings recreate it and report their own budget error.
 	limited := d
 	limited.MaxGroups = 1
 	guarded := q
 	guarded.Metrics = specs[:6]
-	if _, err := limited.ExecuteV2In(ctx, tx, nil, &guarded, qt.PlanOptions{}); err == nil {
-		t.Fatal("shared reductions bypassed group budget")
+	result, err := limited.ExecuteV2In(ctx, tx, nil, &guarded, qt.PlanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range result.Metrics.Metrics {
+		if m.Error != "group population exceeds host budget" {
+			t.Fatalf("shared reductions bypassed group budget: %#v", m)
+		}
 	}
 	assertNoReductions(t, tx)
 	// Repeated execution must see changed data rather than reuse a prior cache.
@@ -118,20 +126,23 @@ func TestV2ReductionReuse(t *testing.T) {
 		t.Fatal(err)
 	}
 	single := metricV2("SUM([n])")
-	result, err := d.ExecuteV2In(ctx, tx, nil, &single, qt.PlanOptions{})
+	result, err = d.ExecuteV2In(ctx, tx, nil, &single, qt.PlanOptions{})
 	if err != nil || result.Metrics.Metrics[0].Buckets[0].Value != float64(18) {
 		t.Fatal(result, err)
 	}
 	q.Metrics = append(q.Metrics, qt.AggSpec{ID: "bad", Expression: "SUM([missing])"})
-	metricProbeCalls.Store(0)
-	if _, err := d.ExecuteV2In(ctx, tx, nil, &q, qt.PlanOptions{}); err == nil || metricProbeCalls.Load() != 0 {
-		t.Fatal("invalid batch executed", err)
+	// An invalid clause fails only itself; its siblings still execute.
+	result, err = d.ExecuteV2In(ctx, tx, nil, &q, qt.PlanOptions{})
+	if err != nil || len(result.Metrics.Metrics) != len(specs)+1 || result.Metrics.Metrics[len(specs)].Error == "" || result.Metrics.Metrics[0].Error != "" || len(result.Metrics.Metrics[0].Buckets) == 0 {
+		t.Fatal("invalid clause failed its siblings", err)
 	}
+	assertNoReductions(t, tx)
 	q.Metrics = specs[:2]
 	q.ExpectedRevisions = map[string]string{"hidden": "1"}
 	opts := qt.PlanOptions{Resolver: qt.DefinitionResolverFunc(func(context.Context, string) (qt.ComputedColumn, error) {
 		return qt.ComputedColumn{ID: "hidden", Revision: "2"}, nil
 	})}
+	metricProbeCalls.Store(0)
 	if _, err := d.ExecuteV2In(ctx, tx, nil, &q, opts); err == nil || metricProbeCalls.Load() != 0 {
 		t.Fatal("stale revision envelope executed", err)
 	}

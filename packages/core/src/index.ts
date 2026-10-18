@@ -118,3 +118,6 @@ export * from "./propertyStorage";
 export * from "./grouping";
 export * from "./source";
 export * from "./queryV3";
+export { inspectBucketQuery, groupSourceQuery } from "./drilldown";
+export { applyPatch, matchPatch, removePatch } from "./queryPatch";
+export type { QueryFacet, QueryPatch, QueryPatchMatch, ApplyPatchOptions } from "./queryPatch";

@@ -145,8 +145,9 @@ func TestMetricPopulationFixtureV3(t *testing.T) {
 		t.Run(c.Name, func(t *testing.T) {
 			out, err := d.Execute(context.Background(), db, populationRequest(c, qt.SQLiteExpressionProfile, now), qt.PlanOptions{})
 			if c.Expected["error"] == true {
-				if err == nil {
-					t.Fatalf("expected a refusal, got %#v", out.Metrics)
+				// A refused clause fails on its own; the request still succeeds.
+				if err != nil || !strings.Contains(out.Metrics[0].Error, "minCount") {
+					t.Fatalf("expected a per-metric refusal, got %#v / %v", out.Metrics, err)
 				}
 				return
 			}
@@ -178,9 +179,8 @@ func TestMetricPopulationFixtureV2(t *testing.T) {
 			q := qt.MetricQuery{Version: 2, Profile: qt.SQLiteExpressionProfile, Where: c.Where, OrderBy: c.OrderBy, Limit: limit, Metrics: []qt.AggSpec{c.Metric}}
 			out, err := d.ExecuteV2(context.Background(), db, nil, &q, qt.PlanOptions{Now: now})
 			if c.Expected["error"] == true {
-				var diag *qt.PlanDiagnostic
-				if err == nil || !strings.Contains(err.Error(), "minCount") {
-					t.Fatalf("expected a minCount diagnostic, got %v / %v", err, diag)
+				if err != nil || !strings.Contains(out.Metrics.Metrics[0].Error, "minCount") {
+					t.Fatalf("expected a per-metric refusal, got %#v / %v", out.Metrics, err)
 				}
 				return
 			}

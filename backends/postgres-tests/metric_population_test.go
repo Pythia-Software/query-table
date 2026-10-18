@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -128,8 +129,9 @@ func TestPostgresMetricPopulationFixture(t *testing.T) {
 			}
 			out, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
 			if c.Expected["error"] == true {
-				if err == nil {
-					t.Fatalf("expected a refusal, got %#v", out.Metrics)
+				// A refused clause fails on its own; the request still succeeds.
+				if err != nil || !strings.Contains(out.Metrics[0].Error, "minCount") {
+					t.Fatalf("expected a per-metric refusal, got %#v / %v", out.Metrics, err)
 				}
 				return
 			}
