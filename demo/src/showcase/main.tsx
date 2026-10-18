@@ -12,11 +12,9 @@ import {
   normalizeQueryState,
   queriesEqual,
   type SavedQuery,
-  metricDateTime,
-  metricDateNext,
+  inspectBucketQuery,
   type AggregationBucket,
   type AggregationClause,
-  type WhereTerm,
 } from "@pythia-software/query-table-core";
 import { useQueryTable } from "@pythia-software/query-table-react";
 import {
@@ -242,31 +240,22 @@ function Workspace({
     }
   }
   function inspect(bucket: AggregationBucket, clause: AggregationClause) {
-    const where: WhereTerm[] = clause.groupBy.flatMap<WhereTerm>(
-      (field, index) => {
-        const value = bucket.keys[index] ?? null;
-        if (value === null) return [{ field, op: "is_null", value: "" }];
-        if (clause.dateGrouping && index === 0) {
-          const config = clause.dateGrouping,
-            start = metricDateTime(value),
-            end = metricDateNext(start, config.interval, config.timeZone);
-          return [
-            { field, op: ">=", value: new Date(start).toISOString() },
-            { field, op: "<", value: new Date(end).toISOString() },
-          ];
-        }
-        return [{ field, op: "=", value: String(value) }];
-      },
-    );
-    if (!where.length) return;
-    api.setQuery((previous) => ({
-      ...previous,
-      where: [...previous.where, ...where],
-      offset: 0,
-    }));
+    const next = inspectBucketQuery(api.query, bucket, clause, dataset.schema);
+    if (!next) {
+      setMessage("This metric result cannot be opened as matching records.");
+      return;
+    }
+    if (next.where.length === api.query.where.length) {
+      setMessage("This total already covers every matching record.");
+      return;
+    }
+    api.setQuery(next);
     tour.record({ type: "inspect" });
     setMessage(
-      `Filtered by ${bucket.keys.map((value) => value ?? "missing value").join(" / ")}.`,
+      `Filtered by ${[
+        ...bucket.keys.map((value) => value ?? "missing value"),
+        ...(bucket.bin ? [`${bucket.bin.min}–${bucket.bin.max}`] : []),
+      ].join(" / ")}.`,
     );
   }
   async function downloadSelection() {

@@ -138,7 +138,7 @@ func TestSQLiteDistributionErrorsAndBudgets(t *testing.T) {
 		q.Metrics[0].GroupBy = []string{"flag"}
 		d.MaxGroups = 2
 		q.Metrics[0].GroupLimit = 1
-		if _, e := d.ExecuteV2(context.Background(), db, nil, &q, qt.PlanOptions{}); e == nil {
+		if r, e := d.ExecuteV2(context.Background(), db, nil, &q, qt.PlanOptions{}); metricFailure(t, r, e) != "group population exceeds host budget" {
 			t.Fatal("group budget ignored")
 		}
 		d.MaxGroups = 0
@@ -168,17 +168,15 @@ func TestSQLiteDistributionValidation(t *testing.T) {
 	for _, change := range []func(*qt.MetricQuery){func(q *qt.MetricQuery) { q.Metrics[0].Distribution.Kind = "unknown" }, func(q *qt.MetricQuery) { q.Metrics[0].Distribution.Input = "SUM([n])" }, func(q *qt.MetricQuery) { q.Metrics[0].Distribution.Input = "[text]" }, func(q *qt.MetricQuery) { q.Metrics[0].Distribution.Bins = 31 }, func(q *qt.MetricQuery) { q.Metrics[0].Distribution.Whiskers = "other" }, func(q *qt.MetricQuery) { q.Metrics[0].ExpressionY = "COUNT()" }, func(q *qt.MetricQuery) { q.Metrics[0].GroupBy = []string{"flag", "text"} }} {
 		q := distributionQuery("histogram", "[n]")
 		change(&q)
-		if _, e := d.ExecuteV2(context.Background(), db, nil, &q, qt.PlanOptions{}); e == nil {
-			t.Fatal(q)
-		}
+		r, e := d.ExecuteV2(context.Background(), db, nil, &q, qt.PlanOptions{})
+		metricFailure(t, r, e)
 	}
 	f := d.Schema.Fields["n"]
 	f.AggregateOps = []string{}
 	d.Schema.Fields["n"] = f
 	q := distributionQuery("box", "[n]")
-	if _, e := d.ExecuteV2(context.Background(), db, nil, &q, qt.PlanOptions{}); e == nil {
-		t.Fatal("disabled measure accepted")
-	}
+	r, e := d.ExecuteV2(context.Background(), db, nil, &q, qt.PlanOptions{})
+	metricFailure(t, r, e)
 }
 
 func TestSQLiteDistributionNumericPrecision(t *testing.T) {
@@ -242,9 +240,8 @@ func TestSQLiteDistributionComputedAndSnapshot(t *testing.T) {
 	f.AggregateOps = []string{}
 	d.Schema.Fields["n"] = f
 	q.ExpectedRevisions = handshake.ResolvedRevisions
-	if _, e = d.ExecuteV2In(ctx, tx, nil, &q, qt.PlanOptions{}); e == nil {
-		t.Fatal("transitive disabled measure accepted")
-	}
+	r, e = d.ExecuteV2In(ctx, tx, nil, &q, qt.PlanOptions{})
+	metricFailure(t, r, e)
 }
 func TestSQLiteHistogramGlobalErrorBeforeTopN(t *testing.T) {
 	db, d := setupV2(t)

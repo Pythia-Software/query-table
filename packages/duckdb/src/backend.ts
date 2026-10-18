@@ -27,6 +27,7 @@ import {
   type QueryResultV3,
   type ServerQuery,
   type Transport,
+  type MetricSort,
   type MetricValue,
   type QueryState,
 } from "@pythia-software/query-table-core";
@@ -196,6 +197,8 @@ export class DuckDBBackend {
       regex: true,
       regexSourceFilters: true,
       regexAggregateExpressions: false,
+      metricFilters: true,
+      metricMinCount: true,
       maxRows: positive(options.maxRows, 10000, 10000),
       maxGroups: positive(options.maxGroups, 10000, 10000),
       maxPopulation: positive(options.maxPopulation, 250000, 10000000),
@@ -305,6 +308,10 @@ export class DuckDBBackend {
         return result;
       } catch (error) {
         await this.sql("ROLLBACK").catch(() => {});
+        // Metrics commit staged relations before isolating each clause, so a
+        // rollback alone may not remove them.
+        for (const table of tables.reverse())
+          await this.sql(`DROP TABLE IF EXISTS ${id(table)}`).catch(() => {});
         abort(signal);
         throw error;
       }
@@ -544,21 +551,30 @@ export class DuckDBBackend {
     signal?: AbortSignal,
   ): Promise<AggregationResultEntry[]> {
     const output: AggregationResultEntry[] = [];
+    // A failed DuckDB statement aborts its transaction, and DuckDB has no
+    // savepoints. Clauses read only staged temporary relations, so commit
+    // them and give each clause its own transaction.
+    await this.sql("COMMIT", [], signal);
     for (const clause of clauses) {
       abort(signal);
+      const created = tables.length;
+      await this.sql("BEGIN TRANSACTION", [], signal);
       try {
-        output.push(
-          await this.metric(
-            relation,
-            schema,
-            query,
-            clause,
-            now,
-            tables,
-            signal,
-          ),
+        const entry = await this.metric(
+          relation,
+          schema,
+          query,
+          clause,
+          now,
+          tables,
+          signal,
         );
+        await this.sql("COMMIT", [], signal);
+        output.push(entry);
       } catch (error) {
+        await this.sql("ROLLBACK").catch(() => {});
+        // The rollback discarded this clause's scratch relations.
+        tables.splice(created);
         abort(signal);
         output.push({
           id: clause.id,
@@ -567,6 +583,7 @@ export class DuckDBBackend {
         });
       }
     }
+    await this.sql("BEGIN TRANSACTION", [], signal);
     return output;
   }
   private async metric(
@@ -591,6 +608,10 @@ export class DuckDBBackend {
         ? `${builder.order(query.orderBy)} LIMIT ${builder.bind(query.limit)} OFFSET ${builder.bind(query.offset)}`
         : "";
     let population = `(SELECT * FROM ${id(relation)} WHERE ${where} ${window})`;
+    // The metric's own predicate narrows the scoped rows (inside the page for
+    // shown-row scope) and never changes the table rows.
+    if (clause.where?.length)
+      population = `(SELECT * FROM ${population} r WHERE ${builder.where(clause.where)})`;
     let dateMapping: string | undefined;
     if (clause.dateGrouping) {
       const config = clause.dateGrouping,
@@ -675,7 +696,9 @@ export class DuckDBBackend {
           (row.samples as unknown[]).length > this.maxSamples,
       )
     )
-      throw Error("DuckDB exact sample budget exceeded.");
+      throw Error(
+        `The ${distribution.kind} distribution exceeded the ${this.maxSamples.toLocaleString("en-US")}-sample budget${clause.groupBy.length ? " for one or more groups" : ""}.`,
+      );
     const edges =
       distribution?.kind === "histogram"
         ? histogramEdges(
@@ -769,9 +792,22 @@ export class DuckDBBackend {
           }
         }
     }
-    const sort = clause.sort ?? [
-      { key: "value" as const, dir: "desc" as const },
-    ];
+    // Calendar fill-ins (count 0) are never hidden; hidden groups leave the
+    // ranking, the group limit and Other.
+    let hiddenGroups: number | undefined;
+    if (clause.minCount !== undefined) {
+      const kept = buckets.filter(
+        (bucket) => bucket.count === 0 || bucket.count >= clause.minCount!,
+      );
+      hiddenGroups = buckets.length - kept.length;
+      buckets.splice(0, buckets.length, ...kept);
+    }
+    // Calendar metrics default to chronological order, like the other engines.
+    const sort: MetricSort[] = clause.sort?.length
+      ? clause.sort
+      : clause.dateGrouping
+        ? [{ key: "group0", dir: "asc", nulls: "last" }]
+        : [{ key: "value", dir: "desc" }];
     buckets.sort((a, b) => {
       for (const term of sort) {
         const value = (bucket: typeof a): MetricValue =>
@@ -802,6 +838,7 @@ export class DuckDBBackend {
       groupCount: buckets.length,
       coverage: buckets.length > limit ? "partial" : "exact",
       ...(clause.scope ? { scope: clause.scope } : {}),
+      ...(hiddenGroups !== undefined ? { hiddenGroups } : {}),
     };
   }
   transport(): Transport<DuckDBRow> {
@@ -813,6 +850,8 @@ export class DuckDBBackend {
         shownRows: true,
         distributions: true,
         computedFields: this.computed.size > 0,
+        filters: true,
+        minCount: true,
         profile: DUCKDB_PROFILE,
         maxGroups: this.capabilities.maxGroups,
       },

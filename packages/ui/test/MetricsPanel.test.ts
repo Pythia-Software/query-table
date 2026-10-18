@@ -47,6 +47,21 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe("shared metric card", () => {
+  it("shows a per-metric server error instead of an empty result", () => {
+    const message =
+      "MEDIAN exceeded the 100,000-sample budget for one or more groups";
+    const html = renderToStaticMarkup(
+      createElement(MetricCard, {
+        clause,
+        result: { buckets: [], error: message },
+        fields,
+        renderers: defaultRenderers,
+      }),
+    );
+    expect(html).toContain(message);
+    expect(html).toContain("qt-metrics-error");
+    expect(html).not.toContain("no data");
+  });
   it("formats explicitly calendar-grouped line and vertical bar axes without changing raw groups", () => {
     const dateBuckets: MetricBucket[] = [
       { keys: ["2026-10-01T00:00:00.000Z"], value: 0, count: 0 },
@@ -888,5 +903,44 @@ describe("measure display defaults", () => {
     expect(card({ id: "m", op: "avg", field: "rate", groupBy: [], display: { kind: "auto", format: { kind: "number", decimals: 3 } } })).toContain("0.074");
     expect(card({ id: "m", op: "count_distinct", field: "rate", groupBy: [] })).not.toContain("%");
     expect(card({ id: "m", op: "avg", field: "rate", expression: "AVG([rate])", groupBy: [] })).not.toContain("%");
+  });
+  it("passes the host's own clause to onInspect, without the derived format", () => {
+    const host: RenderingClause = { id: "m", op: "avg", field: "rate", groupBy: [] };
+    const inspected: RenderingClause[] = [];
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    act(() => root.render(createElement(MetricCard, {
+      clause: host, buckets: [{ keys: [], value: 0.0743, count: 4 }], fields: rateFields,
+      renderers: defaultRenderers, onInspect: (_bucket, c) => inspected.push(c),
+    })));
+    act(() => container.querySelector<HTMLElement>(".qt-metric-inspectable")!.click());
+    expect(inspected).toEqual([host]);
+    act(() => root.unmount());
+    container.remove();
+  });
+});
+describe("metric population notes", () => {
+  it("states how many groups minCount hid", () => {
+    const markup = renderToStaticMarkup(
+      createElement(MetricCard, {
+        clause: { ...clause, minCount: 3 },
+        buckets,
+        fields,
+        renderers: defaultRenderers,
+        result: { buckets, groupCount: 2, hiddenGroups: 4 },
+      }),
+    );
+    expect(markup).toContain("4 groups hidden (fewer than 3 rows)");
+    const none = renderToStaticMarkup(
+      createElement(MetricCard, {
+        clause: { ...clause, minCount: 3 },
+        buckets,
+        fields,
+        renderers: defaultRenderers,
+        result: { buckets, groupCount: 2, hiddenGroups: 0 },
+      }),
+    );
+    expect(none).not.toContain("hidden (fewer");
   });
 });

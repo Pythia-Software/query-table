@@ -3,11 +3,11 @@ import {
   MAX_SUMMARY_COLUMNS,
   normalizeQueryState,
   predicatesOf,
+  withGroupingKeys,
   withoutGrouping,
   type FieldSchema,
   type GroupedRow,
   type GroupingModel,
-  type GroupingState,
   queriesEqual,
   type GroupingView,
   type QueryState,
@@ -94,53 +94,13 @@ export function useGroupingController<Row>(
     if (!keys.length && stage)
       previous.current = { query: api.query, revision: viewRevision };
     api.setQuery((current) => {
-      const before = current.grouping;
-      if (!keys.length) return before ? before.source : current;
-      if (!before) {
-        // Restore a previous grouped layout only for the same explicit keys.
-        if (cached?.grouping && canRestore(current))
-          return {
-            ...cached,
-            grouping: { ...cached.grouping, source: current },
-          };
-        const grouping: GroupingState = {
-          keys,
-          summaries: [],
-          representative: null,
-          source: current,
-        };
+      // Restore a previous grouped layout only for the same explicit keys.
+      if (keys.length && !current.grouping && cached?.grouping && canRestore(current))
         return {
-          select: keys.map((field) => ({ field })),
-          where: [],
-          orderBy: [],
-          limit: current.limit,
-          offset: 0,
-          grouping,
+          ...cached,
+          grouping: { ...cached.grouping, source: current },
         };
-      }
-      const grouping = { ...before, keys };
-      const removed = new Set(before.keys.filter((key) => !keys.includes(key)));
-      // An empty SELECT shows the existing keys by default. Materialize them
-      // before adding keys so introducing an explicit SELECT keeps those columns.
-      const columns = current.select.length
-        ? current.select
-        : before.keys.map((field) => ({ field }));
-      return {
-        ...current,
-        grouping,
-        offset: 0,
-        aggregations: [],
-        select: [
-          ...keys
-            .filter((key) => !before.keys.includes(key))
-            .map((field) => ({ field })),
-          ...columns.filter((c) => !removed.has(c.field)),
-        ],
-        where: current.where.filter(
-          (term) => !predicatesOf(term).some((p) => removed.has(p.field)),
-        ),
-        orderBy: current.orderBy.filter((term) => !removed.has(term.field)),
-      };
+      return withGroupingKeys(current, keys);
     });
     setNotice(
       stage && api.query.aggregations?.length && keys.length

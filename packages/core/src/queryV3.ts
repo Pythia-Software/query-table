@@ -14,6 +14,10 @@ export interface QueryCapabilitiesV3 {
   regex: boolean;
   regexSourceFilters?: boolean;
   regexAggregateExpressions?: boolean;
+  /** Executes AggregationClause.where; clauses using it are refused otherwise. */
+  metricFilters?: boolean;
+  /** Executes AggregationClause.minCount and reports hiddenGroups. */
+  metricMinCount?: boolean;
   maxRows: number;
   maxGroups: number;
   maxPopulation: number;
@@ -80,7 +84,12 @@ export function toQueryRequestV3<Row>(query: QueryState, baseSchema: FieldSchema
   if (result.orderBy.length !== q.orderBy.length) diagnostics.push("The query contains unsupported result ordering.");
   if (q.grouping) for (const term of q.grouping.source.where) for (const predicate of predicatesOf(term))
     if (predicate.field.startsWith("@computed/") && !capabilities.computedSourceFilters) diagnostics.push("This server does not support computed source predicates.");
-  const metrics = toMetricQuery(withoutGrouping(q), resultSchema, execution).metrics.map(metric => {
+  const metricQuery = toMetricQuery(withoutGrouping(q), resultSchema, execution);
+  // The projection keeps only pushdown metric-filter terms; never send the
+  // narrowed population silently. (Its other diagnostics, such as calendar
+  // grouping, describe the v2 transport and do not apply here.)
+  diagnostics.push(...metricQuery.diagnostics.filter(issue => issue.code === "residual_metric_filter").map(issue => issue.message));
+  const metrics = metricQuery.metrics.map(metric => {
     const dateGrouping = q.aggregations?.find(clause => clause.id === metric.id)?.dateGrouping;
     return dateGrouping ? { ...metric, dateGrouping } : metric;
   });

@@ -60,7 +60,13 @@ when identical dataset contents across those requests are required.
 
 The defaults are 10,000 result rows, 2,000 groups, 250,000 matching source rows,
 64 MiB of staged values and 100,000 exact samples per group. Budgets fail rather
-than returning partial groups. The convenience HTTP handler has a 2-MiB request
+than returning partial groups. Source, staging, row and grouped-summary budgets
+fail the request. A metric's sample, group or calendar budget, an invalid metric
+input, or a failed metric statement fails only that metric: it returns
+`{id, scope, buckets: [], error}` and the other metrics and rows still return.
+Each metric runs in a savepoint, so `ExecuteIn` transactions stay usable after a
+PostgreSQL statement failure. Metric errors from failed statements use a fixed
+message rather than driver text. The convenience HTTP handler has a 2-MiB request
 budget and a 30-second deadline. Its authorization callback must select the
 dataset from trusted host state and enforce dataset access and CSRF policy.
 Malformed requests and execution diagnostics return HTTP 400. Infrastructure

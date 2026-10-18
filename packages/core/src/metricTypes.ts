@@ -113,6 +113,12 @@ export interface MetricBoxSummary {
   whiskers: "minmax" | "tukey";
   method: "exact-linear";
 }
+/** One histogram bin: `min <= value < max`, or `<= max` for the final bin. */
+export interface MetricHistogramBin {
+  min: number;
+  max: number;
+  inclusiveMax: boolean;
+}
 export type MetricDistributionResult =
   | { kind: "box"; summary: MetricBoxSummary | null }
   | { kind: "histogram"; edges: number[]; counts: number[]; n: number };
@@ -140,6 +146,10 @@ export interface MetricCapabilities {
   shownRows?: boolean;
   distributions?: boolean;
   computedFields?: boolean;
+  /** Executes AggregationClause.where. Clauses using it are refused otherwise. */
+  filters?: boolean;
+  /** Executes AggregationClause.minCount and reports hiddenGroups. */
+  minCount?: boolean;
   maxGroups?: number;
   profile?: string;
 }

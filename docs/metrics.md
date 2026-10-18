@@ -20,7 +20,7 @@ The **Edit metrics** action opens a transactional workbench. Apply commits the w
 
 The desktop editor has independently resizable metric, expression/settings, reference, and preview panes, plus a modal resized by dragging its corner. The reference pane uses compact Type / Name / ID rows (Type / Name / Signature for functions), with full details on hover. Native selects switch between metric editing and dashboard layout, and between fields and functions. The formula input is a native textarea with diagnostics and cursor-aware reference insertion. It uses the existing formula compiler and worker infrastructure, with no CodeMirror or chart package.
 
-Grouping supports up to 20 fields. Automatic/table display uses a pivot for exactly two grouping fields and a flat table for three or more. Other displays include scalar value, list, horizontal/vertical bars, line, pie, ring, scatter, box plot, and histogram. Chart points expose keyboard and hover tooltips. Escape dismisses an open tooltip; another Escape reaches the enclosing dialog. Combined Other pie/ring slices expose totals but cannot open a single-group inspector. The always-visible **Edit** button opens the metric workbench when `MetricsPanel` receives `api`; the workbench also offers dashboard layout. Hover pencils open an individual metric; custom hosts can instead provide `onEditMetric` and `onEditDashboard`. Configured decimal precision applies to both pie/ring values and their percentage shares. Pie/ring require valid nonnegative numeric shares; invalid chart data is explained rather than drawn misleadingly.
+Grouping supports up to 20 fields. Automatic/table display uses a pivot for exactly two grouping fields and a flat table for three or more. Other displays include scalar value, list, horizontal/vertical bars, line, pie, ring, scatter, box plot, and histogram. Chart points expose keyboard and hover tooltips. Escape dismisses an open tooltip; another Escape reaches the enclosing dialog. Combined Other pie/ring slices and list rows expose totals but cannot open a single-group inspector. The always-visible **Edit** button opens the metric workbench when `MetricsPanel` receives `api`; the workbench also offers dashboard layout. Hover pencils open an individual metric; custom hosts can instead provide `onEditMetric` and `onEditDashboard`. Configured decimal precision applies to both pie/ring values and their percentage shares. Pie/ring require valid nonnegative numeric shares; invalid chart data is explained rather than drawn misleadingly.
 
 Dashboard layout supports wrapped pointer and keyboard reordering, card selection, inline names, and whole-rem desired/minimum widths and heights (including sizes below 8rem). Raising a minimum raises the desired dimension. Canvas presets and an editable width simulate available space. Card actions appear on hover or keyboard focus, including navigation back to that metric's editor. Very small cards may need scrolling for labels or raw data.
 
@@ -47,13 +47,81 @@ const ratio: AggregationClause = {
 
 Aggregate formulas reduce row expressions and then compute once per group. `SUM([x]) / SUM([y])` is a ratio of sums, not an average of row ratios. Use `NULLIF` for an intentionally nullable denominator. Nested aggregates and bare row references outside reductions are invalid. `COUNT()`, `COUNT(expr)`, `COUNT_DISTINCT`, `SUM`, `AVG`, `MIN`, `MAX`, and `MEDIAN` retain scalar semantics. `MEDIAN` accepts numeric expressions, ignores nulls, and averages the middle two values for even populations; an empty population returns null. It is available in aggregate formulas, not the legacy `AggOp` selector. The local expression compiler also supports its documented row functions; each server profile advertises a narrower subset.
 
-`sort` is a stable multi-term order over `value`, scatter `y`, `count`, distribution `samples`, or `group0`, `group1`, etc. Each term has ascending/descending direction and optional null placement. `groupLimit` (1–10,000) applies after reductions, formulas, and sorting. Results expose total group count/coverage so truncated charts can be identified. An Other bucket is available only when the engine can derive an exact additive remainder; ratios are not treated as additive.
+`sort` is a stable multi-term order over `value`, scatter `y`, `count`, distribution `samples`, or `group0`, `group1`, etc. Each term has ascending/descending direction and optional null placement. `groupLimit` (1–10,000) applies after reductions, formulas, `minCount`, and sorting. Results expose total group count/coverage so truncated charts can be identified. An Other bucket is available only when the engine can derive an exact additive remainder; ratios are not treated as additive.
 
 Scatter stores the primary reduction in `expression` and the second in `expressionY`, with `display.kind: "scatter"`. Each typed group tuple produces one X/Y pair from the same population. Format X/Y independently through `xFormat`/`yFormat`, and label them through `xLabel`/`yLabel`.
 
 Box and histogram definitions use `distribution: { kind, input, ... }`, where `input` is a numeric **row** expression, not an aggregate formula. Box options select `whiskers: "minmax" | "tukey"`; optional `display.boxMean` shows a mean marker. Histograms use `bins` (2–30). Quartiles interpolate at `(n-1)*p`. Tukey whiskers end at observed in-fence values; both outlier tails are retained in a bounded sample with a total outlier count. Histograms derive shared equal-width edges from the full scoped population before ranking/limiting groups; the final upper bound is inclusive. Constants and empty populations have explicit results. Distribution response types are exported by core.
 
 Legend placement for pie, ring, and scatter is `left`, `right`, `top`, `bottom`, or `none`. List options are `showBars`, `useGroupColors`, and `showValues`. These affect presentation only. Saved inactive alternatives can be retained during editing; the computation projector sends only the active scalar, scatter, or distribution definition.
+
+## Metric filters and minimum group size
+
+Two clause fields change which rows and groups one metric reduces, without
+changing the table's rows or any other metric:
+
+```ts
+const errorKinds: AggregationClause = {
+  id: "error-kinds",
+  op: "count",
+  groupBy: ["kind"],
+  // "Error kinds among errors only": a pre-group predicate for this metric.
+  where: [{ field: "status", op: "=", value: "error" }],
+  // Hide kinds observed fewer than 20 times instead of ranking them.
+  minCount: 20,
+  groupLimit: 10,
+};
+```
+
+`where` has the table WHERE's shape (CNF terms with optional OR groups), field
+allowlist, operators per type and relative datetime values, and is ANDed with
+the table WHERE before grouping. Relative values resolve against the same
+request clock as the table WHERE. Regex operators are unavailable in metric
+filters, and remote executors require server-filterable (pushdown) fields; a
+residual predicate is an explicit `residual_metric_filter` diagnostic. With
+`scope: "shownRows"` the table query selects the page first and the metric
+filter narrows rows inside it; it never selects a different page. In grouped
+mode metrics run over group rows, so `where` refers to grouped-result fields.
+At most 100 predicates are allowed. Use
+`where: [{ field, op: "is_not_null", value: "" }]` to exclude the null group.
+Unlike `IF(...)` inside an aggregate formula, non-matching rows do not form a
+group at all.
+
+`minCount` (an integer from 1 to 1,000,000) drops groups whose row count, after
+`where`, is below the threshold. It counts rows in the group regardless of the
+metric's operation or formula, including rows whose measure is null. Groups are
+removed before sorting, `groupLimit` and Other, so a top-N list still returns N
+qualifying groups. Removed groups are reported as `hiddenGroups` on the result
+(present whenever `minCount` is set) and are **not** folded into Other:
+`groupCount`, `buckets` and `other` describe only the qualifying groups. Folding
+them would mix "too small to trust" groups into a remainder that is presented as
+exact, so every engine follows this one rule. `minCount` requires at least one
+grouping field; on a grand-total metric it is a clause diagnostic rather than
+being ignored.
+
+- **Calendar grouping.** `includeEmpty` fills empty buckets after `minCount`
+  selects the observed groups, and those empty buckets are never hidden or
+  counted. An observed bucket below the threshold is hidden and leaves a gap; it
+  is not replaced by an empty bucket. An `observed` range still spans the dates
+  of hidden buckets.
+- **Distributions.** `where` filters box and histogram samples, so histogram
+  edges come from the filtered population. `minCount` hides box cohorts (and
+  histogram groups) by their row count; like `groupLimit`, it does not change
+  the shared histogram extent.
+- **Execution metadata.** `processedRows` remains the scope population before
+  the metric's own filter. Host group budgets count hidden groups too.
+
+Executors advertise support explicitly: `metricCapabilities.filters` and
+`metricCapabilities.minCount` for v2 transports, and
+`queryCapabilities.metricFilters` and `queryCapabilities.metricMinCount` for the
+v3 executor. A clause that uses an unadvertised control gets its own error
+result; the other metrics in the batch still run, and the control is never
+silently dropped. The v1 `fetchAggregations` endpoint never receives either
+field. The bundled DuckDB, Go SQLite and Go v3 executors advertise both.
+
+The metric editor exposes **Only rows where…** (the table's filter chips scoped
+to the metric) under *Data scope* and **Minimum rows per group** under
+*Ordering & limits*. Cards note "N groups hidden (fewer than M rows)".
 
 ## Population scope
 
@@ -84,6 +152,52 @@ definitions, including shorthand aggregates, and preserve null versus empty-text
 keys. Local shown-row evaluation preserves the table's input order for sort
 ties; it does not add a hidden identity sort.
 
+## Drilldown
+
+`MetricsPanel` and `MetricCard` accept `onInspect(bucket, clause)`. It fires
+from chart marks, list rows, pivot and flat-table values, value cards, box-plot
+cohorts and histogram bins, by click, Enter or Space. Inspectable elements get
+`role="button"` and the `qt-metric-inspectable` class (chart marks keep
+`qt-metric-mark`); synthetic Other rows are never inspectable. Without
+`onInspect` nothing changes. A histogram bin passes a bucket with the cohort's
+`keys`, the bin's `count`, and client-only `bin: { min, max, inclusiveMax }`.
+
+`inspectBucketQuery(query, bucket, clause, schema)` turns that into the query
+for the underlying records, or `null` when no exact query exists:
+
+```ts
+<MetricsPanel api={table} aggregations={table.aggregations} fields={fields}
+  onInspect={(bucket, clause) => {
+    const next = inspectBucketQuery(table.query, bucket, clause, schema);
+    if (next) table.setQuery(next);
+  }} />
+```
+
+- The clause's own `where` terms come first, so the records match the metric's
+  population. Groups hidden by `minCount` have no bucket to inspect.
+- Each `groupBy` key adds `=`; a null key adds `is_null`. Legacy aggregates
+  put empty text in the NULL bucket, and `is_null` matches empty text locally,
+  so the two agree. Typed metrics keep an empty-text key distinct and drill to
+  `= ""`. Local filters treat NULL and empty text alike for both operators, so
+  with `clientRows` either drill returns both groups; the bundled backend
+  distinguishes them.
+- A date-grouped key adds `>= start` and `< next`, using the clause's interval
+  and timezone (`metricDateNext`), encoded as ISO instants (`…Z`). Filters
+  compare instants, so a date-only source value is read as UTC midnight; group
+  date-only columns in UTC to keep drilldown on the same day.
+- A histogram bin adds `>= min` and `< max` (`<= max` for the final bin) on the
+  distribution input. The input must be a single numeric field reference; a
+  computed expression returns `null`. A box cohort is its group keys.
+- Grouped queries: metrics run over group rows, so the terms are added to the
+  top-level `where` (HAVING). Pass the source schema or the group schema.
+- `scope: "shownRows"` returns `null`: re-filtering re-pages the population. An
+  additive Other remainder (no keys) returns `null`. Excluding the shown groups
+  would be exact only with null-safe negation of every key, so it is not built.
+- Keys on unknown, unfilterable or `textarray` fields return `null`.
+
+Existing terms are kept, terms already present are not repeated, and `offset`
+resets to 0. For grouped rows, see `groupSourceQuery` in [grouping](grouping.md).
+
 ## Transport and server computed fields
 
 ```ts
@@ -92,6 +206,7 @@ const transport: Transport<Row> = {
   metricCapabilities: {
     version: 2, expressions: true, shownRows: true,
     distributions: true, computedFields: true, profile: "qt-postgres-v1",
+    filters: true, minCount: true, // only if the service executes them
   },
   fetchMetrics: (request, signal) => fetchMetricBatch(request, signal),
   fetchRowsV2: (request, signal) => fetchComputedRows(request, signal),

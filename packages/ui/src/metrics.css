@@ -350,3 +350,6 @@
 .qt-metric--compact .qt-metric-legend-label { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .qt-metric--compact :is(.qt-metric-legend-value,.qt-metric-legend-share) { flex:none; font-variant-numeric:tabular-nums; white-space:nowrap; }
 .qt-metric--compact .qt-metric-legend-share { color:var(--qt-metric-muted,var(--qt-muted,#68717d)); }
+.qt-metric .qt-metric-inspectable { cursor: pointer; outline: none; border-radius: 3px; }
+.qt-metric .qt-metric-inspectable:hover { background: color-mix(in srgb, var(--qt-metric-accent, var(--qt-accent, #3979c3)) 8%, transparent); }
+.qt-metric .qt-metric-inspectable:focus-visible { outline: 2px solid var(--qt-metric-accent, var(--qt-accent, #3979c3)); outline-offset: 2px; }

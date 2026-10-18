@@ -52,18 +52,23 @@ it("fills from the complete local dataset even with a rows-only transport", asyn
   expect(r.metrics[0]!.buckets.map((b) => b.value)).toEqual([0, 1, 0, 0]);
   expect(fetchRows).not.toHaveBeenCalled();
 });
-it("rejects unsupported server date grouping before dispatch", async () => {
+it("fails unsupported server date grouping on its clause before dispatch", async () => {
   const fetchMetrics = vi.fn(async () => ({ metrics: [] }));
-  await expect(
-    executeMetrics(query, {
-      schema,
-      transport: {
-        fetchRows: async () => ({ rows, total: 1 }),
-        fetchMetrics,
-        metricCapabilities: { version: 2 },
-      },
-    }),
-  ).rejects.toThrow("does not support");
+  const result = await executeMetrics(query, {
+    schema,
+    transport: {
+      fetchRows: async () => ({ rows, total: 1 }),
+      fetchMetrics,
+      metricCapabilities: { version: 2 },
+    },
+  });
+  expect(result.metrics).toEqual([
+    {
+      id: "dates",
+      buckets: [],
+      error: expect.stringContaining("does not support"),
+    },
+  ]);
   expect(fetchMetrics).not.toHaveBeenCalled();
 });
 it("uses the committed shown page locally while retaining the original filter bounds", async () => {

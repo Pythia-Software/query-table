@@ -80,6 +80,53 @@ export function withoutGrouping(query: QueryState): QueryState {
   const { grouping: _grouping, ...result } = query;
   return result;
 }
+
+/** Leave the grouping stage: the source snapshot restores the record WHERE,
+ * layout, ordering, paging, metrics and item details. Ungrouped queries are
+ * returned unchanged. */
+export function exitGrouping(query: QueryState): QueryState {
+  return query.grouping ? query.grouping.source : query;
+}
+
+/** The grouping-key transition behind the grouping controls. Empty keys exit
+ * the stage; an ungrouped query becomes the source of a new stage that shows
+ * only its keys; a grouped query swaps keys, dropping result columns, HAVING
+ * terms and sorts on removed keys and clearing group metrics. */
+export function withGroupingKeys(query: QueryState, keys: string[]): QueryState {
+  const before = query.grouping;
+  if (!keys.length) return exitGrouping(query);
+  if (!before)
+    return {
+      select: keys.map((field) => ({ field })),
+      where: [],
+      orderBy: [],
+      limit: query.limit,
+      offset: 0,
+      grouping: { keys, summaries: [], representative: null, source: query },
+    };
+  const removed = new Set(before.keys.filter((key) => !keys.includes(key)));
+  // An empty SELECT shows the existing keys by default. Materialize them
+  // before adding keys so introducing an explicit SELECT keeps those columns.
+  const columns = query.select.length
+    ? query.select
+    : before.keys.map((field) => ({ field }));
+  return {
+    ...query,
+    grouping: { ...before, keys },
+    offset: 0,
+    aggregations: [],
+    select: [
+      ...keys
+        .filter((key) => !before.keys.includes(key))
+        .map((field) => ({ field })),
+      ...columns.filter((c) => !removed.has(c.field)),
+    ],
+    where: query.where.filter(
+      (term) => !predicatesOf(term).some((p) => removed.has(p.field)),
+    ),
+    orderBy: query.orderBy.filter((term) => !removed.has(term.field)),
+  };
+}
 export const OP_LABEL: Record<SummaryOp, string> = {
   count: "COUNT",
   count_distinct: "DISTINCT",

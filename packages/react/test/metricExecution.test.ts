@@ -221,12 +221,15 @@ describe("metric execution boundary", () => {
       expressionY: "SUM([y])",
       display: { kind: "scatter" as const },
     };
-    await expect(
-      executeMetrics(
+    const clauseError = async (
+      ...args: Parameters<typeof executeMetrics<Row>>
+    ) => (await executeMetrics(...args)).metrics.map((m) => m.error);
+    expect(
+      await clauseError(
         { ...EMPTY_QUERY, aggregations: [paired] },
         { schema, transport: base },
       ),
-    ).rejects.toThrow("composed");
+    ).toEqual([expect.stringContaining("composed")]);
     const execution = {
       profile: "qt-postgres-v1",
       planToken: "same",
@@ -246,12 +249,12 @@ describe("metric execution boundary", () => {
       op: "count" as const,
       groupBy: ["@computed/category"],
     };
-    await expect(
-      executeMetrics(
+    expect(
+      await clauseError(
         { ...EMPTY_QUERY, aggregations: [grouped] },
         { schema, transport: base, execution },
       ),
-    ).rejects.toThrow("computed fields");
+    ).toEqual([expect.stringContaining("computed fields")]);
     await expect(
       executeMetrics(
         { ...EMPTY_QUERY, aggregations: [grouped] },
@@ -270,6 +273,49 @@ describe("metric execution boundary", () => {
       ),
     ).rejects.toThrow("profiles");
     expect(fetchMetrics).not.toHaveBeenCalled();
+  });
+  it("fails only the clauses that need a missing server capability", async () => {
+    const fetchMetrics = vi.fn<NonNullable<Transport<Row>["fetchMetrics"]>>(
+      async (request) => ({
+        metrics: request.metrics.map((m) => ({
+          id: m.id,
+          buckets: [{ keys: [], value: 1, count: 3 }],
+        })),
+      }),
+    );
+    const transport: Transport<Row> = {
+      fetchRows: async () => ({ rows, total: 3 }),
+      fetchMetrics,
+      metricCapabilities: { version: 2, expressions: true },
+    };
+    const result = await executeMetrics(
+      {
+        ...EMPTY_QUERY,
+        aggregations: [
+          { id: "first", op: "sum", field: "x", groupBy: [] },
+          {
+            id: "box",
+            op: "count",
+            groupBy: [],
+            display: { kind: "box" },
+            distribution: { kind: "box", input: "[x]", whiskers: "tukey" },
+          },
+          { id: "last", op: "count", groupBy: [] },
+        ],
+      },
+      { schema, transport },
+    );
+    expect(result.metrics.map((m) => [m.id, m.error])).toEqual([
+      ["first", undefined],
+      ["box", "This server does not support distributions."],
+      ["last", undefined],
+    ]);
+    expect(result.metrics[1]!.buckets).toEqual([]);
+    expect(fetchMetrics).toHaveBeenCalledTimes(1);
+    expect(fetchMetrics.mock.calls[0]![0].metrics.map((m) => m.id)).toEqual([
+      "first",
+      "last",
+    ]);
   });
   it("ignores inactive formula alternatives when gating server features", async () => {
     const fetchMetrics = vi.fn<NonNullable<Transport<Row>["fetchMetrics"]>>(
@@ -461,4 +507,43 @@ it("does not bypass the mixed-dashboard card cap by partitioning engines", async
       m.error?.includes("Malformed metric definitions"),
     ),
   ).toBe(true);
+});
+describe("metric population capability negotiation", () => {
+  const plain = { id: "plain", op: "count" as const, groupBy: ["group"] };
+  const filtered = { id: "filtered", op: "count" as const, groupBy: ["group"], where: [{ field: "name", op: "=" as const, value: "alpha" }] };
+  const small = { id: "small", op: "count" as const, groupBy: ["group"], minCount: 2 };
+  it("fails only the clauses a v2 server cannot execute exactly", async () => {
+    const fetchMetrics = vi.fn(async (request: { metrics: { id: string }[] }) => ({
+      metrics: request.metrics.map((m) => ({ id: m.id, buckets: [{ keys: ["a"], value: 2, count: 2 }] })),
+    }));
+    const transport = { fetchRows: async () => ({ rows: [], total: 0 }), fetchMetrics, metricCapabilities: { version: 2 as const, minCount: true } } as unknown as Transport<Row>;
+    const result = await executeMetrics({ ...EMPTY_QUERY, aggregations: [plain, filtered, small] }, { schema, transport });
+    expect(fetchMetrics).toHaveBeenCalledOnce();
+    expect(fetchMetrics.mock.calls[0]![0].metrics.map((m) => m.id)).toEqual(["plain", "small"]);
+    expect(result.metrics.map((m) => [m.id, m.error ?? null])).toEqual([
+      ["plain", null],
+      ["filtered", "This server does not support metric filters."],
+      ["small", null],
+    ]);
+  });
+  it("never sends population controls to the version 1 aggregation endpoint", async () => {
+    const fetchAggregations = vi.fn(async (request: { aggregations: { id: string }[] }) => ({
+      metrics: request.aggregations.map((a) => ({ id: a.id, buckets: [] })),
+    }));
+    const transport = { fetchRows: async () => ({ rows: [], total: 0 }), fetchAggregations } as unknown as Transport<Row>;
+    const result = await executeMetrics({ ...EMPTY_QUERY, aggregations: [plain, small] }, { schema, transport });
+    expect(fetchAggregations.mock.calls[0]![0].aggregations.map((a) => a.id)).toEqual(["plain"]);
+    expect(result.metrics[1]).toEqual({ id: "small", buckets: [], error: "This server does not support a minimum rows per group." });
+  });
+  it("evaluates both controls on the local engine, including shown rows", async () => {
+    const result = await executeMetrics(
+      { ...EMPTY_QUERY, aggregations: [filtered, small, { ...filtered, id: "page", scope: "shownRows" as const }] },
+      { schema, clientRows: rows, shownRows: rows, rowsReady: true },
+    );
+    expect(result.metrics.map((m) => [m.id, m.buckets.map((b) => [b.keys[0], b.count]), m.hiddenGroups])).toEqual([
+      ["filtered", [["a", 1]], undefined],
+      ["small", [["a", 2]], 1],
+      ["page", [["a", 1]], undefined],
+    ]);
+  });
 });

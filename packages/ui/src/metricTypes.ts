@@ -16,5 +16,5 @@ export type RenderingClause = AggregationClause;
 /** Optional exact remainder for transports that truncate additive groups. */
 export type MetricRenderResult = Pick<
   AggregationResultEntry,
-  "buckets" | "error" | "groupCount" | "coverage" | "scope" | "processedRows"
+  "buckets" | "error" | "groupCount" | "coverage" | "scope" | "processedRows" | "hiddenGroups"
 > & { other?: AggregationBucket };

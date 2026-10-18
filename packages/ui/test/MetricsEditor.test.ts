@@ -838,3 +838,51 @@ it("saves display group limits and remainder visibility separately from the quer
     expect(saved.groupLimit).toBe(12);
   } finally { act(() => root.unmount()); host.remove(); }
 });
+
+it("edits a metric's own filter and minimum rows per group without touching the table query", async () => {
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const setQuery = vi.fn();
+  const fields: FieldDef<unknown>[] = [
+    { name: "kind", label: "Kind", type: "text", source: { kind: "backend" } },
+    { name: "status", label: "Status", type: "text", source: { kind: "backend" } },
+  ];
+  const clause: AggregationClause = {
+    id: "m",
+    op: "count",
+    groupBy: ["kind"],
+    where: [
+      { field: "status", op: "=", value: "error" },
+      { field: "kind", op: "!=", value: "dns" },
+    ],
+  };
+  const table = { where: [{ field: "status", op: "is_not_null", value: "" }], select: [], orderBy: [], limit: 100, offset: 0 };
+  const api = {
+    aggregations: { clauses: [clause] },
+    setQuery,
+    rows: [],
+    total: 0,
+    query: table,
+    filterValues: vi.fn(async () => ({ values: [], hasMore: false })),
+  } as unknown as QueryTableApi<unknown>;
+  try {
+    await act(async () => root.render(createElement(MetricsEditor, { api, fields, onClose: vi.fn() })));
+    const scoped = host.querySelector('[aria-label="Only rows where"]')!;
+    expect(scoped.querySelectorAll(".qt-chip--where")).toHaveLength(2);
+    act(() => scoped.querySelector<HTMLButtonElement>('[aria-label="Remove Kind filter"]')!.click());
+    expect(scoped.querySelectorAll(".qt-chip--where")).toHaveLength(1);
+    editInput(host.querySelector('[aria-label="Minimum rows per group"]')!, "3");
+    expect(host.textContent).toContain("at least 3 rows");
+    expect(host.textContent).toContain("only rows where 1 filter matches");
+    act(() => [...host.querySelectorAll("button")].find((b) => b.textContent === "Apply metrics")!.click());
+    const next = setQuery.mock.calls[0]![0](table);
+    expect(next.where).toEqual(table.where);
+    expect(next.aggregations).toEqual([
+      { id: "m", op: "count", groupBy: ["kind"], minCount: 3, where: [{ field: "status", op: "=", value: "error" }] },
+    ]);
+  } finally {
+    act(() => root.unmount());
+    host.remove();
+  }
+});
