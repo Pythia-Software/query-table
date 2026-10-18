@@ -880,7 +880,11 @@ export function GroupedColumnsEditor({
                               detail={representativeLabel(representative)}
                               code="ROW"
                               selected={selected.op === "row"}
-                              onClick={() => patchSummary({ op: "row" })}
+                              // Row values keep the source field's rendering;
+                              // the Format control is hidden for them.
+                              onClick={() =>
+                                patchSummary({ op: "row", display: undefined })
+                              }
                             />
                           </div>
                         )}

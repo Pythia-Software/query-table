@@ -295,3 +295,26 @@ it("sets a summary column format from the column editor", async () => {
   await clickText("Apply columns");
   expect(api.query.grouping!.summaries).toEqual([{ id: "total", op: "avg", field: "amount" }]);
 });
+
+it("clears a summary format when the column switches to a representative row value", async () => {
+  const rate: SummaryColumn = { id: "total", op: "avg", field: "amount", display: { kind: "percent", decimals: 1 } };
+  const example: SummaryColumn = { id: "example", op: "row", field: "region" };
+  await mount(["team"], schema, undefined, [rate, example]);
+  await click("Customize columns");
+  await act(async () => document.querySelector<HTMLButtonElement>('.qt-column-item-name[title="Average Amount"]')!.click());
+  expect(document.querySelector('[aria-label="Column format"]')).not.toBeNull();
+  await act(async () => Array.from(document.querySelectorAll<HTMLButtonElement>(".qt-column-row-choice button")).find(b => b.textContent?.includes("Representative row"))!.click());
+  expect(document.querySelector('[aria-label="Column format"]')).toBeNull();
+  await clickText("Apply columns");
+  expect(api.query.grouping!.summaries[0]).toEqual({ id: "total", op: "row", field: "amount" });
+  expect(api.schema!.fields.find(field => field.name === "total")?.display).toBeUndefined();
+});
+
+it("clears a summary format when the headless controller switches it to a row value", async () => {
+  const rate: SummaryColumn = { id: "total", op: "avg", field: "amount", display: { kind: "percent" } };
+  await mount(["team"], schema, undefined, [rate, { id: "example", op: "row", field: "region" }]);
+  await act(async () => api.grouping!.changeSummary("total", "row"));
+  expect(api.query.grouping!.summaries[0]).toEqual({ id: "total", op: "row", field: "amount" });
+  await act(async () => api.grouping!.changeSummary("example", "min"));
+  expect(api.query.grouping!.summaries[1]).toEqual({ id: "example", op: "min", field: "region" });
+});

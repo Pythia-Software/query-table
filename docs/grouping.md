@@ -141,7 +141,9 @@ expression) that measures the column with SUM/AVG/MIN/MAX uses a `number` (with
 `decimals`), `percent` or `duration` display as its default value format;
 `display.format` on the metric still wins. Counts are never formatted this way.
 The column editor offers Number, Percent and Duration with optional decimals
-and a duration source unit.
+and a duration source unit. Switching a summary to a representative-row value
+(in the editor or with `changeSummary(id, "row")`) clears its format, so the
+row value keeps its source field's presentation.
 
 ## State, saved views, and authoring
 
