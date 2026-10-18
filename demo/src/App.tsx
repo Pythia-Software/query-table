@@ -114,10 +114,11 @@ const renderers: RenderRegistry<Run> = {
 };
 
 /** Group link columns with `to: { kind: "query", target: "runs" }` open the
- * composed query in this table. The href is a real URL, so modifier clicks
- * open it in a new tab; plain clicks stay client-side via onNavigate. */
+ * composed query in this table, on whichever route mounted it. The href is a
+ * real URL, so modifier clicks open it in a new tab; plain clicks stay
+ * client-side via onNavigate. */
 const LINK_TARGETS: LinkTargets = {
-  runs: (query) => `/?q=${encodeQuery(query)}`,
+  runs: (query) => `${window.location.pathname}?q=${encodeQuery(query)}`,
 };
 
 export function App({ dateExample = false, savedQueriesPrototype = false }: {

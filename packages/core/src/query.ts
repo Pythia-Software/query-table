@@ -634,13 +634,29 @@ function normalizeLinkSpec(value: unknown): LinkSpec | undefined {
   return { label, to: destination };
 }
 
-/** Keep only the facets the patch supplies, each normalized like any query. */
+/** True when normalization kept every supplied WHERE term. An OR group counts
+ * as its members (an empty group as one), so dropping any literal, a whole
+ * group or anything past the predicate budget is detected. */
+function keptEveryTerm(supplied: unknown, kept: readonly WhereTerm[]): boolean {
+  if (!Array.isArray(supplied)) return false;
+  const count = supplied.reduce((total: number, term: unknown) =>
+    total + (isRecord(term) && Array.isArray(term.any) ? Math.max(1, term.any.length) : 1), 0);
+  return count === kept.reduce((total, term) => total + predicatesOf(term).length, 0);
+}
+
+/** Keep only the facets the patch supplies, each normalized like any query.
+ * Ordinary normalization drops malformed filter terms, which here would
+ * silently widen the destination, so any loss rejects the whole patch. */
 function normalizeLinkPatch(value: unknown): QueryPatch | undefined {
   if (!isRecord(value) || !boundedString(value.id, MAX_FIELD_NAME_LENGTH) || !Array.isArray(value.owns) || !isRecord(value.query)) return undefined;
   if (value.owns.length > QUERY_FACETS.size || value.owns.some((facet) => typeof facet !== "string" || !QUERY_FACETS.has(facet))) return undefined;
   const raw = value.query;
   const normalized = normalizeQuery(raw, EMPTY_QUERY, false);
   if (normalized.grouping?.diagnostics) return undefined;
+  if (raw.where !== undefined && !keptEveryTerm(raw.where, normalized.where)) return undefined;
+  if (raw.aggregations !== undefined && (!Array.isArray(raw.aggregations) ||
+    raw.aggregations.length !== (normalized.aggregations?.length ?? 0) ||
+    normalized.aggregations?.some((clause) => clause.diagnostics?.length))) return undefined;
   const query: Partial<QueryState> = {};
   for (const key of PATCH_QUERY_KEYS) {
     if (raw[key] !== undefined && normalized[key] !== undefined) (query as Record<string, unknown>)[key] = normalized[key];

@@ -97,6 +97,16 @@ try {
   assert.deepEqual([...new Set(await page.locator('.qt-table tbody td[data-qt-field="overall"]').allTextContents())], ["FAIL"]);
   assert.deepEqual([...new Set(await page.locator('.qt-table tbody td[data-qt-field="platform"]').allTextContents())], [target]);
   await page.screenshot({ path: ".context/grouping-links/followed.png", fullPage: true });
+
+  // Other routes that mount the same table keep their own path.
+  await page.goto(`${origin}/saved-queries?q=${encodeQuery(initial)}`);
+  await page.waitForFunction((count) => document.querySelectorAll(".qt-table tbody a.qt-group-link").length === count, platforms.length);
+  assert.match(await links.first().getAttribute("href"), /^\/saved-queries\?q=/);
+  await page.evaluate(() => { window.__qtMarker = "saved queries"; });
+  await links.nth(platforms.indexOf(target)).click();
+  await page.waitForURL((url) => !query(url.toString()).grouping);
+  assert.equal(new URL(page.url()).pathname, "/saved-queries");
+  assert.equal(await page.evaluate(() => window.__qtMarker), "saved queries");
   assert.deepEqual(errors, []);
   console.log(`grouping links: ${platforms.length} links, ${expected} ${target} failing runs after a plain click`);
 } finally {

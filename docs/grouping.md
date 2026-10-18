@@ -273,7 +273,9 @@ summaries. Substituted values are percent-encoded.
   from the sort, filter and metric pickers.
 - Link specs travel with the query: normalization, `?q=` links, saved queries
   and snapshot links. A malformed spec is kept as an invalid column instead of
-  being partly applied. A link's patch cannot itself contain link columns.
+  being partly applied. That includes a patch with a filter or metric that
+  normalization would otherwise drop, which would widen the destination. A
+  link's patch cannot itself contain link columns.
 - `groupLinkQuery(query, value)` and `resolveGroupLink(query, value, targets)`
   expose the same composition for custom renderers. The cell value is a
   `GroupLinkValue`, and `createGroupLinkRenderer` is the renderer `DataTable`

@@ -290,6 +290,34 @@ describe("link column round-trips", () => {
     expect(normalizeQueryState(nested).grouping!.summaries[0]!.link).toBeUndefined();
   });
 
+  it("rejects a patch whose filters lose any term during normalization", () => {
+    const withWhere = (where: unknown) => normalizeQueryState(grouped(["tool"], [link("p", { label: "p", to: { kind: "query", target: "t",
+      patch: { id: "narrow", owns: ["filters"], query: { where } as never } } })])).grouping!.summaries[0]!;
+    const valid = { field: "failed", op: "=", value: "true" };
+    expect(withWhere([valid]).link!.to).toMatchObject({ patch: { query: { where: [valid] } } });
+    for (const where of [
+      [valid, { field: "tool", op: "sounds_like", value: "x" }],
+      [valid, { field: "tool", op: "=", value: "x".repeat(10_001) }],
+      [valid, { any: [{ field: "tool", op: "bogus", value: "x" }, { field: "repo", op: "bogus", value: "y" }] }],
+      [valid, { any: [] }],
+      [valid, "not a term"],
+      Array.from({ length: 101 }, () => valid),
+      "not a list",
+    ]) {
+      const column = withWhere(where);
+      expect(column.link, JSON.stringify(where).slice(0, 80)).toBeUndefined();
+      expect(createGroupingModel(schema).linkDiagnostics({ keys: ["tool"], summaries: [column] })).toEqual(["Link: Invalid link definition."]);
+    }
+  });
+
+  it("rejects a patch whose metrics lose a filter or clause", () => {
+    const withMetrics = (aggregations: unknown) => normalizeQueryState(grouped(["tool"], [link("p", { label: "p", to: { kind: "query", target: "t",
+      patch: { id: "m", owns: ["metrics"], query: { aggregations } as never } } })])).grouping!.summaries[0]!.link;
+    expect(withMetrics([{ id: "n", op: "count", groupBy: [] }])).toBeDefined();
+    expect(withMetrics([{ id: "n", op: "count", groupBy: [], where: [{ field: "tool", op: "bogus", value: "x" }] }])).toBeUndefined();
+    expect(withMetrics([{ id: "n", op: "count", groupBy: [] }, { op: "count" }])).toBeUndefined();
+  });
+
   it("keeps only the facets a patch supplies", () => {
     const patched = normalizeQueryState(grouped(["tool"], [link("p", { label: "p", to: { kind: "query", target: "t",
       patch: { id: "layout", owns: ["columns", "limit"], query: { select: [{ field: "id", width: 5 }], limit: 7 } } } })]));
