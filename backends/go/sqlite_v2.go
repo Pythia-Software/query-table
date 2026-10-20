@@ -68,7 +68,7 @@ func (b *planBuilder) sqliteField(name string, v ValueSQL) (ValueSQL, error) {
 		out := v
 		if v.Type == "text" {
 			errSQL := "COALESCE(" + v.Error + ",CASE WHEN length(CAST(" + raw + " AS BLOB))>" + strconv.Itoa(maxFormulaTextBytes) + " THEN 'text_range' END)"
-			out = b.emit("CASE WHEN "+errSQL+" IS NULL THEN "+raw+" END"+b.collation(), errSQL, v.Type)
+			out = b.emitNative("CASE WHEN "+errSQL+" IS NULL THEN "+raw+" END"+b.collation(), errSQL, v.Type)
 		}
 		b.fields[name] = out
 		b.checked[name] = true
@@ -95,7 +95,7 @@ func (b *planBuilder) sqliteArithmetic(op string, a []ValueSQL, e string) (Value
 	}
 	payload := b.emit("qt_v2_arithmetic('"+op+"',"+a[0].Value+","+right+")", e, "text")
 	out := b.emit("json_extract("+payload.Value+",'$.value')", "COALESCE("+payload.Error+",json_extract("+payload.Value+",'$.error'))", "number")
-	return b.emit("CASE WHEN "+out.Error+" IS NULL THEN "+out.Value+" END", out.Error, "number"), nil
+	return b.emitNative("CASE WHEN "+out.Error+" IS NULL THEN "+out.Value+" END", out.Error, "number"), nil
 }
 func (b *planBuilder) sqliteReduction(op, raw, inputError, typ string) (string, string) {
 	errSQL := "MIN(" + inputError + ")"

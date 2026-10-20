@@ -110,3 +110,27 @@ func BenchmarkV3GroupSummaries(b *testing.B) {
 		{ID: "first", Op: "min", Field: "at"}, {ID: "last", Op: "max", Field: "at"}, {ID: "mean", Op: "formula", Expression: "SUM([n])/COUNT()"},
 	}}, "k", "num", "total", "average", "low", "high", "first", "last", "mean"))
 }
+
+// 100,000 host rows in 1,000 groups: a fused V2 batch over one field plus
+// two row formulas, all grouped by key.
+func BenchmarkV2Metrics(b *testing.B) {
+	db, v3 := benchmarkV3(b, 100000, 1000)
+	d := qt.SQLiteV2Dataset{Schema: v3.Schema, SourceSQL: v3.SourceSQL, Scope: "bench", Dataset: "bench"}
+	q := qt.MetricQuery{Version: 2, Profile: qt.SQLiteExpressionProfile, Metrics: []qt.AggSpec{
+		{ID: "sum", Expression: "SUM([n])", GroupBy: []string{"k"}}, {ID: "avg", Expression: "AVG([n])", GroupBy: []string{"k"}},
+		{ID: "min", Expression: "MIN([n])", GroupBy: []string{"k"}}, {ID: "max", Expression: "MAX([n])", GroupBy: []string{"k"}},
+		{ID: "share", Expression: "SUM(IF([n]>500,[n],0))/COUNT()", GroupBy: []string{"k"}},
+		{ID: "late", Expression: "COUNT(IF(COALESCE([n],0)>100,[at],NULL))", GroupBy: []string{"k"}},
+	}}
+	runBenchmark(b, func() {
+		r, err := d.ExecuteV2(context.Background(), db, nil, &q, qt.PlanOptions{})
+		if err != nil {
+			b.Fatal(err)
+		}
+		for _, m := range r.Metrics.Metrics {
+			if m.Error != "" {
+				b.Fatal(m.ID, m.Error)
+			}
+		}
+	})
+}
