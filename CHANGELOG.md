@@ -22,6 +22,13 @@
   every group. If any summary is sampled (`MEDIAN`), or the combined plan
   exceeds a compiler budget, the summaries run independently as before.
   PostgreSQL is unchanged.
+- Go SQLite plans no longer copy the whole row population for cheap
+  projections: native CASE/COALESCE/comparison stages, error sidecars and
+  numeric guards are evaluated where they are read. Datetime decoding,
+  arithmetic payloads and field guards stay shared, and nothing is inlined over
+  a host source binding that has not been stored, so expensive or volatile host
+  SQL is never evaluated more often than before. A read budget keeps nested
+  formulas linear.
 
 ## 0.8.0 — 2026-10-18
 
