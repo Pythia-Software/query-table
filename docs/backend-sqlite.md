@@ -366,6 +366,88 @@ host transaction. Fingerprints bind profile, SQL, arguments, reached revisions,
 and the supplied trusted identity; they are neither signatures nor promises of
 cross-request data stability.
 
+### Metrics over rows in memory
+
+`ExecuteV2Rows` accepts an already-authorized slice of row maps and returns the
+same `SQLiteV2ExecutionResult` metric envelope as staging those rows in untyped
+SQLite columns and calling `ExecuteV2In`. It never executes `SourceSQL`, which
+may be empty for this API. Hosts remain responsible for authorizing the supplied
+rows and binding token/snapshot validators to that population.
+
+```go
+options := querytable.PlanOptions{Now: requestClock}
+result, err := querytable.ExecuteV2Rows(ctx, tx, v2, authorizedRows,
+    metricRequest, options)
+if errors.Is(err, querytable.ErrRowsUnsupported) {
+    // Stage the complete population in this transaction, then use ExecuteV2In.
+    result, err = v2.ExecuteV2In(ctx, tx, nil, &metricRequest, options)
+}
+```
+
+A dataset method with the same name is also available. `tx` may be nil when no
+expected revisions need the built-in definition store; a host `Resolver` can
+verify revisions without it. The complete supplied revision envelope is checked,
+including definitions unused by the metrics. A successful ordinary request does
+not touch a supplied transaction. Snapshot and plan-token validation retain the
+V2 host callbacks.
+
+The row executor supports plain `count`, `count(field)`, number `sum`/`avg`,
+number/text/enum/datetime `min`/`max`, and scalar `count_distinct`, grouped by text, enum or
+bool fields. Equivalent single-aggregate expressions such as `SUM([cost_usd])`
+are accepted. Every base-field table filter is supported, along with per-metric
+`where`, `minCount`, metric sorting and `groupLimit`. As in SQL V2, regex inside a
+per-metric `where` is a clause error. `processedRows` counts the table-filtered
+population before per-metric predicates; `groupCount` counts visible groups
+before top-N. Hidden groups still consume the group budget. Group budget failures
+fail only affected metrics, while population overflow fails the request.
+
+All metrics run during one traversal of the source slice. Matching grouping and
+per-metric predicates share group lookup; identical reductions also share their
+accumulator. SUM/AVG use exact scaled decimal integers for common values and
+promote to the shared rational accumulator before overflow or for uncommon
+scales. Final rounding and numeric diagnostics follow the SQLite profile.
+
+Rows are keyed by schema field name. A consumed binding must directly reference
+that same column, e.g. `r.cost_usd` or `r."repository_name"`. SQL expressions,
+computed fields, distributions, paired/formula metrics, `shownRows`, and other
+grouping kinds return `ErrRowsUnsupported`. Runtime values that cannot be
+handled exactly also return that sentinel with **no partial result**. For
+example, unsupported Go types, invalid datetime inputs consumed by parsing,
+embedded NULs passed to text functions, unpaired surrogate escapes in JSON
+arrays, and invalid group storage require staging. Unused fields do not force fallback.
+
+| Field kind | Go storage accepted by the row path |
+| --- | --- |
+| All kinds | Missing key or `nil` becomes SQL NULL. |
+| Text / enum | `string` is TEXT. Filtering comparisons also preserve numeric storage-class ordering for `int64`/`float64`. Metric inputs with numeric storage report `storage_type`. |
+| Number | `int64` is INTEGER; `float64` is REAL. NaN becomes NULL, as in SQLite. Non-numeric strings in metrics report `storage_type`; unsafe integers and range failures keep their V2 bucket diagnostics. |
+| Bool | `bool` becomes INTEGER 0/1; `int64` 0/1 is also accepted. Other scalar storage can be compared by filters but produces `storage_type` in metric inputs. |
+| Datetime | `string` for RFC3339/default and canonical UTC milliseconds; `int64`/`float64` for Unix seconds/milliseconds. An empty string becomes NULL. Datetime grouping requires fallback. |
+| Text array | A JSON `string`, matching `qt_array_json`. NULL, malformed JSON, or arrays with non-string elements behave as empty arrays. |
+
+No implicit conversion of `int`, unsigned integers, `time.Time`, `[]byte` or
+`[]string` occurs. `SQLiteRowValues(row, schema, columnNames)` exports the same
+parameter-binding normalization for a host's untyped staging table. It returns
+parameters in the requested column order; the host creates/inserts/drops the
+table and quotes its own identifiers. Using column affinities or source SQL
+transformations changes the reference population and is outside this contract.
+
+The standalone `CompileRowFilter(where, schema, SQLiteOptions{Now: clock})`
+returns an immutable filter. `matches, err := filter.Match(row)` follows
+`CompileSQLiteWhere`, including OR groups, blank no-ops, NULL/empty-string rules,
+Unicode lower-casing and code-point lengths, RE2 regex, array membership and
+relative/indexed datetime comparisons. Handle `ErrRowsUnsupported` before using
+any selected rows. The zero-value `RowFilter` matches every row.
+
+The differential tests and 50,000-row six-metric benchmark are in
+`backends/sqlite-tests/rows_test.go`:
+
+```sh
+cd backends/sqlite-tests
+go test -run '^TestRows' ./...
+go test -run '^$' -bench '^BenchmarkV2RowsTokenSummary' -benchmem ./...
+```
+
 ### V2 numeric contract
 
 The SQLite profile checks native storage and finite numeric inputs in the range

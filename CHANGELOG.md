@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Added
+
+- Go `ExecuteV2Rows` runs V2 scalar metrics over authorized row maps in one
+  traversal, with SQLite-compatible table filters, per-metric predicates,
+  exact decimal reductions, grouping, sorting, `minCount`, budgets and revision
+  validation. `CompileRowFilter` exports the base-field filter separately;
+  `SQLiteRowValues` shares staging parameter normalization. Unsupported shapes
+  or storage return `ErrRowsUnsupported` without a partial result so hosts can
+  stage and retry. See [in-memory metrics](docs/backend-sqlite.md#metrics-over-rows-in-memory).
+
 ## 0.8.0 — 2026-10-18
 
 ### Added
