@@ -3,8 +3,10 @@ package querytable
 import (
 	"context"
 	"database/sql"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -138,6 +140,9 @@ func executeV2Rows(ctx context.Context, tx *sql.Tx, d SQLiteV2Dataset, rows []ma
 		c := byPopulation[string(key)]
 		if c == nil {
 			c = &rowMetricCohort{filter: mf, groupBy: spec.GroupBy, groups: map[string]*rowMetricGroup{}}
+			for _, name := range spec.GroupBy {
+				c.groupFields = append(c.groupFields, rowMetricGroupField{name: name, binding: d.Schema.Fields[name]})
+			}
 			cohorts = append(cohorts, c)
 			byPopulation[string(key)] = c
 		}
@@ -188,7 +193,7 @@ func executeV2Rows(ctx context.Context, tx *sql.Tx, d SQLiteV2Dataset, rows []ma
 			if !matches {
 				continue
 			}
-			g, e := c.group(row, d.Schema, maxGroups)
+			g, e := c.group(row, maxGroups)
 			if e != nil {
 				return out, e
 			}
@@ -278,12 +283,18 @@ type rowMetricSpec struct {
 	binding   FieldSpec
 }
 type rowMetricCohort struct {
-	filter   RowFilter
-	groupBy  []string
-	metrics  []rowMetricSpec
-	reducers []rowMetricSpec
-	groups   map[string]*rowMetricGroup
-	overflow bool
+	filter      RowFilter
+	groupBy     []string
+	groupFields []rowMetricGroupField
+	metrics     []rowMetricSpec
+	reducers    []rowMetricSpec
+	groups      map[string]*rowMetricGroup
+	keyBuf      []byte
+	overflow    bool
+}
+type rowMetricGroupField struct {
+	name    string
+	binding FieldSpec
 }
 type rowMetricGroup struct {
 	keys       []any
@@ -294,29 +305,71 @@ type rowMetricGroup struct {
 func newRowMetricGroup(keys []any, n int) *rowMetricGroup {
 	return &rowMetricGroup{keys: keys, reductions: make([]rowMetricReduction, n)}
 }
-func (c *rowMetricCohort) group(row map[string]any, s Schema, limit int) (*rowMetricGroup, error) {
-	key := ""
-	keys := make([]any, 0, len(c.groupBy))
-	for _, name := range c.groupBy {
-		binding := s.Fields[name]
-		v, e, err := rowMetricValue(row[name], &binding)
+func (c *rowMetricCohort) group(row map[string]any, limit int) (*rowMetricGroup, error) {
+	c.keyBuf = c.keyBuf[:0]
+	for i := range c.groupFields {
+		field := &c.groupFields[i]
+		// Length-prefixed text and separate NULL/boolean markers preserve the
+		// typed tuple identity without JSON or allocations on group hits.
+		switch value := row[field.name].(type) {
+		case nil:
+			c.keyBuf = append(c.keyBuf, 0)
+		case float64:
+			if !math.IsNaN(value) { // SQLite stores NaN as NULL.
+				return c.newGroup(row, limit)
+			}
+			c.keyBuf = append(c.keyBuf, 0)
+		case bool:
+			if field.binding.Kind != FieldBool {
+				return c.newGroup(row, limit)
+			}
+			marker := byte(1)
+			if value {
+				marker = 2
+			}
+			c.keyBuf = append(c.keyBuf, marker)
+		case int64:
+			if field.binding.Kind != FieldBool || value < 0 || value > 1 {
+				return c.newGroup(row, limit)
+			}
+			c.keyBuf = append(c.keyBuf, byte(1+value))
+		case string:
+			if field.binding.Kind == FieldBool {
+				return c.newGroup(row, limit)
+			}
+			c.keyBuf = append(c.keyBuf, 3)
+			c.keyBuf = binary.AppendUvarint(c.keyBuf, uint64(len(value)))
+			c.keyBuf = append(c.keyBuf, value...)
+		default:
+			return c.newGroup(row, limit)
+		}
+	}
+	// Go avoids allocating the temporary string used solely for map lookup.
+	// A hit proves this exact typed tuple already passed storage validation,
+	// including text length, UTF-8 and NUL checks, when its group was created.
+	if g := c.groups[string(c.keyBuf)]; g != nil {
+		return g, nil
+	}
+	return c.newGroup(row, limit)
+}
+
+func (c *rowMetricCohort) newGroup(row map[string]any, limit int) (*rowMetricGroup, error) {
+	// Validate in field order before enforcing the budget, retaining fallback
+	// diagnostics even when a row could not be encoded by the lookup path.
+	keys := make([]any, len(c.groupFields))
+	for i := range c.groupFields {
+		field := &c.groupFields[i]
+		v, code, err := rowMetricValue(row[field.name], &field.binding)
 		if err != nil {
 			return nil, err
 		}
-		if e != "" {
-			return nil, fmt.Errorf("%w: grouping storage %s", ErrRowsUnsupported, name)
+		if code != "" {
+			return nil, fmt.Errorf("%w: grouping storage %s", ErrRowsUnsupported, field.name)
 		}
-		if s.Fields[name].Kind == FieldBool && v != nil {
+		if field.binding.Kind == FieldBool && v != nil {
 			v = v.(int64) != 0
 		}
-		keys = append(keys, v)
-	}
-	if len(keys) > 0 {
-		b, _ := json.Marshal(keys)
-		key = string(b)
-	}
-	if g := c.groups[key]; g != nil {
-		return g, nil
+		keys[i] = v
 	}
 	if len(c.groups) >= limit {
 		c.overflow = true
@@ -324,7 +377,7 @@ func (c *rowMetricCohort) group(row map[string]any, s Schema, limit int) (*rowMe
 		return nil, nil
 	}
 	g := newRowMetricGroup(keys, len(c.reducers))
-	c.groups[key] = g
+	c.groups[string(c.keyBuf)] = g
 	return g, nil
 }
 

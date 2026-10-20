@@ -2,9 +2,12 @@ package querytable
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -41,6 +44,91 @@ func TestRowsReductionVisits(t *testing.T) {
 		}
 		if m.Buckets[0].Value != want {
 			t.Fatalf("%+v", m)
+		}
+	}
+}
+
+func TestRowsGroupIdentity(t *testing.T) {
+	c := &rowMetricCohort{groupBy: []string{"a", "b", "flag"}, groups: map[string]*rowMetricGroup{},
+		groupFields: []rowMetricGroupField{
+			{name: "a", binding: FieldSpec{Kind: FieldText}},
+			{name: "b", binding: FieldSpec{Kind: FieldEnum}},
+			{name: "flag", binding: FieldSpec{Kind: FieldBool}},
+		}}
+	// Include encoding markers, multibyte lengths, JSON escapes and tuples
+	// that would collide if concatenated or separated with a delimiter.
+	texts := []any{nil, "", "a", "ab", "b", "bc", "c", "null", "false", "true", "\x01\x02\x03", "\"\\\n", "é🙂", strings.Repeat("x", 130)}
+	groups := map[string]*rowMetricGroup{}
+	var rows []map[string]any
+	for _, a := range texts {
+		for _, b := range texts {
+			for _, flag := range []any{nil, false, true} {
+				row := map[string]any{"a": a, "b": b, "flag": flag}
+				g, err := c.group(row, 1000)
+				if err != nil || g == nil {
+					t.Fatalf("%v: %v", row, err)
+				}
+				key, _ := json.Marshal([]any{a, b, flag})
+				groups[string(key)] = g
+				rows = append(rows, row)
+			}
+		}
+	}
+	if len(c.groups) != len(rows) {
+		t.Fatalf("%d groups for %d distinct tuples", len(c.groups), len(rows))
+	}
+	for i := len(rows) - 1; i >= 0; i-- {
+		row := rows[i]
+		keys := []any{row["a"], row["b"], row["flag"]}
+		key, _ := json.Marshal(keys)
+		// Native bool and SQL-style 0/1 storage must identify the same group.
+		if flag, ok := row["flag"].(bool); ok {
+			row["flag"] = int64(0)
+			if flag {
+				row["flag"] = int64(1)
+			}
+		}
+		g, err := c.group(row, len(rows))
+		if err != nil || g != groups[string(key)] || !reflect.DeepEqual(g.keys, keys) {
+			t.Fatalf("group changed: %v: %+v, %v", keys, g, err)
+		}
+	}
+	if allocs := testing.AllocsPerRun(100, func() { _, _ = c.group(rows[1], len(rows)) }); allocs != 0 {
+		t.Fatalf("group hits allocate %g times", allocs)
+	}
+	if g, err := c.group(map[string]any{"a": "new"}, len(rows)); err != nil || g != nil || !c.overflow || c.groups != nil {
+		t.Fatalf("group budget not enforced: %+v, %v", g, err)
+	}
+}
+
+func TestRowsGroupStorageValidation(t *testing.T) {
+	for _, tc := range []struct {
+		row     map[string]any
+		message string
+	}{
+		{map[string]any{"flag": int64(-1)}, "grouping storage flag"},
+		{map[string]any{"flag": int64(255)}, "grouping storage flag"},
+		{map[string]any{"flag": int64(256)}, "grouping storage flag"},
+		{map[string]any{"flag": "false"}, "grouping storage flag"},
+		{map[string]any{"a": int64(0)}, "grouping storage a"},
+		{map[string]any{"a": "x\x00y", "flag": []string{}}, "embedded NUL text"},
+		{map[string]any{"a": string([]byte{0xff}), "flag": []string{}}, "grouping storage a"},
+		{map[string]any{"a": strings.Repeat("x", maxFormulaTextBytes+1), "flag": []string{}}, "grouping storage a"},
+	} {
+		c := &rowMetricCohort{groups: map[string]*rowMetricGroup{}, groupFields: []rowMetricGroupField{
+			{name: "a", binding: FieldSpec{Kind: FieldText}},
+			{name: "flag", binding: FieldSpec{Kind: FieldBool}},
+		}}
+		null, err := c.group(nil, 1)
+		if err != nil || null == nil {
+			t.Fatal(err)
+		}
+		if g, err := c.group(map[string]any{"a": math.NaN(), "flag": math.NaN()}, 1); err != nil || g != null {
+			t.Fatalf("NaN must identify the NULL group: %+v, %v", g, err)
+		}
+		g, err := c.group(tc.row, 1)
+		if g != nil || !errors.Is(err, ErrRowsUnsupported) || !strings.Contains(err.Error(), tc.message) || c.overflow {
+			t.Fatalf("expected %s before budget failure; got %+v, %v", tc.message, g, err)
 		}
 	}
 }

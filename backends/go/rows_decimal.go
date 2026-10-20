@@ -7,23 +7,30 @@ import (
 	"strconv"
 )
 
-// Keep common decimal populations (money and token counts) in scaled integers.
-// Promotion is exact and happens before either coefficient can overflow. The
-// shared SQLite accumulator remains authoritative for final rounding, bounds
-// and uncommon scales; there is no per-input binary floating-point addition.
+// Accumulate the shortest decimal rendering of each input at its own scale.
+// No input rescaling or rational reduction is needed in the row loop. Keep the
+// first scale inline so integer-only metrics need no bucket allocation.
 type rowDecimalAggregate struct {
-	n        int64
-	sum, abs int64
-	scale    int
-	slow     *sqliteV2Aggregate
+	n     int64
+	first rowDecimalPart
+	other []rowDecimalPart
 }
 
-var rowPowersOfTen = [...]int64{1, 10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000, 1000000000, 10000000000, 100000000000, 1000000000000, 10000000000000, 100000000000000, 1000000000000000, 10000000000000000, 100000000000000000, 1000000000000000000}
+type rowDecimalPart struct {
+	scale    int
+	sum, abs int64
+	large    *rowDecimalLarge
+}
 
-func rowDecimalParts(n float64) (int64, int, bool) {
+type rowDecimalLarge struct{ sum, abs big.Int }
+
+// The caller has already rejected nonfinite, out-of-range and unsafe integral
+// inputs. A shortest float64 rendering has at most 17 significant digits, so
+// its coefficient fits int64 even at scales beyond 300.
+func rowDecimalParts(n float64) (int64, int) {
 	if math.Trunc(n) == n {
-		return int64(n), 0, true
-	} // caller checks safe integers
+		return int64(n), 0
+	}
 	var buf [32]byte
 	text := strconv.AppendFloat(buf[:0], n, 'g', -1, 64)
 	coefficient := int64(0)
@@ -62,59 +69,86 @@ func rowDecimalParts(n float64) (int64, int, bool) {
 	if negative {
 		coefficient = -coefficient
 	}
-	return coefficient, scale, scale >= 0 && scale < len(rowPowersOfTen)
+	return coefficient, scale
 }
+
 func (a *rowDecimalAggregate) add(n float64) {
-	if a.slow != nil {
-		_ = a.slow.Step([]driver.Value{n})
+	coefficient, scale := rowDecimalParts(n)
+	if a.n == 0 {
+		a.first.scale = scale
+	}
+	a.n++
+	if scale == a.first.scale {
+		a.first.add(coefficient)
 		return
 	}
-	coefficient, scale, ok := rowDecimalParts(n)
-	if ok {
-		// Only the absolute accumulator needs an overflow guard: it also bounds
-		// the signed sum, including populations with large cancellation.
-		magnitude := coefficient
-		if magnitude < 0 {
-			magnitude = -magnitude
-		}
-		sum, abs := a.sum, a.abs
-		target := a.scale
-		if scale > target {
-			factor := rowPowersOfTen[scale-target]
-			if abs > math.MaxInt64/factor {
-				ok = false
-			} else {
-				sum *= factor
-				abs *= factor
-				target = scale
-			}
-		} else if scale < target {
-			factor := rowPowersOfTen[target-scale]
-			if magnitude > math.MaxInt64/factor {
-				ok = false
-			} else {
-				coefficient *= factor
-				magnitude *= factor
-			}
-		}
-		if ok && abs <= math.MaxInt64-magnitude {
-			a.n++
-			a.sum = sum + coefficient
-			a.abs = abs + magnitude
-			a.scale = target
+	for i := range a.other {
+		if a.other[i].scale == scale {
+			a.other[i].add(coefficient)
 			return
 		}
 	}
-	a.slow = a.accumulator("")
-	_ = a.slow.Step([]driver.Value{n})
+	a.other = append(a.other, rowDecimalPart{scale: scale})
+	a.other[len(a.other)-1].add(coefficient)
 }
-func (a *rowDecimalAggregate) accumulator(op string) *sqliteV2Aggregate {
-	return &sqliteV2Aggregate{op: op, n: a.n, sum: big.NewRat(a.sum, rowPowersOfTen[a.scale]), abs: big.NewRat(a.abs, rowPowersOfTen[a.scale])}
-}
-func (a *rowDecimalAggregate) value(op string) (driver.Value, error) {
-	if a.slow != nil {
-		a.slow.op = op
-		return a.slow.Value()
+
+func (p *rowDecimalPart) add(coefficient int64) {
+	magnitude := coefficient
+	if magnitude < 0 {
+		magnitude = -magnitude
 	}
+	// The absolute sum also bounds the signed sum. Spill only when this part
+	// fills int64, then resume int64 additions until the next spill.
+	if p.abs > math.MaxInt64-magnitude {
+		if p.large == nil {
+			p.large = &rowDecimalLarge{}
+		}
+		var v big.Int
+		p.large.sum.Add(&p.large.sum, v.SetInt64(p.sum))
+		p.large.abs.Add(&p.large.abs, v.SetInt64(p.abs))
+		p.sum, p.abs = 0, 0
+	}
+	p.sum += coefficient
+	p.abs += magnitude
+}
+
+func (p *rowDecimalPart) accumulate(sum, abs *big.Int, scale int) {
+	var factor, coefficient big.Int
+	factor.Exp(big.NewInt(10), big.NewInt(int64(scale-p.scale)), nil)
+	coefficient.SetInt64(p.sum)
+	if p.large != nil {
+		coefficient.Add(&coefficient, &p.large.sum)
+	}
+	coefficient.Mul(&coefficient, &factor)
+	sum.Add(sum, &coefficient)
+	coefficient.SetInt64(p.abs)
+	if p.large != nil {
+		coefficient.Add(&coefficient, &p.large.abs)
+	}
+	coefficient.Mul(&coefficient, &factor)
+	abs.Add(abs, &coefficient)
+}
+
+func (a *rowDecimalAggregate) accumulator(op string) *sqliteV2Aggregate {
+	scale := a.first.scale
+	for i := range a.other {
+		if a.other[i].scale > scale {
+			scale = a.other[i].scale
+		}
+	}
+	var sum, abs, denominator big.Int
+	a.first.accumulate(&sum, &abs, scale)
+	for i := range a.other {
+		a.other[i].accumulate(&sum, &abs, scale)
+	}
+	denominator.Exp(big.NewInt(10), big.NewInt(int64(scale)), nil)
+	// Reuse the SQLite implementation for final SUM bounds, AVG division,
+	// decimal-domain checks and the single rounding to float64.
+	return &sqliteV2Aggregate{op: op, n: a.n,
+		sum: new(big.Rat).SetFrac(&sum, &denominator),
+		abs: new(big.Rat).SetFrac(&abs, &denominator)}
+}
+
+func (a *rowDecimalAggregate) value(op string) (driver.Value, error) {
 	return a.accumulator(op).Value()
 }
