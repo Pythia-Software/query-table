@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.9.2 — 2026-10-20
+
 ### Added
 
 - React `useQueryTable` accepts `metricTransport`, `metricExecution`, and
