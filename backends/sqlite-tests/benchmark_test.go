@@ -86,3 +86,17 @@ func BenchmarkV3RepresentativeRows(b *testing.B) {
 		{ID: "num", Op: "count"}, {ID: "row_id", Op: "row", Field: "id"}, {ID: "row_label", Op: "row", Field: "label"}, {ID: "row_at", Op: "row", Field: "at"},
 	}, Representative: &qt.RepresentativeRow{OrderBy: []qt.OrderBy{{Field: "n", Dir: "desc", Nulls: "last"}}}}, "k", "num", "row_id", "row_label", "row_at"))
 }
+
+// 100,000 rows in 1,000 groups; datetime extrema and ROW values, HAVING,
+// sorting and result metrics all consume staged values.
+func BenchmarkV3StagedValues(b *testing.B) {
+	db, d := benchmarkV3(b, 100000, 1000)
+	q := benchmarkV3Request(&qt.GroupingDefinition{Keys: []string{"k"}, Summaries: []qt.SummaryColumn{
+		{ID: "num", Op: "count"}, {ID: "total", Op: "sum", Field: "n"}, {ID: "first", Op: "min", Field: "at"}, {ID: "last", Op: "max", Field: "at"},
+		{ID: "row_at", Op: "row", Field: "at"}, {ID: "row_label", Op: "row", Field: "label"},
+	}, Representative: &qt.RepresentativeRow{OrderBy: []qt.OrderBy{{Field: "at", Dir: "desc"}}}}, "k", "num", "total", "first", "last", "row_at", "row_label")
+	q.Result.Where = []qt.WhereTerm{{Field: "num", Op: ">=", Value: "1"}}
+	q.Result.OrderBy = qt.OrderBys{{Field: "first", Dir: "desc"}}
+	q.Metrics = []qt.AggSpec{{ID: "latest", Op: "max", Field: "last"}, {ID: "total", Op: "sum", Field: "total"}, {ID: "by_label", Op: "count", GroupBy: []string{"row_label"}, GroupLimit: 10}}
+	runV3Benchmark(b, db, d, q)
+}

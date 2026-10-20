@@ -19,6 +19,12 @@
   which both identity validation and the `ROW()` update read. Results and
   diagnostics are unchanged. The table is dropped on success, failure and
   cancellation. Applies to SQLite and PostgreSQL.
+- Go SQLite v3 requests validate and decode each source value once, while
+  staging it. Group keys, summaries, representative rows, HAVING, sorting and
+  result metrics then read the staged values and their error sidecars without
+  re-running field checks or datetime decoding. Formula inputs still apply the
+  100,000-byte text bound. Caller storage is validated as before; no public
+  option skips it.
 
 ## 0.8.0 — 2026-10-18
 

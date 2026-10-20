@@ -3,6 +3,7 @@ package querytable
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -60,6 +61,19 @@ func (b *planBuilder) sqliteField(name string, v ValueSQL) (ValueSQL, error) {
 		return v, diagnostic("unsupported_type", "arrays are outside the expression profile")
 	}
 	raw := v.Value
+	if f.typedValue {
+		// The executor staged this value through the checks below and kept its
+		// error sidecar: reuse the pair, including normalized datetimes. Staged
+		// plain text is unbounded, so formula inputs still apply the text bound.
+		out := v
+		if v.Type == "text" {
+			errSQL := "COALESCE(" + v.Error + ",CASE WHEN length(CAST(" + raw + " AS BLOB))>" + strconv.Itoa(maxFormulaTextBytes) + " THEN 'text_range' END)"
+			out = b.emit("CASE WHEN "+errSQL+" IS NULL THEN "+raw+" END"+b.collation(), errSQL, v.Type)
+		}
+		b.fields[name] = out
+		b.checked[name] = true
+		return out, nil
+	}
 	if v.Type == "datetime" {
 		payload := b.emit("qt_v2_datetime("+raw+","+b.param(f.SQLiteDatetimeFormat, "text")+")", "NULL", "text")
 		out := b.emit("json_extract("+payload.Value+",'$.value') COLLATE BINARY", "COALESCE("+v.Error+",json_extract("+payload.Value+",'$.error'))", "datetime")
