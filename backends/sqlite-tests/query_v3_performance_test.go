@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -71,6 +72,23 @@ func (l *statementLog) reset(fail func(string) error) {
 	defer l.mu.Unlock()
 	l.seen, l.fail = nil, fail
 }
+
+// reductions counts grouped reductions over the staged source: statements
+// that read the request's first temporary table and group it.
+func (l *statementLog) reductions() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	source, n := "", 0
+	for _, query := range l.seen {
+		if source == "" && strings.HasPrefix(query, `CREATE TEMP TABLE "`) {
+			source = query[len(`CREATE TEMP TABLE `):]
+			source = source[:strings.Index(source[1:], `"`)+2]
+		} else if source != "" && strings.Contains(query, source) && strings.Contains(query, " GROUP BY ") {
+			n++
+		}
+	}
+	return n
+}
 func (l *statementLog) count(marker string) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -83,18 +101,25 @@ func (l *statementLog) count(marker string) int {
 	return n
 }
 
-// hookedV3 opens a one-connection file database whose statements pass
-// through log. The schema mirrors setupV3 over a dedicated table.
-func hookedV3(t *testing.T, log *statementLog, rows string) (*sql.DB, qt.QueryDatasetV3) {
+// hookedDB opens a one-connection file database whose statements pass
+// through log, then runs setup in it.
+func hookedDB(t *testing.T, log *statementLog, setup string) *sql.DB {
 	t.Helper()
 	original, _ := setupV3(t)
 	dsn := filepath.ToSlash(filepath.Join(t.TempDir(), "hooked.db"))
 	db := sql.OpenDB(statementHookConnector{base: original.Driver(), dsn: dsn, hook: log.hook})
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { db.Close() })
-	if _, err := db.Exec("CREATE TABLE source(id TEXT,k TEXT,n REAL,at TEXT,label TEXT); INSERT INTO source VALUES " + rows); err != nil {
+	if _, err := db.Exec(setup); err != nil {
 		t.Fatal(err)
 	}
+	return db
+}
+
+// hookedV3 mirrors setupV3's schema over a dedicated hooked table.
+func hookedV3(t *testing.T, log *statementLog, rows string) (*sql.DB, qt.QueryDatasetV3) {
+	t.Helper()
+	db := hookedDB(t, log, "CREATE TABLE source(id TEXT,k TEXT,n REAL,at TEXT,label TEXT); INSERT INTO source VALUES "+rows)
 	_, d := setupV3(t)
 	d.SourceSQL = "SELECT * FROM source"
 	return db, d
@@ -538,5 +563,267 @@ func TestV3StagedSortsAndEnums(t *testing.T) {
 	}
 	if len(out.Rows) != 1 || out.Rows[0]["chosen"] != "a" || out.Rows[0]["smallest"] != "a" {
 		t.Fatal(out.Rows)
+	}
+}
+
+// Fractional sums, cancellation, unsafe integers, numeric-range errors, NULL
+// inputs, datetime and enum extrema, a NULL key and an all-NULL group.
+const fusionFixture = `CREATE TABLE facts(id TEXT,k TEXT,n ANY,m REAL,at TEXT,e TEXT);
+INSERT INTO facts VALUES
+ ('1','frac',0.1,1,'2026-01-01T00:00:00.000Z','low'),('2','frac',0.2,2,'2026-01-03T00:00:00.000Z','high'),('3','frac',NULL,3,NULL,NULL),
+ ('4','cancel',5,1,'2026-02-01T00:00:00.000Z','high'),('5','cancel',-5,1,NULL,'high'),('6','cancel',0.1,1,NULL,NULL),('7','cancel',-0.1,NULL,NULL,'low'),
+ ('8','unsafe',9007199254740991,1,NULL,NULL),('9','unsafe',1,1,NULL,NULL),
+ ('10','range',1e-299,1,NULL,NULL),('11','range',1e-299,1,NULL,NULL),
+ ('12','nulls',NULL,NULL,NULL,NULL),('13','nulls',NULL,2,NULL,NULL),
+ ('14',NULL,3,4,'2026-03-01T00:00:00.000Z','low');`
+
+func fusionDataset(t *testing.T, log *statementLog) (*sql.DB, qt.QueryDatasetV3) {
+	t.Helper()
+	db := hookedDB(t, log, fusionFixture)
+	_, d := setupV3(t)
+	d.SourceSQL = "SELECT * FROM facts"
+	yes := true
+	d.Schema.Fields["m"] = qt.FieldSpec{Name: "m", Kind: qt.FieldNumber, Expr: "r.m", ExpressionNumeric: true, Sortable: true, ServerFilter: true}
+	d.Schema.Fields["e"] = qt.FieldSpec{Name: "e", Kind: qt.FieldEnum, Expr: "r.e", Sortable: true, ServerFilter: true, Groupable: &yes}
+	delete(d.Schema.Fields, "label")
+	return db, d
+}
+
+var fusedSummaries = []qt.SummaryColumn{
+	{ID: "rows", Op: "count"}, {ID: "values", Op: "count", Field: "n"}, {ID: "distinct", Op: "count_distinct", Field: "n"},
+	{ID: "sum", Op: "sum", Field: "n"}, {ID: "avg", Op: "avg", Field: "n"}, {ID: "min", Op: "min", Field: "n"}, {ID: "max", Op: "max", Field: "n"},
+	{ID: "first", Op: "min", Field: "at"}, {ID: "last", Op: "max", Field: "at"}, {ID: "low", Op: "min", Field: "e"}, {ID: "high", Op: "max", Field: "e"},
+	{ID: "both", Op: "formula", Expression: "SUM([n])+SUM([m])*2"},
+	{ID: "lazy", Op: "formula", Expression: "IF(TRUE,SUM([n]),SUM([n]/0))"},
+	{ID: "tiny", Op: "formula", Expression: "SUM([n]/1e100)"},
+	{ID: "several", Op: "formula", Expression: "COUNT()>1"},
+	{ID: "ratio", Op: "formula", Expression: "AVG([m])/COUNT([n])"},
+}
+
+func fusionRequest(summaries []qt.SummaryColumn) qt.QueryRequestV3 {
+	q := groupedRequest()
+	q.Grouping = &qt.GroupingDefinition{Keys: []string{"k"}, Summaries: summaries}
+	q.Result = qt.WireQuery{OrderBy: qt.OrderBys{{Field: "k", Dir: "asc", Nulls: "last"}}, Limit: 20}
+	return q
+}
+
+// fusedAndIndependent runs q as is, then with a MEDIAN summary that keeps
+// every summary on its own statement, and compares the shared output.
+func fusedAndIndependent(t *testing.T, log *statementLog, db *sql.DB, d qt.QueryDatasetV3, q qt.QueryRequestV3, o qt.PlanOptions) (qt.QueryResultV3, int) {
+	t.Helper()
+	log.reset(nil)
+	fused, err := d.Execute(context.Background(), db, q, o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reductions := log.reductions()
+	independent := q
+	independent.Grouping = &qt.GroupingDefinition{Keys: q.Grouping.Keys, Representative: q.Grouping.Representative,
+		Summaries: append(append([]qt.SummaryColumn{}, q.Grouping.Summaries...), qt.SummaryColumn{ID: "qt_median", Op: "formula", Expression: "MEDIAN([m])"})}
+	log.reset(nil)
+	separate, err := d.Execute(context.Background(), db, independent, o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, want := log.reductions(), 1+countScalar(independent.Grouping.Summaries); n != want {
+		t.Fatalf("independent path ran %d reductions, want %d", n, want)
+	}
+	for _, row := range separate.Rows {
+		delete(row, "qt_median")
+	}
+	kept := separate.Schema.Fields[:0]
+	for _, field := range separate.Schema.Fields {
+		if field.Name != "qt_median" {
+			kept = append(kept, field)
+		}
+	}
+	separate.Schema.Fields = kept
+	if !reflect.DeepEqual(fused.Rows, separate.Rows) || !reflect.DeepEqual(fused.Schema, separate.Schema) || !reflect.DeepEqual(fused.Metrics, separate.Metrics) || fused.Total != separate.Total {
+		t.Fatalf("fused output differs from independent execution:\nfused       %#v\nindependent %#v\nmetrics %#v\n        %#v", fused.Rows, separate.Rows, fused.Metrics, separate.Metrics)
+	}
+	return fused, reductions
+}
+func countScalar(summaries []qt.SummaryColumn) int {
+	n := 0
+	for _, s := range summaries {
+		if s.Op != "row" {
+			n++
+		}
+	}
+	return n
+}
+
+func TestV3FusedSummariesMatchIndependentExecution(t *testing.T) {
+	log := &statementLog{}
+	db, d := fusionDataset(t, log)
+	out, reductions := fusedAndIndependent(t, log, db, d, fusionRequest(fusedSummaries), qt.PlanOptions{})
+	// Every compatible summary shares the COUNT reduction.
+	if reductions != 1 {
+		t.Fatalf("%d summaries took %d reductions", len(fusedSummaries), reductions)
+	}
+	byKey := map[any]map[string]any{}
+	for _, row := range out.Rows {
+		byKey[row["k"]] = row
+	}
+	errorCode := func(code string) map[string]any { return map[string]any{"computedError": code} }
+	for key, want := range map[any]map[string]any{
+		"frac":   {"rows": float64(3), "values": float64(2), "distinct": float64(2), "sum": .3, "avg": .15, "min": .1, "max": .2, "first": "2026-01-01T00:00:00.000Z", "last": "2026-01-03T00:00:00.000Z", "low": "high", "high": "low", "both": 12.3, "several": true},
+		"cancel": {"rows": float64(4), "sum": float64(0), "avg": float64(0), "min": float64(-5), "max": float64(5), "lazy": float64(0), "first": "2026-02-01T00:00:00.000Z"},
+		"unsafe": {"sum": errorCode("unsafe_integer"), "lazy": errorCode("unsafe_integer"), "max": float64(9007199254740991)},
+		"range":  {"sum": 2e-299, "tiny": errorCode("numeric_range"), "max": 1e-299},
+		"nulls":  {"rows": float64(2), "values": float64(0), "sum": nil, "avg": nil, "min": nil, "first": nil, "low": nil, "ratio": errorCode("divide_by_zero")},
+		nil:      {"rows": float64(1), "sum": float64(3), "both": float64(11), "several": false},
+	} {
+		row := byKey[key]
+		for name, value := range want {
+			if !reflect.DeepEqual(row[name], value) {
+				t.Errorf("group %v %s: got %#v want %#v", key, name, row[name], value)
+			}
+		}
+	}
+	for _, field := range out.Schema.Fields {
+		if (field.Name == "low" || field.Name == "high") != (field.Type == "enum") {
+			t.Errorf("summary kind: %#v", field)
+		}
+	}
+
+	// Independent metrics over the ungrouped staged source agree, too.
+	q := fusionRequest(nil)
+	q.Grouping = nil
+	q.Result = qt.WireQuery{Select: []string{"id"}, Limit: 1}
+	for _, s := range fusedSummaries {
+		q.Metrics = append(q.Metrics, qt.AggSpec{ID: s.ID, Expression: qt.MetricExpression(qt.AggSpec{Op: s.Op, Field: s.Field, Expression: s.Expression}), GroupBy: []string{"k"}})
+	}
+	metrics, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range metrics.Metrics {
+		if m.Error != "" {
+			t.Fatalf("metric %s: %s", m.ID, m.Error)
+		}
+		for _, bucket := range m.Buckets {
+			value := byKey[bucket.Keys[0]][m.ID]
+			want := bucket.Value
+			if bucket.Error != "" {
+				want = errorCode(bucket.Error)
+			}
+			if !reflect.DeepEqual(value, want) {
+				t.Errorf("metric %s group %v: summary %#v, metric %#v", m.ID, bucket.Keys[0], value, want)
+			}
+		}
+	}
+}
+
+func TestV3FusedSummariesPreserveGroupedResults(t *testing.T) {
+	log := &statementLog{}
+	db, d := fusionDataset(t, log)
+	d.ComputedGroupable = map[string]bool{"inv": true}
+	options := qt.PlanOptions{Resolver: qt.DefinitionResolverFunc(func(_ context.Context, id string) (qt.ComputedColumn, error) {
+		return qt.ComputedColumn{ID: id, Label: "Inverse", Revision: "1", Expression: qt.ComputedExpression{Language: "qt-expr", Version: 1, Source: "1/([m]-2)"}}, nil
+	})}
+	q := fusionRequest(append([]qt.SummaryColumn{{ID: "chosen", Op: "row", Field: "id"}, {ID: "chosen_at", Op: "row", Field: "at"}}, fusedSummaries...))
+	q.Grouping.Representative = &qt.RepresentativeRow{OrderBy: qt.OrderBys{{Field: "n", Dir: "desc", Nulls: "last"}}}
+	q.Result = qt.WireQuery{Select: []string{"k", "rows", "sum", "chosen", "chosen_at", "first"}, Where: []qt.WhereTerm{{Field: "rows", Op: ">=", Value: "2"}},
+		OrderBy: qt.OrderBys{{Field: "max", Dir: "desc"}}, Limit: 2, Offset: 1}
+	q.Metrics = []qt.AggSpec{{ID: "all", Op: "sum", Field: "rows"}, {ID: "shown", Op: "sum", Field: "rows", Scope: "shownRows"}, {ID: "by_low", Op: "max", Field: "both", GroupBy: []string{"low"}}}
+	out, reductions := fusedAndIndependent(t, log, db, d, q, qt.PlanOptions{})
+	if reductions != 1 || out.Total != 5 || len(out.Rows) != 2 {
+		t.Fatalf("reductions=%d total=%d rows=%#v", reductions, out.Total, out.Rows)
+	}
+	// Ordered by max DESC: unsafe, cancel, frac, range, nulls; the page skips one.
+	if out.Rows[0]["k"] != "cancel" || out.Rows[0]["chosen"] != "4" || out.Rows[0]["chosen_at"] != "2026-02-01T00:00:00.000Z" || out.Rows[1]["k"] != "frac" || out.Rows[1]["chosen"] != "2" || out.Rows[1]["first"] != "2026-01-01T00:00:00.000Z" {
+		t.Fatal(out.Rows)
+	}
+	if out.Metrics[0].Buckets[0].Value != float64(13) || out.Metrics[1].Buckets[0].Value != float64(7) {
+		t.Fatal(out.Metrics)
+	}
+
+	// A computed key with NULL and error partitions keeps distinct identities.
+	q = fusionRequest(fusedSummaries)
+	q.ExpectedRevisions = map[string]string{"inv": "1"}
+	q.Grouping.Keys = []string{"@computed/inv"}
+	q.Result.OrderBy = nil
+	fused, reductions := fusedAndIndependent(t, log, db, d, q, options)
+	if reductions != 1 {
+		t.Fatal("computed key summaries were not fused")
+	}
+	identities := map[any]bool{}
+	var failed map[string]any
+	for _, row := range fused.Rows {
+		identities[row[qt.GroupIdentityField]] = true
+		if reflect.DeepEqual(row["@computed/inv"], map[string]any{"computedError": "divide_by_zero"}) {
+			failed = row
+		}
+	}
+	if len(identities) != len(fused.Rows) || failed == nil || !reflect.DeepEqual(failed["rows"], map[string]any{"computedError": "divide_by_zero"}) {
+		t.Fatalf("group error identities: %#v", fused.Rows)
+	}
+}
+
+func TestV3FusedSummariesBudgetsAndFallbacks(t *testing.T) {
+	log := &statementLog{}
+	db, d := fusionDataset(t, log)
+	// Each summary fits the compiler's stage budget; together they do not.
+	wide := []qt.SummaryColumn{}
+	for i := 0; i < 8; i++ {
+		terms := []string{}
+		for j := 1; j <= 25; j++ {
+			terms = append(terms, fmt.Sprintf("[m]*%d", i*100+j))
+		}
+		wide = append(wide, qt.SummaryColumn{ID: fmt.Sprintf("wide%d", i), Op: "formula", Expression: "SUM(" + strings.Join(terms, "+") + ")"})
+	}
+	log.reset(nil)
+	if _, err := d.Execute(context.Background(), db, fusionRequest(wide[:1]), qt.PlanOptions{}); err != nil || log.reductions() != 1 {
+		t.Fatalf("one wide summary: reductions=%d err=%v", log.reductions(), err)
+	}
+	out, reductions := fusedAndIndependent(t, log, db, d, fusionRequest(wide), qt.PlanOptions{})
+	if reductions != 1+len(wide) {
+		t.Fatalf("over-budget combination took %d reductions", reductions)
+	}
+	for _, row := range out.Rows {
+		if row["k"] == "frac" && row["wide0"] != float64(6*325) {
+			t.Fatal(row)
+		}
+	}
+
+	// MEDIAN keeps its sample budget, checked before any summary is reduced.
+	q := fusionRequest(append(append([]qt.SummaryColumn{}, fusedSummaries...), qt.SummaryColumn{ID: "median", Op: "formula", Expression: "MEDIAN([n])"}))
+	limited := d
+	limited.MaxSamplesPerGroup = 2
+	var diag *qt.PlanDiagnostic
+	log.reset(nil)
+	if _, err := limited.Execute(context.Background(), db, q, qt.PlanOptions{}); !errors.As(err, &diag) || diag.Code != "resource_limit" || !strings.Contains(diag.Message, "median") || log.reductions() != 1 {
+		t.Fatalf("sample budget: reductions=%d err=%v", log.reductions(), err)
+	}
+
+	run := func(d qt.QueryDatasetV3, ctx context.Context, q qt.QueryRequestV3) error {
+		tx, err := db.BeginTx(context.Background(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback()
+		_, err = d.ExecuteIn(ctx, tx, q, qt.PlanOptions{})
+		if n := tempTables(t, tx); n != 0 {
+			t.Fatalf("%d temporary tables leaked (err=%v)", n, err)
+		}
+		return err
+	}
+	limited = d
+	limited.MaxGroups = 5
+	log.reset(nil)
+	if err := run(limited, context.Background(), fusionRequest(fusedSummaries)); !errors.As(err, &diag) || diag.Code != "resource_limit" || !strings.Contains(diag.Message, "group population") {
+		t.Fatalf("group budget: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	log.reset(func(query string) error {
+		if strings.Contains(query, " GROUP BY ") {
+			cancel()
+		}
+		return nil
+	})
+	if err := run(d, ctx, fusionRequest(fusedSummaries)); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation: %v", err)
 	}
 }
