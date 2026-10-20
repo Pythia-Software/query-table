@@ -9,16 +9,26 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	qt "github.com/Pythia-Software/query-table/backends/go"
 	"modernc.org/sqlite"
 )
 
+// sqliteCalls counts scalar function invocations by name, so tests can assert
+// how often guards and decoders run without timing anything.
+var sqliteCalls = map[string]*atomic.Int64{}
+
 func init() {
 	for _, f := range append(qt.SQLiteFunctions(), qt.SQLiteV2Functions()...) {
 		f := f
-		if e := sqlite.RegisterDeterministicScalarFunction(f.Name, int32(f.Arity), func(_ *sqlite.FunctionContext, a []driver.Value) (driver.Value, error) { return f.Call(a) }); e != nil {
+		calls := &atomic.Int64{}
+		sqliteCalls[f.Name] = calls
+		if e := sqlite.RegisterDeterministicScalarFunction(f.Name, int32(f.Arity), func(_ *sqlite.FunctionContext, a []driver.Value) (driver.Value, error) {
+			calls.Add(1)
+			return f.Call(a)
+		}); e != nil {
 			panic(e)
 		}
 	}

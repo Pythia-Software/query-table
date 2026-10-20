@@ -418,7 +418,9 @@ func (b *planBuilder) sourceValue(name string) (ValueSQL, error) {
 		return v, nil
 	}
 	var v ValueSQL
-	if b.sqlite {
+	if b.sqlite && b.schema.Fields[name].typedValue {
+		v = raw // Staged text already passed this storage and encoding check.
+	} else if b.sqlite {
 		errSQL := "COALESCE(" + raw.Error + ",qt_v2_field_error(" + raw.Value + ",'source_text'))"
 		v = b.emit("CASE WHEN "+errSQL+" IS NULL THEN "+raw.Value+" END"+b.collation(), errSQL, "text")
 	} else {
