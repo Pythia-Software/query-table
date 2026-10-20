@@ -124,6 +124,27 @@ func compileMetric(ctx context.Context, q MetricQuery, spec AggSpec, s Schema, o
 	return compileMetricDialect(ctx, q, spec, s, o, false)
 }
 func compileMetricDialect(ctx context.Context, q MetricQuery, spec AggSpec, s Schema, o PlanOptions, sqlite bool) (SQLPlan, error) {
+	return compileMetricOutputs(ctx, q, spec, s, o, sqlite, nil)
+}
+
+// summaryOutput is an additional scalar output of one grouped reduction: an ID
+// and an aggregate expression only. It cannot carry a scope, filter, grouping,
+// limit or sampling setting, so every output shares the primary spec's.
+type summaryOutput struct{ ID, Expression string }
+
+// compileMetricOutputs compiles spec and reduces each extra expression in the
+// same pass, as extraN/extraN_error columns. Callers must compile each extra
+// on its own first: a combined plan can still exceed a compiler budget.
+func compileMetricOutputs(ctx context.Context, q MetricQuery, spec AggSpec, s Schema, o PlanOptions, sqlite bool, extra []summaryOutput) (SQLPlan, error) {
+	if len(extra) > 0 && (spec.Distribution != nil || spec.ExpressionY != "") {
+		return SQLPlan{}, diagnostic("invalid_metric", "additional outputs require a scalar metric")
+	}
+	for _, output := range extra {
+		// Sampled reducers stay on their own budget-checked statement.
+		if sampledExpression(output.Expression) {
+			return SQLPlan{}, diagnostic("invalid_metric", "sampled summaries cannot share a reduction")
+		}
+	}
 	if spec.DateGrouping != nil {
 		return SQLPlan{}, diagnostic("unsupported_date_grouping", "calendar grouping requires the negotiated v3 executor")
 	}
@@ -209,6 +230,12 @@ func compileMetricDialect(ctx context.Context, q MetricQuery, spec AggSpec, s Sc
 	n, e := parseExpression(MetricExpression(spec))
 	if e != nil {
 		return SQLPlan{}, e
+	}
+	extraNodes := make([]*exprNode, len(extra))
+	for i, output := range extra {
+		if extraNodes[i], e = parseExpression(output.Expression); e != nil {
+			return SQLPlan{}, e
+		}
 	}
 	var y *exprNode
 	if spec.ExpressionY != "" {
@@ -321,6 +348,15 @@ func compileMetricDialect(ctx context.Context, q MetricQuery, spec AggSpec, s Sc
 	if len(leaves) == 0 {
 		return SQLPlan{}, diagnostic("aggregate_required", "metric must contain an aggregate")
 	}
+	for _, node := range extraNodes {
+		before := len(leaves)
+		if e = collect(node); e != nil {
+			return SQLPlan{}, e
+		}
+		if len(leaves) == before {
+			return SQLPlan{}, diagnostic("aggregate_required", "summary must contain an aggregate")
+		}
+	}
 	if y != nil {
 		before := len(leaves)
 		if e = collect(y); e != nil {
@@ -358,6 +394,13 @@ func compileMetricDialect(ctx context.Context, q MetricQuery, spec AggSpec, s Sc
 		return SQLPlan{}, e
 	}
 	v = b.metricNumber(v)
+	extraValues := make([]ValueSQL, len(extraNodes))
+	for i, node := range extraNodes {
+		if extraValues[i], e = lower(node); e != nil {
+			return SQLPlan{}, e
+		}
+		extraValues[i] = b.metricNumber(extraValues[i])
+	}
 	var yv ValueSQL
 	if y != nil {
 		yv, e = lower(y)
@@ -379,12 +422,18 @@ func compileMetricDialect(ctx context.Context, q MetricQuery, spec AggSpec, s Sc
 	if len(groupErrors) > 0 {
 		ge := "COALESCE(" + strings.Join(append(groupErrors, b.nullError()), ",") + ")"
 		v = b.emit("CASE WHEN "+ge+" IS NULL THEN "+v.Value+" END", "COALESCE("+ge+","+v.Error+")", v.Type)
+		for i, x := range extraValues {
+			extraValues[i] = b.emit("CASE WHEN "+ge+" IS NULL THEN "+x.Value+" END", "COALESCE("+ge+","+x.Error+")", x.Type)
+		}
 		if y != nil {
 			yv = b.emit("CASE WHEN "+ge+" IS NULL THEN "+yv.Value+" END", "COALESCE("+ge+","+yv.Error+")", yv.Type)
 		}
 	}
 	fields := groupOutput(len(groups))
 	fields = append(fields, v.Value+" AS value", v.Error+" AS error", "count")
+	for i, x := range extraValues {
+		fields = append(fields, fmt.Sprintf("%s AS extra%d,%s AS extra%d_error", x.Value, i, x.Error, i))
+	}
 	if y != nil {
 		fields = append(fields, yv.Value+" AS y", yv.Error+" AS y_error")
 	}
@@ -400,6 +449,9 @@ func compileMetricDialect(ctx context.Context, q MetricQuery, spec AggSpec, s Sc
 			cols = append(cols, OutputColumn{Field: spec.GroupBy[i], ValueAlias: fmt.Sprintf("group%d", i), Type: g.Type})
 		}
 		cols = append(cols, OutputColumn{ValueAlias: "value", Type: v.Type})
+		for i, x := range extraValues {
+			cols = append(cols, OutputColumn{Field: extra[i].ID, ValueAlias: fmt.Sprintf("extra%d", i), ErrorAlias: fmt.Sprintf("extra%d_error", i), Type: x.Type})
+		}
 		if y != nil {
 			cols = append(cols, OutputColumn{ValueAlias: "y", Type: yv.Type})
 		}
