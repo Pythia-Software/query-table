@@ -434,8 +434,19 @@ func (d QueryDatasetV3) stageGroups(ctx context.Context, tx *sql.Tx, table strin
 		if e != nil {
 			return result, e
 		}
+		// Rank the population once. Identity validation and every ROW value read
+		// the same chosen rows, which hold one row per (already budgeted) group.
+		chosen := queryTableName()
+		defer func() {
+			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+			defer cancel()
+			_, _ = tx.ExecContext(cleanup, "DROP TABLE IF EXISTS "+queryIdent(chosen))
+		}()
+		if _, err = tx.ExecContext(ctx, "CREATE TEMP TABLE "+queryIdent(chosen)+" AS "+representative.SQL, representative.Args...); err != nil {
+			return result, err
+		}
 		var invalid int64
-		if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM ("+representative.SQL+") AS qt_representatives WHERE qt_identity_count>1 OR qt_missing_identity>0", representative.Args...).Scan(&invalid); err != nil {
+		if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+queryIdent(chosen)+" WHERE qt_identity_count>1 OR qt_missing_identity>0").Scan(&invalid); err != nil {
 			return result, err
 		}
 		if invalid > 0 {
@@ -448,8 +459,8 @@ func (d QueryDatasetV3) stageGroups(ctx context.Context, tx *sql.Tx, table strin
 				assignments = append(assignments, queryIdent(value)+"=summary."+queryIdent(value), queryIdent(value+"_error")+"=summary."+queryIdent(value+"_error"))
 			}
 		}
-		update := "UPDATE " + queryIdent(table) + " AS target SET " + strings.Join(assignments, ",") + " FROM (" + representative.SQL + ") AS summary WHERE " + groupJoin("target", "summary", len(g.Keys))
-		if _, err = tx.ExecContext(ctx, update, representative.Args...); err != nil {
+		update := "UPDATE " + queryIdent(table) + " AS target SET " + strings.Join(assignments, ",") + " FROM " + queryIdent(chosen) + " AS summary WHERE " + groupJoin("target", "summary", len(g.Keys))
+		if _, err = tx.ExecContext(ctx, update); err != nil {
 			return result, err
 		}
 	}

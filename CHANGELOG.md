@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Changed
+
+- Go v3 grouped requests with `ROW()` summaries rank the source once. The
+  chosen representative rows are kept in a temporary table, one row per group,
+  which both identity validation and the `ROW()` update read. Results and
+  diagnostics are unchanged. The table is dropped on success, failure and
+  cancellation. Applies to SQLite and PostgreSQL.
+
 ## 0.8.0 — 2026-10-18
 
 ### Added
