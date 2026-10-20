@@ -349,9 +349,40 @@ func readQueryRows(ctx context.Context, tx *sql.Tx, p SQLPlan, grouped bool, dia
 
 func (d QueryDatasetV3) stageGroups(ctx context.Context, tx *sql.Tx, table string, g *GroupingDefinition, s Schema, o PlanOptions, maxGroups int) (Schema, error) {
 	result := Schema{Name: s.Name + ":groups", IDField: GroupIdentityField, Fields: map[string]FieldSpec{}}
-	countPlan, err := compileMetricDialect(ctx, MetricQuery{Version: 2}, AggSpec{ID: "__qt_count__", Op: "count", GroupBy: g.Keys}, s, o, d.Dialect == "sqlite")
+	// SQLite reduces scalar summaries in the COUNT pass: one scan of the staged
+	// population and one GROUP BY write every value and error sidecar into the
+	// group table. SourcePlan compiled each summary on its own. Any sampled
+	// summary keeps the whole set on the budget-checked independent path.
+	fused := []summaryOutput{}
+	if d.Dialect == "sqlite" {
+		for _, summary := range g.Summaries {
+			if summary.Op == "row" {
+				continue
+			}
+			expression := MetricExpression(summarySpec(summary, g.Keys))
+			if sampledExpression(expression) {
+				fused = nil
+				break
+			}
+			fused = append(fused, summaryOutput{ID: summary.ID, Expression: expression})
+		}
+	}
+	countSpec := AggSpec{ID: "__qt_count__", Op: "count", GroupBy: g.Keys}
+	countPlan, err := compileMetricOutputs(ctx, MetricQuery{Version: 2}, countSpec, s, o, d.Dialect == "sqlite", fused)
+	if err != nil && len(fused) > 0 && ctx.Err() == nil {
+		// The combined plan can exceed a compiler budget that each summary fits
+		// on its own; those summaries then run independently.
+		fused = nil
+		countPlan, err = compileMetricOutputs(ctx, MetricQuery{Version: 2}, countSpec, s, o, d.Dialect == "sqlite", nil)
+	}
 	if err != nil {
 		return result, err
+	}
+	reduced := map[string]OutputColumn{}
+	for _, column := range countPlan.Columns {
+		if column.ErrorAlias != "" {
+			reduced[column.Field] = column
+		}
 	}
 	// A private ordinal lets identity batches join on one indexed integer, even
 	// when the public grouping keys contain NULLs or have different SQL types.
@@ -399,8 +430,11 @@ func (d QueryDatasetV3) stageGroups(ctx context.Context, tx *sql.Tx, table strin
 	for i, summary := range g.Summaries {
 		typ := ""
 		var summaryPlan SQLPlan
+		column, isReduced := reduced[summary.ID]
 		if summary.Op == "row" {
 			typ = expressionType(s.Fields[summary.Field].Kind)
+		} else if isReduced {
+			typ = column.Type
 		} else {
 			summaryPlan, err = compileMetricDialect(ctx, MetricQuery{Version: 2}, summarySpec(summary, g.Keys), s, o, d.Dialect == "sqlite")
 			if err != nil {
@@ -409,9 +443,13 @@ func (d QueryDatasetV3) stageGroups(ctx context.Context, tx *sql.Tx, table strin
 			typ = summaryPlan.Columns[len(summaryPlan.Columns)-1].Type
 		}
 		value, errorName := fmt.Sprintf("summary%d", i), fmt.Sprintf("summary%d_error", i)
-		for _, definition := range []string{queryIdent(value) + " " + d.valueType(typ), queryIdent(errorName) + " TEXT"} {
-			if _, err = tx.ExecContext(ctx, "ALTER TABLE "+queryIdent(table)+" ADD COLUMN "+definition); err != nil {
-				return result, err
+		if isReduced {
+			value, errorName = column.ValueAlias, column.ErrorAlias
+		} else {
+			for _, definition := range []string{queryIdent(value) + " " + d.valueType(typ), queryIdent(errorName) + " TEXT"} {
+				if _, err = tx.ExecContext(ctx, "ALTER TABLE "+queryIdent(table)+" ADD COLUMN "+definition); err != nil {
+					return result, err
+				}
 			}
 		}
 		groupable := typ == "text" || typ == "bool"
@@ -425,7 +463,7 @@ func (d QueryDatasetV3) stageGroups(ctx context.Context, tx *sql.Tx, table strin
 		}
 		field.ValueErrorExpr = "r." + queryIdent(errorName)
 		result.Fields[summary.ID] = field
-		if summary.Op == "row" {
+		if summary.Op == "row" || isReduced {
 			continue
 		}
 		join := groupJoin("target", "summary", len(g.Keys))

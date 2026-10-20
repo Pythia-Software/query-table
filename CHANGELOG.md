@@ -25,6 +25,13 @@
   re-running field checks or datetime decoding. Formula inputs still apply the
   100,000-byte text bound. Caller storage is validated as before; no public
   option skips it.
+- Go SQLite v3 groups reduce compatible scalar summaries (`count`,
+  `count_distinct`, `sum`, `avg`, `min`, `max` and scalar formulas) in the same
+  pass as the group count, writing each value and error sidecar straight into
+  the group table. Summaries no longer each rescan the staged source and update
+  every group. If any summary is sampled (`MEDIAN`), or the combined plan
+  exceeds a compiler budget, the summaries run independently as before.
+  PostgreSQL is unchanged.
 
 ## 0.8.0 — 2026-10-18
 

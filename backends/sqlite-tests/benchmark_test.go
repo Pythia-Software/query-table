@@ -100,3 +100,13 @@ func BenchmarkV3StagedValues(b *testing.B) {
 	q.Metrics = []qt.AggSpec{{ID: "latest", Op: "max", Field: "last"}, {ID: "total", Op: "sum", Field: "total"}, {ID: "by_label", Op: "count", GroupBy: []string{"row_label"}, GroupLimit: 10}}
 	runV3Benchmark(b, db, d, q)
 }
+
+// 100,000 rows in 1,000 groups; ten scalar summaries over two fields.
+func BenchmarkV3GroupSummaries(b *testing.B) {
+	db, d := benchmarkV3(b, 100000, 1000)
+	runV3Benchmark(b, db, d, benchmarkV3Request(&qt.GroupingDefinition{Keys: []string{"k"}, Summaries: []qt.SummaryColumn{
+		{ID: "num", Op: "count"}, {ID: "values", Op: "count", Field: "n"}, {ID: "distinct", Op: "count_distinct", Field: "n"},
+		{ID: "total", Op: "sum", Field: "n"}, {ID: "average", Op: "avg", Field: "n"}, {ID: "low", Op: "min", Field: "n"}, {ID: "high", Op: "max", Field: "n"},
+		{ID: "first", Op: "min", Field: "at"}, {ID: "last", Op: "max", Field: "at"}, {ID: "mean", Op: "formula", Expression: "SUM([n])/COUNT()"},
+	}}, "k", "num", "total", "average", "low", "high", "first", "last", "mean"))
+}
