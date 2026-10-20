@@ -338,7 +338,11 @@ only the highest-ranked groups are returned; no additive `other` is invented
 for ratios, medians, or distinct counts.
 
 Default execution budgets are 10,000 page rows, 2,000 total groups, and 250,000
-matching source rows. The population check reads at most budget+1 matching rows
+matching source rows. Trusted hosts may explicitly set `MaxGroups` from 1 through
+100,000; zero retains the 2,000-group default advertised by `Capabilities()`.
+This ceiling applies to `SQLiteV2Dataset` and to both SQLite and PostgreSQL
+`QueryDatasetV3` hosts. Request `groupLimit` and result paging do not raise the
+host budget. The population check reads at most budget+1 matching rows
 before sorting/formulas. A source SELECT with its own expensive joins/sorts
 still needs host indexes and a context deadline. Exceeding the row or population
 budget fails the entire request; exceeding a metric's group or sample budget

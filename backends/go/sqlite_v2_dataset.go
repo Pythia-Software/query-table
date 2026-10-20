@@ -22,6 +22,7 @@ type SQLiteV2Dataset struct {
 	Scope, Dataset    string
 	ComputedGroupable map[string]bool
 	// Zero defaults to 10000 rows, 2000 groups and 250000 matching source rows.
+	// Explicit MaxGroups may be 1..100000.
 	// Limits fail explicitly; no approximate or silently truncated populations.
 	MaxRows, MaxGroups, MaxPopulation int
 }
@@ -149,7 +150,7 @@ func (d SQLiteV2Dataset) limits() (int, int, int, error) {
 	if pop == 0 {
 		pop = 250000
 	}
-	if rows < 1 || rows > 10000 || groups < 1 || groups > 10000 || pop < 1 || pop > 10000000 {
+	if rows < 1 || rows > 10000 || groups < 1 || groups > 100000 || pop < 1 || pop > 10000000 {
 		return 0, 0, 0, diagnostic("resource_limit", "invalid host execution budgets")
 	}
 	if e := validateSQLiteSchema(d.Schema); e != nil {

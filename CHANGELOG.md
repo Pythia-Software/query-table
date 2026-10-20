@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.9.1 — 2026-10-20
+
+### Fixed
+
+- Go `SQLiteV2Dataset` and `QueryDatasetV3` now accept an explicit host
+  `MaxGroups` up to 100,000, including PostgreSQL V3. Zero still defaults to
+  2,000 groups; negative budgets and values above 100,000 remain invalid.
+  Actual group populations still obey the configured budget before top-N or
+  result paging, with V2 per-metric and V3 grouped-request errors unchanged.
+
 ## 0.9.0 — 2026-10-20
 
 ### Added

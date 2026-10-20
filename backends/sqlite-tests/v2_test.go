@@ -29,6 +29,7 @@ func runMetric(t *testing.T, db *sql.DB, d qt.SQLiteV2Dataset, q qt.MetricQuery)
 	}
 	return r.Metrics.Metrics[0]
 }
+
 // metricFailure asserts that a request succeeded but its only metric failed.
 func metricFailure(t *testing.T, r qt.SQLiteV2ExecutionResult, e error) string {
 	t.Helper()
@@ -221,6 +222,54 @@ func TestV2ValidationAndBudgets(t *testing.T) {
 	}
 	if !d.Capabilities().Distributions || d.Capabilities().Profile != qt.SQLiteExpressionProfile {
 		t.Fatal(d.Capabilities())
+	}
+}
+
+func TestV2HostGroupBudget(t *testing.T) {
+	db, d := setupV2(t)
+	rows := qt.ServerQueryV2{Version: 2, Profile: qt.SQLiteExpressionProfile, WireQuery: qt.WireQuery{Select: []string{"id"}, Limit: 1, Offset: 1}}
+	q := metricV2("COUNT()")
+	q.Limit, q.Offset = rows.Limit, rows.Offset
+	q.Metrics[0].GroupBy = []string{"flag"}
+	q.Metrics[0].GroupLimit = 1
+	q.Metrics = append(q.Metrics, qt.AggSpec{ID: "count", Expression: "COUNT()"})
+	for _, budget := range []int{0, 10_000, 100_000, 100_001, -1} {
+		d.MaxGroups = budget
+		r, err := d.ExecuteV2(context.Background(), db, &rows, &q, qt.PlanOptions{})
+		if budget < 0 || budget > 100_000 {
+			var diag *qt.PlanDiagnostic
+			if !errors.As(err, &diag) || diag.Code != "resource_limit" || diag.Message != "invalid host execution budgets" {
+				t.Fatalf("budget %d: expected host budget diagnostic, got %v", budget, err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("budget %d: %v", budget, err)
+		}
+		want := budget
+		if want == 0 {
+			want = 2000
+		}
+		if caps := d.Capabilities(); caps.MaxGroups != want {
+			t.Fatalf("budget %d: capabilities=%#v", budget, caps)
+		}
+		if len(r.Rows.Rows) != 1 || r.Rows.Total != 4 || len(r.Metrics.Metrics) != 2 {
+			t.Fatalf("budget %d: result=%#v", budget, r)
+		}
+		m := r.Metrics.Metrics[0]
+		if m.Error != "" || m.GroupCount != 3 || len(m.Buckets) != 1 || r.Metrics.Metrics[1].Buckets[0].Value != float64(4) {
+			t.Fatalf("budget %d: metrics=%#v", budget, r.Metrics.Metrics)
+		}
+	}
+	// Neither top-N nor row paging may hide groups from the host budget.
+	d.MaxGroups = 2
+	r, err := d.ExecuteV2(context.Background(), db, &rows, &q, qt.PlanOptions{})
+	if err != nil {
+		t.Fatalf("metric group budget failed the request: %v", err)
+	}
+	m, sibling := r.Metrics.Metrics[0], r.Metrics.Metrics[1]
+	if m.Error != "group population exceeds host budget" || len(m.Buckets) != 0 || sibling.Error != "" || sibling.Buckets[0].Value != float64(4) || len(r.Rows.Rows) != 1 || r.Rows.Total != 4 {
+		t.Fatalf("group budget isolation: rows=%#v metrics=%#v", r.Rows, r.Metrics)
 	}
 }
 

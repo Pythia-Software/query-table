@@ -241,3 +241,39 @@ func TestPostgresSnapshotTransactionsAndConcurrentQuota(t *testing.T) {
 		t.Fatal("malformed direct write accepted")
 	}
 }
+
+func TestPostgresHostGroupBudget(t *testing.T) {
+	db, d := fixture(t)
+	q := groupedQuery()
+	q.Result.Limit, q.Result.Offset = 1, 1
+	for _, budget := range []int{0, 10_000, 100_000, 100_001, -1} {
+		d.MaxGroups = budget
+		out, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
+		if budget < 0 || budget > 100_000 {
+			var diag *qt.PlanDiagnostic
+			if !errors.As(err, &diag) || diag.Code != "resource_limit" || diag.Message != "invalid host execution budgets" {
+				t.Fatalf("budget %d: expected host budget diagnostic, got %v", budget, err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("budget %d: %v", budget, err)
+		}
+		want := budget
+		if want == 0 {
+			want = 2000
+		}
+		if caps := d.Capabilities(); caps.MaxGroups != want {
+			t.Fatalf("budget %d: capabilities=%#v", budget, caps)
+		}
+		if out.SourceTotal != 6 || out.Total != 4 || len(out.Rows) != 1 {
+			t.Fatalf("budget %d: result=%#v", budget, out)
+		}
+	}
+	// The full grouping population is checked before result paging.
+	d.MaxGroups = 3
+	var diag *qt.PlanDiagnostic
+	if _, err := d.Execute(context.Background(), db, q, qt.PlanOptions{}); !errors.As(err, &diag) || diag.Code != "resource_limit" || diag.Message != "group population exceeds host budget" {
+		t.Fatalf("group budget before paging: %v", err)
+	}
+}
