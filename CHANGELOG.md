@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.9.0 — 2026-10-20
+
 ### Added
 
 - Go `ExecuteV2Rows` runs V2 scalar metrics over authorized row maps in one
