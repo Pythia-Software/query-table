@@ -407,9 +407,11 @@ fail only affected metrics, while population overflow fails the request.
 
 All metrics run during one traversal of the source slice. Matching grouping and
 per-metric predicates share group lookup; identical reductions also share their
-accumulator. SUM/AVG use exact scaled decimal integers for common values and
-promote to the shared rational accumulator before overflow or for uncommon
-scales. Final rounding and numeric diagnostics follow the SQLite profile.
+accumulator. Group lookup reuses a typed key buffer; only new groups allocate
+keys and validate their text. SUM/AVG accumulate exact decimal integers at each
+input scale, spilling a part to `big.Int` before it overflows. The parts are
+combined into rationals once at finalization, retaining the SQLite profile's
+rounding, absolute-sum bound and numeric diagnostics.
 
 Rows are keyed by schema field name. A consumed binding must directly reference
 that same column, e.g. `r.cost_usd` or `r."repository_name"`. SQL expressions,
@@ -450,6 +452,14 @@ The differential tests and 50,000-row six-metric benchmark are in
 cd backends/sqlite-tests
 go test -run '^TestRows' ./...
 go test -run '^$' -bench '^BenchmarkV2RowsTokenSummary' -benchmem ./...
+```
+
+The Go backend also has 20,000-row benchmarks for two-text-key grouping,
+float-noise versus six-decimal-place costs, and a six-metric token summary:
+
+```sh
+cd backends/go
+go test -run '^$' -bench '^BenchmarkV2Rows' -benchmem ./...
 ```
 
 ### V2 numeric contract

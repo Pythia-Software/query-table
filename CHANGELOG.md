@@ -24,6 +24,14 @@
   The host's `isCurrentWindow` check should match the query, window size, and
   data origin. See the [migration example](docs/metrics.md#independent-remote-metrics).
 
+### Changed
+
+- Go `ExecuteV2Rows` reuses typed group keys and accumulates decimal sums by
+  scale, avoiding per-row JSON allocation and rational arithmetic for float
+  costs. Exact SUM/AVG results, numeric diagnostics and group budgets are
+  unchanged. Backend benchmarks cover 20,000-row grouped counts, decimal costs
+  and token summaries.
+
 ### Fixed
 
 - Standalone `useAggregations` calls with a complete client dataset retain
