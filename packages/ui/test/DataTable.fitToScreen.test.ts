@@ -35,7 +35,8 @@ beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
     return this.classList.contains("qt-table-wrap") ? viewport : 0;
   });
-  vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(600);
+  // TanStack Virtual measures the scroll viewport through clientHeight.
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(600);
   const real = HTMLElement.prototype.getBoundingClientRect;
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
     if (this.getAttribute("aria-hidden") !== "true" || this.tagName !== "SPAN") return real.call(this);
