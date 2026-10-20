@@ -152,6 +152,7 @@ func (d QueryDatasetV3) ExecuteIn(ctx context.Context, tx *sql.Tx, q QueryReques
 			original.ServerFilter = d.ComputedFilterable[strings.TrimPrefix(column.Field, "@computed/")]
 		}
 		original.Expr = "r." + queryIdent(column.ValueAlias)
+		original.typedValue = d.Dialect == "sqlite"
 		original.SortExpr = ""
 		original.ValueErrorExpr = "r." + queryIdent(column.ErrorAlias)
 		if original.Kind == FieldDatetime {
@@ -370,7 +371,9 @@ func (d QueryDatasetV3) stageGroups(ctx context.Context, tx *sql.Tx, table strin
 	if _, err = tx.ExecContext(ctx, "CREATE UNIQUE INDEX "+queryIdent(table+"_ordinal")+" ON "+queryIdent(table)+" (qt_group_ordinal)"); err != nil {
 		return result, err
 	}
-	result.Fields[GroupIdentityField] = resultField(GroupIdentityField, "text", "r.identity", false)
+	identity := resultField(GroupIdentityField, "text", "r.identity", false)
+	identity.typedValue = d.Dialect == "sqlite"
+	result.Fields[GroupIdentityField] = identity
 	for _, summary := range g.Summaries {
 		if sampledExpression(MetricExpression(summarySpec(summary, g.Keys))) {
 			limit, _ := d.sampleLimit()
@@ -387,6 +390,7 @@ func (d QueryDatasetV3) stageGroups(ctx context.Context, tx *sql.Tx, table strin
 	for i, key := range g.Keys {
 		original := s.Fields[key]
 		original.Expr = fmt.Sprintf("r.group%d", i)
+		original.typedValue = d.Dialect == "sqlite"
 		original.ValueErrorExpr = fmt.Sprintf("r.group%d_error", i)
 		original.SortExpr = ""
 		original.SQLiteSortField = ""
@@ -415,6 +419,7 @@ func (d QueryDatasetV3) stageGroups(ctx context.Context, tx *sql.Tx, table strin
 			groupable = fieldGroupable(s.Fields[summary.Field])
 		}
 		field := resultField(summary.ID, typ, "r."+queryIdent(value), groupable)
+		field.typedValue = d.Dialect == "sqlite"
 		if (summary.Op == "row" || summary.Op == "min" || summary.Op == "max") && s.Fields[summary.Field].Kind == FieldEnum {
 			field.Kind = FieldEnum
 		}
