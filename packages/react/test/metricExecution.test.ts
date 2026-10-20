@@ -46,6 +46,42 @@ const clause = {
   expression: "SUM([x]) / SUM([y])",
 };
 describe("metric execution boundary", () => {
+  it.each([false, undefined])("uses committed rows when V2 shownRows is %s, preserving remote revisions and clause order", async (shownRows) => {
+    const fetchRows = vi.fn(async () => ({ rows: [{ ...rows[1]!, x: 999 }], total: 100 }));
+    const fetchMetrics = vi.fn<NonNullable<Transport<Row>["fetchMetrics"]>>(async request => ({
+      metrics: request.metrics.map(m => ({ id: m.id, buckets: [{ keys: [], value: 100, count: 100 }] })),
+    }));
+    const transport: Transport<Row> = {
+      fetchRows, fetchMetrics,
+      metricCapabilities: { version: 2, computedFields: true, expressions: true, ...(shownRows !== undefined ? { shownRows } : {}) },
+    };
+    const execution = {
+      profile: "qt-postgres-v1", planToken: "metric-plan", resolvedRevisions: { double: "metric-revision" },
+      fields: { "@computed/double": { type: "number" as const, select: true, sort: true, group: true, measure: true } },
+    };
+    const query = { ...EMPTY_QUERY, offset: 1, limit: 1, aggregations: [
+      { id: "page", op: "sum" as const, field: "@computed/double", groupBy: [], scope: "shownRows" as const },
+      { id: "all", op: "sum" as const, field: "@computed/double", groupBy: [] },
+      { id: "page-count", op: "count" as const, groupBy: [], scope: "shownRows" as const },
+    ] };
+    const context = {
+      schema, transport, execution, clientRows: rows, shownRows: [rows[1]!], rowsReady: true,
+      resolveComputed: (name: string) => name === "@computed/double" ? compileFormula("[x] * 2", schema.fields) : undefined,
+    };
+    const result = await executeMetrics(query, context);
+    expect(result.metrics.map(m => [m.id, m.buckets[0]?.value])).toEqual([["page", 60], ["all", 100], ["page-count", 1]]);
+    expect(fetchMetrics).toHaveBeenCalledOnce();
+    expect(fetchMetrics.mock.calls[0]![0]).toMatchObject({
+      metrics: [{ id: "all", field: "@computed/double" }],
+      expectedRevisions: { double: "metric-revision" }, planToken: "metric-plan",
+    });
+    expect(fetchRows).not.toHaveBeenCalled();
+    await expect(executeMetrics(query, { ...context, rowsReady: false })).rejects.toThrow("current table page");
+    await expect(executeMetrics(query, { ...context, shownRows: [{ id: 2 } as Row] })).rejects.toThrow("not loaded");
+    expect(fetchRows).not.toHaveBeenCalled();
+    const ac = new AbortController(); ac.abort();
+    await expect(executeMetrics(query, context, ac.signal)).rejects.toMatchObject({ name: "AbortError" });
+  });
   it("falls back to the complete client dataset when a transport cannot aggregate", async () => {
     const transport: Transport<Row> = {
       fetchRows: async () => ({ rows: rows.slice(0, 1), total: 3 }),
@@ -371,7 +407,7 @@ describe("metric execution boundary", () => {
     );
     expect(fetchMetrics).toHaveBeenCalledTimes(2);
   });
-  it("runs regex inputs only on the shown page in a terminated worker", async () => {
+  it.each([false, true, undefined])("runs regex inputs on a worker with V2 shownRows=%s", async (shownRows) => {
     const inputs: Record<string, FormulaValue>[] = [];
     const terminate = vi.fn();
     const worker = {
@@ -402,6 +438,13 @@ describe("metric execution boundary", () => {
       {
         schema,
         clientRows: rows,
+        shownRows: [rows[1]!],
+        rowsReady: true,
+        transport: {
+          fetchRows: vi.fn(async () => ({ rows, total: 3 })),
+          fetchMetrics: vi.fn(async () => ({ metrics: [] })),
+          metricCapabilities: { version: 2, ...(shownRows !== undefined ? { shownRows } : {}) },
+        },
         workerFactory: () => worker as unknown as Worker,
       },
     );

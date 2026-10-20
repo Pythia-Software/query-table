@@ -92,8 +92,15 @@ export interface UseQueryTableOptions<Row> {
   /** Disable row-producing grouping for this instance. Enabled for complete client datasets by default. */
   grouping?: boolean;
   schema: FieldSchema<Row>;
-  /** Data access. Omit for a purely client-side table driven by `clientRows`. */
+  /** Row data access. Omit to filter, sort, and page `clientRows` locally. */
   transport?: Transport<Row>;
+  /** Metric-only data access; defaults to transport and never selects server row mode. */
+  metricTransport?: Transport<Row>;
+  /** Authoritative metric handshake; defaults to the existing row execution selection. */
+  metricExecution?: ComputedExecution;
+  /** Additional host readiness gate for committed-page metrics and previews.
+   * Does not delay remote allMatching requests. Re-evaluated on each render. */
+  metricRowsReady?: (query: QueryState) => boolean;
   /** Dataset already available in memory. Remote grouping/aggregation belongs
    * on the server; do not download a population to supply this option. */
   clientRows?: Row[];
@@ -465,8 +472,8 @@ export function useQueryTable<Row>(
   const active = opts.active !== false;
   const urlSyncEnabled = opts.syncUrl === true;
   const syncUrl = urlSyncEnabled && active;
-  const { transport: metadataTransport, activity: requestActivity } =
-    useRequestActivity(sourceTransport);
+  const { transport: metadataTransport, metricTransport, activity: requestActivity } =
+    useRequestActivity(sourceTransport, opts.metricTransport);
   const transport = metadataTransport;
   const storage = useMemo(
     () => opts.storage ?? memoryStorageAdapter(),
@@ -730,6 +737,8 @@ export function useQueryTable<Row>(
     serverComputed,
     ...(serverExecution ? { serverExecution } : {}),
     ...(opts.computedExecution ? { execution: opts.computedExecution } : {}),
+    ...(metricTransport ? { metricTransport } : {}),
+    ...(opts.metricExecution ? { metricExecution: opts.metricExecution } : {}),
     ...(opts.computedColumnStore ? { store: opts.computedColumnStore } : {}),
     ...(opts.formulaWorkerFactory
       ? { workerFactory: opts.formulaWorkerFactory }
@@ -745,18 +754,21 @@ export function useQueryTable<Row>(
         : undefined,
     [computed.compile],
   );
+  const metricCompileSchema = useMemo(() => opts.metricExecution
+    ? sourceExecutionSchema(displaySchema, opts.metricExecution, computed.definitions)
+    : displaySchema, [displaySchema, opts.metricExecution, computed.definitions]);
   const metricCompile = useCallback(
     (clause: AggregationClause) => {
       const diagnostics = validateMetric(
         clause,
-        displaySchema,
+        metricCompileSchema,
         resolveComputed,
       );
       if (diagnostics.length)
         throw new Error(diagnostics.map((d) => d.message).join(" "));
-      return metricPlans(clause, displaySchema, resolveComputed);
+      return metricPlans(clause, metricCompileSchema, resolveComputed);
     },
-    [displaySchema, resolveComputed],
+    [metricCompileSchema, resolveComputed],
   );
   const computedRevisions = useMemo(
     () =>
@@ -1041,11 +1053,18 @@ export function useQueryTable<Row>(
   const dataToken = useRef(0);
   const dataVersion = useMemo(
     () => ++dataToken.current,
-    [schema, transport, clientRows, nonce, definitionKey, executionKey],
+    [schema, transport, clientRows, rows, nonce, definitionKey, executionKey, metricTransport, opts.metricExecution],
   );
+  const metricRowsReady = pageReady && (opts.metricRowsReady?.(query) ?? true);
+  const metricExecution = opts.metricExecution ?? (opts.computedExecution
+    ? pageReady && serverExecution ? serverExecution : opts.computedExecution
+    : undefined);
+  const v3MetricExecution = opts.metricExecution ?? opts.computedExecution;
+  const metricSourceCatalogue = useMemo(() => sourceExecutionSchema(sourceSchema, v3MetricExecution),
+    [sourceSchema, v3MetricExecution]);
   const executeV3Metrics = useCallback(async (metricQuery: QueryState, signal?: AbortSignal) => {
-    if (!transport?.fetchQueryV3 || transport.queryCapabilities?.version !== 3) throw Error("The v3 query executor is unavailable.");
-    const capabilities = transport.queryCapabilities;
+    if (!metricTransport?.fetchQueryV3 || metricTransport.queryCapabilities?.version !== 3) throw Error("The v3 query executor is unavailable.");
+    const capabilities = metricTransport.queryCapabilities;
     // Unsupported population controls fail their own cards, never the batch.
     const refused = new Map<string, string>();
     for (const clause of metricQuery.aggregations ?? []) {
@@ -1057,10 +1076,10 @@ export function useQueryTable<Row>(
     if (runnable.length) {
       const scoped = { ...metricQuery, aggregations: runnable };
       const request = toQueryRequestV3(query.grouping ? { ...scoped, grouping: query.grouping } : scoped,
-        sourceSchema, capabilities, opts.computedExecution, { now: groupingNow ?? (opts.evaluationNow ?? Date.now)(), rows: false });
+        sourceSchema, capabilities, v3MetricExecution, { now: groupingNow ?? (opts.evaluationNow ?? Date.now)(), rows: false });
       if (request.diagnostics.length) throw Error(request.diagnostics.join(" "));
-      const result = await transport.fetchQueryV3(request, signal);
-      validateQueryResultV3(result, request, query.grouping ? schema : sourceCatalogue);
+      const result = await metricTransport.fetchQueryV3(request, signal);
+      validateQueryResultV3(result, request, query.grouping ? schema : metricSourceCatalogue);
       metrics = result.metrics;
     }
     if (!refused.size) return { metrics };
@@ -1071,7 +1090,7 @@ export function useQueryTable<Row>(
       const metric = byId.get(clause.id);
       return metric ? [metric] : [];
     }) };
-  }, [transport, sourceSchema, sourceCatalogue, schema, opts.computedExecution, groupKey, groupingNow, opts.evaluationNow]);
+  }, [metricTransport, sourceSchema, metricSourceCatalogue, schema, v3MetricExecution, groupKey, groupingNow, opts.evaluationNow]);
   const previewGrouping = useCallback(async (draft: QueryState, signal?: AbortSignal) => {
     if (!active || !storageReady || restoration.loading || restoration.error) throw Error("Wait for query restoration before previewing groups.");
     if (!transport?.fetchQueryV3 || !transport.queryCapabilities?.groupedRows || !draft.grouping) throw Error("The server group preview is unavailable.");
@@ -1085,31 +1104,24 @@ export function useQueryTable<Row>(
   const aggState = useAggregations(
     executionQuery,
     schema,
-    transport,
+    metricTransport,
     clientRows,
     debounceMs,
     nonce,
     validateExecution,
     {
-      ...(transport?.fetchQueryV3 && transport.queryCapabilities?.version === 3 &&
+      ...(metricTransport?.fetchQueryV3 && metricTransport.queryCapabilities?.version === 3 &&
         (query.grouping || query.aggregations?.some(metric => metric.dateGrouping) ||
           query.where.some(term => ("any" in term ? term.any : [term]).some(predicate => isComputedField(predicate.field))))
         ? { executeV3: executeV3Metrics, queryContextKey: groupKey } : {}),
       ...(groupingNow !== undefined ? { now: groupingNow, strictLocalMetrics: true } : {}),
       shownRows: rows,
-      rowsReady: pageReady,
+      rowsReady: metricRowsReady,
       rowsError: error,
       ...(transport ? { shownFields: committedFields } : {}),
       resolveComputed,
       revisions: computedRevisions,
-      ...(opts.computedExecution
-        ? {
-            execution:
-              pageReady && serverExecution
-                ? serverExecution
-                : opts.computedExecution,
-          }
-        : {}),
+      ...(metricExecution ? { execution: metricExecution } : {}),
       ...(opts.formulaWorkerFactory
         ? { workerFactory: opts.formulaWorkerFactory }
         : {}),
@@ -1434,7 +1446,7 @@ export function useQueryTable<Row>(
       preview: aggState.preview,
       replace: replaceAggregations,
       compile: metricCompile,
-      contextKey: `${dataVersion}:${pageContext}:${pageReady}:${JSON.stringify(query.where)}`,
+      contextKey: `${dataVersion}:${pageContext}:${metricRowsReady}:${JSON.stringify(query.where)}`,
     }),
     [
       query.aggregations,
@@ -1450,7 +1462,7 @@ export function useQueryTable<Row>(
       replaceAggregations,
       metricCompile,
       pageContext,
-      pageReady,
+      metricRowsReady,
       dataVersion,
       query.where,
     ],

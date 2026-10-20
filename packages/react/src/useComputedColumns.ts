@@ -62,6 +62,9 @@ interface Options<Row> {
   clientRows?: Row[];
   workerFactory?: FormulaWorkerFactory;
   execution?: ComputedExecution;
+  /** Metric authority affects aggregate capabilities only, independently of rows. */
+  metricTransport?: Transport<Row>;
+  metricExecution?: ComputedExecution;
   serverComputed?: Map<RowId, RowComputedValues>;
   serverExecution?: ComputedExecution;
 }
@@ -70,6 +73,8 @@ export function useComputedColumns<Row>(options: Options<Row>): {
   displaySchema: FieldSchema<Row>;
 } {
   const { schema, query, rows, transport, clientRows, workerFactory } = options;
+  const metricTransport = options.metricTransport ?? transport;
+  const metricExecution = options.metricExecution ?? options.execution;
   const store = useMemo(
     () => options.store ?? memoryComputedColumnStore(),
     [options.store],
@@ -363,9 +368,9 @@ export function useComputedColumns<Row>(options: Options<Row>): {
         aggregate: {
           measure: !!entry?.plan,
           groupable:
-            (!!transport?.fetchMetrics && transport.metricCapabilities?.version === 2 || !!transport?.fetchQueryV3) &&
-            !!options.execution?.fields[computedFieldName(def.id)]?.group &&
-            executionRevision(options.execution, def.id) === def.revision &&
+            (!!metricTransport?.fetchMetrics && metricTransport.metricCapabilities?.version === 2 || !!metricTransport?.fetchQueryV3) &&
+            !!metricExecution?.fields[computedFieldName(def.id)]?.group &&
+            executionRevision(metricExecution, def.id) === def.revision &&
             !!entry?.plan &&
             !hasRegex(entry.plan),
         },
@@ -406,6 +411,8 @@ export function useComputedColumns<Row>(options: Options<Row>): {
     loading,
     transport,
     options.execution,
+    metricTransport,
+    metricExecution,
     options.serverComputed,
     options.serverExecution,
   ]);
