@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Changed
+
+- Remove Dependabot's scheduled version updates and disable its automatic
+  security pull requests in the repository settings.
+- Refresh npm dependencies and lockfile within the existing compatible release
+  lines, align Node types with Node 22, and update npm to 11.21.1. Keep React 18
+  development coverage and the public React 18/19 peer ranges. DuckDB-Wasm stays
+  on its latest stable release rather than the registry's development tag.
+- Update the SQLite and PostgreSQL demo drivers and their dependencies for
+  Go 1.25. Keep SQLite's libc version matched to its upstream requirement.
+- Adjust virtualizer test viewport mocks to use its current `clientHeight`
+  measurement.
+- Update the tsup esbuild override to 0.28.2 to address
+  [GHSA-g7r4-m6w7-qqqr](https://github.com/advisories/GHSA-g7r4-m6w7-qqqr).
+
 ## 0.9.2 — 2026-10-20
 
 ### Added

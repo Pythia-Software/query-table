@@ -26,8 +26,8 @@ afterEach(() => {
 });
 
 function renderTable() {
-  // Give the virtualizer a viewport so jsdom renders the row checkboxes.
-  vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(600);
+  // Give the virtualizer a client viewport so jsdom renders row checkboxes.
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(600);
   function Harness() {
     selection = useSelection(rows.map((row) => row.id));
     return createElement(DataTable<{ id: number }>, {
