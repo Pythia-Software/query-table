@@ -88,7 +88,7 @@ if (!import.meta.resolve("@pythia-software/query-table-ui/theme.css").endsWith("
     join(consumerDirectory, "types.ts"),
     `import { sourceDependencies, toQueryRequestV3, QuerySnapshotHttpError,
   type QueryState, type FieldSchema, type QueryRequestV3, type QueryResultV3,
-  type Transport } from "@pythia-software/query-table-core";
+  type Transport, type ComputedExecution } from "@pythia-software/query-table-core";
 import type { QueryTableApi, UseQueryTableOptions } from "@pythia-software/query-table-react";
 import type { DataTableProps } from "@pythia-software/query-table-ui";
 import type { GoGenerationOptions } from "@pythia-software/query-table-codegen";
@@ -99,10 +99,13 @@ declare const props: DataTableProps<{ id: number }>;
 declare const go: GoGenerationOptions;
 declare const schema: FieldSchema<{ id: number }>;
 declare const transport: Transport<{ id: number }>;
+declare const metricExecution: ComputedExecution;
 declare const request: QueryRequestV3;
 declare const result: QueryResultV3;
 const options: UseQueryTableOptions<{ id: number }> = {
   schema, transport, queryParameter: "q_runs", active: true,
+  metricTransport: transport, metricExecution,
+  metricRowsReady: query => query.offset === 0,
 };
 void table.restoreLocation("https://example.test/?q=2j.e30", new AbortController().signal);
 const status: "resolving" | "ready" | "error" = table.restoration.status;

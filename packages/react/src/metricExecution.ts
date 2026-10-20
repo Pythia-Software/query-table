@@ -52,6 +52,20 @@ const abort = (signal?: AbortSignal) => {
   if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
 };
 
+/** Keep dispatch and the hook's committed-page lifecycle on the same route. */
+export function usesLocalMetricPage<Row>(
+  clause: AggregationClause,
+  context: MetricExecutionContext<Row>,
+): boolean {
+  return !context.executeV3 && clause.scope === "shownRows" && (
+    !context.transport?.fetchMetrics ||
+    context.transport.metricCapabilities?.version !== 2 ||
+    context.transport.metricCapabilities.shownRows !== true ||
+    !!clause.dateGrouping ||
+    metricPlans(clause, context.schema, context.resolveComputed).some(hasRegex)
+  );
+}
+
 /** Local regex inputs run in terminable workers; reduction uses only cached values. */
 async function localMetrics<Row>(
   rows: Row[],
@@ -220,6 +234,8 @@ export async function executeMetrics<Row>(
   const clauses = query.aggregations ?? [];
   if (!clauses.length) return { metrics: [] };
   if (context.executeV3) return context.executeV3(query, signal);
+  if (context.rowsReady === false && clauses.some(c => usesLocalMetricPage(c, context)))
+    throw Error("Wait for the current table page before previewing shown-row metrics.");
   const supportsV2 =
     !!context.transport?.fetchMetrics &&
     context.transport.metricCapabilities?.version === 2;
@@ -229,18 +245,8 @@ export async function executeMetrics<Row>(
     !context.transport?.fetchAggregations
   )
     return localMetrics(context.clientRows, query, context, signal);
-  const needsWorker = (c: AggregationClause) =>
-    metricPlans(c, context.schema, context.resolveComputed).some(hasRegex);
-  const shown = clauses.filter(
-    (c) =>
-      c.scope === "shownRows" &&
-      (!supportsV2 || needsWorker(c) || !!c.dateGrouping),
-  );
-  let matching = clauses.filter(
-    (c) =>
-      c.scope !== "shownRows" ||
-      (supportsV2 && !needsWorker(c) && !c.dateGrouping),
-  );
+  const shown = clauses.filter(c => usesLocalMetricPage(c, context));
+  let matching = clauses.filter(c => !shown.includes(c));
   const results: AggregationResult["metrics"] = [];
   if (shown.length) {
     if (!context.rowsReady || !context.shownRows)

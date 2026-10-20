@@ -139,7 +139,56 @@ backend calendar metrics and metrics over grouped results. A legacy
 Unsupported features fail explicitly; an all-matching metric never falls back
 to an incomplete page. See the [host integration guide](host-integration-next-release.md).
 
-Shown-row fallback can reduce committed remote rows when all required inputs are present. Automatic evaluation waits in a loading state while that page is being fetched; a failed page request ends that wait and surfaces the row error. Applying such metrics adds their input dependencies to row projections. A draft referencing an unloaded field explains that the author must select/refresh it or use a snapshot-capable metric service. It never refetches current IDs and claims that newer values belong to the displayed snapshot.
+Shown-row fallback can reduce committed remote rows when all required inputs are present. A V2 transport's `metricCapabilities.shownRows` must be explicitly `true` to execute supported shown-row clauses remotely; false or omitted selects the committed-page fallback. Regex inputs still use workers, and calendar grouping still uses local evaluation unless a V3 executor is selected. Automatic local evaluation waits in a loading state while that page is being fetched; a failed page request ends that wait and surfaces the row error. Applying such metrics adds their input dependencies to row projections. A draft referencing an unloaded field explains that the author must select/refresh it or use a snapshot-capable metric service. It never refetches current IDs and claims that newer values belong to the displayed snapshot.
+
+### Independent remote metrics
+
+Hosts that fetch a coarse server window themselves can pass it as `clientRows`
+for local refinement, sorting and paging, while a separate transport evaluates
+the entire authorized `allMatching` population. The metric transport's row
+methods are never called by the row pipeline:
+
+```tsx
+const table = useQueryTable({
+  schema,
+  clientRows: fetchedWindow.rows,
+  metricTransport,
+  metricExecution: metricHandshake,
+  metricRowsReady: query =>
+    !externalLoading &&
+    fetchedWindow.origin === currentOrigin &&
+    fetchedWindow.requestKey === windowRequestKey(query, requestedWindowSize),
+});
+```
+
+In this example the host records the origin and request key alongside each
+fetched window; `windowRequestKey` identifies its query and requested window
+size. Keep those checks tied to the window that actually supplied `clientRows`.
+Keeping the same rows reference during an external fetch does not establish
+readiness for a new query or origin. Rerender the hook when loading, origin, or
+readiness changes, and treat supplied rows and handshakes as immutable.
+
+`metricTransport` defaults to `transport`; supplying it alone leaves the hook in
+client row mode. `metricExecution` provides authoritative computed capabilities,
+revisions, plan token, and snapshot for metrics. When omitted, metrics retain
+the existing execution selection. Both V2 metrics and negotiated V3 metric
+requests use the overrides and appear in `requestActivity`. Query restoration,
+activation, and query validation still apply before metric execution.
+
+`metricRowsReady(query)` defaults to true and adds a host gate to the hook's
+internal committed-page readiness. It gates local shown-row results and
+previews, including purely local tables. Unavailable previews reject; losing
+readiness clears current results and cancels local work. Previews that become
+obsolete reject with `AbortError`. Remote all-matching requests execute
+independently, including in mixed dashboards; combined results retain the
+original clause order once both populations are ready. Native V2 shown-row
+execution with `shownRows: true` and negotiated V3 execution keep their server
+snapshot semantics and do not depend on this local-page gate.
+
+To migrate from a local patch, replace its custom hook options with these
+supported options and rerun consumer regressions against the matching package
+versions before removing the patch. A separate HTTP metric query should not
+advertise `shownRows: true` unless it can share the displayed page's snapshot.
 
 A rows-only transport falls back to `clientRows` when a complete client dataset is supplied. Engine selection is per clause: legacy aggregates, including `count_distinct`, retain their existing coercion and grouping behavior even alongside composed formulas or scoped metrics. Legacy empty-text keys share the NULL bucket, matching `is_null` drilldown. Typed datetime grouping converts `Date` objects to ISO keys. The typed local engine gives each metric an independent operation budget (10 million by default); row and retained-memory limits still apply separately. An expensive metric cannot consume another metric's allowance. Direct field aggregate inputs read only their own binding; complex row formulas retain the full dependency input path. Both paths use the formula runtime for type/null/date checks and preserve operation accounting and safe-number validation before reduction. Null-only SUM groups contribute zero to an exact additive Other remainder, with their rows included in its count.
 

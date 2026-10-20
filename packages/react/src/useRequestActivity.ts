@@ -92,7 +92,10 @@ export function observeTransport<Row>(
   });
 }
 
-export function useRequestActivity<Row>(source: Transport<Row> | undefined) {
+export function useRequestActivity<Row>(
+  source: Transport<Row> | undefined,
+  metricSource?: Transport<Row>,
+) {
   const [entries, setEntries] = useState<RequestActivityEntry[]>([]);
   const sequence = useRef(0),
     mounted = useRef(true);
@@ -122,9 +125,15 @@ export function useRequestActivity<Row>(source: Transport<Row> | undefined) {
       setEntries((previous) => previous.filter((e) => e.status === "pending")),
     [],
   );
+  const metricTransport = useMemo(
+    () => !metricSource || metricSource === source
+      ? transport
+      : observeTransport(metricSource, publish, () => ++sequence.current),
+    [metricSource, source, transport, publish],
+  );
   const activity: RequestActivityApi = useMemo(
     () => ({ entries, clear }),
     [entries, clear],
   );
-  return { transport, activity };
+  return { transport, metricTransport, activity };
 }
