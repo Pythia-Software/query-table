@@ -12,6 +12,14 @@
   or storage return `ErrRowsUnsupported` without a partial result so hosts can
   stage and retry. See [in-memory metrics](docs/backend-sqlite.md#metrics-over-rows-in-memory).
 
+### Changed
+
+- Go v3 grouped requests with `ROW()` summaries rank the source once. The
+  chosen representative rows are kept in a temporary table, one row per group,
+  which both identity validation and the `ROW()` update read. Results and
+  diagnostics are unchanged. The table is dropped on success, failure and
+  cancellation. Applies to SQLite and PostgreSQL.
+
 ## 0.8.0 — 2026-10-18
 
 ### Added
