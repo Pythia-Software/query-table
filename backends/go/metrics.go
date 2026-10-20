@@ -374,7 +374,7 @@ func compileMetricOutputs(ctx context.Context, q MetricQuery, spec AggSpec, s Sc
 	var lower func(*exprNode) (ValueSQL, error)
 	lower = func(n *exprNode) (ValueSQL, error) {
 		if v, ok := leaves[n]; ok {
-			return b.emit("CASE WHEN "+v.Error+" IS NULL THEN "+v.Value+" END", v.Error, v.Type), nil
+			return b.emitNative("CASE WHEN "+v.Error+" IS NULL THEN "+v.Value+" END", v.Error, v.Type), nil
 		}
 		if n.op == "literal" {
 			return b.row(n)
@@ -421,12 +421,12 @@ func compileMetricOutputs(ctx context.Context, q MetricQuery, spec AggSpec, s Sc
 	}
 	if len(groupErrors) > 0 {
 		ge := "COALESCE(" + strings.Join(append(groupErrors, b.nullError()), ",") + ")"
-		v = b.emit("CASE WHEN "+ge+" IS NULL THEN "+v.Value+" END", "COALESCE("+ge+","+v.Error+")", v.Type)
+		v = b.emitNative("CASE WHEN "+ge+" IS NULL THEN "+v.Value+" END", "COALESCE("+ge+","+v.Error+")", v.Type)
 		for i, x := range extraValues {
-			extraValues[i] = b.emit("CASE WHEN "+ge+" IS NULL THEN "+x.Value+" END", "COALESCE("+ge+","+x.Error+")", x.Type)
+			extraValues[i] = b.emitNative("CASE WHEN "+ge+" IS NULL THEN "+x.Value+" END", "COALESCE("+ge+","+x.Error+")", x.Type)
 		}
 		if y != nil {
-			yv = b.emit("CASE WHEN "+ge+" IS NULL THEN "+yv.Value+" END", "COALESCE("+ge+","+yv.Error+")", yv.Type)
+			yv = b.emitNative("CASE WHEN "+ge+" IS NULL THEN "+yv.Value+" END", "COALESCE("+ge+","+yv.Error+")", yv.Type)
 		}
 	}
 	fields := groupOutput(len(groups))
@@ -620,5 +620,7 @@ func (b *planBuilder) metricNumber(v ValueSQL) ValueSQL {
 		return v
 	}
 	err := "COALESCE(" + v.Error + ",CASE WHEN " + b.unsafeMetricNumber(v.Value) + " THEN " + b.errorLiteral("unsafe_integer") + " END)"
-	return b.emit("CASE WHEN "+err+" IS NULL THEN "+v.Value+" END", err, v.Type)
+	// Reading an unmaterialized guard calls qt_v2_unsafe where the value is
+	// consumed, which measured cheaper than copying every row for each input.
+	return b.emitNative("CASE WHEN "+err+" IS NULL THEN "+v.Value+" END", err, v.Type)
 }
