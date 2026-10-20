@@ -110,6 +110,8 @@ type QueryDatasetV3 struct {
 	Dialect                           string // sqlite or postgres
 	ComputedGroupable                 map[string]bool
 	ComputedFilterable                map[string]bool
+	// Zero defaults to 10000 rows, 2000 groups and 250000 matching source rows.
+	// Explicit MaxGroups may be 1..100000.
 	MaxRows, MaxGroups, MaxPopulation int
 	// UTF-8 value/error payload of the narrow source, checked before its copy.
 	// Database storage overhead and query scratch space remain host-managed.
@@ -138,7 +140,7 @@ func (d QueryDatasetV3) limits() (int, int, int, int64, error) {
 	if bytes == 0 {
 		bytes = 64 << 20
 	}
-	if rows < 1 || rows > 10000 || groups < 1 || groups > 10000 || pop < 1 || pop > 10000000 || bytes < 1 || bytes > 1<<30 {
+	if rows < 1 || rows > 10000 || groups < 1 || groups > 100000 || pop < 1 || pop > 10000000 || bytes < 1 || bytes > 1<<30 {
 		return 0, 0, 0, 0, diagnostic("resource_limit", "invalid host execution budgets")
 	}
 	if d.Dialect != "sqlite" && d.Dialect != "postgres" {

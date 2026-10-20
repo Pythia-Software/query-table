@@ -59,9 +59,12 @@ the same transaction. Separate controller requests need a host snapshot binding
 when identical dataset contents across those requests are required.
 
 The defaults are 10,000 result rows, 2,000 groups, 250,000 matching source rows,
-64 MiB of staged values and 100,000 exact samples per group. Budgets fail rather
-than returning partial groups. Source, staging, row and grouped-summary budgets
-fail the request. A metric's sample, group or calendar budget, an invalid metric
+64 MiB of staged values and 100,000 exact samples per group. Since 0.9.1, trusted
+hosts may explicitly set `MaxGroups` from 1 through 100,000 for either dialect
+(and for `SQLiteV2Dataset`). Zero retains the 2,000-group default advertised by
+`Capabilities()`. Request `groupLimit` and result paging cannot hide an exceeded
+host group budget. Budgets fail rather than returning partial groups. Source,
+staging, row and grouped-summary budgets fail the request. A metric's sample, group or calendar budget, an invalid metric
 input, or a failed metric statement fails only that metric: it returns
 `{id, scope, buckets: [], error}` and the other metrics and rows still return.
 Each metric runs in a savepoint, so `ExecuteIn` transactions stay usable after a
