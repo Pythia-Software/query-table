@@ -120,3 +120,23 @@ and reject them through `validateQuery` so users can repair the selected tags.
 `api.aggregations.preview(clauses, signal)` evaluates a draft without modifying the query. `replace(clauses, expected?)` commits the entire dashboard as one undoable change and can reject a stale editor baseline. Presentation-only changes reuse computation. Advanced remote execution uses `fetchMetrics` plus explicit v2 `metricCapabilities`; v1 transports continue to support representable simple metrics. All-matching scope requires the complete client dataset or a server metric service. Shown-row fallback uses committed inputs and reports missing dependencies.
 
 See [the metrics integration guide](../../docs/metrics.md) for scopes, cancellation, worker-isolated regex, capability negotiation, computed revisions, and snapshot requirements.
+
+For host-managed row windows, pass `metricTransport` to fetch metrics separately
+while `clientRows` continues through local filtering, sorting, and paging.
+`metricExecution` overrides the metric handshake independently of
+`computedExecution`. Both default to the existing row transport/execution
+selection. Computed grouping choices in `api.computed.catalogue` use the metric
+transport and handshake, including definition revisions; row selection,
+filtering, sorting, and value access keep their row capabilities.
+Use `metricRowsReady(query)` to confirm that the external row window
+matches the current query and origin before local shown-row evaluation or
+previews. Remote `allMatching` metrics run while that gate is false.
+
+A V2 transport must explicitly advertise `metricCapabilities.shownRows: true`
+to execute supported shown-row clauses remotely. False or omitted uses the
+committed page, provided its inputs are loaded. See the
+[migration example](../../docs/metrics.md#independent-remote-metrics).
+
+Standalone `useAggregations` calls with a complete client dataset derive the
+shown page when readiness options are omitted. An explicit `rowsReady: false`
+still blocks automatic shown-row evaluation and previews.

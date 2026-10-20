@@ -83,14 +83,18 @@ describe("grouped metric lifecycle", () => {
     expect(values(current.api)).toEqual([3, 160, 2, 130]);
   });
 
-  it("previews the latest grouped population during a debounced page transition without mutating state", async () => {
+  it("waits for the committed grouped page before previewing shown-row metrics", async () => {
     const current = mount({ debounceMs: 100 }); await settle(300);
     act(() => current.api.setOffset(1));
     const before = current.api.query;
+    await expect(current.api.aggregations.preview!(current.api.aggregations.clauses)).rejects.toThrow("current table page");
+    await settle(300);
     const preview = await current.api.aggregations.preview!(current.api.aggregations.clauses);
     expect(preview.metrics.map(m => m.buckets[0]?.value)).toEqual([4, 190, 1, 60]);
     expect(current.api.query).toBe(before);
     act(() => current.api.grouping!.source.addFilter({ field: "amount", op: ">", value: "20" }));
+    await expect(current.api.aggregations.preview!(current.api.aggregations.clauses)).rejects.toThrow("current table page");
+    await settle(300);
     const changed = await current.api.aggregations.preview!(current.api.aggregations.clauses);
     expect(changed.metrics.map(m => m.buckets[0]?.value)).toEqual([3, 160, 1, 90]);
     await settle(300);

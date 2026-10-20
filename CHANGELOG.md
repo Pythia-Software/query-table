@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### Added
+
+- React `useQueryTable` accepts `metricTransport`, `metricExecution`, and
+  `metricRowsReady(query)`. Hosts can keep server-fetched windows in `clientRows`
+  for local paging while fetching `allMatching` metrics independently. Metrics
+  default to the existing `transport` and execution handshake when overrides
+  are omitted; remote requests participate in `requestActivity` and wait for
+  query restoration as before. To replace a consumer patch:
+
+  ```tsx
+  const table = useQueryTable({
+    schema,
+    clientRows: fetchedWindow,
+    metricTransport,
+    metricExecution: metricHandshake,
+    metricRowsReady: query => !externalLoading && isCurrentWindow(query),
+  });
+  ```
+
+  The host's `isCurrentWindow` check should match the query, window size, and
+  data origin. See the [migration example](docs/metrics.md#independent-remote-metrics).
+
 ### Changed
 
 - Go `ExecuteV2Rows` reuses typed group keys and accumulates decimal sums by
@@ -9,6 +31,24 @@
   costs. Exact SUM/AVG results, numeric diagnostics and group budgets are
   unchanged. Backend benchmarks cover 20,000-row grouped counts, decimal costs
   and token summaries.
+
+### Fixed
+
+- Standalone `useAggregations` calls with a complete client dataset retain
+  automatic shown-row evaluation when readiness options are omitted. An
+  explicit false readiness gate still blocks results and previews.
+- Computed fields in the metric editor's Group by catalogue now use the metric
+  transport and handshake, including revision checks, independently of row
+  selection, filtering, sorting, and displayed computed values.
+- V2 metric transports with `shownRows: false` or an omitted `shownRows`
+  capability now evaluate those clauses from the committed browser page.
+  Mixed dashboards retain clause order and use the server for `allMatching`.
+  Local results and previews wait for internal page commitment and the host's
+  readiness gate, invalidate when the page becomes unavailable, and cancel
+  obsolete work. Remote all-matching requests continue while the page loads.
+  Missing inputs retain the existing diagnostic without hydrating newer row
+  values. Regex workers, local calendar grouping, native V2 `shownRows: true`,
+  and negotiated V3 execution retain their routes.
 
 ## 0.9.1 — 2026-10-20
 
