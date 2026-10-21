@@ -56,18 +56,18 @@ func (d QueryDatasetV3) sqliteDirectGroups(ctx context.Context, tx *sql.Tx, q Qu
 		}
 		if valid {
 			var groups, population, bytes int64
-			err = tx.QueryRowContext(ctx, "SELECT COUNT(*),COALESCE(SUM(qt_source_count),0),COALESCE(SUM(qt_source_bytes),0) FROM "+queryIdent(table)).Scan(&groups, &population, &bytes)
+			err = tx.QueryRowContext(ctx, "SELECT COUNT(*),COALESCE(MAX(qt_source_count),0),COALESCE(MAX(qt_source_bytes),0) FROM "+queryIdent(table)).Scan(&groups, &population, &bytes)
 			if err != nil {
 				return nil, 0, err
-			}
-			if groups > int64(maxGroups) {
-				return nil, 0, diagnostic("resource_limit", "group population exceeds host budget")
 			}
 			if population > int64(maxPop) {
 				return nil, 0, diagnostic("resource_limit", "matching population exceeds host budget")
 			}
 			if bytes > maxBytes {
 				return nil, 0, diagnostic("resource_limit", "source staging exceeds host byte budget")
+			}
+			if groups > int64(maxGroups) {
+				return nil, 0, diagnostic("resource_limit", "group population exceeds host budget")
 			}
 			prepared, err := sqliteReplaceStage(MetricSQLPlan{SQLPlan: combined}, combined.SQLiteReductionStage, "SELECT * FROM "+queryIdent(table))
 			return &prepared.SQLPlan, population, err

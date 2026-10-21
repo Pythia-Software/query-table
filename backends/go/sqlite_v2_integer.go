@@ -135,7 +135,10 @@ func sqliteIntegerReduction(ctx context.Context, q MetricQuery, specs []AggSpec,
 				guards = append(guards, "MIN(qt_v2_field_error("+raw+",'source_text')) IS NULL")
 			}
 		}
-		columns = append(columns, "COUNT(*) AS qt_source_count", "COALESCE(SUM("+strings.Join(parts, "+")+"),0) AS qt_source_bytes")
+		// Window proofs cover every group before LIMIT bounds the staged
+		// output. Budgets and invalid values in an omitted group must not be
+		// hidden by that limit, or change ordinary diagnostic precedence.
+		columns = append(columns, "SUM(COUNT(*)) OVER () AS qt_source_count", "SUM(COALESCE(SUM("+strings.Join(parts, "+")+"),0)) OVER () AS qt_source_bytes")
 	}
 	plan := &sqliteIntegerPlan{Input: input, Args: args}
 	baseColumns, baseGuards := columns, guards
@@ -208,7 +211,11 @@ func sqliteIntegerReduction(ctx context.Context, q MetricQuery, specs []AggSpec,
 		if len(guards) == 0 {
 			guards = append(guards, "1")
 		}
-		columns = append(columns, "CASE WHEN "+strings.Join(guards, " AND ")+" THEN 1 ELSE 0 END AS qt_integer_valid")
+		valid := "CASE WHEN " + strings.Join(guards, " AND ") + " THEN 1 ELSE 0 END"
+		if len(sourceProof) > 0 {
+			valid = "MIN(" + valid + ") OVER ()"
+		}
+		columns = append(columns, valid+" AS qt_integer_valid")
 		by := ""
 		if len(groupBy) > 0 {
 			by = " GROUP BY " + strings.Join(groupBy, ",")

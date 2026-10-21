@@ -176,3 +176,30 @@ func TestV3DirectGroupsRetainOpaqueSourceEvaluation(t *testing.T) {
 		t.Fatal("opaque source evaluation changed")
 	}
 }
+
+func TestV3DirectGroupsProofsCoverUnstagedGroups(t *testing.T) {
+	for _, mode := range []string{"population first", "bytes first", "invalid omitted group"} {
+		t.Run(mode, func(t *testing.T) {
+			log := &statementLog{}
+			db, v2 := crossFieldDataset(t, log)
+			d := qt.QueryDatasetV3{Schema: v2.Schema, SourceSQL: v2.SourceSQL, SourceArgs: v2.SourceArgs, Dialect: "sqlite", MaxGroups: 1}
+			switch mode {
+			case "population first":
+				d.MaxPopulation, d.MaxStagingBytes = 10, 1
+			case "bytes first":
+				d.MaxStagingBytes = 1
+			case "invalid omitted group":
+				if _, err := db.Exec("UPDATE source SET n0='invalid' WHERE k='g2'"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			q := directRequest()
+			_, got := d.Execute(context.Background(), db, q, qt.PlanOptions{})
+			log.reset(declineDirect)
+			_, want := d.Execute(context.Background(), db, q, qt.PlanOptions{})
+			if got == nil || want == nil || got.Error() != want.Error() {
+				t.Fatalf("candidate %v; general %v", got, want)
+			}
+		})
+	}
+}
