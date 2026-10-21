@@ -50,7 +50,9 @@ go test -run '^$' -bench V3SimpleGrouping -benchtime=3x -benchmem -count=3
 Measured 2026-10-21: Apple M3 Ultra, 96 GiB RAM, macOS 15.7.3, Go 1.27.1,
 modernc SQLite v1.59.0; one reused connection to a temporary file database.
 Each benchmark discards one warmup then times three operations. These are
-medians of three runs. CPU is process user+system time, including Go/driver
+medians of three runs. Final V3 runs experienced heavy shared-machine load
+(load average reached 119 on 28 logical CPUs), so wall times are not a latency
+guarantee. CPU is process user+system time, including Go/driver
 work. Allocations are Go allocations. No unit test asserts latency.
 
 `V3UsageGroups` reproduces the consumer shape: 50,000 authorized facts, text ID,
@@ -66,17 +68,20 @@ ordinary candidate needs no host intervention.
 
 | V3 usage execution | Wall ms/op | CPU ms/op | Go MB/op | Allocs/op | TEMP high water |
 |---|---:|---:|---:|---:|---:|
-| General, 50,000 rows | 358.0 | 365.1 | 29.36 | 2,005,267 | 1,613,824 B |
-| Ordinary direct, 50,000 rows | 84.7 | 81.7 | 3.29 | 204,358 | 16,384 B |
-| Bare SQL, 50,000 rows | 33.2 | 33.2 | 0.003 | 56 | 0 B |
-| General, provider filtered | 203.7 | 214.9 | 17.81 | 1,205,083 | 970,752 B |
-| Ordinary direct, provider filtered | 41.3 | 43.0 | 2.15 | 124,362 | 16,384 B |
-| Bare SQL, provider filtered | 21.5 | 20.1 | 0.003 | 60 | 0 B |
+| General, 50,000 rows | 1,080.3 | 445.9 | 29.38 | 2,005,291 | 1,613,824 B |
+| Ordinary direct, 50,000 rows | 310.9 | 84.9 | 3.32 | 204,373 | 16,384 B |
+| Bare SQL, 50,000 rows | 118.4 | 39.0 | 0.002 | 55 | 0 B |
+| General, provider filtered | 347.4 | 241.7 | 17.82 | 1,205,099 | 970,752 B |
+| Ordinary direct, provider filtered | 98.9 | 49.0 | 2.16 | 124,370 | 16,384 B |
+| Bare SQL, provider filtered | 43.0 | 20.8 | 0.002 | 59 | 0 B |
 
-The separate existing `V3SimpleGrouping` fixture compares 0.9.3 with candidate:
-379 to 66 ms wall, 395 to 69 ms CPU, 29.85 to 3.31 MB and 2,278,556 to 204,375
-allocations/op. Copying already typed rows costs about 17 ms; eliminating that
-copy alone cannot account for the improvement.
+The existing `V3SimpleGrouping` baseline on 0.9.3 measured 379 ms wall,
+395 ms CPU, 29.85 MB and 2,278,556 allocations/op before heavy load. The final
+candidate measured 179 ms wall, 74.7 ms CPU, 3.31 MB and 204,384 allocations/op.
+Those wall times span different machine loads; use the same-run general/direct
+comparison above and CPU/allocations to assess the change. The earlier copy
+ablation measured about 17 ms for already typed rows; removing that copy alone
+cannot account for the reduction in CPU.
 
 TEMP high water is `temp.page_count * temp.page_size`; it excludes transient
 CTE/sorter storage and does not measure disk bytes written. Bare SQL omits
@@ -84,12 +89,14 @@ storage/encoding/numeric proofs, budgets, revisions, identities, schema,
 response mapping and result metric payloads. It is only a cost lower bound.
 
 Statement timings include execution, row stepping and close, but exclude Go
-compilation/mapping. General typed source preflight/projection takes about
-268 ms and grouping 67 ms. Direct source proofs/bytes/grouping fuse into one
-approximately 82 ms statement and cannot be independently timed. EXPLAIN takes
-0.04 ms, identity/group finalization 0.7 ms and result metrics 0.3 ms. Cleanup
-falls from about 1 ms to 0.05 ms. Remaining SQL includes staged validation and
-result reads. The benchmark prints each category alongside full wall/CPU cost.
+compilation/mapping. In the final unfiltered runs, general typed source
+preflight/projection took about 682 ms wall and grouping 281 ms. Direct source
+proofs/bytes/grouping fuse into one approximately 306 ms wall statement and
+cannot be independently timed. EXPLAIN took 0.09 ms, identity/group finalization
+1.8 ms and result metrics 0.6 ms (general: 1.1 ms). Cleanup fell from about 1 ms
+to 0.06 ms. These phase wall times include scheduler delays under contention.
+Remaining SQL includes staged validation and result reads. The benchmark prints
+each category alongside full wall/CPU cost.
 
 ## Residual V2 cost
 
