@@ -143,4 +143,8 @@ it("retains canonical computed sorting and rejects stale preview revisions", asy
   expect(fetchRowsV2.mock.calls[0]?.[0].expectedRevisions).toEqual({ saved: "current" });
   await expect(fetchPreviewRows({ fetchRowsV2 }, query, schema, canonical, [{ ...saved, revision: "new" }], 1, new AbortController().signal)).rejects.toThrow();
   expect(fetchRowsV2).toHaveBeenCalledOnce();
+  const fetchRows = vi.fn();
+  await expect(fetchPreviewRows({ fetchRowsV2, fetchRows }, { ...query,
+    where: [{ field: "@computed/saved", op: "=", value: "x" }] }, schema, canonical, [saved], 1, new AbortController().signal)).rejects.toThrow();
+  expect(fetchRows).not.toHaveBeenCalled();
 });

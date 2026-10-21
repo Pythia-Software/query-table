@@ -51,7 +51,7 @@ export async function fetchPreviewRows<Row>(
     const response = await transport.fetchQueryV3(request, signal);
     validateQueryResultV3(response, request, query.grouping ? schema : sourceSchema);
     result = { rows: response.rows as Row[], total: response.total };
-  } else if (transport.fetchRows) {
+  } else if (transport.fetchRows && !query.grouping && !(computedFilter && transport.fetchRowsV2 && execution)) {
     result = await transport.fetchRows(toServerQuery(query, schema), signal);
   } else {
     throw Error("Row execution requires fetchRows, negotiated fetchRowsV2, or negotiated fetchQueryV3.");
