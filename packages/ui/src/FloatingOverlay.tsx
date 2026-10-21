@@ -10,14 +10,19 @@ export interface FloatingOverlayOptions {
   anchor: OverlayAnchor;
   onClose: () => void;
   returnFocus?: HTMLElement | null | undefined;
-  width?: number | undefined;
+  width?: CSSProperties["width"] | undefined;
+  /** Combobox suggestions remain anchored on mobile and keep focus in their input. */
+  modalOnMobile?: boolean | undefined;
+  retainAnchorFocus?: boolean | undefined;
+  maxHeight?: number | undefined;
   placement?: Placement | undefined;
   nodeId?: string | undefined;
 }
 
 /** Shared geometry, theme, dismissal and focus lifecycle for menus and forms. */
-export function useFloatingOverlay({ anchor, onClose, returnFocus, width = 240, placement = "bottom-start", nodeId }: FloatingOverlayOptions) {
-  const mobile = useMobileLayout();
+export function useFloatingOverlay({ anchor, onClose, returnFocus, width = 240, placement = "bottom-start", nodeId, modalOnMobile = true, retainAnchorFocus = false, maxHeight }: FloatingOverlayOptions) {
+  const mobileLayout = useMobileLayout();
+  const mobile = mobileLayout && modalOnMobile;
   const themeAnchor = useRef<HTMLSpanElement>(null);
   const theme = useOverlayTheme(themeAnchor);
   const surface = useRef<HTMLDivElement | null>(null);
@@ -37,7 +42,7 @@ export function useFloatingOverlay({ anchor, onClose, returnFocus, width = 240, 
     placement, whileElementsMounted: autoUpdate,
     middleware: [offset(4), flip({ padding: 8 }), shift({ padding: 8 }), size({
       padding: 8,
-      apply({ availableHeight, elements }) { elements.floating.style.maxHeight = `${Math.max(0, availableHeight)}px`; },
+      apply({ availableHeight, elements }) { elements.floating.style.maxHeight = `${Math.max(0, Math.min(availableHeight, maxHeight ?? Infinity))}px`; },
     })],
   });
   const isElementAnchor = typeof HTMLElement !== "undefined" && anchor instanceof HTMLElement;
@@ -78,7 +83,7 @@ export function useFloatingOverlay({ anchor, onClose, returnFocus, width = 240, 
       close("outside");
     };
     const focusOutside = (event: FocusEvent) => {
-      if (pointerOnAnchor && event.target instanceof Node && isElementAnchor && (anchor as HTMLElement).contains(event.target)) return;
+      if ((pointerOnAnchor || retainAnchorFocus) && event.target instanceof Node && isElementAnchor && (anchor as HTMLElement).contains(event.target)) return;
       if (event.target instanceof Node && !surface.current?.contains(event.target)) close("outside");
     };
     const scroll = (event: Event) => {
@@ -97,7 +102,7 @@ export function useFloatingOverlay({ anchor, onClose, returnFocus, width = 240, 
       document.removeEventListener("scroll", scroll, true);
       window.removeEventListener("blur", blur);
     };
-  }, [close, mobile, isElementAnchor, anchor]);
+  }, [close, mobile, isElementAnchor, anchor, retainAnchorFocus]);
   const setSurface = useCallback((element: HTMLDivElement | null) => {
     surface.current = element;
     refs.setFloating(mobile ? null : element);

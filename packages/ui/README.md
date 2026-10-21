@@ -234,6 +234,15 @@ full workbenches use the shared modal/sheet foundation with Apply/Cancel and foc
 containment. Native selects, expandable sections, and formula autocomplete keep
 their respective form, disclosure, and combobox interactions.
 
+Distinct filter values use a freeform combobox. Focus or click the value input
+to open suggestions; Arrow Up/Down highlights a choice and Enter selects it.
+Escape dismisses suggestions and Tab leaves without selecting. The menu sizes
+to its contents independently of the compact input, wraps long values, and
+scrolls within the viewport, including inside mobile filter dialogs. Loading,
+unavailable suggestions, and no matches never prevent typing arbitrary values.
+While fetching new suggestions, matching values from the previous response stay
+visible and selectable. A loading message appears only when no known values match.
+
 ## Tag/set filters
 
 Set `filter.editor: "set"` on a `textarray` field to use the native WHERE

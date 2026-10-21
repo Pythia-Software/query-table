@@ -110,6 +110,13 @@ keyboard focus and dismissal, scrolling, viewport bounds, clipping, RTL, dialogs
 phone sheets, and real table/query/metric consumers, including tag filters.
 Set `QT_DEMO_URL` to test another local server or built preview.
 
+Visit `/filter-values` for the portable Repository autocomplete reproduction.
+It includes similar repository names, an unbroken long value, a long list,
+viewport-edge positioning, array membership, and a scrollable dialog. Run
+`npm run test:filter-values` for Chromium and WebKit checks at desktop, 390px,
+and 320px widths. Set `QT_SCREENSHOT_DIR` to save screenshots. Also check this
+fixture manually in native macOS Safari, including keyboard and touchpad use.
+
 ## Row-producing grouping playground
 
 Open `/grouping` on the same demo server. It uses the existing QueryBuilder,

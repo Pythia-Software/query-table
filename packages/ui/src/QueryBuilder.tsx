@@ -30,7 +30,6 @@ import {
   type ReactNode,
 } from "react";
 import type {
-  DistinctValuesResult,
   FieldDef,
   FilterOp,
   OpChoice,
@@ -73,6 +72,7 @@ import { ReorderList } from "./ReorderList";
 import { Icon } from "./Icon";
 import { MenuButton, MenuGroup, MenuItem } from "./Menu";
 import { Popover } from "./Popover";
+import { FilterValueAutocomplete } from "./FilterValueAutocomplete";
 
 export interface QueryBuilderProps<Row> {
   /** Collect unused clauses into a compact row of add actions. */
@@ -2059,6 +2059,10 @@ function PredicateEditor<Row>({
       api={api}
       field={field}
       value={clause.value}
+      // Filter edits reset paging; neither that nor this value changes the surrounding context.
+      contextKey={JSON.stringify({ ...api.query, offset: 0 }, (_key, entry) =>
+        entry === clause ? { ...clause, value: "" } : entry,
+      )}
       forceFreeform={isRegex || isLength}
       numeric={isLength}
       placeholder={
@@ -2129,6 +2133,7 @@ function ValueInput<Row>({
   api,
   field,
   value,
+  contextKey,
   forceFreeform,
   numeric,
   placeholder = "value",
@@ -2138,6 +2143,7 @@ function ValueInput<Row>({
   api: QueryFilterApi<Row>;
   field: FieldDef<Row> | undefined;
   value: string;
+  contextKey: string;
   forceFreeform?: boolean;
   numeric?: boolean;
   placeholder?: string;
@@ -2210,76 +2216,15 @@ function ValueInput<Row>({
 
   // Autocomplete (the default) → debounced combobox backed by api.filterValues.
   return (
-    <AutocompleteInput
+    <FilterValueAutocomplete
       api={api}
       field={field}
       value={value}
-      classNames={classNames}
+      contextKey={contextKey}
+      className={cx("qt-chip-val", classNames?.input)}
+      widthChars={chipFieldWidthForInput(value || "value", field.type, 5, 4)}
       onChange={onChange}
     />
-  );
-}
-
-function AutocompleteInput<Row>({
-  api,
-  field,
-  value,
-  classNames,
-  onChange,
-}: {
-  api: QueryFilterApi<Row>;
-  field: FieldDef<Row>;
-  value: string;
-  classNames: QueryBuilderClassNames | undefined;
-  onChange: (v: string) => void;
-}) {
-  const [result, setResult] = useState<DistinctValuesResult>({
-    values: [],
-    hasMore: false,
-  });
-  const listId = useId();
-
-  useEffect(() => {
-    let cancelled = false;
-    const t = setTimeout(() => {
-      void api
-        .filterValues(field.name, value)
-        .then((r) => {
-          if (!cancelled) setResult(r);
-        })
-        .catch(() => {
-          if (!cancelled) setResult({ values: [], hasMore: false });
-        });
-    }, 200);
-    return () => {
-      cancelled = true;
-      clearTimeout(t);
-    };
-  }, [api, field.name, value]);
-
-  return (
-    <span className="qt-autocomplete">
-      <input
-        className={cx("qt-chip-val", classNames?.input)}
-        value={value}
-        placeholder="value"
-        aria-label={`Value for ${field.label}`}
-        list={listId}
-        size={chipFieldWidthForInput(value || "value", field.type, 5, 4)}
-        style={{
-          width: `${chipFieldWidthForInput(value || "value", field.type, 5, 4)}ch`,
-        }}
-        onChange={(e) => onChange(e.target.value)}
-      />
-      <datalist id={listId}>
-        {result.values.map((v) => (
-          <option key={v} value={v} />
-        ))}
-      </datalist>
-      {result.hasMore && (
-        <span className="qt-autocomplete-hint">keep typing to refine…</span>
-      )}
-    </span>
   );
 }
 
