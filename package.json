@@ -1,6 +1,6 @@
 {
   "name": "query-table-monorepo",
-  "version": "0.9.4",
+  "version": "0.9.5",
   "private": true,
   "description": "Schema-driven data table — core, react, and ui packages.",
   "license": "MIT",
@@ -43,6 +43,7 @@
     "test:dnd": "node demo/dnd-test.mjs",
     "test:mobile": "node demo/mobile-test.mjs",
     "test:menus": "node demo/menu-test.mjs",
+    "test:filter-values": "node demo/filter-value-test.mjs",
     "test:feedback": "node demo/agentation-test.mjs",
     "test:cells": "node demo/cell-display-test.mjs",
     "test:computed": "node demo/computed-test.mjs",

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.9.5 — 2026-10-21
+
+### Fixed
+
+- Distinct filter-value suggestions open in a content-sized, viewport-bounded
+  combobox menu instead of a narrow native datalist. Long values wrap and long
+  lists scroll, including in mobile dialogs. Preserve freeform values, keyboard
+  and pointer selection, and reject stale suggestions after context changes.
+
 ## 0.9.4 — 2026-10-21
 
 ### Added

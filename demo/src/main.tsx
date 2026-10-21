@@ -2,6 +2,7 @@ import { lazy, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 const CellDisplayDemo = lazy(() => import("./CellDisplayDemo").then(module => ({ default: module.CellDisplayDemo })));
+const FilterValueDemo = lazy(() => import("./FilterValueDemo").then(module => ({ default: module.FilterValueDemo })));
 const MenuDemo = lazy(() =>
   import("./MenuDemo").then((module) => ({ default: module.MenuDemo })),
 );
@@ -42,6 +43,8 @@ createRoot(document.getElementById("root")!).render(
       <Suspense fallback={<p>Loading object playground…</p>}>
         <PropertiesDemo />
       </Suspense>
+    ) : window.location.pathname.startsWith("/filter-values") ? (
+      <Suspense fallback={<p>Loading filter playground…</p>}><FilterValueDemo /></Suspense>
     ) : window.location.pathname.startsWith("/menus") ? (
       <Suspense fallback={<p>Loading menu playground…</p>}>
         <MenuDemo />
