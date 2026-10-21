@@ -106,19 +106,6 @@ func (d QueryDatasetV3) ExecuteIn(ctx context.Context, tx *sql.Tx, q QueryReques
 	if err != nil {
 		return out, err
 	}
-	// Inspect the bounded narrow projection in the same authorized snapshot
-	// before copying it. An oversized source must never fill our temp table.
-	sizeSQL := d.stagingSizeSQL(plan.Columns)
-	var count, bytes int64
-	if err = tx.QueryRowContext(ctx, "SELECT COUNT(*),"+sizeSQL+" FROM ("+plan.SQL+") AS qt_source_budget", plan.Args...).Scan(&count, &bytes); err != nil {
-		return out, err
-	}
-	if count > int64(maxPop) {
-		return out, diagnostic("resource_limit", "matching population exceeds host budget")
-	}
-	if bytes > maxBytes {
-		return out, diagnostic("resource_limit", "source staging exceeds host byte budget")
-	}
 	tables := []string{}
 	defer func() {
 		err = errors.Join(err, d.dropQueryTables(ctx, tx, tables))
@@ -126,76 +113,98 @@ func (d QueryDatasetV3) ExecuteIn(ctx context.Context, tx *sql.Tx, q QueryReques
 			out = QueryResultV3{}
 		}
 	}()
-	source := queryTableName()
-	tables = append(tables, source)
-	if _, err = tx.ExecContext(ctx, "CREATE TEMP TABLE "+queryIdent(source)+" AS "+plan.SQL, plan.Args...); err != nil {
+	direct, total, err := d.sqliteDirectGroups(ctx, tx, q, o, plan, maxPop, maxGroups, maxBytes, &tables)
+	if err != nil {
 		return out, err
 	}
-	// Recheck the materialized values too, including host expressions that may
-	// be volatile. The preflight is what prevents normal budget failures staging.
-	if err = tx.QueryRowContext(ctx, "SELECT COUNT(*),"+sizeSQL+" FROM "+queryIdent(source)).Scan(&count, &bytes); err != nil {
-		return out, err
-	}
-	if count > int64(maxPop) {
-		return out, diagnostic("resource_limit", "matching population exceeds host budget")
-	}
-	if bytes > maxBytes {
-		return out, diagnostic("resource_limit", "source staging exceeds host byte budget")
-	}
-	out.SourceTotal = count
-	staged := Schema{Name: d.Schema.Name, IDField: d.Schema.IDField, Fields: map[string]FieldSpec{}}
-	for _, column := range plan.Columns {
-		original, ok := d.Schema.Fields[column.Field]
-		if !ok {
-			original = resultField(column.Field, column.Type, "", d.ComputedGroupable[strings.TrimPrefix(column.Field, "@computed/")])
-			original.AggregateOps = plan.ComputedPolicies[column.Field]
-			original.ServerFilter = d.ComputedFilterable[strings.TrimPrefix(column.Field, "@computed/")]
-		}
-		original.Expr = "r." + queryIdent(column.ValueAlias)
-		original.typedValue = d.Dialect == "sqlite"
-		original.SortExpr = ""
-		original.ValueErrorExpr = "r." + queryIdent(column.ErrorAlias)
-		if original.Kind == FieldDatetime {
-			original.SQLiteDatetimeFormat = "rfc3339"
-		}
-		staged.Fields[column.Field] = original
-	}
-	if q.Grouping == nil {
-		staged.DefaultSort = d.Schema.DefaultSort
-		staged.TiebreakSort = d.Schema.TiebreakSort
-	}
-	for name, field := range staged.Fields {
-		if field.SQLiteSortField != "" {
-			field.SortExpr = staged.Fields[field.SQLiteSortField].Expr
-			staged.Fields[name] = field
-		}
-	}
-	// Invalid base storage cannot masquerade as a complete source. Canonical
-	// computed runtime errors remain sidecars and propagate through reductions.
-	baseErrors := []string{}
-	for _, column := range plan.Columns {
-		if !strings.HasPrefix(column.Field, "@computed/") {
-			baseErrors = append(baseErrors, queryIdent(column.ErrorAlias)+" IS NOT NULL")
-		}
-	}
-	if len(baseErrors) > 0 {
-		var invalid int64
-		if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+queryIdent(source)+" WHERE "+strings.Join(baseErrors, " OR ")).Scan(&invalid); err != nil {
+	staged := d.Schema
+	stageOptions := o
+	if direct == nil {
+		// Inspect the bounded narrow projection in the same authorized snapshot
+		// before copying it. An oversized source must never fill our temp table.
+		sizeSQL := d.stagingSizeSQL(plan.Columns)
+		var count, bytes int64
+		if err = tx.QueryRowContext(ctx, "SELECT COUNT(*),"+sizeSQL+" FROM ("+plan.SQL+") AS qt_source_budget", plan.Args...).Scan(&count, &bytes); err != nil {
 			return out, err
 		}
-		if invalid > 0 {
-			return out, diagnostic("invalid_source_value", "source contains invalid typed values")
+		if count > int64(maxPop) {
+			return out, diagnostic("resource_limit", "matching population exceeds host budget")
 		}
+		if bytes > maxBytes {
+			return out, diagnostic("resource_limit", "source staging exceeds host byte budget")
+		}
+		source := queryTableName()
+		tables = append(tables, source)
+		if _, err = tx.ExecContext(ctx, "CREATE TEMP TABLE "+queryIdent(source)+" AS "+plan.SQL, plan.Args...); err != nil {
+			return out, err
+		}
+		// Recheck the materialized values too, including host expressions that may
+		// be volatile. The preflight is what prevents normal budget failures staging.
+		if err = tx.QueryRowContext(ctx, "SELECT COUNT(*),"+sizeSQL+" FROM "+queryIdent(source)).Scan(&count, &bytes); err != nil {
+			return out, err
+		}
+		if count > int64(maxPop) {
+			return out, diagnostic("resource_limit", "matching population exceeds host budget")
+		}
+		if bytes > maxBytes {
+			return out, diagnostic("resource_limit", "source staging exceeds host byte budget")
+		}
+		out.SourceTotal = count
+		staged = Schema{Name: d.Schema.Name, IDField: d.Schema.IDField, Fields: map[string]FieldSpec{}}
+		for _, column := range plan.Columns {
+			original, ok := d.Schema.Fields[column.Field]
+			if !ok {
+				original = resultField(column.Field, column.Type, "", d.ComputedGroupable[strings.TrimPrefix(column.Field, "@computed/")])
+				original.AggregateOps = plan.ComputedPolicies[column.Field]
+				original.ServerFilter = d.ComputedFilterable[strings.TrimPrefix(column.Field, "@computed/")]
+			}
+			original.Expr = "r." + queryIdent(column.ValueAlias)
+			original.typedValue = d.Dialect == "sqlite"
+			original.SortExpr = ""
+			original.ValueErrorExpr = "r." + queryIdent(column.ErrorAlias)
+			if original.Kind == FieldDatetime {
+				original.SQLiteDatetimeFormat = "rfc3339"
+			}
+			staged.Fields[column.Field] = original
+		}
+		if q.Grouping == nil {
+			staged.DefaultSort = d.Schema.DefaultSort
+			staged.TiebreakSort = d.Schema.TiebreakSort
+		}
+		for name, field := range staged.Fields {
+			if field.SQLiteSortField != "" {
+				field.SortExpr = staged.Fields[field.SQLiteSortField].Expr
+				staged.Fields[name] = field
+			}
+		}
+		// Invalid base storage cannot masquerade as a complete source. Canonical
+		// computed runtime errors remain sidecars and propagate through reductions.
+		baseErrors := []string{}
+		for _, column := range plan.Columns {
+			if !strings.HasPrefix(column.Field, "@computed/") {
+				baseErrors = append(baseErrors, queryIdent(column.ErrorAlias)+" IS NOT NULL")
+			}
+		}
+		if len(baseErrors) > 0 {
+			var invalid int64
+			if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+queryIdent(source)+" WHERE "+strings.Join(baseErrors, " OR ")).Scan(&invalid); err != nil {
+				return out, err
+			}
+			if invalid > 0 {
+				return out, diagnostic("invalid_source_value", "source contains invalid typed values")
+			}
+		}
+		stageOptions.SourceSQL = "SELECT * FROM " + queryIdent(source)
+		stageOptions.SourceArgs = nil
+		stageOptions.ComputedFilterable = d.ComputedFilterable
+	} else {
+		out.SourceTotal = total
 	}
-	stageOptions := o
-	stageOptions.SourceSQL = "SELECT * FROM " + queryIdent(source)
-	stageOptions.SourceArgs = nil
-	stageOptions.ComputedFilterable = d.ComputedFilterable
 	result := staged
 	if q.Grouping != nil {
 		groups := queryTableName()
 		tables = append(tables, groups)
-		result, err = d.stageGroups(ctx, tx, groups, q.Grouping, staged, stageOptions, maxGroups)
+		result, err = d.stageGroups(ctx, tx, groups, q.Grouping, staged, stageOptions, maxGroups, direct)
 		if err != nil {
 			return out, err
 		}
@@ -347,7 +356,7 @@ func readQueryRows(ctx context.Context, tx *sql.Tx, p SQLPlan, grouped bool, dia
 	return out, rows.Err()
 }
 
-func (d QueryDatasetV3) stageGroups(ctx context.Context, tx *sql.Tx, table string, g *GroupingDefinition, s Schema, o PlanOptions, maxGroups int) (result Schema, err error) {
+func (d QueryDatasetV3) stageGroups(ctx context.Context, tx *sql.Tx, table string, g *GroupingDefinition, s Schema, o PlanOptions, maxGroups int, prepared *SQLPlan) (result Schema, err error) {
 	result = Schema{Name: s.Name + ":groups", IDField: GroupIdentityField, Fields: map[string]FieldSpec{}}
 	// SQLite reduces scalar summaries in the COUNT pass: one scan of the staged
 	// population and one GROUP BY write every value and error sidecar into the
@@ -368,7 +377,12 @@ func (d QueryDatasetV3) stageGroups(ctx context.Context, tx *sql.Tx, table strin
 		}
 	}
 	countSpec := AggSpec{ID: "__qt_count__", Op: "count", GroupBy: g.Keys}
-	countPlan, err := compileMetricOutputs(ctx, MetricQuery{Version: 2}, countSpec, s, o, d.Dialect == "sqlite", fused)
+	var countPlan SQLPlan
+	if prepared != nil {
+		countPlan = *prepared
+	} else {
+		countPlan, err = compileMetricOutputs(ctx, MetricQuery{Version: 2}, countSpec, s, o, d.Dialect == "sqlite", fused)
+	}
 	if err != nil && len(fused) > 0 && ctx.Err() == nil {
 		// The combined plan can exceed a compiler budget that each summary fits
 		// on its own; those summaries then run independently.
