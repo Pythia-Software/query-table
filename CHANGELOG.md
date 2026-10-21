@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+## 0.9.4 — 2026-10-21
+
+### Added
+
+- Ordinary SQLite V3 grouping can directly reduce eligible stored-column
+  COUNT/SUM/AVG/extrema/distinct-count requests with text/enum keys. Compiler
+  validation, strict numeric/storage guards, source totals/byte budgets and
+  exact fallback remain enforced. The existing group finalizer retains
+  identities, schema, HAVING, paging and both result metric scopes.
+- Portable consumer-shaped benchmarks, direct/general parity and failure
+  tests, and [measurements with remaining V2 costs](docs/sqlite-direct-groups.md).
+
+### Changed
+
+- `Transport.fetchRows` is optional. Tables and computed-column previews can
+  use negotiated V2 or V3 without a legacy row endpoint. Drafts still evaluate
+  locally over bounded dependency pages. V3 previews support grouped results
+  and honor negotiated page limits. See [migration notes](docs/computed-columns.md#modern-row-transports).
+
+### Fixed
+
+- Reject cancelled, superseded and context-invalidated computed previews even
+  when a transport ignores its abort signal. Validate modern preview response
+  identities, revisions, totals and diagnostics before local draft evaluation.
+- Include computed WHERE fields in V2 response revision validation.
+
 ## 0.9.3 — 2026-10-21
 
 ### Added

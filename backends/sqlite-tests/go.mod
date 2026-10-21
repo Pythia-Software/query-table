@@ -5,7 +5,7 @@ go 1.25.0
 replace github.com/Pythia-Software/query-table/backends/go => ../go
 
 require (
-	github.com/Pythia-Software/query-table/backends/go v0.9.3
+	github.com/Pythia-Software/query-table/backends/go v0.9.4
 	modernc.org/sqlite v1.59.0
 )
 
