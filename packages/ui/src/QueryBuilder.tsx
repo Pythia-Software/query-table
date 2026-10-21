@@ -2059,8 +2059,8 @@ function PredicateEditor<Row>({
       api={api}
       field={field}
       value={clause.value}
-      // Typing changes this predicate's search, not its suggestion context.
-      contextKey={JSON.stringify(api.query, (_key, entry) =>
+      // Filter edits reset paging; neither that nor this value changes the surrounding context.
+      contextKey={JSON.stringify({ ...api.query, offset: 0 }, (_key, entry) =>
         entry === clause ? { ...clause, value: "" } : entry,
       )}
       forceFreeform={isRegex || isLength}

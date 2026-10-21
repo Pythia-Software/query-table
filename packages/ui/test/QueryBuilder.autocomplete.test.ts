@@ -73,10 +73,13 @@ it("debounces filtering, supports clearing and arbitrary values, and ignores unr
 });
 
 it("immediately filters known suggestions during debounce and fetch, replacing them with fresh results", async () => {
-  await mount(); await tick();
+  await mount();
+  await act(async () => api.setQuery(query => ({ ...query, offset: 25 })));
+  await tick();
   let resolve!: (result: DistinctValuesResult) => void;
   fetchValues.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
   await type(" EXPLORATION- ");
+  expect(api.query.offset).toBe(0);
   expect(options().map(option => option.textContent)).toEqual(names.slice(1, 3));
   expect(document.querySelector('[role="status"]')).toBeNull();
   expect(document.querySelector('[role="listbox"]')!.getAttribute("aria-busy")).toBe("true");
