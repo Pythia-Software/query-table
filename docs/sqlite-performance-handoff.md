@@ -1,5 +1,8 @@
 # SQLite reductions and caller-owned transactions
 
+For the subsequent 0.9.4 work, see [direct V3 grouping, measurements and residual
+V2 costs](sqlite-direct-groups.md). The lifecycle contract below still applies.
+
 This records the Query Table side of the 2026-10-21 Pharos handoff against
 Query Table mainline `835b71a` and Pharos `b454ffe`. The changes are prepared
 for the aligned 0.9.3 Go/npm release. They are not a claim that either host

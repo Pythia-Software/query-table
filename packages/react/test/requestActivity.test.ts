@@ -23,7 +23,7 @@ it("observes transport calls with their receiver and records cancellation once",
     () => ++id,
   );
   const ac = new AbortController();
-  const result = transport.fetchRows(
+  const result = transport.fetchRows!(
     { select: [], where: [], orderBy: [], limit: 1, offset: 0 },
     ac.signal,
   );
@@ -49,7 +49,7 @@ it("preserves original errors and optional capabilities", async () => {
   );
   expect(transport.fetchMetrics).toBeUndefined();
   await expect(
-    transport.fetchRows({
+    transport.fetchRows!({
       select: [],
       where: [],
       orderBy: [],

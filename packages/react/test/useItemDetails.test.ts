@@ -71,7 +71,7 @@ describe("built-in item details", () => {
     await probe.unmount();
   });
   it("fetches hidden Page template fields and follows creator defaults for Page-only instances", async () => {
-    const fetchRows = vi.fn<Transport<Row>["fetchRows"]>(async () => ({ rows, total: 2 }));
+    const fetchRows = vi.fn<NonNullable<Transport<Row>["fetchRows"]>>(async () => ({ rows, total: 2 }));
     let api!: QueryTableApi<Row>;
     const options: ItemDetailsOptions<Row> = { modes: ["page"], page: { urlTemplate: "/items/{field:secret}", target: "_self" } };
     const transport: Transport<Row> = { fetchRows };

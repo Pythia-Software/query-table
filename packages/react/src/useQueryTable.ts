@@ -733,6 +733,9 @@ export function useQueryTable<Row>(
   const { api: computed, displaySchema } = useComputedColumns({
     schema,
     query: executionQuery,
+    sourceSchema,
+    previewQuery: query,
+    ...(groupingNow !== undefined ? { now: groupingNow } : {}),
     rows,
     serverComputed,
     ...(serverExecution ? { serverExecution } : {}),
@@ -885,7 +888,8 @@ export function useQueryTable<Row>(
         if (transport) {
           if (transport.fetchQueryV3 && transport.queryCapabilities?.version === 3 &&
             (query.grouping || query.select.some(column => isComputedField(column.field)) || query.orderBy.some(term => isComputedField(term.field)) ||
-              query.where.some(term => ("any" in term ? term.any : [term]).some(predicate => isComputedField(predicate.field))))) {
+              query.where.some(term => ("any" in term ? term.any : [term]).some(predicate => isComputedField(predicate.field))) ||
+              !transport.fetchRows && !(transport.fetchRowsV2 && opts.computedExecution))) {
             const request = toQueryRequestV3({ ...query, aggregations: [], select: [...query.select.filter(column => isComputedField(column.field)),
               ...serverRowQuery.select.map(field => ({ field }))] }, sourceSchema,
               transport.queryCapabilities, opts.computedExecution, { now: groupingNow ?? (opts.evaluationNow ?? Date.now)() });
@@ -904,6 +908,8 @@ export function useQueryTable<Row>(
             return;
           }
           const useV2 = "version" in serverRowQuery && transport.fetchRowsV2;
+          if (!useV2 && !transport.fetchRows)
+            throw Error("Row execution requires fetchRows, negotiated fetchRowsV2, or negotiated fetchQueryV3.");
           if (
             "diagnostics" in serverRowQuery &&
             Array.isArray(serverRowQuery.diagnostics) &&
@@ -921,7 +927,7 @@ export function useQueryTable<Row>(
                 serverRowQuery as ReturnType<typeof toServerQueryV2<Row>>,
                 ac.signal,
               )
-            : await transport.fetchRows(serverRowQuery, ac.signal);
+            : await transport.fetchRows!(serverRowQuery, ac.signal);
           if (useV2)
             validateComputedResponse(
               serverRowQuery as ReturnType<typeof toServerQueryV2<Row>>,

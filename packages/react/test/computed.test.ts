@@ -159,7 +159,7 @@ describe("shared computed columns", () => {
   it("requests hidden dependencies, batches previews, and only refetches on dependency changes", async () => {
     const store = memoryComputedColumnStore();
     const saved = await store.save("shared", definition, null);
-    const fetchRows = vi.fn<Transport<Row>["fetchRows"]>(async (query) => ({
+    const fetchRows = vi.fn<NonNullable<Transport<Row>["fetchRows"]>>(async (query) => ({
       rows: rows
         .slice(query.offset, query.offset + Math.min(query.limit, 2))
         .map(

@@ -12,12 +12,19 @@ type sqliteIntegerPlan struct {
 	Args                       []any
 }
 
+// V3 also proves the complete narrow source's byte size and identity storage.
+// These private columns never become public summary outputs.
+type sqliteIntegerSourceProof struct {
+	columns                  []OutputColumn
+	maxPopulation, maxGroups int
+}
+
 // Speculative reductions for plain scalar metrics over integer storage. Opaque
 // host bindings retain one materialized raw projection. Checked integer SUM
 // proves nonnegative populations directly; signed inputs also check their exact
 // absolute total. Other domains retain the ordinary exact decimal reducer.
 // No schema declaration or sampled row is treated as proof about the population.
-func sqliteIntegerReduction(ctx context.Context, q MetricQuery, specs []AggSpec, s Schema, o PlanOptions, combined SQLPlan) *sqliteIntegerPlan {
+func sqliteIntegerReduction(ctx context.Context, q MetricQuery, specs []AggSpec, s Schema, o PlanOptions, combined SQLPlan, sourceProof ...sqliteIntegerSourceProof) *sqliteIntegerPlan {
 	if len(specs) < 2 || combined.Scope != "allMatching" {
 		return nil
 	}
@@ -56,6 +63,19 @@ func sqliteIntegerReduction(ctx context.Context, q MetricQuery, specs []AggSpec,
 		}
 		fields[name] = true
 	}
+	if len(sourceProof) > 0 {
+		for _, column := range sourceProof[0].columns {
+			if !fields[column.Field] {
+				f, ok := s.Fields[column.Field]
+				// The only otherwise unused projection is a text identity. A
+				// numeric identity, computed input or inherited error falls back.
+				if !ok || (f.Kind != FieldText && f.Kind != FieldEnum) || f.ValueErrorExpr != "" {
+					return nil
+				}
+				fields[column.Field] = true
+			}
+		}
+	}
 	names := []string{}
 	for name := range fields {
 		names = append(names, name)
@@ -82,6 +102,9 @@ func sqliteIntegerReduction(ctx context.Context, q MetricQuery, specs []AggSpec,
 		pred = " WHERE " + sqliteNumberParameters(filter.SQL, len(o.SourceArgs))
 	}
 	input := "SELECT " + strings.Join(projections, ",") + " FROM (" + o.SourceSQL + ") AS r" + pred
+	if len(sourceProof) > 0 {
+		input += fmt.Sprintf(" LIMIT %d", sourceProof[0].maxPopulation+1)
+	}
 	inputName := "qt_integer_input"
 	for strings.Contains(strings.ToLower(input), inputName) {
 		inputName += "_"
@@ -102,6 +125,20 @@ func sqliteIntegerReduction(ctx context.Context, q MetricQuery, specs []AggSpec,
 			guard = "MAX(" + guard + ")"
 		}
 		guards = append(guards, guard+" IS NULL")
+	}
+	if len(sourceProof) > 0 {
+		parts := []string{}
+		for _, column := range sourceProof[0].columns {
+			raw := aliases[column.Field]
+			parts = append(parts, "COALESCE(length(CAST(CAST("+raw+" AS TEXT) AS BLOB)),0)")
+			if !containsString(specs[0].GroupBy, column.Field) && (column.Type == "text" || column.Type == "enum") {
+				guards = append(guards, "MIN(qt_v2_field_error("+raw+",'source_text')) IS NULL")
+			}
+		}
+		// Window proofs cover every group before LIMIT bounds the staged
+		// output. Budgets and invalid values in an omitted group must not be
+		// hidden by that limit, or change ordinary diagnostic precedence.
+		columns = append(columns, "SUM(COUNT(*)) OVER () AS qt_source_count", "SUM(COALESCE(SUM("+strings.Join(parts, "+")+"),0)) OVER () AS qt_source_bytes")
 	}
 	plan := &sqliteIntegerPlan{Input: input, Args: args}
 	baseColumns, baseGuards := columns, guards
@@ -174,12 +211,19 @@ func sqliteIntegerReduction(ctx context.Context, q MetricQuery, specs []AggSpec,
 		if len(guards) == 0 {
 			guards = append(guards, "1")
 		}
-		columns = append(columns, "CASE WHEN "+strings.Join(guards, " AND ")+" THEN 1 ELSE 0 END AS qt_integer_valid")
+		valid := "CASE WHEN " + strings.Join(guards, " AND ") + " THEN 1 ELSE 0 END"
+		if len(sourceProof) > 0 {
+			valid = "MIN(" + valid + ") OVER ()"
+		}
+		columns = append(columns, valid+" AS qt_integer_valid")
 		by := ""
 		if len(groupBy) > 0 {
 			by = " GROUP BY " + strings.Join(groupBy, ",")
 		}
 		sql := "WITH " + inputName + " AS MATERIALIZED (" + input + ") SELECT " + strings.Join(columns, ",") + " FROM " + inputName + by
+		if len(sourceProof) > 0 {
+			sql += fmt.Sprintf(" LIMIT %d", sourceProof[0].maxGroups+1)
+		}
 		if nonnegative {
 			plan.NonnegativeSQL = sql
 		} else {
