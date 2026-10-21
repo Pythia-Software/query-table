@@ -315,8 +315,8 @@ existing exact sampling/streaming paths. No cache crosses requests or snapshots.
 Plain numeric base-field metrics over INTEGER/NULL storage may use a guarded
 SQLite reduction. Every group's storage types and absolute integer totals must
 prove exact arithmetic before the result is used; other domains retain the
-general exact decimal plan. Host bindings are materialized once within that
-reduction. See [the performance and migration notes](sqlite-performance-handoff.md)
+general exact decimal plan. Simple stored-column sources may reduce directly;
+opaque host bindings retain materialization to avoid repeated evaluation. See [the performance and migration notes](sqlite-performance-handoff.md)
 for eligibility, fallback semantics and portable benchmarks.
 
 Shared reductions use uniquely named temporary tables in the same transaction.

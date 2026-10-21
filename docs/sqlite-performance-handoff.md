@@ -18,14 +18,28 @@ and paired metrics keep their existing paths. Combined compiler budgets and
 statement failures fall back to the individually validated plans.
 
 For plain COUNT, SUM, AVG, MIN, MAX and COUNT_DISTINCT over numeric base fields,
-compatible `allMatching` metrics can use a speculative integer reduction. An
-explicitly materialized narrow input evaluates opaque host bindings once. The
-reduction checks **all** values, including storage type and absolute integer
-sum, per group and field. Only INTEGER/NULL inputs whose absolute totals fit
-9,007,199,254,740,991 qualify. Below that limit SQLite's floating TOTAL additions
-and the final integer-average division are exact in the profile's sense. Text,
-enum and boolean keys retain binary grouping and their field validation. No
-column declaration, sample, cached bound or host trust flag replaces a guard.
+compatible `allMatching` metrics can use a speculative integer reduction. Every
+consumed value must have INTEGER/NULL storage and each field/group's absolute
+total must fit 9,007,199,254,740,991. A checked SUM substitutes a REAL zero for
+any declined input; an INTEGER/NULL aggregate result therefore proves that all
+inputs met its domain. A nonnegative plan can prove the absolute bound directly
+from that checked SUM, without a separate absolute-total aggregate. Signed
+integers use an additional absolute-total guard. Fractions and unsupported
+storage retain the general exact decimal path. In particular, numeric-looking
+TEXT is never accepted through SQLite's automatic SUM coercion.
+
+The executor asks SQLite to EXPLAIN the authorized narrow input in the current
+transaction. A closed allowlist of simple stored-column/index/filter operations
+permits a direct reduction without copying the raw input. Functions (including
+functions hidden inside views), virtual tables, scalar subqueries, arithmetic,
+sorting and unknown opcodes retain materialization. Inspection failure retains
+the conservative path; it never authorizes SQL or replaces a value guard. Opaque
+host expressions still evaluate once within an eligible reduction.
+
+Text/enum keys use BINARY grouping, so the exact string/NULL value can be
+validated once per group. Boolean storage still validates every row: SQLite's
+numeric grouping can merge INTEGER 1 and REAL 1.0. No column declaration,
+sample, cached bound or host trust flag replaces a storage/numeric guard.
 
 If any guard declines, the general exact decimal reduction runs instead. This
 includes REAL values, invalid storage, excessive absolute totals, unsafe or
@@ -53,7 +67,10 @@ go test -run '^$' -bench SQLiteScratchLifecycle -benchtime=3x -benchmem -count=3
 The fixture has 50,000 authorized rows, nine integer fields, NULL/empty text
 keys, five groups, and a denied tenant row. There are no host indexes, cubes or
 private catalogs. V2 compares ten independent cards in one transaction, the
-combined adapter batch, and native SQL. The native query intentionally omits
+combined adapter batch, guarded SQL alone, and native SQL. The guarded SQL
+ablation isolates the strict storage/numeric proofs from compilation, population
+preflight, savepoints, consumer mapping and scratch lifecycle. It is a cost
+breakdown, not another supported executor. The native query intentionally omits
 the adapter's validation and budgets: it is a lower bound on cost, not a
 semantically equivalent replacement. Every benchmark includes one untimed
 warmup. CPU is process user+system time; allocation counts include Go compiler,
@@ -76,19 +93,43 @@ CPU and allocations give the more stable comparison.
 |---|---:|---:|---:|---:|
 | Scalar independent, candidate | 435 | 436 | 22.58 | 1,805,312 |
 | Scalar batch, before | 381 | 383 | 22.25 | 1,804,494 |
-| Scalar batch, candidate | 110 | 105 | 0.93 | 7,002 |
+| Scalar batch, initial candidate | 110 | 105 | 0.93 | 7,002 |
+| Scalar batch, follow-up | 114 | 54 | 0.96 | 7,221 |
 | Scalar native SQL, candidate fixture | 19 | 18 | 0.002 | 51 |
 | Grouped independent, candidate | 1,103 | 1,084 | 56.72 | 5,179,445 |
 | Grouped batch, before | 1,203 | 1,036 | 56.21 | 5,178,537 |
-| Grouped batch, candidate | 253 | 165 | 2.87 | 177,138 |
+| Grouped batch, initial candidate | 253 | 165 | 2.87 | 177,138 |
+| Grouped batch, follow-up | 101 | 95 | 1.20 | 8,839 |
 | Grouped native SQL, candidate fixture | 46 | 46 | 0.003 | 95 |
 
-Batch CPU falls by approximately 3.7× scalar / 6.3× grouped, and Go allocation
-bytes by about 96% / 95%. The reduced TEMP table high water is 8,192 bytes;
+The initial candidate (`3cd14ec`) cut batch CPU by approximately 3.7× scalar /
+6.3× grouped. The follow-up applies the generic lessons from the host reducer:
+prove multiple invariants with one checked aggregate, validate exact text keys
+at the group boundary, and materialize only sources whose resolved programs
+need it. CPU falls to about 54/95 ms: approximately 7.1× scalar / 10.9× grouped
+relative to mainline. Grouped allocation counts fall another 20× versus the
+initial candidate. Follow-up wall times were affected by host contention; the
+CPU reduction should not be read as a measured scalar wall-time improvement.
+The reduced TEMP table high water is 8,192 bytes;
 the baseline reports zero TEMP database pages because its intermediate work
 uses transient CTE storage, which this counter does not measure. The candidate
 still costs more than bare SQL. These numbers support the library optimization,
 not an assertion that Pharos's cached/indexed host reducer is redundant.
+
+A same-run comparison after the follow-up measured these median CPU costs:
+
+| Execution | Scalar ms/op | Grouped ms/op |
+|---|---:|---:|
+| Bare native SQL | 16.5 | 46.6 |
+| SQL with strict storage/bounds/key proofs | 39.2 | 81.7 |
+| Complete adapter batch | 54.5 | 90.0 |
+
+This locates much of the remaining cost in the value proofs, rather than
+compilation or per-card mapping. It does not prove those costs cannot improve.
+The host's narrower nonnegative reducer motivated the aggregate-level proof;
+the library retains an explicit storage guard because SUM can coerce numeric
+TEXT. Source-generation caches remain host-owned and were not used in this
+probe.
 
 ### V3 raw-source staging investigation
 
@@ -197,11 +238,13 @@ All three named parity tests passed on Pharos `b454ffe` against this candidate,
 using its documented local Go workspace. Release pins and installed npm packages
 were left unchanged. A disposable 50,000-row, nine-integer-column SQL probe in
 that checkout, with the same authorized source and no cubes/indexes, measured
-the native host reducer at 26.6 ms scalar / 73.9 ms grouped and ordinary adapter
-execution at 93.2 ms / 232.6 ms (three warm wall-time samples). The adapter was
+the native host reducer at 24.5 ms scalar / 50.2 ms grouped and ordinary adapter
+execution at 60.7 ms / 93.5 ms after the follow-up (three warm wall-time samples). The adapter was
 called directly with nativeMetrics disabled; these timings do not include the
 full HTTP/host transaction lifecycle or generation-bound caches. This confirms
-a remaining roughly 3× gap on that fixture; no host bypass is deleted here.
+remaining overhead of roughly 2.5× scalar / 1.9× grouped on that fixture;
+the initial candidate's roughly 3× gap was not an irreducible generality cost.
+No host bypass is deleted here.
 The reproducible upstream benchmark is the checked-in counterpart; the
 throwaway host probe is not required to run it.
 

@@ -357,3 +357,120 @@ func TestV2CrossFieldCleanupFailure(t *testing.T) {
 	defer tx.Rollback()
 	assertNoReductions(t, tx)
 }
+
+func TestV2CrossFieldStoredAndOpaqueSources(t *testing.T) {
+	log := &statementLog{}
+	db, d := crossFieldDataset(t, log)
+	q := crossFieldQuery(true)
+	check := func(wantMaterialized bool) {
+		t.Helper()
+		log.reset(nil)
+		metricProbeCalls.Store(0)
+		if _, err := d.ExecuteV2(context.Background(), db, nil, &q, qt.PlanOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		var reduction string
+		for _, sql := range log.seen {
+			if strings.HasPrefix(sql, "CREATE TEMP TABLE _qt_reduction_") {
+				reduction = sql
+				break
+			}
+		}
+		if reduction == "" {
+			t.Fatal("missing reduction")
+		}
+		direct := strings.Contains(reduction, " AS NOT MATERIALIZED (")
+		if direct == wantMaterialized {
+			t.Fatalf("stored-source choice: direct=%t, want materialized=%t", direct, wantMaterialized)
+		}
+	}
+	check(false)
+	// Resolving a view must expose hidden functions to the planner. EXPLAIN
+	// itself must not execute them, and the chosen projection evaluates them once.
+	if _, err := db.Exec(`CREATE VIEW opaque_source AS SELECT id,k,tenant,qt_test_metric_probe(n0) AS n0,n1,n2,n3,n4,n5,n6,n7,n8 FROM source`); err != nil {
+		t.Fatal(err)
+	}
+	d.SourceSQL = "SELECT * FROM opaque_source WHERE tenant=?1"
+	check(true)
+	if n := metricProbeCalls.Load(); n != 30 {
+		t.Fatalf("opaque view evaluated %d inputs, want 30", n)
+	}
+	// A correlated scalar subquery also keeps materialization, even without a UDF.
+	d.SourceSQL = "SELECT id,k,tenant,(SELECT n0) AS n0,n1,n2,n3,n4,n5,n6,n7,n8 FROM source WHERE tenant=?1"
+	check(true)
+	// Ordinary indexes and comparisons retain the direct option.
+	d.SourceSQL = "SELECT * FROM source WHERE tenant=?1"
+	if _, err := db.Exec("CREATE INDEX source_tenant ON source(tenant)"); err != nil {
+		t.Fatal(err)
+	}
+	q.Where = []qt.WhereTerm{{Field: "n0", Op: ">", Value: "3"}}
+	check(false)
+}
+
+func TestV2CrossFieldProofStorageAndKeyTypes(t *testing.T) {
+	log := &statementLog{}
+	db, d := crossFieldDataset(t, log)
+	q := crossFieldQuery(true)
+	for _, value := range []string{"'12'", "'0'", "X'3132'", "NULL", "-3", "9223372036854775807"} {
+		if _, err := db.Exec("UPDATE source SET n0=" + value + " WHERE id='00000001'"); err != nil {
+			t.Fatal(err)
+		}
+		crossFieldParity(t, db, d, q, qt.PlanOptions{})
+	}
+	// An INTEGER and a REAL boolean compare equal in SQLite GROUP BY. Validating
+	// only the representative would miss whichever member had invalid storage.
+	f := d.Schema.Fields["k"]
+	f.Kind = qt.FieldBool
+	f.Expr = "CASE WHEN r.id<'00000015' THEN 1 ELSE 1.0 END"
+	d.Schema.Fields["k"] = f
+	crossFieldParity(t, db, d, q, qt.PlanOptions{})
+	// Text groups can validate once per exact BINARY value, but storage types
+	// and malformed UTF-8 must still force the ordinary error-sidecar path.
+	f.Kind = qt.FieldText
+	for _, expr := range []string{"CASE WHEN r.id<'00000015' THEN 1 ELSE '1' END", "CAST(X'FF' AS TEXT)", "X'3132'"} {
+		f.Expr = expr
+		d.Schema.Fields["k"] = f
+		crossFieldParity(t, db, d, q, qt.PlanOptions{})
+	}
+}
+
+func TestV2CrossFieldSourceInspectionFallback(t *testing.T) {
+	log := &statementLog{}
+	db, d := crossFieldDataset(t, log)
+	q := crossFieldQuery(true)
+	log.reset(func(sql string) error {
+		if strings.HasPrefix(sql, "EXPLAIN ") {
+			return errors.New("inspection unavailable")
+		}
+		return nil
+	})
+	result, err := d.ExecuteV2(context.Background(), db, nil, &q, qt.PlanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range result.Metrics.Metrics {
+		if m.Error != "" {
+			t.Fatal(m)
+		}
+	}
+	if n := log.count("CREATE TEMP TABLE _qt_reduction_"); n != 1 {
+		t.Fatalf("fallback created %d reductions", n)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	log.reset(func(sql string) error {
+		if strings.HasPrefix(sql, "EXPLAIN ") {
+			cancel()
+		}
+		return nil
+	})
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if _, err = d.ExecuteV2In(ctx, tx, nil, &q, qt.PlanOptions{}); !errors.Is(err, context.Canceled) {
+		t.Fatal("inspection cancellation", err)
+	}
+	assertNoReductions(t, tx)
+}

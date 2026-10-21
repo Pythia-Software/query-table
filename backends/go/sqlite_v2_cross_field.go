@@ -9,12 +9,11 @@ import (
 )
 
 type sqliteCrossFieldReduction struct {
-	key         string
-	plan        SQLPlan
-	aliases     map[string]string
-	disabled    bool
-	integerSQL  string
-	integerArgs []any
+	key      string
+	plan     SQLPlan
+	aliases  map[string]string
+	disabled bool
+	integer  *sqliteIntegerPlan
 }
 
 // Every member has already compiled independently. Only population, scope,
@@ -74,7 +73,7 @@ func (c *sqliteReductionCache) addCrossFields(ctx context.Context, batch MetricB
 		for _, member := range members {
 			integerSpecs = append(integerSpecs, specs[member.ID])
 		}
-		f.integerSQL, f.integerArgs = sqliteIntegerReduction(ctx, q, integerSpecs, s, o, combined)
+		f.integer = sqliteIntegerReduction(ctx, q, integerSpecs, s, o, combined)
 		for name, identity := range combined.reduction.keys {
 			f.aliases[identity] = name
 		}
@@ -91,24 +90,34 @@ func (c *sqliteReductionCache) crossFieldPlan(ctx context.Context, tx *sql.Tx, p
 		i := f.plan.SQLiteReductionStage
 		statement := "CREATE TEMP TABLE " + table + " AS " + sqlStageCTEs(f.plan.Stages[:i+1]) + "\nSELECT * FROM " + f.plan.Stages[i].Name
 		c.tables[f.key] = table
-		if f.integerSQL != "" {
-			_, fastErr := tx.ExecContext(ctx, "CREATE TEMP TABLE "+table+" AS "+f.integerSQL, f.integerArgs...)
-			if fastErr == nil {
-				var invalid int
-				fastErr = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM "+table+" WHERE qt_integer_valid=0)").Scan(&invalid)
-				if fastErr == nil && invalid == 0 {
-					return c.crossFieldPlan(ctx, tx, p, f)
-				}
-			}
-			if ctx.Err() != nil {
-				return p, ctx.Err()
-			}
-			// Neither a declined numeric domain nor a failed speculative statement
-			// changes an individual metric's semantics.
-			f.integerSQL = ""
-			if _, err := tx.ExecContext(ctx, "DROP TABLE IF EXISTS "+table); err != nil {
+		if f.integer != nil {
+			direct, err := sqliteStoredProjection(ctx, tx, f.integer.Input, f.integer.Args)
+			if err != nil {
 				return p, err
 			}
+			candidates := []string{f.integer.SQL}
+			if direct {
+				candidates = []string{f.integer.NonnegativeSQL, f.integer.SQL}
+			}
+			for _, candidate := range candidates {
+				if direct {
+					candidate = strings.Replace(candidate, " AS MATERIALIZED (", " AS NOT MATERIALIZED (", 1)
+				}
+				valid, err := sqliteTryIntegerReduction(ctx, tx, table, candidate, f.integer.Args)
+				if valid {
+					return c.crossFieldPlan(ctx, tx, p, f)
+				}
+				if ctx.Err() != nil {
+					return p, ctx.Err()
+				}
+				if _, dropErr := tx.ExecContext(ctx, "DROP TABLE IF EXISTS "+table); dropErr != nil {
+					return p, dropErr
+				}
+				if err != nil {
+					break
+				} // A failed statement goes straight to the general plan.
+			}
+			f.integer = nil
 		}
 		if _, err := tx.ExecContext(ctx, statement, f.plan.Args...); err != nil {
 			if ctx.Err() != nil {
@@ -128,4 +137,16 @@ func (c *sqliteReductionCache) crossFieldPlan(ctx context.Context, tx *sql.Tx, p
 		projections = append(projections, alias+" AS "+col.Name)
 	}
 	return sqliteReplaceStage(p, p.SQLiteReductionStage, "SELECT "+strings.Join(projections, ",")+" FROM "+table)
+}
+
+// A speculative proof is checked over the tiny reduction table before any
+// original consumer sees it. Statement errors and declined domains preserve
+// per-metric fallback; cancellation remains a request error.
+func sqliteTryIntegerReduction(ctx context.Context, tx *sql.Tx, table, statement string, args []any) (bool, error) {
+	if _, err := tx.ExecContext(ctx, "CREATE TEMP TABLE "+table+" AS "+statement, args...); err != nil {
+		return false, err
+	}
+	var invalid int
+	err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM "+table+" WHERE qt_integer_valid=0)").Scan(&invalid)
+	return err == nil && invalid == 0, err
 }

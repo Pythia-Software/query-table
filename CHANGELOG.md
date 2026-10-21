@@ -9,8 +9,11 @@
 - SQLite V2 scalar batches fuse reductions across fields with matching
   populations, scopes, metric predicates and grouping. Plain integer metrics
   can use a fully guarded SQLite reduction, with exact decimal fallback for
-  unsupported domains. Each metric retains independent errors, formulas,
-  minCount, sorting, top-N, budgets and result payloads.
+  unsupported domains. Resolved stored-column sources reduce directly, while
+  opaque expressions retain materialization. Checked sums combine storage and
+  numeric proofs, and exact text keys validate once per group. Each metric
+  retains independent errors, formulas, minCount, sorting, top-N, budgets and
+  result payloads.
 - Portable cross-field, V3 source-copy and SQLite scratch-lifecycle benchmarks,
   with [measurements and host migration guidance](docs/sqlite-performance-handoff.md).
 
