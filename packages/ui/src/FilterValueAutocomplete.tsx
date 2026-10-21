@@ -4,10 +4,11 @@ import type { QueryFilterApi } from "@pythia-software/query-table-react";
 import { OverlayPortal, useFloatingOverlay } from "./FloatingOverlay";
 
 /** Freeform values with optional distinct suggestions; focus stays in the input. */
-export function FilterValueAutocomplete<Row>({ api, field, value, className, widthChars, onChange }: {
+export function FilterValueAutocomplete<Row>({ api, field, value, contextKey, className, widthChars, onChange }: {
   api: QueryFilterApi<Row>;
   field: FieldDef<Row>;
   value: string;
+  contextKey: string;
   className: string;
   widthChars: number;
   onChange: (value: string) => void;
@@ -16,14 +17,21 @@ export function FilterValueAutocomplete<Row>({ api, field, value, className, wid
   const listId = useId();
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState<string | null>(null);
-  // Include the query stage/context even when the host keeps a stable callback.
-  const requestKey = JSON.stringify([field.name, value, api.query]);
+  // Reuse known values across searches, but never across fields/query contexts.
+  const scopeKey = JSON.stringify([field.name, contextKey]);
+  const requestKey = JSON.stringify([scopeKey, value]);
   const fetchValues = api.filterValues;
+  const [known, setKnown] = useState<{
+    scopeKey: string; fetchValues: typeof fetchValues; result: DistinctValuesResult;
+  } | null>(null);
   const [response, setResponse] = useState<{
     key: string; fetchValues: typeof fetchValues; result?: DistinctValuesResult; failed?: boolean;
   } | null>(null);
   const current = response?.key === requestKey && response.fetchValues === fetchValues ? response : null;
-  const values = current?.result ? [...new Set(current.result.values)] : [];
+  const search = value.trim().toLowerCase();
+  const previousValues = known?.scopeKey === scopeKey && known.fetchValues === fetchValues
+    ? known.result.values.filter(choice => choice.toLowerCase().includes(search)) : [];
+  const values = [...new Set(current?.result?.values ?? previousValues)];
   const activeIndex = active === null ? -1 : values.indexOf(active);
   const activeId = open && activeIndex >= 0 ? `${listId}-${activeIndex}` : undefined;
 
@@ -32,12 +40,16 @@ export function FilterValueAutocomplete<Row>({ api, field, value, className, wid
     setActive(null);
     const timer = setTimeout(() => {
       void Promise.resolve().then(() => fetchValues(field.name, value)).then(
-        result => { if (!cancelled) setResponse({ key: requestKey, fetchValues, result }); },
+        result => {
+          if (cancelled) return;
+          setResponse({ key: requestKey, fetchValues, result });
+          setKnown({ scopeKey, fetchValues, result });
+        },
         () => { if (!cancelled) setResponse({ key: requestKey, fetchValues, failed: true }); },
       );
     }, 200);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [fetchValues, requestKey, field.name, value]);
+  }, [fetchValues, requestKey, scopeKey, field.name, value]);
 
   useEffect(() => {
     if (activeId) document.getElementById(activeId)?.scrollIntoView?.({ block: "nearest" });
@@ -49,7 +61,7 @@ export function FilterValueAutocomplete<Row>({ api, field, value, className, wid
     close();
     input.current?.focus({ preventScroll: true });
   };
-  const status = !current ? "Loading suggestions…" : current.failed
+  const status = !current ? (values.length ? "" : "Loading suggestions…") : current.failed
     ? "Suggestions unavailable. Keep typing a value."
     : values.length === 0 ? "No matching values. Keep typing a value."
     : current.result?.hasMore ? "keep typing to refine…" : "";

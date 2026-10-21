@@ -240,6 +240,8 @@ Escape dismisses suggestions and Tab leaves without selecting. The menu sizes
 to its contents independently of the compact input, wraps long values, and
 scrolls within the viewport, including inside mobile filter dialogs. Loading,
 unavailable suggestions, and no matches never prevent typing arbitrary values.
+While fetching new suggestions, matching values from the previous response stay
+visible and selectable. A loading message appears only when no known values match.
 
 ## Tag/set filters
 

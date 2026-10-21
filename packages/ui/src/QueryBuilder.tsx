@@ -2059,6 +2059,10 @@ function PredicateEditor<Row>({
       api={api}
       field={field}
       value={clause.value}
+      // Typing changes this predicate's search, not its suggestion context.
+      contextKey={JSON.stringify(api.query, (_key, entry) =>
+        entry === clause ? { ...clause, value: "" } : entry,
+      )}
       forceFreeform={isRegex || isLength}
       numeric={isLength}
       placeholder={
@@ -2129,6 +2133,7 @@ function ValueInput<Row>({
   api,
   field,
   value,
+  contextKey,
   forceFreeform,
   numeric,
   placeholder = "value",
@@ -2138,6 +2143,7 @@ function ValueInput<Row>({
   api: QueryFilterApi<Row>;
   field: FieldDef<Row> | undefined;
   value: string;
+  contextKey: string;
   forceFreeform?: boolean;
   numeric?: boolean;
   placeholder?: string;
@@ -2214,6 +2220,7 @@ function ValueInput<Row>({
       api={api}
       field={field}
       value={value}
+      contextKey={contextKey}
       className={cx("qt-chip-val", classNames?.input)}
       widthChars={chipFieldWidthForInput(value || "value", field.type, 5, 4)}
       onChange={onChange}

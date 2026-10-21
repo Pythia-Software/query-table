@@ -72,6 +72,72 @@ it("debounces filtering, supports clearing and arbitrary values, and ignores unr
   expect(selectedValue()).toBe(""); expect(options()).toHaveLength(names.length);
 });
 
+it("immediately filters known suggestions during debounce and fetch, replacing them with fresh results", async () => {
+  await mount(); await tick();
+  let resolve!: (result: DistinctValuesResult) => void;
+  fetchValues.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+  await type(" EXPLORATION- ");
+  expect(options().map(option => option.textContent)).toEqual(names.slice(1, 3));
+  expect(document.querySelector('[role="status"]')).toBeNull();
+  expect(document.querySelector('[role="listbox"]')!.getAttribute("aria-busy")).toBe("true");
+  await tick();
+  expect(options().map(option => option.textContent)).toEqual(names.slice(1, 3));
+  expect(document.querySelector('[role="status"]')).toBeNull();
+  await act(async () => resolve({ values: ["exploration-new-result"], hasMore: false }));
+  expect(options().map(option => option.textContent)).toEqual(["exploration-new-result"]);
+  expect(document.querySelector('[role="listbox"]')!.getAttribute("aria-busy")).toBe("false");
+  fetchValues.mockResolvedValueOnce({ values: [], hasMore: false });
+  await type("exploration");
+  expect(options().map(option => option.textContent)).toEqual(["exploration-new-result"]);
+  await tick();
+  expect(options()).toHaveLength(0);
+  expect(document.querySelector('[role="status"]')!.textContent).toContain("No matching values");
+});
+
+it("shows loading only without known matches, and accepts keyboard/pointer selection while fetching", async () => {
+  await mount(); await tick();
+  fetchValues.mockImplementation(() => new Promise(() => {}));
+  await type("missing");
+  expect(options()).toHaveLength(0);
+  expect(document.querySelector('[role="status"]')!.textContent).toContain("Loading suggestions");
+  await type("exploration-"); await tick();
+  await key("ArrowDown"); await key("Enter");
+  expect(selectedValue()).toBe(names[1]); expect(document.activeElement).toBe(input());
+  await type("");
+  expect(options().map(option => option.textContent)).toEqual(names);
+  await act(async () => options().at(-1)!.click());
+  expect(selectedValue()).toBe(names.at(-1)); expect(document.activeElement).toBe(input());
+});
+
+it("does not reuse known matches across field, callback, or sibling filter changes", async () => {
+  await mount(); await tick();
+  await type("exploration");
+  expect(options()).toHaveLength(3);
+  await act(async () => api.setQuery(query => ({ ...query, where: [...query.where, { field: "status", op: "=", value: "ready" }] })));
+  expect(options()).toHaveLength(0);
+  await tick();
+  expect(options()).toHaveLength(3);
+  await act(async () => api.setQuery(query => ({ ...query, where: [{ field: "tags", op: "includes", value: "exploration" }] })));
+  expect(options()).toHaveLength(0);
+  await tick();
+  expect(options()).toHaveLength(3);
+  fetchValues = vi.fn(() => new Promise(() => {}));
+  await act(async () => rerender());
+  expect(options()).toHaveLength(0);
+});
+
+it("retains known options when editing an OR member but invalidates them when a sibling changes", async () => {
+  await mount();
+  await act(async () => api.setQuery(query => ({ ...query, where: [{ any: [
+    { field: "repository_name", op: "=", value: "" }, { field: "status", op: "=", value: "ready" },
+  ] }] })));
+  await tick();
+  await type("exploration-");
+  expect(options().map(option => option.textContent)).toEqual(names.slice(1, 3));
+  await act(async () => api.updatePredicate(0, 1, { field: "status", op: "=", value: "waiting" }));
+  expect(options()).toHaveLength(0);
+});
+
 it("exposes active options, selects the complete value, and preserves input focus", async () => {
   await mount(); await tick();
   expect(input().getAttribute("aria-expanded")).toBe("true");
@@ -130,6 +196,7 @@ it("rejects late responses for previous text, field, and query context", async (
   await act(async () => pending[0]!({ values: ["old-result"], hasMore: true }));
   expect(options().map(option => option.textContent)).toEqual(["new-result"]);
   await type(""); await tick();
+  expect(options().map(option => option.textContent)).toEqual(["new-result"]);
   await act(async () => api.setQuery(query => ({ ...query, where: [{ field: "tags", op: "includes", value: "" }] })));
   expect(options()).toHaveLength(0); await tick();
   const previousFieldRequest = pending.at(-1)!;
