@@ -89,7 +89,7 @@ func TestCalendarScratchIsNarrowBatchedAndReleasedPerMetric(t *testing.T) {
 			columns = append(columns, count)
 		}
 		if strings.HasPrefix(query, "DROP TABLE IF EXISTS ") {
-			delete(active, strings.Fields(query)[4])
+			delete(active, strings.TrimPrefix(strings.Fields(query)[4], "temp."))
 		}
 		if strings.HasPrefix(query, "WITH qt_calendar_keys") {
 			updates++

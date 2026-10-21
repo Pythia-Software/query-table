@@ -121,7 +121,7 @@ func (d QueryDatasetV3) ExecuteIn(ctx context.Context, tx *sql.Tx, q QueryReques
 	}
 	tables := []string{}
 	defer func() {
-		err = errors.Join(err, dropQueryTables(ctx, tx, tables))
+		err = errors.Join(err, d.dropQueryTables(ctx, tx, tables))
 		if err != nil {
 			out = QueryResultV3{}
 		}
@@ -481,7 +481,7 @@ func (d QueryDatasetV3) stageGroups(ctx context.Context, tx *sql.Tx, table strin
 		// the same chosen rows, which hold one row per (already budgeted) group.
 		chosen := queryTableName()
 		defer func() {
-			if cleanupErr := dropQueryTables(ctx, tx, []string{chosen}); cleanupErr != nil {
+			if cleanupErr := d.dropQueryTables(ctx, tx, []string{chosen}); cleanupErr != nil {
 				err = errors.Join(err, cleanupErr)
 			}
 		}()

@@ -19,6 +19,9 @@
 
 ### Fixed
 
+- Qualify scratch cleanup with SQLite's `temp` or PostgreSQL's `pg_temp`
+  schema, preserving same-named host tables after failed creation or repeated
+  cleanup.
 - Track SQLite reduction tables before DDL so cancellation also cleans up an
   interrupted CREATE TABLE AS that left an empty relation.
 - Return V3 scratch cleanup errors, including representative tables, before

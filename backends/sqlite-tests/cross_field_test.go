@@ -333,7 +333,7 @@ func TestV2CrossFieldCleanupFailure(t *testing.T) {
 	q := crossFieldQuery(true)
 	sentinel := errors.New("injected V2 cleanup failure")
 	log.reset(func(query string) error {
-		if strings.HasPrefix(query, "DROP TABLE IF EXISTS _qt_reduction_") {
+		if strings.HasPrefix(query, `DROP TABLE IF EXISTS temp."_qt_reduction_`) {
 			return sentinel
 		}
 		return nil

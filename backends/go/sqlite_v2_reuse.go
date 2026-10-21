@@ -228,7 +228,8 @@ func (c *sqliteReductionCache) close(tx *sql.Tx) error {
 	defer cancel()
 	var cleanupErr error
 	for _, table := range c.tables {
-		if _, err := tx.ExecContext(ctx, "DROP TABLE IF EXISTS "+table); err != nil {
+		// Failed CTAS may leave no TEMP table. Never resolve cleanup in main.
+		if _, err := tx.ExecContext(ctx, "DROP TABLE IF EXISTS temp."+queryIdent(table)); err != nil {
 			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("drop SQLite reduction %s: %w", table, err))
 		}
 	}

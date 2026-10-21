@@ -110,7 +110,7 @@ func (c *sqliteReductionCache) crossFieldPlan(ctx context.Context, tx *sql.Tx, p
 				if ctx.Err() != nil {
 					return p, ctx.Err()
 				}
-				if _, dropErr := tx.ExecContext(ctx, "DROP TABLE IF EXISTS "+table); dropErr != nil {
+				if _, dropErr := tx.ExecContext(ctx, "DROP TABLE IF EXISTS temp."+queryIdent(table)); dropErr != nil {
 					return p, dropErr
 				}
 				if err != nil {

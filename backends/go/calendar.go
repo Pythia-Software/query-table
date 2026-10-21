@@ -342,9 +342,7 @@ func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggS
 	// with every calendar clause in the request. ExecuteIn also retains a fallback
 	// cleanup entry for failures/cancelled transactions.
 	defer func() {
-		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
-		defer cancel()
-		_, _ = tx.ExecContext(cleanup, "DROP TABLE IF EXISTS "+queryIdent(table))
+		_ = d.dropQueryTables(ctx, tx, []string{table})
 	}()
 	if err = d.checkCalendarStaging(ctx, tx, queryIdent(table), sizeSQL, nil, maxPopulation, maxBytes); err != nil {
 		return SQLiteMetricV2{}, err

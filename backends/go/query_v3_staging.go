@@ -13,12 +13,18 @@ import (
 // empty relation; DROP IF EXISTS also covers DDL rolled back by a savepoint.
 // A cleanup error must prevent a success result, so caller-owned transactions
 // are only safe to commit after ExecuteIn returns nil.
-func dropQueryTables(ctx context.Context, tx *sql.Tx, tables []string) error {
+func (d QueryDatasetV3) dropQueryTables(ctx context.Context, tx *sql.Tx, tables []string) error {
 	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 	defer cancel()
+	schema := "temp."
+	if d.Dialect == "postgres" {
+		schema = "pg_temp."
+	}
 	var err error
 	for i := len(tables) - 1; i >= 0; i-- {
-		if _, e := tx.ExecContext(cleanup, "DROP TABLE IF EXISTS "+queryIdent(tables[i])); e != nil {
+		// Failed DDL or earlier per-metric cleanup can leave no TEMP table.
+		// Qualify the schema so a host's persistent table is never selected.
+		if _, e := tx.ExecContext(cleanup, "DROP TABLE IF EXISTS "+schema+queryIdent(tables[i])); e != nil {
 			err = errors.Join(err, fmt.Errorf("drop query scratch %s: %w", tables[i], e))
 		}
 	}
