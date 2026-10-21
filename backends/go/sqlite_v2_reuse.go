@@ -10,9 +10,9 @@ import (
 	"time"
 )
 
-// Cache identical scalar reductions; fuse different reductions with exactly
-// matching validated inputs and grouping into one population scan. Distributions
-// retain their own streaming and sampling behavior.
+// Cache identical scalar reductions and fuse compatible plans, using either
+// identical validated input stages or a combined cross-field compiler plan.
+// Distributions retain their own streaming and sampling behavior.
 // All plans and revision envelopes have already validated. The temporary tables
 // contain bounded grouped results, belong to this execution, and are dropped
 // before returning the caller's transaction. No cache crosses snapshots.
