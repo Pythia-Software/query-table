@@ -19,6 +19,7 @@ import (
 type sqliteReductionCache struct {
 	shared  map[string]bool
 	fusions map[string]*sqliteReductionFusion
+	cross   map[string]*sqliteCrossFieldReduction
 	tables  map[string]string
 }
 
@@ -106,7 +107,7 @@ func sqliteFusionKey(p MetricSQLPlan) string {
 	return rowKey + "\x00" + p.SQLiteReductionFrom
 }
 func newSQLiteReductionCache(batch MetricBatchPlan) *sqliteReductionCache {
-	c := &sqliteReductionCache{shared: map[string]bool{}, fusions: map[string]*sqliteReductionFusion{}, tables: map[string]string{}}
+	c := &sqliteReductionCache{shared: map[string]bool{}, fusions: map[string]*sqliteReductionFusion{}, cross: map[string]*sqliteCrossFieldReduction{}, tables: map[string]string{}}
 	first := map[string]string{}
 	for _, p := range batch.Metrics {
 		key := sqliteReductionKey(p)
@@ -142,6 +143,9 @@ func (c *sqliteReductionCache) plan(ctx context.Context, tx *sql.Tx, p MetricSQL
 	if key == "" {
 		return p, nil
 	}
+	if f := c.cross[key]; f != nil && !f.disabled {
+		return c.crossFieldPlan(ctx, tx, p, f)
+	}
 	fusionKey := sqliteFusionKey(p)
 	if f := c.fusions[fusionKey]; f != nil && len(f.reductions) > 1 && len(f.expressions) <= 128 {
 		tableKey := "fusion\x00" + fusionKey
@@ -153,6 +157,9 @@ func (c *sqliteReductionCache) plan(ctx context.Context, tx *sql.Tx, p MetricSQL
 				projections = append(projections, expr+" AS "+f.aliases[expr])
 			}
 			statement := "CREATE TEMP TABLE " + table + " AS " + sqlStageCTEs(p.Stages[:p.SQLiteReductionStage]) + "\nSELECT " + strings.Join(projections, ",") + p.SQLiteReductionFrom
+			// Interrupted CTAS can leave an empty table even when Exec returns an
+			// error. Register ownership before issuing DDL so cleanup covers it.
+			c.tables[tableKey] = table
 			if _, err := tx.ExecContext(ctx, statement, p.Args...); err != nil {
 				if ctx.Err() != nil {
 					return p, err
@@ -162,7 +169,6 @@ func (c *sqliteReductionCache) plan(ctx context.Context, tx *sql.Tx, p MetricSQL
 				delete(c.fusions, fusionKey)
 				return c.plan(ctx, tx, p)
 			}
-			c.tables[tableKey] = table
 		}
 		projections := make([]string, 0, len(p.SQLiteReductionColumns))
 		for _, col := range p.SQLiteReductionColumns {
@@ -180,10 +186,10 @@ func (c *sqliteReductionCache) reuseStage(ctx context.Context, tx *sql.Tx, p Met
 	if !ok {
 		table = fmt.Sprintf("_qt_reduction_%d", sqliteReductionSequence.Add(1))
 		statement := "CREATE TEMP TABLE " + table + " AS " + sqlStageCTEs(p.Stages[:i+1]) + "\nSELECT * FROM " + p.Stages[i].Name
+		c.tables[key] = table
 		if _, err := tx.ExecContext(ctx, statement, p.Args...); err != nil {
 			return p, err
 		}
-		c.tables[key] = table
 	}
 	return sqliteReplaceStage(p, i, "SELECT * FROM "+table)
 }
@@ -222,7 +228,7 @@ func (c *sqliteReductionCache) close(tx *sql.Tx) error {
 	defer cancel()
 	var cleanupErr error
 	for _, table := range c.tables {
-		if _, err := tx.ExecContext(ctx, "DROP TABLE "+table); err != nil {
+		if _, err := tx.ExecContext(ctx, "DROP TABLE IF EXISTS "+table); err != nil {
 			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("drop SQLite reduction %s: %w", table, err))
 		}
 	}
