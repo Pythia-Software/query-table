@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -82,8 +83,8 @@ func (d QueryDatasetV3) Execute(ctx context.Context, db *sql.DB, q QueryRequestV
 // reduces groups with the existing typed SQL compiler, then executes HAVING,
 // sorting, paging and metrics over that projection. All temporary tables are
 // dropped before success; cancellation/budget failures never return a page.
-func (d QueryDatasetV3) ExecuteIn(ctx context.Context, tx *sql.Tx, q QueryRequestV3, o PlanOptions) (QueryResultV3, error) {
-	out := QueryResultV3{Version: 3, Now: q.Now, Rows: []map[string]any{}, Metrics: []SQLiteMetricV2{}}
+func (d QueryDatasetV3) ExecuteIn(ctx context.Context, tx *sql.Tx, q QueryRequestV3, o PlanOptions) (out QueryResultV3, err error) {
+	out = QueryResultV3{Version: 3, Now: q.Now, Rows: []map[string]any{}, Metrics: []SQLiteMetricV2{}}
 	if err := q.Validate(); err != nil {
 		return out, err
 	}
@@ -120,10 +121,9 @@ func (d QueryDatasetV3) ExecuteIn(ctx context.Context, tx *sql.Tx, q QueryReques
 	}
 	tables := []string{}
 	defer func() {
-		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
-		defer cancel()
-		for i := len(tables) - 1; i >= 0; i-- {
-			_, _ = tx.ExecContext(cleanup, "DROP TABLE IF EXISTS "+queryIdent(tables[i]))
+		err = errors.Join(err, dropQueryTables(ctx, tx, tables))
+		if err != nil {
+			out = QueryResultV3{}
 		}
 	}()
 	source := queryTableName()
@@ -347,8 +347,8 @@ func readQueryRows(ctx context.Context, tx *sql.Tx, p SQLPlan, grouped bool, dia
 	return out, rows.Err()
 }
 
-func (d QueryDatasetV3) stageGroups(ctx context.Context, tx *sql.Tx, table string, g *GroupingDefinition, s Schema, o PlanOptions, maxGroups int) (Schema, error) {
-	result := Schema{Name: s.Name + ":groups", IDField: GroupIdentityField, Fields: map[string]FieldSpec{}}
+func (d QueryDatasetV3) stageGroups(ctx context.Context, tx *sql.Tx, table string, g *GroupingDefinition, s Schema, o PlanOptions, maxGroups int) (result Schema, err error) {
+	result = Schema{Name: s.Name + ":groups", IDField: GroupIdentityField, Fields: map[string]FieldSpec{}}
 	// SQLite reduces scalar summaries in the COUNT pass: one scan of the staged
 	// population and one GROUP BY write every value and error sidecar into the
 	// group table. SourcePlan compiled each summary on its own. Any sampled
@@ -481,9 +481,9 @@ func (d QueryDatasetV3) stageGroups(ctx context.Context, tx *sql.Tx, table strin
 		// the same chosen rows, which hold one row per (already budgeted) group.
 		chosen := queryTableName()
 		defer func() {
-			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
-			defer cancel()
-			_, _ = tx.ExecContext(cleanup, "DROP TABLE IF EXISTS "+queryIdent(chosen))
+			if cleanupErr := dropQueryTables(ctx, tx, []string{chosen}); cleanupErr != nil {
+				err = errors.Join(err, cleanupErr)
+			}
 		}()
 		if _, err = tx.ExecContext(ctx, "CREATE TEMP TABLE "+queryIdent(chosen)+" AS "+representative.SQL, representative.Args...); err != nil {
 			return result, err

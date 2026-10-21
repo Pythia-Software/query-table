@@ -3,8 +3,27 @@ package querytable
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"strings"
+	"time"
 )
+
+// Register scratch ownership before DDL. An interrupted CTAS may leave an
+// empty relation; DROP IF EXISTS also covers DDL rolled back by a savepoint.
+// A cleanup error must prevent a success result, so caller-owned transactions
+// are only safe to commit after ExecuteIn returns nil.
+func dropQueryTables(ctx context.Context, tx *sql.Tx, tables []string) error {
+	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	var err error
+	for i := len(tables) - 1; i >= 0; i-- {
+		if _, e := tx.ExecContext(cleanup, "DROP TABLE IF EXISTS "+queryIdent(tables[i])); e != nil {
+			err = errors.Join(err, fmt.Errorf("drop query scratch %s: %w", tables[i], e))
+		}
+	}
+	return err
+}
 
 // Count UTF-8 payload bytes, including error sidecars and caller-supplied
 // scratch metadata, before and after materializing a temporary projection.
