@@ -237,7 +237,7 @@ it.each([false, true])("waits for remote query restoration before syncing stored
     save: vi.fn(async (_key, snapshot) => snapshot),
   };
   const storage = { ...memoryStorageAdapter(), snapshots, saveLast: vi.fn(async () => {}) };
-  const fetchRows = vi.fn<Transport<Row>["fetchRows"]>(async () => ({ rows, total: 1 }));
+  const fetchRows = vi.fn<NonNullable<Transport<Row>["fetchRows"]>>(async () => ({ rows, total: 1 }));
   window.history.replaceState(null, "", `/runs?q=@${code}`);
   const api = mount({ schema, storage, transport: { fetchRows }, itemDetails: { storage: propertyStorage },
     syncUrl: true, debounceMs: 0, links: { cache: memoryQuerySnapshotCache() } });

@@ -2,6 +2,41 @@
 
 The SELECT editor combines a column catalogue, draft column ordering, value-frequency browsing, and a formula workbench. Open it through **Edit columns** in `QueryBuilder`, or mount the exported `SelectColumnEditor` yourself. Column layout is applied as one undoable query change. Saving a shared definition is a separate action and is not undone by cancelling layout changes or undoing a query.
 
+## Modern row transports
+
+From 0.9.4, `Transport.fetchRows` is optional. Remote tables and computed
+previews can use `fetchRowsV2` with `computedExecution`, or `fetchQueryV3` with
+`queryCapabilities`. Legacy-only transports keep using `fetchRows`; complete
+client datasets keep their local execution behavior.
+
+```ts
+const transport: Transport<Row> = { fetchRowsV2, fetchQueryV3, queryCapabilities,
+  fetchMetrics, metricCapabilities };
+useQueryTable({ schema, transport, computedExecution });
+```
+
+Previews prefer negotiated V2 for ordinary rows. V3 supports V3-only hosts,
+computed source filters and grouped-result inputs. Grouping retains its source
+and result stages. Previews start at offset zero in the current filter/sort
+order, independent of the table page. They request only the identity and draft
+dependencies in pages of at most 500 rows (or a smaller V3 `maxRows`), up to
+10,000 rows and the existing 16 MB input limit. One evaluation time is reused
+across V3 pages. Totals, server diagnostics, execution identity and canonical
+computed revisions are checked before evaluating the draft locally.
+
+Unsaved expression source is never submitted as a saved server definition.
+References to saved expressions expand to their input dependencies locally;
+saved fields used by server sorting/filtering retain their negotiated revisions.
+Cancelling, replacing or invalidating a preview aborts it; late responses from
+transports that ignore abort cannot return a stale preview.
+
+Hosts implementing modern methods can remove their legacy preview route after
+upgrading all Query Table packages together. Direct application calls through
+the general `Transport` interface must now check `transport.fetchRows` before
+calling it, or migrate to their negotiated method. Application actions such as
+share/export Select all remain the host's responsibility. A transport lacking
+any usable negotiated or legacy row method produces an execution diagnostic.
+
 ## Persistence and identity
 
 A query stores only an ID reference and its presentation settings:

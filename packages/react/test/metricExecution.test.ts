@@ -170,7 +170,7 @@ describe("metric execution boundary", () => {
     expect(fetchAggregations).not.toHaveBeenCalled();
   });
   it("uses committed shown-page inputs without a newer hydration request", async () => {
-    const fetchRows = vi.fn<Transport<Row>["fetchRows"]>(async () => ({
+    const fetchRows = vi.fn<NonNullable<Transport<Row>["fetchRows"]>>(async () => ({
       rows: [{ ...rows[0]!, x: 99 }],
       total: 3,
     }));

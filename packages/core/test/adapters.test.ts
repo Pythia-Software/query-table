@@ -1,7 +1,19 @@
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, expect, expectTypeOf, it, vi } from "vitest";
+import type { Transport } from "../src/index";
 import { EMPTY_QUERY, localStorageAdapter, memoryStorageAdapter } from "../src/index";
 
 afterEach(() => vi.unstubAllGlobals());
+
+it("accepts modern-only public row transports", () => {
+  const v2: Transport<{ id: string }> = { fetchRowsV2: async () => ({ version: 2, rows: [], total: 0, computed: [],
+    execution: { profile: "qt-sqlite-v1", planToken: "", resolvedRevisions: {}, fields: {} } }) };
+  const v3: Transport = { fetchQueryV3: async request => ({ version: 3, now: request.now, sourceTotal: 0, rows: [], total: 0,
+    schema: { name: "source", idField: "id", fields: [] }, metrics: [], execution: { profile: request.profile, planToken: "", resolvedRevisions: {}, fields: {} } }) };
+  expectTypeOf(v2).toExtend<Transport<{ id: string }>>();
+  expectTypeOf(v3).toExtend<Transport>();
+  expect(v2.fetchRows).toBeUndefined();
+  expect(v3.fetchRows).toBeUndefined();
+});
 
 function localStorageMock() {
   const values = new Map<string, string>();

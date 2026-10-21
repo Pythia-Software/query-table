@@ -56,9 +56,10 @@ export interface Transport<Row = any> {
   fetchRowsV2?(query: ServerQueryV2, signal?: AbortSignal): Promise<FetchRowsResultV2<Row>>;
   metricCapabilities?: MetricCapabilities;
   fetchMetrics?(query: MetricQuery, signal?: AbortSignal): Promise<AggregationResult>;
-  /** Run a server query. The only required method — a purely client-side table
-   *  can omit a Transport entirely and rely on applyQuery over local rows. */
-  fetchRows(query: ServerQuery, signal?: AbortSignal): Promise<FetchRowsResult<Row>>;
+  /** Legacy row execution. A remote table needs this, fetchRowsV2 with a
+   * computedExecution handshake, or fetchQueryV3 with queryCapabilities.
+   * Modern hosts may omit the legacy endpoint, including for draft previews. */
+  fetchRows?(query: ServerQuery, signal?: AbortSignal): Promise<FetchRowsResult<Row>>;
 
   /** Distinct values for filter autocomplete. Strongly recommended: without it,
    *  fields fall back to freeform input. The backend should match `search`

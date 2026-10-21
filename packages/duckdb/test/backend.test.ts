@@ -423,13 +423,13 @@ describe("DuckDB native conformance", () => {
     await expect(
       small
         .transport()
-        .fetchRows(toServerQuery(normalizeQueryState({}), schema)),
+        .fetchRows!(toServerQuery(normalizeQueryState({}), schema)),
     ).rejects.toThrow("budget");
     expect(
       (
         await backend
           .transport()
-          .fetchRows(toServerQuery(normalizeQueryState({ limit: 1 }), schema))
+          .fetchRows!(toServerQuery(normalizeQueryState({ limit: 1 }), schema))
       ).total,
     ).toBe(6);
   });

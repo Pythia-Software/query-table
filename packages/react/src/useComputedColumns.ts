@@ -1,4 +1,5 @@
 import { executionRevision } from "./computedExecution";
+import { fetchPreviewRows } from "./previewRows";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   isGroupLinkField,
@@ -9,7 +10,6 @@ import {
   isComputedField,
   memoryComputedColumnStore,
   readFieldValue,
-  toServerQuery,
   validateComputedColumn,
   isSelectable,
   hasRegex,
@@ -56,6 +56,10 @@ export interface ComputedColumnsApi<Row> {
 interface Options<Row> {
   schema: FieldSchema<Row>;
   query: QueryState;
+  /** V3 previews retain the source/grouping stages behind a result schema. */
+  sourceSchema?: FieldSchema<Row>;
+  previewQuery?: QueryState;
+  now?: number;
   rows: Row[];
   store?: ComputedColumnStore;
   transport?: Transport<Row>;
@@ -436,6 +440,7 @@ export function useComputedColumns<Row>(options: Options<Row>): {
     },
     [compile, store, schema.name],
   );
+  const previewRequest = useRef<AbortController | null>(null);
   const preview = useCallback(
     async (
       source: string,
@@ -444,59 +449,76 @@ export function useComputedColumns<Row>(options: Options<Row>): {
       editingId?: string,
       includeInputs = true,
     ): Promise<ColumnPreview> => {
-      if (!Number.isInteger(count) || count < 1 || count > 10000)
-        throw new Error("Choose between 1 and 10,000 rows.");
-      const plan = compile(source, editingId);
-      let batch: Row[] = [],
-        total = 0;
-      if (transport) {
-        const request = toServerQuery(
-          {
+      previewRequest.current?.abort();
+      const controller = new AbortController();
+      previewRequest.current = controller;
+      const abort = () => controller.abort();
+      signal?.addEventListener("abort", abort, { once: true });
+      if (signal?.aborted) controller.abort();
+      try {
+        if (!Number.isInteger(count) || count < 1 || count > 10000)
+          throw new Error("Choose between 1 and 10,000 rows.");
+        const plan = compile(source, editingId);
+        let batch: Row[] = [],
+          total = 0;
+        if (transport) {
+          const request = {
             ...query,
+            ...(options.previewQuery?.grouping
+              ? { grouping: options.previewQuery.grouping } : {}),
             select: [
               ...new Set([schema.idField, ...backendDependencies(plan)]),
             ].map((field) => ({ field })),
             limit: Math.min(count, 500),
             offset: 0,
-          },
-          schema,
-        );
-        while (batch.length < count) {
-          if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-          const res = await transport.fetchRows(
-            {
-              ...request,
-              offset: batch.length,
-              limit: Math.min(500, count - batch.length),
-            },
-            signal,
+          };
+          const now = options.now ?? Date.now();
+          const computedFilter = request.where.some(term => ("any" in term ? term.any : [term])
+            .some(predicate => isComputedField(predicate.field)));
+          const v3 = !(transport.fetchRowsV2 && options.execution && !request.grouping && !computedFilter) &&
+            transport.fetchQueryV3 && transport.queryCapabilities?.version === 3;
+          const pageSize = Math.min(500, v3 ? transport.queryCapabilities!.maxRows : 500);
+          if (!Number.isInteger(pageSize) || pageSize < 1) throw Error("Invalid negotiated preview row limit.");
+          while (batch.length < count) {
+            const res = await fetchPreviewRows(transport,
+              {
+                ...request,
+                offset: batch.length,
+                limit: Math.min(pageSize, count - batch.length),
+              },
+              schema, options.execution, definitions, now, controller.signal, options.sourceSchema,
+            );
+            total = res.total;
+            batch.push(...res.rows.slice(0, count - batch.length));
+            if (!res.rows.length || batch.length >= total) break;
+          }
+        } else {
+          const result = applyQuery(
+            clientRows ?? [],
+            { ...query, limit: count, offset: 0 },
+            schema,
           );
-          total = res.total;
-          batch.push(...res.rows.slice(0, count - batch.length));
-          if (!res.rows.length || batch.length >= total) break;
+          batch = result.rows;
+          total = result.total;
         }
-      } else {
-        const result = applyQuery(
-          clientRows ?? [],
-          { ...query, limit: count, offset: 0 },
-          schema,
-        );
-        batch = result.rows;
-        total = result.total;
-      }
-      const inputs = inputsFor(plan, batch),
-        results = await evaluateFormulaRows(
-          plan.ast,
+        const inputs = inputsFor(plan, batch),
+          results = await evaluateFormulaRows(
+            plan.ast,
+            inputs,
+            controller.signal,
+            workerFactory,
+          );
+        if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
+        return groupPreview(
+          includeInputs ? plan.dependencies : [],
           inputs,
-          signal,
-          workerFactory,
+          results,
+          total,
         );
-      return groupPreview(
-        includeInputs ? plan.dependencies : [],
-        inputs,
-        results,
-        total,
-      );
+      } finally {
+        signal?.removeEventListener("abort", abort);
+        if (previewRequest.current === controller) previewRequest.current = null;
+      }
     },
     [
       compile,
@@ -507,8 +529,14 @@ export function useComputedColumns<Row>(options: Options<Row>): {
       clientRows,
       inputsFor,
       workerFactory,
+      options.execution,
+      definitions,
+      options.sourceSchema,
+      options.previewQuery?.grouping,
+      options.now,
     ],
   );
+  useEffect(() => () => previewRequest.current?.abort(), [preview]);
   return {
     displaySchema,
     api: {
