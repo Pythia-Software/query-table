@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## 0.9.3 — 2026-10-21
+
+### Added
+
+- SQLite V2 scalar batches fuse reductions across fields with matching
+  populations, scopes, metric predicates and grouping. Plain integer metrics
+  can use a fully guarded SQLite reduction, with exact decimal fallback for
+  unsupported domains. Each metric retains independent errors, formulas,
+  minCount, sorting, top-N, budgets and result payloads.
+- Portable cross-field, V3 source-copy and SQLite scratch-lifecycle benchmarks,
+  with [measurements and host migration guidance](docs/sqlite-performance-handoff.md).
+
+### Fixed
+
+- Track SQLite reduction tables before DDL so cancellation also cleans up an
+  interrupted CREATE TABLE AS that left an empty relation.
+- Return V3 scratch cleanup errors, including representative tables, before
+  reporting success to a caller-owned transaction. Successful V2/V3 calls may
+  be committed; execution/cleanup failures still require rollback.
+
 ### Changed
 
 - Remove Dependabot's scheduled version updates and disable its automatic
