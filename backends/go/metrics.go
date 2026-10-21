@@ -247,6 +247,7 @@ func compileMetricOutputs(ctx context.Context, q MetricQuery, spec AggSpec, s Sc
 	leaves := map[*exprNode]ValueSQL{}
 	reductionMemo := map[string]ValueSQL{}
 	reductions := []string{}
+	reductionKeys := map[string]string{}
 	var collect func(*exprNode) error
 	collect = func(n *exprNode) error {
 		op := strings.ToLower(n.op)
@@ -328,6 +329,7 @@ func compileMetricOutputs(ctx context.Context, q MetricQuery, spec AggSpec, s Sc
 			a := fmt.Sprintf("a%d", index)
 			z := a + "_error"
 			reductions = append(reductions, value+" AS "+a, errorExpr+" AS "+z)
+			reductionKeys[a], reductionKeys[z] = "value\x00"+key, "error\x00"+key
 			leaves[n] = ValueSQL{a, z, typ}
 			reductionMemo[key] = leaves[n]
 			return nil
@@ -367,6 +369,11 @@ func compileMetricOutputs(ctx context.Context, q MetricQuery, spec AggSpec, s Sc
 		}
 	}
 	selectGroups, by := groupSQL(groups)
+	for i := range groups {
+		name := fmt.Sprintf("group%d", i)
+		reductionKeys[name], reductionKeys[name+"_error"] = name, name+"_error"
+	}
+	reductionKeys["count"] = "count"
 	reductions = append(selectGroups, append(reductions, "COUNT(*) AS count")...)
 	reductionFrom := " FROM " + b.rel + by
 	b.stage("SELECT " + strings.Join(reductions, ",") + reductionFrom)
@@ -460,7 +467,7 @@ func compileMetricOutputs(ctx context.Context, q MetricQuery, spec AggSpec, s Sc
 	if b.lateSource {
 		reductionStage++ // finish prepends the shared authorized source.
 	}
-	plan.reduction = &scalarReduction{stage: reductionStage, from: reductionFrom}
+	plan.reduction = &scalarReduction{stage: reductionStage, from: reductionFrom, keys: reductionKeys}
 	for _, projection := range reductions {
 		split := strings.LastIndex(projection, " AS ") // Every output has a compiler-owned alias.
 		plan.reduction.columns = append(plan.reduction.columns, SQLiteReductionColumn{Name: projection[split+4:], SQL: projection[:split]})
@@ -472,6 +479,7 @@ func compileMetricOutputs(ctx context.Context, q MetricQuery, spec AggSpec, s Sc
 	}
 	return plan, nil
 }
+
 // metricResult ranks and limits reduced groups. MinCount first removes groups
 // below the threshold; group_count then counts only the kept groups. The kept
 // rows are LEFT JOINed to a one-row hidden_groups count, so a result whose

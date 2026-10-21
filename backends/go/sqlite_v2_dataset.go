@@ -278,6 +278,7 @@ func (d SQLiteV2Dataset) ExecuteV2In(ctx context.Context, tx *sql.Tx, rows *Serv
 		r := SQLiteMetricsV2Result{Metrics: []SQLiteMetricV2{}}
 		memo := map[string]SQLiteMetricV2{}
 		reductions := newSQLiteReductionCache(batch)
+		reductions.addCrossFields(ctx, batch, *metrics, d.Schema, o)
 		defer func() {
 			if cleanupErr := reductions.close(tx); cleanupErr != nil {
 				out = SQLiteV2ExecutionResult{}

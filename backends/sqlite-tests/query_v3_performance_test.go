@@ -18,9 +18,10 @@ import (
 // statementHookConnector observes, and can fail, every statement the executor
 // sends. Tests use it to count executions without timing anything.
 type statementHookConnector struct {
-	base driver.Driver
-	dsn  string
-	hook func(string) error
+	base       driver.Driver
+	dsn        string
+	hook       func(string) error
+	beforeExec func(context.Context, driver.Conn, string) error
 }
 
 func (c statementHookConnector) Driver() driver.Driver { return c.base }
@@ -29,18 +30,24 @@ func (c statementHookConnector) Connect(context.Context) (driver.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	return statementHookConn{Conn: conn, ConnBeginTx: conn.(driver.ConnBeginTx), hook: c.hook}, nil
+	return statementHookConn{Conn: conn, ConnBeginTx: conn.(driver.ConnBeginTx), hook: c.hook, beforeExec: c.beforeExec}, nil
 }
 
 type statementHookConn struct {
 	driver.Conn
 	driver.ConnBeginTx
-	hook func(string) error
+	hook       func(string) error
+	beforeExec func(context.Context, driver.Conn, string) error
 }
 
 func (c statementHookConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
 	if err := c.hook(query); err != nil {
 		return nil, err
+	}
+	if c.beforeExec != nil {
+		if err := c.beforeExec(ctx, c.Conn, query); err != nil {
+			return nil, err
+		}
 	}
 	return c.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
 }
@@ -105,9 +112,14 @@ func (l *statementLog) count(marker string) int {
 // through log, then runs setup in it.
 func hookedDB(t *testing.T, log *statementLog, setup string) *sql.DB {
 	t.Helper()
+	return hookedDBWithExecHook(t, log, setup, nil)
+}
+
+func hookedDBWithExecHook(t *testing.T, log *statementLog, setup string, beforeExec func(context.Context, driver.Conn, string) error) *sql.DB {
+	t.Helper()
 	original, _ := setupV3(t)
 	dsn := filepath.ToSlash(filepath.Join(t.TempDir(), "hooked.db"))
-	db := sql.OpenDB(statementHookConnector{base: original.Driver(), dsn: dsn, hook: log.hook})
+	db := sql.OpenDB(statementHookConnector{base: original.Driver(), dsn: dsn, hook: log.hook, beforeExec: beforeExec})
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { db.Close() })
 	if _, err := db.Exec(setup); err != nil {

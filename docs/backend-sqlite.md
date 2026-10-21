@@ -304,13 +304,20 @@ budget, or a failed statement) is returned as that metric's `error` with empty
 buckets, and sibling metrics and rows still return. Request-level diagnostics,
 stale revisions and cancellation still fail the request. Identical metric fingerprints and scopes share a
 result within that execution, with independent mutable bucket/distribution
-payloads. Scalar cards with exactly matching compiler input stages and grouping
-share grouped reductions. A failed metric's savepoint discards the reductions it
+payloads. Compatible scalar cards share grouped reductions across fields when
+their populations, scopes, metric predicates and grouping agree. A failed metric's savepoint discards the reductions it
 created, so later metrics rebuild them, and a failing fused statement falls back
 to per-metric reductions. Compatible SUM/AVG/MIN and other scalar reductions
 fuse into one grouped SELECT, limited to 128 projected expressions. Final
 formulas, group sorting, and top-N still run per plan. Distributions retain their
 existing exact sampling/streaming paths. No cache crosses requests or snapshots.
+
+Plain numeric base-field metrics over INTEGER/NULL storage may use a guarded
+SQLite reduction. Every group's storage types and absolute integer totals must
+prove exact arithmetic before the result is used; other domains retain the
+general exact decimal plan. Simple stored-column sources may reduce directly;
+opaque host bindings retain materialization to avoid repeated evaluation. See [the performance and migration notes](sqlite-performance-handoff.md)
+for eligibility, fallback semantics and portable benchmarks.
 
 Shared reductions use uniquely named temporary tables in the same transaction.
 The executor drops them before returning, using a separate bounded cleanup
@@ -325,6 +332,13 @@ in the same short transaction. Use `ExecuteV2In`
 when a host already owns that transaction. `PlanOptions.Resolver` can override
 the built-in scoped `SQLiteComputedDefinitionResolver`, but it must resolve
 canonical definitions in that same snapshot.
+
+After either `ExecuteV2In` or `QueryDatasetV3.ExecuteIn` returns nil, the host may
+commit that successful query transaction: adapter-owned scratch objects have
+been dropped without ending the source snapshot. Roll back after a non-nil
+execution or cleanup error. The adapter never changes connection PRAGMAs.
+See the [caller-owned transaction example](sqlite-performance-handoff.md#supported-sqlite-scratch-lifetime)
+before changing a host's connection policy.
 
 `result.Rows` matches `FetchRowsResultV2`: `{version:2,rows,total,computed,execution}`.
 Computed values are separate sidecars indexed by stable row ID, with **bare

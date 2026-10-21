@@ -69,6 +69,9 @@ type scalarReduction struct {
 	stage   int
 	from    string
 	columns []SQLiteReductionColumn
+	// Compiler-owned semantic identities allow a combined reduction to supply
+	// an independently compiled consumer without depending on its row aliases.
+	keys map[string]string
 }
 type SQLPlan struct {
 	reduction              *scalarReduction
