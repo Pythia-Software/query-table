@@ -42,6 +42,7 @@
     "demo": "npm run dev --workspace @pythia-software/query-table-demo",
     "test:dnd": "node demo/dnd-test.mjs",
     "test:mobile": "node demo/mobile-test.mjs",
+    "test:touch-targets": "node demo/touch-target-test.mjs",
     "test:menus": "node demo/menu-test.mjs",
     "test:filter-values": "node demo/filter-value-test.mjs",
     "test:feedback": "node demo/agentation-test.mjs",

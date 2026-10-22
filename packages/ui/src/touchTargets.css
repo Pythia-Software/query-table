@@ -1,0 +1,67 @@
+/* Public --qt-touch-target-scale is a unitless enlargement factor, default 1.
+ * Responsive rules interpolate from the desktop border box once, even when
+ * coarse-pointer and narrow-screen queries overlap. Layout and font sizes do
+ * not scale. Keep these private baselines beside the theme's entry point so
+ * generic sheet rules can respect each control's ordinary geometry.
+ *
+ * Intrinsic baselines include the line box, vertical padding and borders.
+ * A minimum never caps content: wrapped labels and larger input fonts can
+ * still make a control taller. Fixed-size controls keep an icon/line-box floor.
+ */
+:where(.qt-btn, .qt-add, .qt-link-btn) { --_qt-target-height: 24px; }
+.qt-btn { --_qt-target-width: 30px; }
+.qt-add { --_qt-target-width: 26px; }
+.qt-link-btn { --_qt-target-width: 28px; }
+.qt-qb-collapse-btn, .qt-qt-section-toggle { --_qt-target-height: 28px; }
+.qt-chip-op, .qt-chip-val, .qt-chip-op-btn, .qt-chip-x, .qt-chip-agg-add { --_qt-target-height: 20px; }
+.qt-chip-x { --_qt-target-width: 20px; }
+.qt-chip-op-btn { --_qt-target-width: 20px; }
+.qt-qb-saved-star { --_qt-target-height: 16px; --_qt-target-width: 16px; }
+.qt-qb-saved-cancel { --_qt-target-height: 16px; --_qt-target-width: 16px; }
+.qt-qb-num, .qt-qb-saved-input { --_qt-target-height: calc(1lh + 6px); }
+.qt-qb-num-step { --_qt-target-height: calc(1lh + 6px); --_qt-target-width: calc(4ch + 13px); }
+.qt-cm-item, .qt-op-cell { --_qt-target-height: 32px; }
+.qt-picker-input { --_qt-target-height: calc(1lh + 6px); }
+.qt-popover .qt-input, .qt-field-picker-popover .qt-picker-input { --_qt-target-height: 32px; }
+.qt-popover .qt-input { --_qt-padding-y: 6px; }
+.qt-formula-input { --_qt-padding-y: 12px; }
+.qt-preview-controls select { --_qt-padding-y: 5px; }
+.qt-metrics-editor .qt-input { --_qt-padding-y: 6px; }
+.qt-picker-item { --_qt-target-height: calc(1lh + 10px); }
+.qt-picker-popover .qt-picker-input { --_qt-target-height: calc(1lh + 18px); }
+.qt-picker-popover .qt-picker-item { --_qt-target-height: calc(1lh + 18px); }
+.qt-saved-pick { --_qt-target-height: calc(2lh + 8px); }
+.qt-value-picker-list button { --_qt-target-height: calc(1lh + 16px); }
+.qt-sort-extract-input, .qt-sort-extract-direction, .qt-sort-extract-field { --_qt-target-height: 32px; }
+.qt-sort-direction-grid .qt-btn { --_qt-target-height: 34px; }
+.qt-icon-btn { --_qt-target-height: 22px; --_qt-target-width: 22px; }
+.qt-column-name { --_qt-target-height: 20px; }
+.qt-json-action { --_qt-target-height: 28px; --_qt-target-width: 28px; }
+.qt-json-toggle { --_qt-target-height: 24px; --_qt-target-width: 20px; }
+.qt-json-copy { --_qt-target-height: 24px; --_qt-target-width: 24px; }
+.qt-item-detail-button { --_qt-target-height: 28px; }
+.qt-property-icon-button { --_qt-target-width: 26px; --_qt-padding-x: 0px; }
+.qt-property-controls input, .qt-property-controls select { --_qt-target-height: 28px; }
+.qt-property-editor :is(input, select) { --_qt-target-height: calc(1lh * 5 / 6 + 4px); }
+.qt-property-pick { --_qt-target-height: calc(1.3em + 17px); }
+.qt-metrics-editor .qt-btn { --_qt-target-height: 30px; }
+.qt-metrics-editor :is(input, select) { --_qt-target-height: 34px; }
+.qt-metric-selection-tools select { --_qt-target-height: 30px; }
+.qt-representative-field { --_qt-target-height: 24px; }
+.qt-representative-order .qt-reorder-handle { --_qt-target-height: 22px; --_qt-target-width: 16px; }
+
+@media (max-width: 760px), (pointer: coarse) and (max-height: 500px) {
+  /* PickerSurface replaces its desktop popover with a sheet. Include the
+   * popover's 8/9px padding and 12px line box even though mobile uses 16/14px
+   * text. Otherwise changing surfaces would lose the desktop baseline. */
+  .qt-sheet .qt-picker-input { --_qt-target-height: calc(1lh * 3 / 4 + 18px); }
+  .qt-sheet .qt-picker-item { --_qt-target-height: calc(1lh * 6 / 7 + 18px); }
+  .qt-qb-num { --_qt-target-height: calc(1lh * 13 / 16 + 6px); }
+  .qt-sheet .qt-value-picker-list button { --_qt-target-height: calc(1lh * 13 / 16 + 16px); }
+  /* Mobile input fonts remain 16px to avoid browser zoom. At scale 0 their
+   * content may need more room than a desktop control's fixed height. */
+  .qt-chip-op, .qt-chip-val { height: max(calc(1lh + 4px), calc(20px + 12px * var(--qt-touch-target-scale, 1))); }
+  .qt-chip-op-btn { height: max(calc(1lh + 2px), calc(20px + 12px * var(--qt-touch-target-scale, 1))); }
+  .qt-auto-refresh-select { height: max(calc(1lh + 6px + 8px * var(--qt-touch-target-scale, 1)), calc(24px + 16px * var(--qt-touch-target-scale, 1))); }
+  .qt-json-search.qt-input { height: max(calc(1lh + 8px), calc(28px + 4px * var(--qt-touch-target-scale, 1))); }
+}
