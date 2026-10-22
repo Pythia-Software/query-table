@@ -1041,7 +1041,7 @@
     display: none;
   }
   .qt-metrics-editor-header .qt-metric-close {
-    min-height: 34px;
+    min-height: calc(30px + 4px * var(--qt-touch-target-scale, 1));
     order: 2;
     margin-inline-start: auto;
   }
@@ -1063,7 +1063,7 @@
   }
   .qt-metrics-editor-footer .qt-btn {
     font-size: 12px;
-    min-height: 38px;
+    min-height: calc(30px + 8px * var(--qt-touch-target-scale, 1));
   }
   .qt-metric-workspace > :is(aside, section) {
     padding: 12px;
@@ -1267,8 +1267,8 @@
 }
 @media (pointer: coarse) {
   .qt-metric-card-resize {
-    width: 30px;
-    height: 30px;
+    width: calc(22px + 8px * var(--qt-touch-target-scale, 1));
+    height: calc(22px + 8px * var(--qt-touch-target-scale, 1));
   }
   .qt-metric-card-edit,
   .qt-metric-card-resize {

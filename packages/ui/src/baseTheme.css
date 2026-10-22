@@ -834,9 +834,9 @@
   .qt-btn,
   .qt-add,
   .qt-link-btn {
-    min-height: 40px;
+    min-height: calc(var(--_qt-target-height, 24px) + (40px - var(--_qt-target-height, 24px)) * var(--qt-touch-target-scale, 1));
     height: auto;
-    padding: 8px 10px;
+    padding: calc(0px + 8px * var(--qt-touch-target-scale, 1)) calc(var(--_qt-padding-x, 6px) + (10px - var(--_qt-padding-x, 6px)) * var(--qt-touch-target-scale, 1));
     touch-action: manipulation;
   }
 
@@ -875,9 +875,9 @@
   }
 
   .qt-qb-saved-star {
-    width: 32px;
-    min-width: 32px;
-    min-height: 32px;
+    width: calc(16px + 16px * var(--qt-touch-target-scale, 1));
+    min-width: calc(16px + 16px * var(--qt-touch-target-scale, 1));
+    min-height: calc(16px + 16px * var(--qt-touch-target-scale, 1));
     font-size: 18px;
   }
 
@@ -924,7 +924,7 @@
 
   .qt-chip {
     height: auto;
-    min-height: 40px;
+    min-height: calc(24px + 16px * var(--qt-touch-target-scale, 1));
     padding: 0 8px;
     gap: 5px;
     flex-wrap: wrap;
@@ -934,8 +934,8 @@
   .qt-chip-grip { display: none; }
 
   .qt-chip-x {
-    min-width: 30px;
-    min-height: 30px;
+    min-width: calc(var(--_qt-target-width, 0px) + (30px - var(--_qt-target-width, 0px)) * var(--qt-touch-target-scale, 1));
+    min-height: calc(20px + 10px * var(--qt-touch-target-scale, 1));
     padding: 0 7px;
     justify-content: center;
     font-size: 13px;
@@ -943,14 +943,14 @@
 
   .qt-chip-op,
   .qt-chip-val {
-    height: 32px;
-    min-height: 32px;
+    height: calc(20px + 12px * var(--qt-touch-target-scale, 1));
+    min-height: calc(20px + 12px * var(--qt-touch-target-scale, 1));
     padding: 0 6px;
     font-size: 16px;
   }
 
   .qt-chip-op-btn {
-    height: 32px;
+    height: calc(20px + 12px * var(--qt-touch-target-scale, 1));
     padding: 0 8px;
     font-size: 13px;
   }
@@ -970,13 +970,13 @@
   }
 
   .qt-chip-agg-group {
-    height: 32px;
+    height: calc(20px + 12px * var(--qt-touch-target-scale, 1));
     font-size: 13px;
   }
 
   .qt-chip-agg-group .qt-chip-x {
-    min-width: 28px;
-    min-height: 28px;
+    min-width: calc(var(--_qt-target-width, 0px) + (28px - var(--_qt-target-width, 0px)) * var(--qt-touch-target-scale, 1));
+    min-height: calc(20px + 8px * var(--qt-touch-target-scale, 1));
     font-size: 12px;
   }
 
@@ -1004,9 +1004,9 @@
 
   .qt-qb-num {
     width: 100%;
-    min-height: 40px;
+    min-height: calc(var(--_qt-target-height, 24px) + (40px - var(--_qt-target-height, 24px)) * var(--qt-touch-target-scale, 1));
     box-sizing: border-box;
-    padding: 6px 8px;
+    padding: calc(2px + 4px * var(--qt-touch-target-scale, 1)) 8px;
     font-size: 16px;
   }
 
@@ -1050,8 +1050,8 @@
 
   .qt-auto-refresh-select {
     width: 150px;
-    height: 40px;
-    padding: 6px 8px;
+    height: calc(24px + 16px * var(--qt-touch-target-scale, 1));
+    padding: calc(2px + 4px * var(--qt-touch-target-scale, 1)) 8px;
     font-size: 16px;
   }
 
@@ -1062,9 +1062,9 @@
 
   .qt-picker-input {
     width: 100%;
-    min-height: 42px;
+    min-height: calc(var(--_qt-target-height, 24px) + (42px - var(--_qt-target-height, 24px)) * var(--qt-touch-target-scale, 1));
     box-sizing: border-box;
-    padding: 7px 9px;
+    padding: calc(2px + 5px * var(--qt-touch-target-scale, 1)) 9px;
     font-size: 16px;
   }
 
@@ -1079,8 +1079,8 @@
   }
 
   .qt-picker-item {
-    min-height: 48px;
-    padding: 8px 10px;
+    min-height: calc(var(--_qt-target-height, 24px) + (48px - var(--_qt-target-height, 24px)) * var(--qt-touch-target-scale, 1));
+    padding: calc(5px + 3px * var(--qt-touch-target-scale, 1)) 10px;
     font-size: 14px;
   }
 
@@ -1097,11 +1097,11 @@
   }
 
   .qt-selection-actions > * {
-    min-height: 40px;
+    min-height: calc(var(--_qt-target-height, 24px) + (40px - var(--_qt-target-height, 24px)) * var(--qt-touch-target-scale, 1));
   }
 
   .qt-qt-section-head {
-    min-height: 48px;
+    min-height: calc(36px + 12px * var(--qt-touch-target-scale, 1));
     padding: 2px 8px;
   }
 
@@ -1112,8 +1112,8 @@
   }
 
   .qt-btn.qt-qt-section-toggle {
-    height: 44px;
-    min-height: 44px;
+    height: calc(28px + 16px * var(--qt-touch-target-scale, 1));
+    min-height: calc(28px + 16px * var(--qt-touch-target-scale, 1));
     padding: 0 4px;
   }
 
@@ -1188,8 +1188,8 @@
   }
 
   .qt-checkbox-cell input {
-    width: 20px;
-    height: 20px;
+    width: calc(13px + 7px * var(--qt-touch-target-scale, 1));
+    height: calc(13px + 7px * var(--qt-touch-target-scale, 1));
     margin: 0;
   }
 
@@ -1206,11 +1206,11 @@
     left: 12px;
     width: calc(100vw - 48px);
     width: calc(100cqw - 24px);
-    min-height: 40px;
+    min-height: calc(24px + 16px * var(--qt-touch-target-scale, 1));
   }
 
   .qt-table-summary .qt-btn {
-    min-width: 76px;
+    min-width: calc(var(--_qt-target-width, 30px) + (76px - var(--_qt-target-width, 30px)) * var(--qt-touch-target-scale, 1));
   }
 
   .qt-cell-menu {
@@ -1228,8 +1228,8 @@
   }
 
   .qt-cm-item {
-    min-height: 44px;
-    padding: 10px 12px;
+    min-height: calc(32px + 12px * var(--qt-touch-target-scale, 1));
+    padding: calc(6px + 4px * var(--qt-touch-target-scale, 1)) 12px;
     font-size: 15px;
   }
 
@@ -1260,7 +1260,7 @@
   .qt-saved-pick {
     flex: 1 0 100%;
     min-width: 0;
-    padding: 6px 2px;
+    padding: calc(4px + 2px * var(--qt-touch-target-scale, 1)) 2px;
   }
 
   .qt-saved-default,
@@ -1270,7 +1270,7 @@
   }
 
   .qt-modal-footer .qt-btn {
-    min-width: 96px;
+    min-width: calc(var(--_qt-target-width, 30px) + (96px - var(--_qt-target-width, 30px)) * var(--qt-touch-target-scale, 1));
     justify-content: center;
   }
 }
@@ -1395,12 +1395,12 @@
   .qt-qb *, .qt-sheet * { box-sizing: border-box; }
   .qt-qb .qt-btn, .qt-qb .qt-add, .qt-qb .qt-link-btn,
   .qt-sheet button, .qt-sheet select, .qt-sheet input:not([type="checkbox"]),
-  .qt-selection-toolbar .qt-btn { min-height: 44px; touch-action: manipulation; }
-  .qt-qb .qt-btn, .qt-qb .qt-add, .qt-qb .qt-link-btn { padding: 6px 10px; min-width: 44px; }
+  .qt-selection-toolbar .qt-btn { min-height: calc(var(--_qt-target-height, 24px) + (44px - var(--_qt-target-height, 24px)) * var(--qt-touch-target-scale, 1)); touch-action: manipulation; }
+  .qt-qb .qt-btn, .qt-qb .qt-add, .qt-qb .qt-link-btn { padding: calc(0px + 6px * var(--qt-touch-target-scale, 1)) calc(var(--_qt-padding-x, 6px) + (10px - var(--_qt-padding-x, 6px)) * var(--qt-touch-target-scale, 1)); min-width: calc(var(--_qt-target-width, 0px) + (44px - var(--_qt-target-width, 0px)) * var(--qt-touch-target-scale, 1)); }
   .qt-qb-bar { padding: 4px 8px; }
   .qt-qb-state-bar { min-height: 40px; gap: 6px; }
-  .qt-qb-state-bar .qt-btn { min-height: 32px; min-width: 32px; padding: 0 6px; }
-  .qt-qb-state-bar .qt-qb-collapse-btn { min-width: 0; height: 44px; min-height: 44px; padding: 0 4px; }
+  .qt-qb-state-bar .qt-btn { min-height: calc(var(--_qt-target-height, 24px) + (32px - var(--_qt-target-height, 24px)) * var(--qt-touch-target-scale, 1)); min-width: calc(var(--_qt-target-width, 0px) + (32px - var(--_qt-target-width, 0px)) * var(--qt-touch-target-scale, 1)); padding: 0 6px; }
+  .qt-qb-state-bar .qt-qb-collapse-btn { min-width: 0; height: calc(28px + 16px * var(--qt-touch-target-scale, 1)); min-height: calc(28px + 16px * var(--qt-touch-target-scale, 1)); padding: 0 4px; }
   .qt-qb-editor-bar { padding: 8px; gap: 8px; }
   .qt-qb-editor-bar .qt-qb-body { gap: 0; }
   .qt-qb-editor-bar .qt-qb-row { gap: 6px; }
@@ -1413,20 +1413,20 @@
   .qt-qb-window-field { gap: 6px; }
   .qt-qb-window-field > .qt-qb-kw[data-mobile-label] { min-height: 32px; align-items: center; font-size: 0; }
   .qt-qb-window-field + .qt-qb-window-field { margin-left: 6px; padding-left: 12px; }
-  .qt-qb .qt-qb-num { min-height: 32px; padding: 0 8px; border-radius: 8px; }
+  .qt-qb .qt-qb-num { min-height: calc(var(--_qt-target-height, 24px) + (32px - var(--_qt-target-height, 24px)) * var(--qt-touch-target-scale, 1)); padding: 0 8px; border-radius: 8px; }
   .qt-qb-num-combo { display: flex; min-width: 0; }
   .qt-qb-num-combo > .qt-qb-num { flex: 1; min-width: 0; border-radius: 8px 0 0 8px; }
-  .qt-qb-num-step { min-width: 44px; padding: 0 10px; font-size: 13px; touch-action: manipulation; }
+  .qt-qb-num-step { min-width: calc(var(--_qt-target-width, 0px) + (44px - var(--_qt-target-width, 0px)) * var(--qt-touch-target-scale, 1)); padding: 0 10px; font-size: 13px; touch-action: manipulation; }
   .qt-qb-num-step:last-child { border-radius: 0 8px 8px 0; }
   .qt-qt-section-head { padding: 2px 8px; }
   .qt-metrics { padding: 8px; gap: 8px; }
-  .qt-th, .qt-cell { height: 44px; padding-top: 6px; padding-bottom: 6px; }
-  .qt-qb .qt-qb-saved-star, .qt-qb .qt-qb-saved-cancel { min-width: 44px; min-height: 44px; }
-  .qt-qb-state-bar .qt-qb-saved-star, .qt-qb-state-bar .qt-qb-saved-cancel { min-width: 32px; min-height: 32px; }
+  .qt-th, .qt-cell { height: calc(calc(1lh + 17px) + (44px - calc(1lh + 17px)) * var(--qt-touch-target-scale, 1)); padding-top: 6px; padding-bottom: 6px; }
+  .qt-qb .qt-qb-saved-star, .qt-qb .qt-qb-saved-cancel { min-width: calc(var(--_qt-target-width, 0px) + (44px - var(--_qt-target-width, 0px)) * var(--qt-touch-target-scale, 1)); min-height: calc(var(--_qt-target-height, 24px) + (44px - var(--_qt-target-height, 24px)) * var(--qt-touch-target-scale, 1)); }
+  .qt-qb-state-bar .qt-qb-saved-star, .qt-qb-state-bar .qt-qb-saved-cancel { min-width: calc(var(--_qt-target-width, 0px) + (32px - var(--_qt-target-width, 0px)) * var(--qt-touch-target-scale, 1)); min-height: calc(var(--_qt-target-height, 24px) + (32px - var(--_qt-target-height, 24px)) * var(--qt-touch-target-scale, 1)); }
   .qt-qb-collapse-caret, .qt-qt-section-toggle-caret { width: 14px; height: 14px; }
-  .qt-qb .qt-chip-x, .qt-qb .qt-chip-op-btn { min-height: 32px; min-width: 32px; padding-top: 0; padding-bottom: 0; }
-  .qt-qb .qt-chip-op, .qt-qb .qt-chip-val { min-height: 32px; font-size: 16px; max-width: 100%; }
-  .qt-qb-editor-bar .qt-btn, .qt-qb-editor-bar .qt-add, .qt-qb-editor-bar .qt-link-btn { min-height: 32px; padding: 0 8px; }
+  .qt-qb .qt-chip-x, .qt-qb .qt-chip-op-btn { min-height: calc(20px + 12px * var(--qt-touch-target-scale, 1)); min-width: calc(var(--_qt-target-width, 0px) + (32px - var(--_qt-target-width, 0px)) * var(--qt-touch-target-scale, 1)); padding-top: 0; padding-bottom: 0; }
+  .qt-qb .qt-chip-op, .qt-qb .qt-chip-val { min-height: calc(20px + 12px * var(--qt-touch-target-scale, 1)); font-size: 16px; max-width: 100%; }
+  .qt-qb-editor-bar .qt-btn, .qt-qb-editor-bar .qt-add, .qt-qb-editor-bar .qt-link-btn { min-height: calc(var(--_qt-target-height, 24px) + (32px - var(--_qt-target-height, 24px)) * var(--qt-touch-target-scale, 1)); padding: 0 calc(var(--_qt-padding-x, 6px) + (8px - var(--_qt-padding-x, 6px)) * var(--qt-touch-target-scale, 1)); }
   .qt-qb-editor-bar .qt-qb-row:not(.qt-qb-pagination) > .qt-qb-kw[data-mobile-label] { flex: 1 0 auto; align-self: center; width: auto; font-size: 0; }
   .qt-qb-kw[data-mobile-label]::after { content: attr(data-mobile-label); font-size: 14px; font-weight: 650; letter-spacing: 0; text-transform: none; color: var(--qt-text); }
   .qt-sheet .qt-reorder-handle { touch-action: none; }
@@ -1435,9 +1435,9 @@
   .qt-chip--sort > .qt-chip-field { flex: 1; }
   .qt-chip--sort > .qt-chip-x { margin-left: auto; }
   .qt-where-term-wrap { flex: 1 0 100%; max-width: 100%; }
-  .qt-mobile-clause { display: flex; align-items: stretch; flex: 1 0 100%; width: 100%; max-width: 100%; min-width: 0; min-height: 32px; border-radius: 8px; background: var(--qt-bg, #fff); box-shadow: inset 0 0 0 1px var(--qt-border); overflow: hidden; }
+  .qt-mobile-clause { display: flex; align-items: stretch; flex: 1 0 100%; width: 100%; max-width: 100%; min-width: 0; min-height: calc(24px + 8px * var(--qt-touch-target-scale, 1)); border-radius: 8px; background: var(--qt-bg, #fff); box-shadow: inset 0 0 0 1px var(--qt-border); overflow: hidden; }
   .qt-mobile-clause:focus-within { outline: 2px solid var(--qt-accent); outline-offset: 2px; }
-  .qt-mobile-filter { display: flex; align-items: center; justify-content: space-between; flex: 1; gap: 6px; min-width: 0; min-height: 32px; padding: 0 8px; border: 0; border-radius: 0; background: transparent; color: var(--qt-text); font: inherit; text-align: left; cursor: pointer; touch-action: manipulation; }
+  .qt-mobile-filter { display: flex; align-items: center; justify-content: space-between; flex: 1; gap: 6px; min-width: 0; min-height: calc(24px + 8px * var(--qt-touch-target-scale, 1)); padding: 0 8px; border: 0; border-radius: 0; background: transparent; color: var(--qt-text); font: inherit; text-align: left; cursor: pointer; touch-action: manipulation; }
   .qt-mobile-filter:hover:not(:disabled) { background: var(--qt-accent-bg); }
   .qt-mobile-clause button:disabled { cursor: default; opacity: 0.5; }
   .qt-mobile-filter > span:first-child { flex: 1; min-width: 0; }
@@ -1451,16 +1451,16 @@
   .qt-qb-section-header > .qt-add::after { content: "Add"; font-size: 12px; margin-left: 4px; }
   .qt-qb-section-header > .qt-btn, .qt-qb-section-header > .qt-add, .qt-qb-section-header > .qt-link-btn { padding: 0 6px; min-width: 0; }
   .qt-qb-section-header > .qt-add, .qt-qb .qt-split-btn > .qt-add:first-child { padding-right: 8px; }
-  .qt-split-btn { height: 32px; }
-  .qt-qb .qt-split-btn > .qt-split-btn-caret { width: 28px; }
+  .qt-split-btn { height: calc(24px + 8px * var(--qt-touch-target-scale, 1)); }
+  .qt-qb .qt-split-btn > .qt-split-btn-caret { width: calc(24px + 4px * var(--qt-touch-target-scale, 1)); }
   .qt-qb-row--filters > .qt-qb-hint, .qt-qb-row--sort > .qt-qb-hint, .qt-qb-row--metrics > .qt-qb-hint { flex-basis: 100%; }
   .qt-query-reorder-list { display: flex; flex-direction: column; gap: 4px; flex: 1 0 100%; width: 100%; max-width: 100%; min-width: 0; padding: 0; overflow: visible; }
-  .qt-query-reorder-list > .qt-reorder-item { min-height: 32px; max-width: 100%; min-width: 0; padding: 0; gap: 0; border: 0; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--qt-border); }
+  .qt-query-reorder-list > .qt-reorder-item { min-height: calc(24px + 8px * var(--qt-touch-target-scale, 1)); max-width: 100%; min-width: 0; padding: 0; gap: 0; border: 0; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--qt-border); }
   .qt-query-reorder-list > .qt-reorder-item { overflow: hidden; }
   .qt-query-reorder-list > .qt-reorder-item:hover:not(:has(:disabled)) { background: var(--qt-accent-bg); }
   .qt-query-reorder-list .qt-mobile-filter:hover:not(:disabled) { background: transparent; }
   .qt-query-reorder-list > .qt-reorder-item:focus-within { outline: 2px solid var(--qt-accent); outline-offset: 2px; }
-  .qt-query-reorder-list .qt-reorder-handle { flex-shrink: 0; min-width: 24px; min-height: 32px; padding: 0; font-size: 20px; }
+  .qt-query-reorder-list .qt-reorder-handle { flex-shrink: 0; min-width: 24px; min-height: calc(20px + 12px * var(--qt-touch-target-scale, 1)); padding: 0; font-size: 20px; }
   .qt-query-reorder-list .qt-reorder-handle > .qt-icon { width: 12px; }
   .qt-query-reorder-list .qt-mobile-filter { padding-left: 4px; }
   .qt-query-reorder-list .qt-mobile-clause { flex: 1; box-shadow: none; border-radius: 0; background: transparent; }
@@ -1476,35 +1476,35 @@
   .qt-overlay-header .qt-btn { font-size: 15px; border: 0; background: transparent; }
   .qt-sheet .qt-overlay-body { padding: 10px max(12px, env(safe-area-inset-right)) 12px max(12px, env(safe-area-inset-left)); }
   .qt-sheet .qt-sort-extract-footer { padding: 8px 12px; }
-  .qt-sheet .qt-sort-extract-footer > button { min-height: 32px; padding: 0 8px; }
+  .qt-sheet .qt-sort-extract-footer > button { min-height: calc(24px + 8px * var(--qt-touch-target-scale, 1)); padding: 0 8px; }
   .qt-sheet .qt-reorder-hint { padding: 6px 12px; font-size: 13px; }
   .qt-sheet .qt-reorder-list { padding: 0 12px 8px; }
   .qt-sheet .qt-reorder-item { min-height: 32px; padding: 0; gap: 4px; }
   .qt-sheet .qt-reorder-handle { min-width: 32px; min-height: 32px; padding: 0; font-size: 20px; }
   .qt-sheet .qt-picker { display: flex; flex-direction: column; padding: 10px 12px; flex: 0 1 auto; min-height: 0; }
-  .qt-sheet .qt-picker-input { flex-shrink: 0; min-height: 44px; padding: 6px 10px; border-radius: 10px; }
+  .qt-sheet .qt-picker-input { flex-shrink: 0; min-height: calc(var(--_qt-target-height, 24px) + (44px - var(--_qt-target-height, 24px)) * var(--qt-touch-target-scale, 1)); padding: 6px 10px; border-radius: 10px; }
   .qt-sheet .qt-picker-list { position: static; width: 100%; max-width: none; max-height: none; min-height: 0; margin-top: 6px; border: 0; box-shadow: none; overscroll-behavior: contain; }
-  .qt-sheet .qt-picker-item { padding: 6px 4px; min-height: 44px; border-bottom: 1px solid var(--qt-border-subtle); }
+  .qt-sheet .qt-picker-item { padding: 6px 4px; min-height: calc(var(--_qt-target-height, 24px) + (44px - var(--_qt-target-height, 24px)) * var(--qt-touch-target-scale, 1)); border-bottom: 1px solid var(--qt-border-subtle); }
   .qt-sheet .qt-picker-row { align-items: center; }
   .qt-sheet .qt-picker-group-label { padding: 4px; }
   .qt-sheet .qt-picker-label, .qt-sheet .qt-picker-name { overflow-wrap: anywhere; min-width: 0; }
   .qt-sheet .qt-picker-name { font-size: 12px; }
   .qt-sheet .qt-cell-menu, .qt-sheet .qt-op-pop, .qt-sheet .qt-auto-refresh-popover, .qt-sheet .qt-value-picker-pop { position: static !important; inset: auto !important; width: 100% !important; min-width: 0; max-height: none; min-height: 0; overflow-y: auto; border: 0; border-radius: 0; box-shadow: none; padding: 8px 12px; overscroll-behavior: contain; }
   .qt-sheet .qt-op-pop { display: grid; font-size: 15px; }
-  .qt-sheet .qt-op-cell { padding: 6px 8px; min-height: 44px; font-size: 15px; }
+  .qt-sheet .qt-op-cell { padding: 6px 8px; min-height: calc(32px + 12px * var(--qt-touch-target-scale, 1)); font-size: 15px; }
   .qt-sheet .qt-auto-refresh-popover { display: flex; gap: 8px; }
   .qt-sheet .qt-auto-refresh-field { flex-wrap: wrap; gap: 6px; }
   .qt-sheet .qt-auto-refresh-select { font-size: 16px; width: auto; flex: 1; }
   .qt-sheet .qt-value-picker-pop { gap: 6px; }
   .qt-sheet .qt-value-picker-pop > input { font-size: 16px; padding: 6px 10px; flex-shrink: 0; }
-  .qt-sheet .qt-value-picker-list button { min-height: 44px; font-size: 16px; padding: 6px 8px; }
+  .qt-sheet .qt-value-picker-list button { min-height: calc(var(--_qt-target-height, 24px) + (44px - var(--_qt-target-height, 24px)) * var(--qt-touch-target-scale, 1)); font-size: 16px; padding: 6px 8px; }
   .qt-filter-editor .qt-pred { display: flex; flex-wrap: wrap; gap: 6px; padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid var(--qt-border-subtle); }
   .qt-filter-editor .qt-pred > .qt-chip-field { flex: 1 0 100%; font-size: 15px; }
   .qt-filter-editor > p { margin: 6px 0; }
   .qt-filter-editor .qt-autocomplete, .qt-filter-editor .qt-value-picker { flex: 1; min-width: 0; }
-  .qt-filter-editor .qt-chip-val { width: 100% !important; min-width: 0; min-height: 44px; font-size: 16px; padding: 6px 8px; }
-  .qt-filter-editor .qt-chip-op-btn { min-height: 44px; font-size: 16px; padding: 6px 8px; }
-  .qt-filter-editor .qt-chip-x { min-width: 44px; min-height: 44px; }
+  .qt-filter-editor .qt-chip-val { width: 100% !important; min-width: 0; min-height: calc(20px + 24px * var(--qt-touch-target-scale, 1)); font-size: 16px; padding: calc(1px + 5px * var(--qt-touch-target-scale, 1)) 8px; }
+  .qt-filter-editor .qt-chip-op-btn { min-height: calc(20px + 24px * var(--qt-touch-target-scale, 1)); font-size: 16px; padding: calc(0px + 6px * var(--qt-touch-target-scale, 1)) 8px; }
+  .qt-filter-editor .qt-chip-x { min-width: calc(var(--_qt-target-width, 0px) + (44px - var(--_qt-target-width, 0px)) * var(--qt-touch-target-scale, 1)); min-height: calc(20px + 24px * var(--qt-touch-target-scale, 1)); }
   .qt-filter-combine { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
   .qt-filter-combine select { width: 100%; font-size: 16px; }
   .qt-mobile-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; min-width: 0; }
@@ -1512,24 +1512,24 @@
   .qt-mobile-form-field > span:first-child { color: var(--qt-muted); font-size: 12px; font-weight: 600; }
   .qt-mobile-form-field--wide, .qt-mobile-form-actions, .qt-mobile-form-hint, .qt-mobile-form > .qt-mobile-form-remove { grid-column: 1 / -1; }
   .qt-mobile-form select, .qt-mobile-form input, .qt-mobile-form .qt-value-picker, .qt-mobile-form .qt-autocomplete, .qt-mobile-form .qt-op-wrap { width: 100% !important; min-width: 0; max-width: 100%; box-sizing: border-box; }
-  .qt-mobile-form select, .qt-mobile-form input, .qt-mobile-form .qt-chip-val, .qt-mobile-form .qt-chip-op-btn { min-height: 36px; padding: 0 8px; font-size: 16px; border: 1px solid var(--qt-border); border-radius: 8px; background: var(--qt-bg, #fff); color: var(--qt-text); }
+  .qt-mobile-form select, .qt-mobile-form input, .qt-mobile-form .qt-chip-val, .qt-mobile-form .qt-chip-op-btn { min-height: calc(var(--_qt-target-height, 24px) + (36px - var(--_qt-target-height, 24px)) * var(--qt-touch-target-scale, 1)); padding: 0 8px; font-size: 16px; border: 1px solid var(--qt-border); border-radius: 8px; background: var(--qt-bg, #fff); color: var(--qt-text); }
   .qt-mobile-form .qt-chip-op-btn { width: 100%; height: 100%; white-space: normal; overflow-wrap: anywhere; text-align: left; }
   .qt-mobile-form .qt-op-wrap { display: flex; flex: 1; }
   .qt-mobile-form-inline, .qt-mobile-form-actions { display: flex; align-items: center; gap: 6px; min-width: 0; }
   .qt-mobile-form-inline input { flex: 1; }
-  .qt-mobile-form-inline .qt-btn { flex-shrink: 0; min-width: 44px; min-height: 44px; }
+  .qt-mobile-form-inline .qt-btn { flex-shrink: 0; min-width: calc(var(--_qt-target-width, 0px) + (44px - var(--_qt-target-width, 0px)) * var(--qt-touch-target-scale, 1)); min-height: calc(var(--_qt-target-height, 24px) + (44px - var(--_qt-target-height, 24px)) * var(--qt-touch-target-scale, 1)); }
   .qt-mobile-form-actions { justify-content: space-between; border-top: 1px solid var(--qt-border-subtle); }
-  .qt-mobile-form-remove { min-height: 32px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: var(--qt-fail-fg); font: inherit; font-size: 14px; text-align: left; touch-action: manipulation; }
-  .qt-sheet .qt-mobile-form-remove { min-height: 32px; }
+  .qt-mobile-form-remove { min-height: calc(24px + 8px * var(--qt-touch-target-scale, 1)); padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: var(--qt-fail-fg); font: inherit; font-size: 14px; text-align: left; touch-action: manipulation; }
+  .qt-sheet .qt-mobile-form-remove { min-height: calc(24px + 8px * var(--qt-touch-target-scale, 1)); }
   .qt-mobile-form > .qt-mobile-form-remove { border-top: 1px solid var(--qt-border-subtle); border-radius: 0; }
   .qt-mobile-form-hint { margin: 0; color: var(--qt-muted); font-size: 12px; line-height: 1.4; }
   .qt-mobile-form .qt-chip-agg-by { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
-  .qt-mobile-form .qt-chip-agg-group { display: inline-flex; align-items: center; min-height: 32px; max-width: 100%; padding-left: 8px; border: 1px solid var(--qt-border); border-radius: 8px; font-size: 14px; }
+  .qt-mobile-form .qt-chip-agg-group { display: inline-flex; align-items: center; min-height: calc(20px + 12px * var(--qt-touch-target-scale, 1)); max-width: 100%; padding-left: 8px; border: 1px solid var(--qt-border); border-radius: 8px; font-size: 14px; }
   .qt-mobile-form .qt-chip-agg-group-label { min-width: 0; overflow-wrap: anywhere; }
-  .qt-sheet .qt-mobile-form .qt-chip-x, .qt-sheet .qt-mobile-form .qt-chip-agg-add { flex-shrink: 0; min-width: 32px; min-height: 32px; padding-top: 0; padding-bottom: 0; }
+  .qt-sheet .qt-mobile-form .qt-chip-x, .qt-sheet .qt-mobile-form .qt-chip-agg-add { flex-shrink: 0; min-width: calc(var(--_qt-target-width, 0px) + (32px - var(--_qt-target-width, 0px)) * var(--qt-touch-target-scale, 1)); min-height: calc(20px + 12px * var(--qt-touch-target-scale, 1)); padding-top: 0; padding-bottom: 0; }
   .qt-mobile-predicate + p { padding-top: 6px; border-top: 1px solid var(--qt-border-subtle); font-size: 12px; font-weight: 600; }
   .qt-filter-combine { margin-top: 8px; font-size: 12px; }
-  .qt-filter-combine select { min-width: 0; min-height: 44px; padding: 6px 8px; border: 1px solid var(--qt-border); border-radius: 8px; background: var(--qt-bg, #fff); color: var(--qt-text); }
+  .qt-filter-combine select { min-width: 0; min-height: calc(24px + 20px * var(--qt-touch-target-scale, 1)); padding: calc(2px + 4px * var(--qt-touch-target-scale, 1)) 8px; border: 1px solid var(--qt-border); border-radius: 8px; background: var(--qt-bg, #fff); color: var(--qt-text); }
   .qt-metric--gb0 { flex: 1 1 calc(50% - 4px); padding: 8px; }
   .qt-metric--gb1, .qt-metric--gb2, .qt-metric--gb3 { flex: 1 0 100%; padding: 8px; }
   .qt-metric-head { min-width: 0; overflow-wrap: anywhere; }
@@ -1545,8 +1545,8 @@
   .qt-sheet .qt-editor-columns { margin: 0 0 4px; padding: 0; overflow: visible; }
   .qt-sheet .qt-editor-columns li { min-height: 32px; margin-bottom: 2px; padding: 0; gap: 4px; }
   .qt-sheet .qt-editor-columns li > span[aria-hidden] { display: none; }
-  .qt-sheet .qt-icon-btn, .qt-sheet .qt-column-name { min-width: 32px; min-height: 32px; padding-top: 0; padding-bottom: 0; }
-  .qt-sheet .qt-input, .qt-sheet textarea, .qt-sheet .qt-preview-controls select, .qt-sheet .qt-preview-controls input { max-width: 100%; font-size: 16px; padding: 6px 8px; }
+  .qt-sheet .qt-icon-btn, .qt-sheet .qt-column-name { min-width: calc(var(--_qt-target-width, 0px) + (32px - var(--_qt-target-width, 0px)) * var(--qt-touch-target-scale, 1)); min-height: calc(var(--_qt-target-height, 24px) + (32px - var(--_qt-target-height, 24px)) * var(--qt-touch-target-scale, 1)); padding-top: 0; padding-bottom: 0; }
+  .qt-sheet .qt-input, .qt-sheet textarea, .qt-sheet .qt-preview-controls select, .qt-sheet .qt-preview-controls input { max-width: 100%; font-size: 16px; padding: calc(min(6px, var(--_qt-padding-y, 1px)) + (6px - min(6px, var(--_qt-padding-y, 1px))) * var(--qt-touch-target-scale, 1)) 8px; }
   .qt-sheet .qt-catalogue-list { max-height: none; }
   .qt-sheet .qt-select-editor-footer { flex-wrap: wrap; padding: 8px 12px max(8px, env(safe-area-inset-bottom)); gap: 6px; background: var(--qt-bg, #fff); }
   .qt-sheet .qt-select-editor-footer > span { flex: 1 0 100%; }
@@ -1585,6 +1585,6 @@
   .qt-sheet .qt-popover { position: static; width: 100%; max-height: none; min-height: 0; border: 0; border-radius: 0; box-shadow: none; padding: 8px 12px; }
   .qt-sheet .qt-field-picker-popover .qt-picker { padding: 0; }
   .qt-set-editor.qt-sheet { padding: 12px 12px max(12px, env(safe-area-inset-bottom)); }
-  .qt-set-editor.qt-sheet select, .qt-set-editor.qt-sheet > input { font-size: 16px; min-height: 44px; }
-  .qt-set-editor.qt-sheet .qt-set-option { min-height: 44px; box-sizing: border-box; }
+  .qt-set-editor.qt-sheet select, .qt-set-editor.qt-sheet > input { font-size: 16px; min-height: calc(32px + 12px * var(--qt-touch-target-scale, 1)); }
+  .qt-set-editor.qt-sheet .qt-set-option { min-height: calc(calc(1lh + 12px) + (44px - calc(1lh + 12px)) * var(--qt-touch-target-scale, 1)); box-sizing: border-box; }
 }

@@ -56,15 +56,15 @@
   .qt-json-inspector.qt-modal.qt-sheet { width: 100%; min-width: 0; max-width: 100%; max-height: 100%; resize: none; padding-bottom: env(safe-area-inset-bottom); }
   .qt-json-toolbar { padding: 6px 8px; gap: 4px; }
   .qt-json-title { display: none; }
-  .qt-json-action { width: 28px; height: 32px; }
-  .qt-json-search-mode { height: 32px; width: 68px; }
-  .qt-json-search.qt-input { height: 32px; font-size: 16px; }
+  .qt-json-action { width: 28px; height: calc(28px + 4px * var(--qt-touch-target-scale, 1)); }
+  .qt-json-search-mode { height: calc(28px + 4px * var(--qt-touch-target-scale, 1)); width: 68px; }
+  .qt-json-search.qt-input { height: calc(28px + 4px * var(--qt-touch-target-scale, 1)); font-size: 16px; }
   .qt-json-content { padding: 8px; }
   .qt-json-code { line-height: 28px; }
-  .qt-json-toggle, .qt-json-toggle-space, .qt-json-copy { height: 28px; }
+  .qt-json-toggle, .qt-json-toggle-space, .qt-json-copy { height: calc(24px + 4px * var(--qt-touch-target-scale, 1)); }
   .qt-json-copy { opacity: 1; }
 }
 @media (pointer: coarse) {
-  .qt-json-toggle, .qt-json-copy { min-width: 28px; min-height: 32px; }
+  .qt-json-toggle, .qt-json-copy { min-width: calc(var(--_qt-target-width, 0px) + (28px - var(--_qt-target-width, 0px)) * var(--qt-touch-target-scale, 1)); min-height: calc(24px + 8px * var(--qt-touch-target-scale, 1)); }
   .qt-json-copy { opacity: 1; }
 }

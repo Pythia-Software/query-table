@@ -379,6 +379,54 @@ status indicators an accessible label on their wrapper.
 
 ## Mobile behavior
 
+### Responsive target sizing
+
+Set the public, unitless `--qt-touch-target-scale` CSS custom property to
+configure the **added** touch-target size in the bundled theme:
+
+| Value | Target sizing |
+| --- | --- |
+| `1` (default, including when unset) | Existing responsive enlargement |
+| `0.5` | Half the added size |
+| `0` | Desktop target sizing with the responsive layout |
+
+```css
+/* Scope to a host wrapper containing the builder, table and metrics. */
+.pharos-query-table {
+  --qt-touch-target-scale: 0.5;
+}
+```
+
+For each enlarged dimension, the theme uses
+`desktop + (responsive - desktop) * scale`. A desktop 24px button that normally
+grows to 44px therefore becomes 34px at `0.5`. Each control uses its own desktop
+baseline, including its line box, padding and borders; collapse controls, chips,
+picker rows and editor buttons have different baselines. Narrow and coarse
+pointer rules use the final responsive size once, so matching both does not
+compound the enlargement. Use a number from `0` to `1`, without a unit.
+
+The setting covers query actions/chips, table cells/actions, picker and menu
+rows, selection actions, saved-query controls, JSON controls, and select,
+property and metric editor controls. Content remains a lower bound: wrapped
+labels, icons, native controls and the retained mobile input fonts can require
+more room than the scaled minimum. Existing responsive size reductions stay
+compact. Layout widths, wrapping, sheets, scrolling, focus behavior, drag/touch
+actions, breakpoints and input font sizes are independent of the factor.
+
+Use `:root` for an application-wide setting, or a wrapper for independent
+instances. Built-in portaled menus, pickers, dialogs and sheets inherit the
+setting from their trigger/overlay anchor through the same theme propagation
+as the palette, including live ancestor `class`, `style` and `data-theme`
+changes. Keep standalone overlays beneath that wrapper in the React tree (and
+their anchor within it). Host-owned portals and controls with custom styling
+must propagate/apply their own sizing. `QueryBuilder`'s `compact` prop controls
+clause presentation separately.
+
+Run `npm run test:touch-targets` with `npm run demo` running to check relative
+sizing, scoped portal updates and interactions in Chromium and WebKit.
+
+### Responsive layout and interactions
+
 The bundled theme keeps the table as a horizontally scrollable grid on narrow
 screens so columns remain comparable. Narrow screens (up to 760px) and short,
 touch-based landscape viewports use a mobile interaction model:

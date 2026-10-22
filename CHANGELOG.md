@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Added
+
+- Public `--qt-touch-target-scale` theme setting for responsive enlargement.
+  The default `1` keeps existing sizing; `0.5` halves the added size and `0`
+  retains desktop target sizes with responsive layouts and content-safe minima.
+  Covers query/table actions, pickers, selection, saved queries and editor
+  surfaces, including scoped settings and live updates through built-in portals.
+- Chromium/WebKit browser coverage for relative sizing on phones, coarse-pointer
+  tablets and landscape viewports, plus portal, pointer and focus behavior.
+
 ## 0.9.5 — 2026-10-21
 
 ### Fixed

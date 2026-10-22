@@ -167,12 +167,12 @@
   .qt-property-history { margin-inline-start: auto; }
   .qt-property-controls .qt-btn,
   .qt-property-controls .qt-add,
-  .qt-property-controls .qt-link-btn { min-height: 36px; }
-  .qt-property-icon-button { min-width: 32px; }
+  .qt-property-controls .qt-link-btn { min-height: calc(24px + 12px * var(--qt-touch-target-scale, 1)); }
+  .qt-property-icon-button { min-width: calc(26px + 6px * var(--qt-touch-target-scale, 1)); }
   .qt-property-controls input,
-  .qt-property-controls select { font-size: 16px; height: 36px; }
+  .qt-property-controls select { font-size: 16px; height: calc(28px + 8px * var(--qt-touch-target-scale, 1)); }
   .qt-property-controls .qt-property-view-picker select { max-width: 100%; font-size: 13px; }
-  .qt-property-controls .qt-property-save-star { width: 32px; }
+  .qt-property-controls .qt-property-save-star { width: calc(24px + 8px * var(--qt-touch-target-scale, 1)); }
   .qt-property-columns,
   .qt-property { grid-template-columns: minmax(0, var(--qt-property-label-width, 35%)) minmax(0, 1fr); }
   .qt-property-columns > span,
@@ -234,18 +234,18 @@
 @media (max-width: 760px), (pointer: coarse) and (max-height: 500px) {
   .qt-property-editor-context { padding: 8px 16px; gap: 4px 12px; }
   .qt-property-editor-tabs { display: flex; flex-shrink: 0; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--qt-border); }
-  .qt-property-editor-tabs > button { flex: 1; min-height: 36px; }
+  .qt-property-editor-tabs > button { flex: 1; min-height: calc(24px + 12px * var(--qt-touch-target-scale, 1)); }
   .qt-property-editor-tabs [aria-selected="true"] { color: var(--qt-accent); background: var(--qt-accent-bg); }
   .qt-property-workspace { display: flex; overflow: hidden; }
   .qt-property-workspace > :is(aside, section) { flex: 1; }
   .qt-property-editor-library > .qt-editor-pane-title { padding: 12px; }
   .qt-property-editor-scroll { padding: 0 12px 12px; }
-  .qt-property-editor-list .qt-reorder-item { min-height: 44px; }
+  .qt-property-editor-list .qt-reorder-item { min-height: calc(40px + 4px * var(--qt-touch-target-scale, 1)); }
   .qt-property-editor-footer { padding: 12px; }
   .qt-property-editor-footer > span { flex-basis: 100%; }
-  .qt-property-editor-footer > button { flex: 1; min-height: 40px; justify-content: center; }
-  .qt-property-editor .qt-property-icon-button, .qt-property-editor .qt-reorder-handle { min-height: 36px; min-width: 28px; }
-  .qt-property-editor :is(input, select) { font-size: 16px; min-height: 40px; }
+  .qt-property-editor-footer > button { flex: 1; min-height: calc(24px + 16px * var(--qt-touch-target-scale, 1)); justify-content: center; }
+  .qt-property-editor .qt-property-icon-button, .qt-property-editor .qt-reorder-handle { min-height: calc(28px + 8px * var(--qt-touch-target-scale, 1)); min-width: calc(24px + 4px * var(--qt-touch-target-scale, 1)); }
+  .qt-property-editor :is(input, select) { font-size: 16px; min-height: calc(var(--_qt-target-height, 24px) + (40px - var(--_qt-target-height, 24px)) * var(--qt-touch-target-scale, 1)); }
 }
 .qt-item-detail-actions { display: flex; align-items: center; gap: 2px; }
 .qt-item-detail-button { width: 28px; height: 28px; padding: 0; justify-content: center; border-radius: 4px; }
@@ -286,6 +286,6 @@
   .qt-item-detail-modal.qt-modal.qt-sheet { max-height: 100%; padding-bottom: env(safe-area-inset-bottom); }
   .qt-item-detail-modal .qt-property-toolbar-actions { gap: 4px; }
   .qt-item-detail-modal .qt-property-history { gap: 0; }
-  .qt-item-detail-button { min-height: 36px; }
+  .qt-item-detail-button { min-height: calc(28px + 8px * var(--qt-touch-target-scale, 1)); }
   .qt-item-expanded { padding: 8px; }
 }

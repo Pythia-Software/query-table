@@ -274,7 +274,7 @@
   }
   .qt-qb--compact .qt-qb-pagination .qt-qb-num {
     width: 54px;
-    min-height: 32px;
+    min-height: calc(var(--_qt-target-height, 24px) + (32px - var(--_qt-target-height, 24px)) * var(--qt-touch-target-scale, 1));
   }
   .qt-qb--compact .qt-qb-body > .qt-qb-row--unused {
     align-self: center;

@@ -99,17 +99,17 @@
 }
 @media (max-width: 760px), (pointer: coarse) and (max-height: 500px) {
   .qt-group-op-control {
-    height: 28px;
+    height: calc(20px + 8px * var(--qt-touch-target-scale, 1));
   }
   .qt-qb--groupable .qt-group-clauses .qt-chip {
-    height: 32px;
-    min-height: 32px;
+    height: calc(24px + 8px * var(--qt-touch-target-scale, 1));
+    min-height: calc(24px + 8px * var(--qt-touch-target-scale, 1));
   }
   .qt-qb--groupable .qt-query-reorder-list--columns {
     gap: 6px;
   }
   .qt-group-views .qt-btn {
-    min-height: 36px;
+    min-height: calc(24px + 12px * var(--qt-touch-target-scale, 1));
   }
 }
 
@@ -650,8 +650,8 @@
   }
   .qt-sheet .qt-representative-editor > .qt-picker-heading > button {
     display: inline-flex;
-    min-height: 32px;
-    min-width: 32px;
+    min-height: calc(24px + 8px * var(--qt-touch-target-scale, 1));
+    min-width: calc(var(--_qt-target-width, 0px) + (32px - var(--_qt-target-width, 0px)) * var(--qt-touch-target-scale, 1));
   }
   .qt-sheet .qt-representative-editor {
     padding: 0 12px 12px;
@@ -660,10 +660,10 @@
   .qt-representative-order .qt-chip-x,
   .qt-representative-order .qt-reorder-handle,
   .qt-representative-field {
-    min-height: 32px;
+    min-height: calc(var(--_qt-target-height, 24px) + (32px - var(--_qt-target-height, 24px)) * var(--qt-touch-target-scale, 1));
   }
   .qt-representative-order .qt-chip-x {
-    min-width: 28px;
+    min-width: calc(var(--_qt-target-width, 0px) + (28px - var(--_qt-target-width, 0px)) * var(--qt-touch-target-scale, 1));
   }
   .qt-representative-order .qt-chip-op-btn {
     min-width: 0;
@@ -671,7 +671,7 @@
     font-size: 12px;
   }
   .qt-representative-order .qt-reorder-handle {
-    min-width: 24px;
+    min-width: calc(16px + 8px * var(--qt-touch-target-scale, 1));
   }
   .qt-representative-field {
     font-size: 13px;
@@ -682,7 +682,7 @@
   .qt-representative-footer .qt-btn,
   .qt-representative-footer > .qt-link-btn,
   .qt-representative-body > .qt-add {
-    min-height: 32px;
+    min-height: calc(24px + 8px * var(--qt-touch-target-scale, 1));
   }
 }
 .qt-group-clauses .qt-qb-row--unused {
