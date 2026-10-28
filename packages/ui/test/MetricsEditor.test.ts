@@ -886,3 +886,134 @@ it("edits a metric's own filter and minimum rows per group without touching the 
     host.remove();
   }
 });
+
+it("edits windows, shares and whole intervals, turning on the empty dates a window needs", async () => {
+  const host = document.createElement("div"); document.body.append(host);
+  const root = createRoot(host), setQuery = vi.fn();
+  const fields: FieldDef<unknown>[] = [
+    { name: "at", label: "At", type: "datetime", source: { kind: "backend" }, aggregate: { groupable: true } },
+    { name: "model", label: "Model", type: "text", source: { kind: "backend" }, aggregate: { groupable: true } },
+    { name: "tokens", label: "Tokens", type: "number", source: { kind: "backend" } },
+  ];
+  const clause: AggregationClause = {
+    id: "m", op: "sum", field: "tokens", groupBy: ["at", "model"], display: { kind: "line" },
+    dateGrouping: { field: "at", interval: "day", includeEmpty: false, range: "observed" },
+  };
+  const api = { aggregations: { clauses: [clause] }, setQuery, rows: [], total: 0, query: { where: [] } } as unknown as QueryTableApi<unknown>;
+  const choose = (label: string, value: string) => act(() => {
+    const select = host.querySelector<HTMLSelectElement>(`[aria-label="${label}"]`)!;
+    select.value = value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  const saved = () => {
+    act(() => [...host.querySelectorAll("button")].find((b) => b.textContent === "Apply metrics")!.click());
+    return setQuery.mock.calls.at(-1)![0]({ where: [] }).aggregations[0] as AggregationClause;
+  };
+  try {
+    await act(async () => root.render(createElement(MetricsEditor, { api, fields, onClose: vi.fn() })));
+    expect(host.textContent).toContain("Values as computed");
+    choose("Window", "trailing");
+    editInput(host.querySelector<HTMLInputElement>('[aria-label="Window length"]')!, "3");
+    choose("Combine window", "mean");
+    act(() => host.querySelector<HTMLInputElement>('[aria-label="Show partial windows"]')!.click());
+    act(() => host.querySelector<HTMLInputElement>('[aria-label="Whole intervals only"]')!.click());
+    choose("Show values as", "group0");
+    expect(host.textContent).toContain("Trailing 3 days · mean per day · share of each day");
+    // A running window cannot be partial; a share of all groups is not windowed.
+    choose("Window", "all");
+    expect(host.querySelector('[aria-label="Show partial windows"]')).toBeNull();
+    expect([...host.querySelector<HTMLSelectElement>('[aria-label="Show values as"]')!.options].map((o) => o.value)).toEqual(["values", "group0"]);
+    const next = saved();
+    expect(next.window).toEqual({ periods: "all", reduce: "mean" });
+    expect(next).toMatchObject({
+      window: { periods: "all", reduce: "mean" },
+      share: "group0",
+      dateGrouping: { includeEmpty: true, partialIntervals: "exclude" },
+      display: { kind: "line", format: { kind: "percent", decimals: 1 } },
+    });
+    // Leaving calendar grouping drops the window it needs.
+    choose("Date interval", "exact");
+    expect(host.querySelector('[aria-label="Window"]')).toBeNull();
+    expect(saved().window).toBeUndefined();
+  } finally { act(() => root.unmount()); host.remove(); }
+});
+
+it("clears a share the window cannot use and the percent format a share added", async () => {
+  const host = document.createElement("div"); document.body.append(host);
+  const root = createRoot(host), setQuery = vi.fn();
+  const fields: FieldDef<unknown>[] = [
+    { name: "at", label: "At", type: "datetime", source: { kind: "backend" }, aggregate: { groupable: true } },
+    { name: "model", label: "Model", type: "text", source: { kind: "backend" }, aggregate: { groupable: true } },
+    { name: "tokens", label: "Tokens", type: "number", source: { kind: "backend" } },
+  ];
+  const dated: AggregationClause = {
+    id: "m", op: "sum", field: "tokens", groupBy: ["at"], display: { kind: "line" },
+    dateGrouping: { field: "at", interval: "day", includeEmpty: true, range: "observed" },
+  };
+  const percent = { kind: "percent" as const, decimals: 2 };
+  const clauses = [dated, { ...dated, id: "kept", label: "Kept", display: { kind: "line" as const, format: percent } }];
+  const api = { aggregations: { clauses }, setQuery, rows: [], total: 0, query: { where: [] } } as unknown as QueryTableApi<unknown>;
+  const choose = (label: string, value: string) => act(() => {
+    const select = host.querySelector<HTMLSelectElement>(`[aria-label="${label}"]`)!;
+    select.value = value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  const saved = () => {
+    act(() => [...host.querySelectorAll("button")].find((b) => b.textContent === "Apply metrics")!.click());
+    return setQuery.mock.calls.at(-1)![0]({ where: [] }).aggregations as AggregationClause[];
+  };
+  try {
+    await act(async () => root.render(createElement(MetricsEditor, { api, fields, onClose: vi.fn() })));
+    choose("Show values as", "total");
+    expect(saved()[0]).toMatchObject({ share: "total", display: { format: { kind: "percent", decimals: 1 } } });
+    // A window cannot divide by the grand total, so choosing one drops it.
+    choose("Window", "trailing");
+    let [next] = saved();
+    expect(next!.window).toEqual({ periods: 7 });
+    expect(next!.share).toBeUndefined();
+    expect(next!.display).toEqual({ kind: "line" });
+    expect(host.querySelector<HTMLSelectElement>('[aria-label="Show values as"]')!.value).toBe("values");
+    // Back to values: a share's percent format goes, an author's format stays.
+    choose("Window", "none");
+    choose("Show values as", "total");
+    choose("Show values as", "values");
+    [next] = saved();
+    expect(next!.display).toEqual({ kind: "line" });
+    choose("Editing metric", "kept");
+    choose("Show values as", "total");
+    choose("Show values as", "values");
+    expect(saved()[1]!.display).toEqual({ kind: "line", format: percent });
+  } finally { act(() => root.unmount()); host.remove(); }
+});
+
+it("clears a window and share when the display changes to one that cannot use them", async () => {
+  const host = document.createElement("div"); document.body.append(host);
+  const root = createRoot(host), setQuery = vi.fn();
+  const fields: FieldDef<unknown>[] = [
+    { name: "at", label: "At", type: "datetime", source: { kind: "backend" }, aggregate: { groupable: true } },
+    { name: "model", label: "Model", type: "text", source: { kind: "backend" }, aggregate: { groupable: true } },
+    { name: "tokens", label: "Tokens", type: "number", source: { kind: "backend" } },
+  ];
+  const clause: AggregationClause = {
+    id: "m", op: "sum", field: "tokens", groupBy: ["at", "model"], display: { kind: "line" },
+    dateGrouping: { field: "at", interval: "day", includeEmpty: true, range: "observed" },
+  };
+  const api = { aggregations: { clauses: [clause] }, setQuery, rows: [], total: 0, query: { where: [] } } as unknown as QueryTableApi<unknown>;
+  const choose = (label: string, value: string) => act(() => {
+    const select = host.querySelector<HTMLSelectElement>(`[aria-label="${label}"]`)!;
+    select.value = value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  try {
+    await act(async () => root.render(createElement(MetricsEditor, { api, fields, onClose: vi.fn() })));
+    choose("Window", "trailing");
+    choose("Show values as", "group0");
+    choose("Metric display", "box");
+    expect(host.querySelector('[aria-label="Show values as"]')).toBeNull();
+    act(() => [...host.querySelectorAll("button")].find((b) => b.textContent === "Apply metrics")!.click());
+    const saved = setQuery.mock.calls.at(-1)![0]({ where: [] }).aggregations[0] as AggregationClause;
+    expect(saved.window).toBeUndefined();
+    expect(saved.share).toBeUndefined();
+    expect(saved.display).toEqual({ kind: "box" });
+  } finally { act(() => root.unmount()); host.remove(); }
+});

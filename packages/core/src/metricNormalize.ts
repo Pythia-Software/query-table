@@ -45,8 +45,22 @@ export function normalizeMetricOptions(
       scope: ["allMatching", "shownRows"],
       groupLimit: "integer",
       minCount: "positiveInteger",
+      share: ["total", "group0"],
     }),
   );
+  if (raw.window !== undefined) {
+    if (record(raw.window)) {
+      const w = copy(raw.window, {
+        reduce: ["total", "mean"],
+        partial: ["omit", "include"],
+      });
+      const periods = raw.window.periods;
+      if (periods === "all" || (Number.isSafeInteger(periods) && (periods as number) >= 0 && (periods as number) <= 1000000))
+        w.periods = periods;
+      else diagnostics.push("Invalid metric window.");
+      out.window = w;
+    } else diagnostics.push("Invalid metric window.");
+  }
   if (raw.dateGrouping !== undefined) {
     if (record(raw.dateGrouping)) {
       const d = copy(raw.dateGrouping, {
@@ -57,6 +71,7 @@ export function normalizeMetricOptions(
         range: ["query", "observed", "custom"],
         start: "string",
         end: "string",
+        partialIntervals: ["include", "exclude"],
       });
       if (
         typeof d.field !== "string" ||

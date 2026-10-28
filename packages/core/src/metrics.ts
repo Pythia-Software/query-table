@@ -32,6 +32,7 @@ import {
   type WhereTerm,
 } from "./query";
 import { opsForField } from "./ops";
+import { hasMetricSeries, planMetricSeries, validateMetricSeries } from "./metricSeries";
 import { applyQuery } from "./apply";
 import { prepareGrouping, withoutGrouping, type GroupedRow } from "./grouping";
 import { computedInputAllowed } from "./apply";
@@ -511,6 +512,7 @@ export function validateMetric(
     const compiled = metricPlans(c, schema, resolve);
     if (c.scope !== "shownRows" && compiled.some(hasRegex))
       throw new FormulaError("Regex is unavailable for all-matching metrics.");
+    validateMetricSeries(c, compiled[0]!);
     return [];
   } catch (e) {
     return [
@@ -600,6 +602,8 @@ export function metricComputationKey(
         groupLimit: c.groupLimit,
         where: c.where,
         minCount: c.minCount,
+        window: c.window,
+        share: c.share,
         distribution: distributionActive(c) ? c.distribution : undefined,
       }))
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
@@ -658,6 +662,8 @@ export function toMetricQuery<Row>(
       expressionY,
       dateGrouping,
       where,
+      window: _window,
+      share: _share,
       ...rest
     } = c;
     return {
@@ -690,6 +696,18 @@ export function toMetricQuery<Row>(
         from: 0,
         to: 1,
         message: "Metric filters must use server-filterable fields.",
+      });
+  // Servers never compute windows, shares or whole intervals; sending the
+  // clause unexpanded would silently return the plain metric.
+  for (const c of q.aggregations ?? [])
+    if (hasMetricSeries(c))
+      diagnostics.push({
+        metricId: c.id,
+        code: "unexpanded_series",
+        from: 0,
+        to: 1,
+        message:
+          "Windows, shares and whole intervals are computed from plain metrics; expand the query with planMetricSeries first.",
       });
   for (const c of q.aggregations ?? [])
     if (c.dateGrouping)
@@ -978,6 +996,48 @@ export function compareMetricValues(a: MetricValue, b: MetricValue): number {
   }
   return a < b ? -1 : 1;
 }
+/** Order buckets as a metric result: errors last, then `clause.sort`
+ * (chronological for calendar groups, largest value first otherwise), then keys. */
+export function sortMetricBuckets(
+  buckets: AggregationBucket[],
+  c: Pick<AggregationClause, "sort" | "dateGrouping">,
+): AggregationBucket[] {
+  const ordering: MetricSort[] = c.sort?.length
+    ? c.sort
+    : c.dateGrouping
+      ? [{ key: "group0", dir: "asc", nulls: "last" }]
+      : [{ key: "value", dir: "desc", nulls: "last" }];
+  const target = (b: AggregationBucket, s: MetricSort): MetricValue =>
+    s.key === "samples"
+      ? b.count - (b.nullCount ?? 0) - (b.inputErrorCount ?? 0)
+      : s.key.startsWith("group")
+        ? (b.keys[Number(s.key.slice(5))] ?? null)
+        : s.key === "count"
+          ? b.count
+          : s.key === "y"
+            ? (b.y ?? null)
+            : b.value;
+  return buckets.sort((a, b) => {
+    if (!!(a.error || a.yError) !== !!(b.error || b.yError))
+      return a.error || a.yError ? 1 : -1;
+    for (const s of ordering) {
+      const av = target(a, s),
+        bv = target(b, s);
+      const cmp =
+        av === null || bv === null
+          ? av === bv
+            ? 0
+            : (av === null ? 1 : -1) * (s.nulls === "first" ? -1 : 1)
+          : compareMetricValues(av, bv) * (s.dir === "asc" ? 1 : -1);
+      if (cmp) return cmp;
+    }
+    for (let i = 0; i < a.keys.length; i++) {
+      const cmp = compareMetricValues(a.keys[i]!, b.keys[i]!);
+      if (cmp) return cmp;
+    }
+    return 0;
+  });
+}
 export function evaluateMetrics<Row>(
   rows: Row[],
   q: QueryState,
@@ -999,6 +1059,18 @@ export function evaluateMetrics<Row>(
   }
   const now = evaluationTime(options),
     fields = indexFields(schema);
+  const series = planMetricSeries(q, schema, {
+    now,
+    ...(options.resolveComputed ? { resolveComputed: options.resolveComputed } : {}),
+  });
+  if (series)
+    return {
+      metrics: series.combine(
+        series.queries.flatMap(
+          (part) => evaluateMetrics(rows, part, schema, { ...options, now }).metrics,
+        ),
+      ),
+    };
   let matching: Row[] | undefined;
   let shown: Row[] | undefined;
   return {
@@ -1383,41 +1455,7 @@ export function evaluateMetrics<Row>(
           hiddenGroups = buckets.length - kept.length;
           buckets = kept;
         }
-        const ordering: MetricSort[] = c.sort?.length
-          ? c.sort
-          : c.dateGrouping
-            ? [{ key: "group0", dir: "asc", nulls: "last" }]
-            : [{ key: "value", dir: "desc", nulls: "last" }];
-        const target = (b: AggregationBucket, s: MetricSort): MetricValue =>
-          s.key === "samples"
-            ? b.count - (b.nullCount ?? 0) - (b.inputErrorCount ?? 0)
-            : s.key.startsWith("group")
-              ? (b.keys[Number(s.key.slice(5))] ?? null)
-              : s.key === "count"
-                ? b.count
-                : s.key === "y"
-                  ? (b.y ?? null)
-                  : b.value;
-        buckets.sort((a, b) => {
-          if (!!(a.error || a.yError) !== !!(b.error || b.yError))
-            return a.error || a.yError ? 1 : -1;
-          for (const s of ordering) {
-            const av = target(a, s),
-              bv = target(b, s);
-            const cmp =
-              av === null || bv === null
-                ? av === bv
-                  ? 0
-                  : (av === null ? 1 : -1) * (s.nulls === "first" ? -1 : 1)
-                : compareMetricValues(av, bv) * (s.dir === "asc" ? 1 : -1);
-            if (cmp) return cmp;
-          }
-          for (let i = 0; i < a.keys.length; i++) {
-            const cmp = compareMetricValues(a.keys[i]!, b.keys[i]!);
-            if (cmp) return cmp;
-          }
-          return 0;
-        });
+        sortMetricBuckets(buckets, c);
         tick();
         const groupCount = buckets.length;
         let other: AggregationBucket | undefined;

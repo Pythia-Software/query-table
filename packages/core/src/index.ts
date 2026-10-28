@@ -112,6 +112,7 @@ export * from "./metricTypes";
 export * from "./metrics";
 export * from "./metricDistributions";
 export * from "./metricDates";
+export * from "./metricSeries";
 export * from "./execution";
 export * from "./properties";
 export * from "./propertyStorage";

@@ -1,6 +1,7 @@
 import { aggOpsForField, isMeasurable } from "./agg";
 import type { MetricKey } from "./metricTypes";
 import { evaluateMetrics, type MetricEvaluationOptions } from "./metrics";
+import { hasMetricSeries } from "./metricSeries";
 // apply.ts — client-side filter + multi-sort + paginate.
 //
 // applyQuery is the client mirror of the backend compiler. Three jobs:
@@ -170,7 +171,8 @@ export function applyAggregations<Row>(
       a.sort ||
       a.groupLimit !== undefined ||
       a.where !== undefined ||
-      a.minCount !== undefined,
+      a.minCount !== undefined ||
+      hasMetricSeries(a),
   );
   if (advanced.length) {
     // Partitioning must not hide invalid IDs/shapes or the query-wide card cap.

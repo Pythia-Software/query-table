@@ -13,6 +13,7 @@ import {
 } from "react";
 import {
   MAX_AGGREGATIONS,
+  MAX_METRIC_WINDOW_PERIODS,
   METRIC_FUNCTIONS,
   aggOpsForField,
   compileFormula,
@@ -29,6 +30,8 @@ import {
   type MetricLayout,
   type MetricValueFormat,
   type MetricDateGrouping,
+  type MetricShare,
+  type MetricWindow,
   type WhereTerm,
 } from "@pythia-software/query-table-core";
 import type { QueryTableApi } from "@pythia-software/query-table-react";
@@ -496,14 +499,34 @@ export function MetricsEditor<Row>({
         ? []
         : [{ ...s, key: `group${index}` as `group${number}` }];
     });
+    const dated = selected.dateGrouping?.field === groupBy[0];
+    const share =
+      groupBy.length >= (selected.share === "group0" ? 2 : 1)
+        ? selected.share
+        : undefined;
     patch(selected.id, {
       groupBy,
       ...(sort ? { sort } : {}),
-      dateGrouping:
-        selected.dateGrouping?.field === groupBy[0]
-          ? selected.dateGrouping
-          : undefined,
+      dateGrouping: dated ? selected.dateGrouping : undefined,
+      window: dated ? selected.window : undefined,
+      share,
+      ...shareDisplay(selected.share, share),
     });
+  }
+  // Shares read best as percentages. The percent format a share adds leaves
+  // with it, so plain sums are not shown as percentages; a format the author
+  // chose is kept.
+  function shareDisplay(
+    previous: MetricShare | undefined,
+    next: MetricShare | undefined,
+  ): { display?: MetricDisplay } {
+    if (next && !previous && !chosen.format)
+      return { display: { ...chosen, format: SHARE_FORMAT } };
+    if (!next && previous && sameFormat(chosen.format, SHARE_FORMAT)) {
+      const { format: _format, ...display } = chosen;
+      return { display };
+    }
+    return {};
   }
   function changeSize(key: keyof MetricLayout, raw: number) {
     if (!selected || !Number.isFinite(raw)) return;
@@ -517,7 +540,17 @@ export function MetricsEditor<Row>({
   }
   function changeDisplay(kind: MetricDisplay["kind"]) {
     if (!selected) return;
-    const next: Partial<AggregationClause> = { display: { ...chosen, kind } };
+    // Distributions and scatters have no window or share, and hide their
+    // settings, so leaving them set would strand an invalid metric.
+    const single = !["box", "histogram", "scatter"].includes(kind);
+    const display =
+      (!single && shareDisplay(selected.share, undefined).display) || chosen;
+    const next: {
+      [K in keyof AggregationClause]?: AggregationClause[K] | undefined;
+    } = {
+      display: { ...display, kind },
+      ...(single ? {} : { window: undefined, share: undefined }),
+    };
     setFormatTarget(kind === "scatter" || kind === "histogram" ? "x" : "value");
     if (selected.sort)
       next.sort = selected.sort.filter(
@@ -1617,7 +1650,10 @@ export function MetricsEditor<Row>({
                           value={selected.dateGrouping?.interval ?? "exact"}
                           onChange={(e) => {
                             if (e.target.value === "exact") {
-                              patch(selected.id, { dateGrouping: undefined });
+                              patch(selected.id, {
+                                dateGrouping: undefined,
+                                window: undefined,
+                              });
                               return;
                             }
                             const interval = e.target
@@ -1765,6 +1801,31 @@ export function MetricsEditor<Row>({
                           </p>
                         </>
                       )}
+                      <label className="qt-metric-date-toggle">
+                        <input
+                          type="checkbox"
+                          aria-label="Whole intervals only"
+                          disabled={!selected.dateGrouping}
+                          checked={
+                            selected.dateGrouping?.partialIntervals ===
+                            "exclude"
+                          }
+                          onChange={(e) => {
+                            const { partialIntervals: _partial, ...rest } =
+                              selected.dateGrouping!;
+                            patch(selected.id, {
+                              dateGrouping: e.target.checked
+                                ? { ...rest, partialIntervals: "exclude" }
+                                : rest,
+                            });
+                          }}
+                        />
+                        Whole intervals only
+                      </label>
+                      <p className="qt-metric-help">
+                        Leave out intervals the date filters cut short and the
+                        interval still in progress.
+                      </p>
                       <p className="qt-metric-help">
                         Calendar boundaries and custom dates use the grouping
                         timezone. Weeks begin Monday.
@@ -1791,6 +1852,22 @@ export function MetricsEditor<Row>({
                       ))}
                   </select>
                 </Settings>
+                {selected.groupBy.length > 0 &&
+                  !["box", "histogram", "scatter"].includes(chosen.kind) && (
+                    <MetricSeriesSettings
+                      clause={selected}
+                      fields={fields}
+                      settings={settingsState("Window & share")}
+                      onChange={(values) =>
+                        patch(selected.id, {
+                          ...values,
+                          ...("share" in values
+                            ? shareDisplay(selected.share, values.share)
+                            : {}),
+                        })
+                      }
+                    />
+                  )}
                 <Settings
                   title="Ordering & limits"
                   {...settingsState("Ordering & limits")}
@@ -2782,6 +2859,200 @@ function Settings({
       </summary>
       <div>{children}</div>
     </details>
+  );
+}
+const SHARE_FORMAT: MetricValueFormat = { kind: "percent", decimals: 1 };
+const sameFormat = (a: MetricValueFormat | undefined, b: MetricValueFormat) =>
+  !!a && JSON.stringify(a) === JSON.stringify(b);
+const windowOf = (
+  periods: MetricWindow["periods"],
+  mean: boolean,
+  partial: boolean,
+): MetricWindow => ({
+  periods,
+  ...(mean ? { reduce: "mean" as const } : {}),
+  ...(partial ? { partial: "include" as const } : {}),
+});
+/** Trailing windows, running values and shares. A window turns on empty
+ * dates, which it needs to span every interval. */
+function MetricSeriesSettings({
+  clause,
+  fields,
+  settings,
+  onChange,
+}: {
+  clause: AggregationClause;
+  fields: readonly FieldDef[];
+  settings: { open: boolean; onOpenChange: (open: boolean) => void };
+  onChange: (values: {
+    [K in keyof AggregationClause]?: AggregationClause[K] | undefined;
+  }) => void;
+}) {
+  const { window, share, dateGrouping } = clause;
+  const first =
+    fields.find((f) => f.name === clause.groupBy[0])?.label ??
+    clause.groupBy[0];
+  const unit = dateGrouping?.interval ?? "interval";
+  const mode = !window ? "none" : window.periods === "all" ? "all" : "trailing";
+  const setWindow = (next: MetricWindow | undefined) =>
+    onChange({
+      window: next,
+      ...(next && dateGrouping && !dateGrouping.includeEmpty
+        ? { dateGrouping: { ...dateGrouping, includeEmpty: true } }
+        : {}),
+      // A share of the total cannot be windowed, and its option is hidden.
+      ...(next && share === "total" ? { share: undefined } : {}),
+    });
+  const summary = [
+    !window
+      ? ""
+      : window.periods === "all"
+        ? "Running"
+        : `Trailing ${window.periods} ${unit}s`,
+    window?.reduce === "mean" ? `mean per ${unit}` : "",
+    share === "group0"
+      ? `share of each ${dateGrouping ? unit : first}`
+      : share === "total"
+        ? "share of total"
+        : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <Settings
+      title="Window & share"
+      {...settings}
+      summary={summary || "Values as computed"}
+    >
+      {dateGrouping && (
+        <>
+          <label>
+            Window
+            <select
+              aria-label="Window"
+              value={mode}
+              onChange={(e) =>
+                setWindow(
+                  e.target.value === "none"
+                    ? undefined
+                    : windowOf(
+                        e.target.value === "all"
+                          ? "all"
+                          : window && window.periods !== "all"
+                            ? window.periods
+                            : 7,
+                        window?.reduce === "mean",
+                        // A running value has no partial windows.
+                        e.target.value !== "all" && window?.partial === "include",
+                      ),
+                )
+              }
+            >
+              <option value="none">None</option>
+              <option value="trailing">Trailing {unit}s</option>
+              <option value="all">Running from the first {unit}</option>
+            </select>
+          </label>
+          {window && window.periods !== "all" && (
+            <label>
+              {`${unit[0]!.toUpperCase()}${unit.slice(1)}s per window`}
+              <input
+                aria-label="Window length"
+                type="number"
+                min={2}
+                max={MAX_METRIC_WINDOW_PERIODS}
+                value={window.periods}
+                onChange={(e) => {
+                  const n = e.currentTarget.valueAsNumber;
+                  if (
+                    Number.isInteger(n) &&
+                    n >= 2 &&
+                    n <= MAX_METRIC_WINDOW_PERIODS
+                  )
+                    setWindow({ ...window, periods: n });
+                }}
+              />
+            </label>
+          )}
+          {window && (
+            <>
+              <label>
+                Combine
+                <select
+                  aria-label="Combine window"
+                  value={window.reduce ?? "total"}
+                  onChange={(e) =>
+                    setWindow(
+                      windowOf(
+                        window.periods,
+                        e.target.value === "mean",
+                        window.partial === "include",
+                      ),
+                    )
+                  }
+                >
+                  <option value="total">Total over the window</option>
+                  <option value="mean">Mean per {unit}</option>
+                </select>
+              </label>
+              {window.periods !== "all" && (
+                <label className="qt-metric-date-toggle">
+                  <input
+                    type="checkbox"
+                    aria-label="Show partial windows"
+                    checked={window.partial === "include"}
+                    onChange={(e) =>
+                      setWindow(
+                        windowOf(
+                          window.periods,
+                          window.reduce === "mean",
+                          e.target.checked,
+                        ),
+                      )
+                    }
+                  />
+                  Show windows that start before the range
+                </label>
+              )}
+              <p className="qt-metric-help">
+                A total evaluates the metric over every row in the window, so
+                ratios and averages pool their parts. A mean per {unit}{" "}
+                averages a single sum, count or distinct count.
+              </p>
+            </>
+          )}
+        </>
+      )}
+      <label>
+        Show values as
+        <select
+          aria-label="Show values as"
+          value={share ?? "values"}
+          onChange={(e) =>
+            onChange({
+              share:
+                e.target.value === "values"
+                  ? undefined
+                  : (e.target.value as MetricShare),
+            })
+          }
+        >
+          <option value="values">Values</option>
+          {clause.groupBy.length > 1 && (
+            <option value="group0">
+              Share of each {dateGrouping ? unit : first}
+            </option>
+          )}
+          {!window && <option value="total">Share of all groups</option>}
+        </select>
+      </label>
+      {share && (
+        <p className="qt-metric-help">
+          Divides each group by a total of the same sum or count, including
+          groups past the group limit.
+        </p>
+      )}
+    </Settings>
   );
 }
 function MetricFormatControls({

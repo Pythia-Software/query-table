@@ -373,6 +373,9 @@ export interface AggregationBucket {
    *  cohort is inspected (`count`/`value` are then the bin's count). Never part
    *  of a transport result. */
   bin?: MetricHistogramBin;
+  /** Calendar intervals combined into a windowed point (`AggregationClause.window`);
+   *  fewer than its periods where the window starts before the first interval. */
+  intervals?: number;
   /** The metric: a number for count/sum/avg, or the column's value for min/max
    *  (which may be a string for text/datetime). null when undefined (e.g. avg of
    *  an all-null column). */

@@ -6,7 +6,8 @@
 
 import { compileFormula } from "./formula";
 import { createGroupingModel, exitGrouping, GROUP_ID_FIELD, type GroupedRow } from "./grouping";
-import { metricDateNext, metricDateTime } from "./metricDates";
+import { metricDateFloor, metricDateNext, metricDateTime } from "./metricDates";
+import { MAX_METRIC_WINDOW_PERIODS, wholeIntervalSpan } from "./metricSeries";
 import { isFilterable, resolveField, type FieldSchema } from "./schema";
 import { groupKeyTerms, keyClause } from "./groupKeys";
 import type { AggregationBucket } from "./encode";
@@ -30,7 +31,8 @@ function distributionActive(clause: AggregationClause): boolean {
  * - Each `clause.groupBy` key adds `=`; a null key adds `is_null` (legacy
  *   aggregates already place empty text in that bucket).
  * - A date-grouped key becomes `>= start` and `< next`, using the clause's
- *   interval and timezone.
+ *   interval and timezone. A windowed point starts at its window's first
+ *   interval, or has no lower bound for a running value.
  * - A histogram bin (`bucket.bin`) adds `>= min` and `< max` (`<= max` for
  *   the final bin) on the distribution input, which must be a field reference.
  *   Box cohorts are their group keys.
@@ -61,12 +63,23 @@ export function inspectBucketQuery(
       } catch {
         return null;
       }
-      const { interval, timeZone } = clause.dateGrouping;
+      const { interval, timeZone, partialIntervals } = clause.dateGrouping;
       const next = metricDateNext(start, interval, timeZone);
-      terms.push(
-        { field: field.name, op: ">=", value: new Date(start).toISOString() },
-        { field: field.name, op: "<", value: new Date(next).toISOString() },
-      );
+      // A windowed point reads its trailing intervals; a running one, every
+      // interval from the start of the range.
+      let from: number | undefined = start;
+      const periods = clause.window?.periods;
+      if (periods === "all") from = undefined;
+      else if (periods !== undefined) {
+        if (!Number.isInteger(periods) || periods < 2 || periods > MAX_METRIC_WINDOW_PERIODS) return null;
+        for (let i = 1; i < periods; i++) from = metricDateFloor(from! - 1, interval, timeZone);
+      }
+      if (partialIntervals === "exclude") {
+        const whole = wholeIntervalSpan(clause, query, fields, Date.now()).start;
+        if (whole !== undefined) from = Math.max(from ?? whole, whole);
+      }
+      if (from !== undefined) terms.push({ field: field.name, op: ">=", value: new Date(from).toISOString() });
+      terms.push({ field: field.name, op: "<", value: new Date(next).toISOString() });
       continue;
     }
     const term = keyClause(field, key);

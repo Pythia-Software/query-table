@@ -11,6 +11,18 @@
   surfaces, including scoped settings and live updates through built-in portals.
 - Chromium/WebKit browser coverage for relative sizing on phones, coarse-pointer
   tablets and landscape viewports, plus portal, pointer and focus behavior.
+- Metric windows, shares and whole intervals (`AggregationClause.window`,
+  `AggregationClause.share`, `MetricDateGrouping.partialIntervals`). A window
+  gives each calendar point the metric over its trailing intervals, or a
+  running value from the first one; ratios and averages pool their parts
+  rather than averaging interval values, and a mean per interval is available
+  for single sums and counts. A share divides by the same measure grouped by
+  fewer keys, so groups past the limit still count. Whole intervals leave out
+  intervals the date filters cut and the one still in progress.
+  `planMetricSeries` builds these from plain metrics, so the local engine,
+  metric transports and the v3 executor run them without server changes;
+  windowed points drill down to their whole window. The metric editor's **Window & share**
+  settings and a **Whole intervals only** option edit them.
 
 ## 0.9.5 — 2026-10-21
 
