@@ -235,6 +235,9 @@ for the underlying records, or `null` when no exact query exists:
   and timezone (`metricDateNext`), encoded as ISO instants (`…Z`). Filters
   compare instants, so a date-only source value is read as UTC midnight; group
   date-only columns in UTC to keep drilldown on the same day.
+- An hour-of-day or day-of-week slot selects its occurrences inside the date
+  bounds, or returns `null` without bounds (see
+  [Hour of day and day of week](#hour-of-day-and-day-of-week)).
 - A histogram bin adds `>= min` and `< max` (`<= max` for the final bin) on the
   distribution input. The input must be a single numeric field reference; a
   computed expression returns `null`. A box cohort is its group keys.
@@ -314,8 +317,8 @@ Without calendar grouping, group labels show raw keys; a retained scatter or
 histogram X format does not apply to these keys. Coordinates retain raw values.
 
 When the first grouping field is a groupable `datetime`, Grouping settings offer
-an optional calendar interval (hour/day/week/month/year) and **Include empty
-dates**. The definition stores `dateGrouping`, for example:
+an optional calendar interval (hour/day/week/month/year), the cyclic hour of
+day and day of week (see below) and **Include empty dates**. The definition stores `dateGrouping`, for example:
 
 ```ts
 dateGrouping: {
@@ -447,6 +450,111 @@ for their results; `executeMetrics` and `evaluateMetrics` call it, so every
 engine supports them. A host that sends metric requests itself calls it the
 same way. Servers never receive these fields: `toMetricQuery` and
 `toQueryRequestV3` report an `unexpanded_series` diagnostic instead.
+
+### Hour of day and day of week
+
+Two cyclic intervals profile a typical day or week. Each bucket is a slot of
+the cycle rather than a date:
+
+- `interval: "hourOfDay"` keys each record by its local wall-clock hour, `0`
+  to `23`;
+- `interval: "dayOfWeek"` keys it by its local ISO weekday, `1` (Monday) to
+  `7` (Sunday).
+
+The slot is the one the record's timestamp occupies in `dateGrouping.timeZone`.
+Across a spring-forward change the skipped hour has no records that day; across
+a fall-back change both 01:00 hours fall in slot `1`. Fractional offsets such as
+`Asia/Kolkata` (+05:30) use the local hour, so 03:45Z is slot `9`. Keys are
+numbers in every engine, and rows without a date keep a `null` bucket.
+
+```ts
+const byHour: AggregationClause = {
+  id: "by-hour", op: "count", groupBy: ["at", "provider"],
+  dateGrouping: { field: "at", interval: "hourOfDay",
+    timeZone: "America/New_York", includeEmpty: true, range: "query" },
+  display: { kind: "line" },
+};
+```
+
+- **Grouping.** Slots combine with other `groupBy` fields. `includeEmpty`
+  adds all 24 or 7 slots for each observed series, whatever the date range, so
+  `range`, `start` and `end` do not apply to the slots. Direct COUNT,
+  COUNT_DISTINCT and SUM fill-ins are 0; other expressions have no value.
+  `minCount`, `hiddenGroups`, `sort`, `groupLimit` and shares work as for
+  calendar intervals, and the default order is slot number. Windows need a
+  timeline and are refused. Pooled box and histogram distributions are refused
+  as for calendar intervals; use occurrences below.
+- **Whole intervals.** `partialIntervals: "exclude"` keeps only the whole hours
+  (`hourOfDay`) or days (`dayOfWeek`) inside the date bounds.
+- **Engines.** The local engine (`evaluateMetrics`, `applyAggregations`), the
+  v3 executor of the Go module (SQLite and PostgreSQL) and DuckDB compute
+  slots, and their buckets match for the same rows. Servers advertise
+  `QueryCapabilitiesV3.calendarCycles`; `toQueryRequestV3` reports a diagnostic
+  without it. As for calendar intervals, the v1/v2 metric protocols
+  (`/metrics`) reject date grouping.
+- **Labels.** Charts, lists and tables label slots "09:00" and the locale's
+  short weekday ("Mon"); tooltips use "09:00–10:00" and "Monday"
+  (`metricCycleLabel`). Line charts order slots by number. The metric editor
+  offers **Hour of day** and **Day of week** under Date interval.
+
+#### Per-occurrence statistics
+
+A slot pools every record that falls in it. To describe a *typical* Monday,
+first total each Monday, then summarise those totals. Set
+`dateGrouping.occurrence`:
+
+```ts
+const typicalWeekday: AggregationClause = {
+  id: "typical-weekday", op: "count", groupBy: ["at"],
+  dateGrouping: { field: "at", interval: "dayOfWeek", timeZone: "Europe/Berlin",
+    includeEmpty: true, range: "query",
+    occurrence: { interval: "day", includeEmpty: true } },
+  distribution: { kind: "box", input: "" },  // optional
+  display: { kind: "box" },
+};
+```
+
+- **Occurrences.** `occurrence.interval` is one calendar `"day"` or `"hour"`
+  of the slot (`hourOfDay` occurs hourly, so it needs `"hour"`). The metric is
+  evaluated once per occurrence, with any expression: counts, sums, distinct
+  counts, ratios and medians.
+- **Whole occurrences only.** Occurrences the date bounds cut short, and the
+  occurrence still in progress, are left out, using the same boundary as
+  `partialIntervals: "exclude"`. "Last 30 days" opened at 14:00 drops the
+  partial first and last dates. `partialIntervals: "include"` is refused.
+- **Idle occurrences.** With `occurrence.includeEmpty: true` an occurrence
+  without rows counts as 0 for a direct COUNT, COUNT_DISTINCT or SUM, and has
+  no value for other expressions such as ratios and averages, so it is not a
+  sample. Their range is the clause's `range` (`"query"` needs a lower date
+  bound; the clock ends it), `"observed"` or `"custom"`. `false` counts only
+  occurrences with rows.
+- **Values.** Without a distribution, a slot's `value` is the **mean of its
+  occurrence values**. With `distribution: { kind: "box" }` the bucket carries a
+  box over the occurrence values and `value` is their median, as for every
+  box; `whiskers` applies and `input` is not used. Histograms are refused.
+  `count` is the slot's rows over its counted occurrences, so `minCount` counts
+  rows, and `occurrences` is the number of samples. A slot without any sample
+  has no value.
+- **Execution.** `planMetricSeries` runs one calendar metric per occurrence
+  clause (`interval: occurrence.interval`, whole occurrences only) and folds it
+  into slots, so every engine with calendar grouping supports it, including
+  the Go v3 executor, without server changes. Servers never receive
+  `occurrence`; unexpanded clauses get the `unexpanded_series` diagnostic. An
+  hourly occurrence over a year is 8,760 calendar groups per series, and they
+  count against the engine's group budget.
+
+#### Drill-down
+
+`inspectBucketQuery` selects exactly one slot's records with ordinary
+predicates. Inside the date field's conjunctive bounds (narrowed to whole
+occurrences or whole intervals when the clause uses them), the slot's
+occurrences are disjoint ranges r1…rk. The query adds `>= r1.start`,
+`< rk.end` and, for each gap, an OR group `< ri.end` or `>= ri+1.start`.
+Adjacent ranges, such as a repeated fall-back hour, merge. It returns `null`
+when the query has no lower or upper bound on the date field, or when the
+ranges would take the query past its 100-predicate budget (about 48
+occurrences, such as hour 09:00 over seven weeks). A `null` slot key drills to
+`is_null` as usual.
 
 ### Compact chart integration
 

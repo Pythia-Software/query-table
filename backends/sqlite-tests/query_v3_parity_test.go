@@ -117,6 +117,51 @@ func TestV3FrontendParity(t *testing.T) {
 			}
 		}
 	}
+	// Cyclic slots: local hours across DST changes and fractional or
+	// half-hour-DST offsets, and ISO weekdays across local midnight.
+	cycles := []struct {
+		name, zone string
+		times      []string
+	}{
+		{"ny/dst", "America/New_York", []string{"2026-03-08T06:15:00.000Z", "2026-03-08T07:15:00.000Z", "2026-11-01T05:15:00.000Z", "2026-11-01T06:15:00.000Z", "2026-11-01T06:45:00.000Z"}},
+		{"kolkata", "Asia/Kolkata", []string{"2026-03-01T18:15:00.000Z", "2026-03-01T18:45:00.000Z", "2026-03-02T03:15:00.000Z", "2026-03-08T03:45:00.000Z"}},
+		{"lord-howe", "Australia/Lord_Howe", []string{"2026-10-03T15:15:00.000Z", "2026-10-03T15:35:00.000Z", "2026-04-04T14:45:00.000Z", "2026-04-04T15:05:00.000Z"}},
+		{"utc", "UTC", []string{"2026-03-01T23:59:59.000Z", "2026-03-02T00:00:00.000Z", "2026-03-08T12:00:00.000Z"}},
+	}
+	for _, c := range cycles {
+		for _, interval := range []string{"hourOfDay", "dayOfWeek"} {
+			// AVG can differ by an ULP between SQLite's exact decimal and the browser.
+			for _, op := range []string{"count", "sum", "max"} {
+				for _, extra := range []bool{false, true} {
+					for _, includeEmpty := range []bool{false, true} {
+						rows := []map[string]any{}
+						for i, at := range c.times {
+							key := any("a")
+							if i%2 != 0 {
+								key = nil
+							}
+							rows = append(rows, map[string]any{"id": fmt.Sprint(i), "k": key, "n": float64(i) + 0.5, "at": at, "label": "row", "flag": i%2 == 0})
+						}
+						rows = append(rows, map[string]any{"id": "null", "k": "a", "n": float64(9), "at": nil, "label": nil, "flag": nil})
+						groupBy := []string{"at"}
+						if extra {
+							groupBy = append(groupBy, "k")
+						}
+						field := ""
+						if op != "count" {
+							field = "n"
+						}
+						spec := qt.AggSpec{ID: "cycle", Op: op, Field: field, GroupBy: groupBy, DateGrouping: &qt.MetricDateGrouping{Field: "at", Interval: interval, TimeZone: c.zone, IncludeEmpty: includeEmpty, Range: "query"}}
+						if !includeEmpty {
+							spec.MinCount = 2
+						}
+						q := qt.QueryRequestV3{Version: 3, Profile: qt.SQLiteExpressionProfile, Now: time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC).UnixMilli(), Result: qt.WireQuery{Select: []string{"id"}, Limit: 10}, Metrics: []qt.AggSpec{spec}}
+						run(fmt.Sprintf("cycle/%s/%s/%s/%t/%t", c.name, interval, op, extra, includeEmpty), rows, q)
+					}
+				}
+			}
+		}
+	}
 	q = groupedRequest()
 	q.Grouping.Summaries = append(q.Grouping.Summaries, qt.SummaryColumn{ID: "latest", Op: "max", Field: "at"})
 	q.Result.Select = append(q.Result.Select, "latest")

@@ -7,6 +7,8 @@
 // parts instead of averaging interval ratios. COUNT_DISTINCT and MEDIAN do not
 // merge and are refused rather than approximated. A share divides by the same
 // measure grouped by fewer keys, so groups beyond `groupLimit` still count.
+// Occurrences of a cyclic slot are the slot's whole hours or days: the metric
+// runs once per occurrence on a calendar interval, then folds into slots.
 
 import { FormulaError, type FormulaPlan, type FormulaResult } from "./formula";
 import type { AggregationBucket, AggregationResultEntry } from "./encode";
@@ -15,16 +17,21 @@ import {
   compileMetric,
   evaluateMetricReductions,
   metricExpression,
+  occurrenceDistribution,
   sortMetricBuckets,
   validateMetric,
   type MetricPlan,
 } from "./metrics";
 import {
+  isMetricCycle,
   metricCustomEndTime,
+  metricCycleSlot,
+  metricCycleSlots,
   metricDateFloor,
   metricDateNext,
   metricDateTime,
 } from "./metricDates";
+import { boxSummary } from "./metricDistributions";
 import { assertMetricNumber } from "./metricPrecision";
 import type { MetricDateGrouping, MetricValue } from "./metricTypes";
 import { coerceValue } from "./ops";
@@ -46,7 +53,8 @@ export function hasMetricSeries(c: AggregationClause): boolean {
   return (
     c.window !== undefined ||
     c.share !== undefined ||
-    c.dateGrouping?.partialIntervals !== undefined
+    c.dateGrouping?.partialIntervals !== undefined ||
+    c.dateGrouping?.occurrence !== undefined
   );
 }
 
@@ -77,7 +85,7 @@ export function validateMetricSeries(
   const metric = plan as MetricPlan,
     sole = soleAggregate(metric);
   if (window) {
-    if (!c.dateGrouping)
+    if (!c.dateGrouping || isMetricCycle(c.dateGrouping.interval))
       throw new FormulaError(
         "A window needs a calendar interval on the first grouping field.",
       );
@@ -142,15 +150,15 @@ export function validateMetricSeries(
     );
 }
 
-/** The whole intervals inside the conjunctive bounds on the date field (the
- * query's and the metric's own), ending by `now`: [start, end). */
-export function wholeIntervalSpan(
+/** The conjunctive bounds on a date-grouped clause's field, from the query's
+ * and the metric's own filters: [lower, upper), infinite where absent. */
+export function metricDateBounds(
   c: AggregationClause,
   query: QueryState,
   schema: FieldSchema,
   now: number,
-): { start?: number; end: number } {
-  const { field, interval, timeZone } = c.dateGrouping!;
+): { lower: number; upper: number } {
+  const { field } = c.dateGrouping!;
   const canonical = (name: string) => resolveFieldName(schema, name) ?? name;
   let lower = -Infinity,
     upper = Infinity;
@@ -177,6 +185,20 @@ export function wholeIntervalSpan(
     if (term.op === "<" || term.op === "<=" || term.op === "=")
       upper = Math.min(upper, time + (term.op === "<" ? 0 : 1));
   }
+  return { lower, upper };
+}
+
+/** The whole intervals inside the conjunctive bounds on the date field (the
+ * query's and the metric's own), ending by `now`: [start, end). A cyclic
+ * interval's intervals are its hours or days. */
+export function wholeIntervalSpan(
+  c: AggregationClause,
+  query: QueryState,
+  schema: FieldSchema,
+  now: number,
+): { start?: number; end: number } {
+  const { interval, timeZone } = c.dateGrouping!;
+  const { lower, upper } = metricDateBounds(c, query, schema, now);
   const floor = (time: number) => metricDateFloor(time, interval, timeZone);
   const end = floor(Math.min(upper, now));
   if (!Number.isFinite(lower)) return { end };
@@ -209,6 +231,11 @@ type Prepared =
   | { kind: "empty"; clause: AggregationClause }
   | { kind: "plain"; clause: AggregationClause; parts: [AggregationClause] }
   | {
+      kind: "occurrence";
+      clause: AggregationClause;
+      parts: [AggregationClause];
+    }
+  | {
       kind: "series";
       clause: AggregationClause;
       plan: MetricPlan;
@@ -229,6 +256,9 @@ type Prepared =
  *   of every group. With a window, both are windowed first.
  * - **Whole intervals.** `partialIntervals: "exclude"` narrows the metric to
  *   the intervals the query bounds and `now` leave whole.
+ * - **Occurrences.** A cyclic slot with `dateGrouping.occurrence` runs the
+ *   metric per whole occurrence (one calendar hour or day), then summarises
+ *   each slot: the mean of its occurrence values, or a box over them.
  *
  * `sort`, `groupLimit` and `minCount` (counting a window's rows) apply to the
  * combined buckets. Windowed and share results have no Other remainder. */
@@ -264,50 +294,109 @@ export function planMetricSeries(
   function prepare(c: AggregationClause): Prepared {
     const issue = validateMetric(c, schema, options.resolveComputed)[0];
     if (issue) return { kind: "error", clause: c, error: issue.message };
+    // Narrow to the intervals the query's bounds and the clock leave whole;
+    // undefined when none remain.
+    function whole(
+      config: MetricDateGrouping,
+    ): { where: WhereTerm[]; dateGrouping: MetricDateGrouping } | undefined {
+      let where = c.where ?? [],
+        dateGrouping = config;
+      const span = wholeIntervalSpan(
+        { ...c, dateGrouping: config },
+        query,
+        schema,
+        now,
+      );
+      if (span.start !== undefined && span.end <= span.start) {
+        if (!isMetricCycle(config.interval)) return undefined;
+        // Nothing is whole, but the engine still lists every slot.
+        span.end = span.start;
+      }
+      const field = resolveFieldName(schema, config.field) ?? config.field;
+      const iso = (time: number) => new Date(time).toISOString();
+      where = [
+        ...where,
+        ...(span.start !== undefined
+          ? [{ field, op: ">=", value: iso(span.start) } as WhereTerm]
+          : []),
+        { field, op: "<", value: iso(span.end) },
+      ];
+      // Completion would otherwise refill the partial intervals as empty.
+      // Every slot of a cycle exists anyway.
+      if (
+        config.includeEmpty &&
+        config.range !== "observed" &&
+        !isMetricCycle(config.interval)
+      ) {
+        const floor = (time: number) =>
+          metricDateFloor(time, config.interval, config.timeZone);
+        let from = span.start,
+          through = span.end - 1;
+        if (config.range === "custom") {
+          const start = floor(
+            metricDateTime(config.start ?? "", config.timeZone),
+          );
+          from = Math.max(from ?? start, start);
+          through = Math.min(
+            through,
+            metricCustomEndTime(config.end ?? "", config.timeZone),
+          );
+        }
+        if (from !== undefined) {
+          if (through < from) return undefined;
+          dateGrouping = {
+            ...config,
+            range: "custom",
+            start: iso(from),
+            end: iso(through),
+          };
+        }
+      }
+      return { where, dateGrouping };
+    }
     let where = c.where ?? [];
     let dateGrouping: MetricDateGrouping | undefined;
     if (c.dateGrouping) {
-      const { partialIntervals, ...config } = c.dateGrouping;
-      dateGrouping = config;
-      if (partialIntervals === "exclude") {
-        const span = wholeIntervalSpan(c, query, schema, now);
-        if (span.start !== undefined && span.end <= span.start)
-          return { kind: "empty", clause: c };
-        const field = resolveFieldName(schema, config.field) ?? config.field;
-        const iso = (time: number) => new Date(time).toISOString();
-        where = [
-          ...where,
-          ...(span.start !== undefined
-            ? [{ field, op: ">=", value: iso(span.start) } as WhereTerm]
-            : []),
-          { field, op: "<", value: iso(span.end) },
-        ];
-        // Completion would otherwise refill the partial intervals as empty.
-        if (config.includeEmpty && config.range !== "observed") {
-          const floor = (time: number) =>
-            metricDateFloor(time, config.interval, config.timeZone);
-          let from = span.start,
-            through = span.end - 1;
-          if (config.range === "custom") {
-            const start = floor(
-              metricDateTime(config.start ?? "", config.timeZone),
-            );
-            from = Math.max(from ?? start, start);
-            through = Math.min(
-              through,
-              metricCustomEndTime(config.end ?? "", config.timeZone),
-            );
-          }
-          if (from !== undefined) {
-            if (through < from) return { kind: "empty", clause: c };
-            dateGrouping = {
-              ...config,
-              range: "custom",
-              start: iso(from),
-              end: iso(through),
-            };
-          }
-        }
+      const { partialIntervals, occurrence, ...config } = c.dateGrouping;
+      // An occurrence is one whole calendar hour or day of the slot.
+      const narrowed = occurrence
+        ? whole({
+            ...config,
+            interval: occurrence.interval,
+            includeEmpty: occurrence.includeEmpty,
+          })
+        : partialIntervals === "exclude"
+          ? whole(config)
+          : { where, dateGrouping: config };
+      if (!narrowed) return { kind: "empty", clause: c };
+      ({ where, dateGrouping } = narrowed);
+      if (occurrence) {
+        const {
+          dateGrouping: _date,
+          where: _where,
+          scope: _scope,
+          distribution: _distribution,
+          display: _display,
+          sort: _sort,
+          groupLimit: _limit,
+          minCount: _min,
+          label: _label,
+          layout: _layout,
+          ...rest
+        } = c;
+        return {
+          kind: "occurrence",
+          clause: c,
+          parts: [
+            {
+              ...rest,
+              id: id(),
+              ...(c.scope ? { scope: c.scope } : {}),
+              ...(where.length ? { where } : {}),
+              dateGrouping,
+            },
+          ],
+        };
       }
     }
     const scoped = (groupBy: string[]): Partial<AggregationClause> => ({
@@ -395,14 +484,17 @@ export function planMetricSeries(
         const c = item.clause;
         if (item.kind === "error")
           return { id: c.id, buckets: [], error: item.error };
-        if (item.kind === "empty")
-          return {
+        if (item.kind === "empty") {
+          const none: AggregationResultEntry = {
             id: c.id,
             buckets: [],
             scope: c.scope ?? "allMatching",
             groupCount: 0,
             coverage: "exact",
           };
+          // No whole occurrence: every slot is still listed, without a value.
+          return c.dateGrouping?.occurrence ? combineOccurrences(c, none) : none;
+        }
         const entries = item.parts.map(
           (part) =>
             byId.get(part.id) ?? {
@@ -413,6 +505,8 @@ export function planMetricSeries(
         );
         if (item.kind === "plain") return { ...entries[0]!, id: c.id };
         try {
+          if (item.kind === "occurrence")
+            return combineOccurrences(c, entries[0]!);
           return combineSeries(item, entries);
         } catch (e) {
           return {
@@ -654,6 +748,110 @@ function combineSeries(
     scope: first.scope ?? c.scope ?? "allMatching",
     ...(first.processedRows !== undefined
       ? { processedRows: first.processedRows }
+      : {}),
+    groupCount,
+    coverage: "exact",
+    ...(hiddenGroups !== undefined ? { hiddenGroups } : {}),
+  };
+}
+
+/** Fold per-occurrence buckets (keyed by an hour or day start) into cyclic
+ * slots. Each slot's value is the mean of its occurrences' values, or the
+ * median of a box over them; occurrences without a value are not samples. */
+function combineOccurrences(
+  c: AggregationClause,
+  entry: AggregationResultEntry,
+): AggregationResultEntry {
+  const config = c.dateGrouping!,
+    cycle = config.interval;
+  if (!isMetricCycle(cycle)) throw Error("Invalid date grouping occurrence.");
+  if (entry.error) throw Error(entry.error);
+  if (
+    entry.coverage === "partial" ||
+    (entry.groupCount ?? entry.buckets.length) > entry.buckets.length
+  )
+    throw Error(
+      "Occurrences need every interval, but the engine returned only some of them.",
+    );
+  type Slot = {
+    keys: MetricValue[];
+    count: number;
+    values: number[];
+    error?: string;
+  };
+  const slots = new Map<string, Slot>();
+  const slotOf = (keys: MetricValue[]) => {
+    const key = JSON.stringify(keys);
+    let slot = slots.get(key);
+    if (!slot) slots.set(key, (slot = { keys, count: 0, values: [] }));
+    return slot;
+  };
+  for (const bucket of entry.buckets) {
+    // Whole-occurrence bounds keep rows without a date out of the metric.
+    if (bucket.keys[0] === null || bucket.keys[0] === undefined) continue;
+    const slot = slotOf([
+      metricCycleSlot(metricDateTime(bucket.keys[0]), cycle, config.timeZone),
+      ...bucket.keys.slice(1),
+    ]);
+    slot.count += bucket.count;
+    if (slot.error) continue;
+    if (bucket.error) slot.error = bucket.error;
+    else if (typeof bucket.value === "number") slot.values.push(bucket.value);
+    else if (bucket.value !== null)
+      slot.error = "Occurrence values must be numeric.";
+  }
+  if (config.includeEmpty) {
+    const tails = new Map<string, MetricValue[]>();
+    for (const slot of slots.values())
+      tails.set(JSON.stringify(slot.keys.slice(1)), slot.keys.slice(1));
+    if (c.groupBy.length === 1 && !tails.size) tails.set("[]", []);
+    for (const number of metricCycleSlots(cycle))
+      for (const tail of tails.values()) slotOf([number, ...tail]);
+  }
+  // Validation allows only a box over occurrences.
+  const box = occurrenceDistribution(c);
+  let buckets = [...slots.values()].map((slot): AggregationBucket => {
+    const bucket: AggregationBucket = {
+      keys: slot.keys,
+      count: slot.count,
+      value: null,
+      occurrences: slot.values.length,
+    };
+    if (slot.error) return { ...bucket, error: slot.error };
+    try {
+      if (box) {
+        const summary = boxSummary(slot.values, c.distribution!.whiskers);
+        bucket.distribution = { kind: "box", summary };
+        bucket.value = summary?.median ?? null;
+      } else if (slot.values.length) {
+        const mean =
+          slot.values.reduce((sum, value) => sum + value, 0) /
+          slot.values.length;
+        assertMetricNumber(mean);
+        bucket.value = mean;
+      }
+    } catch (e) {
+      return { ...bucket, value: null, error: (e as Error).message };
+    }
+    return bucket;
+  });
+  let hiddenGroups: number | undefined;
+  if (c.minCount !== undefined) {
+    const kept = buckets.filter(
+      (b) => b.count === 0 || b.count >= c.minCount!,
+    );
+    hiddenGroups = buckets.length - kept.length;
+    buckets = kept;
+  }
+  sortMetricBuckets(buckets, c);
+  const groupCount = buckets.length;
+  if (c.groupLimit) buckets = buckets.slice(0, c.groupLimit);
+  return {
+    id: c.id,
+    buckets,
+    scope: entry.scope ?? c.scope ?? "allMatching",
+    ...(entry.processedRows !== undefined
+      ? { processedRows: entry.processedRows }
       : {}),
     groupCount,
     coverage: "exact",

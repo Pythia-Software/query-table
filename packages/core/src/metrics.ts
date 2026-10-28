@@ -55,6 +55,9 @@ import {
   metricDateFloor,
   metricDateNext,
   metricDateRange,
+  isMetricCycle,
+  metricCycleSlot,
+  metricCycleSlots,
   validateDateGrouping,
 } from "./metricDates";
 const aggregates = new Set([
@@ -388,12 +391,17 @@ function distributionActive(c: AggregationClause): boolean {
     (!c.display || c.display.kind === "box" || c.display.kind === "histogram")
   );
 }
+/** A box over a cyclic slot's per-occurrence values: its input is the
+ * metric itself, evaluated once per occurrence. */
+export function occurrenceDistribution(c: AggregationClause): boolean {
+  return distributionActive(c) && !!c.dateGrouping?.occurrence;
+}
 export function metricPlans(
   c: AggregationClause,
   schema: FieldSchema,
   resolve?: (name: string) => FormulaPlan | undefined,
 ): FormulaPlan[] {
-  if (distributionActive(c)) {
+  if (distributionActive(c) && !occurrenceDistribution(c)) {
     const p = compileFormula(
       c.distribution!.input,
       resolve
@@ -471,7 +479,21 @@ export function validateMetric(
         throw new FormulaError(
           "Date grouping must use the first grouping field, with a datetime type.",
         );
-      if (distributionActive(c))
+      const { occurrence } = c.dateGrouping;
+      if (occurrence) {
+        if (distributionActive(c) && c.distribution!.kind !== "box")
+          throw new FormulaError(
+            "Occurrences summarise as a mean or a box plot, not a histogram.",
+          );
+        if (c.display?.kind === "scatter")
+          throw new FormulaError(
+            "Occurrences summarise single-value metrics, not scatters.",
+          );
+        if (c.window || c.share !== undefined)
+          throw new FormulaError(
+            "Windows and shares do not apply to occurrences of a slot.",
+          );
+      } else if (distributionActive(c))
         throw new FormulaError(
           "Date grouping currently supports scalar metrics, not distributions.",
         );
@@ -593,7 +615,10 @@ export function metricComputationKey(
         id: c.id,
         diagnostics: c.diagnostics,
         unsupportedOp: c.unsupportedOp,
-        expression: distributionActive(c) ? undefined : metricExpression(c),
+        expression:
+          distributionActive(c) && !occurrenceDistribution(c)
+            ? undefined
+            : metricExpression(c),
         expressionY: c.display?.kind === "scatter" ? c.expressionY : undefined,
         scope: c.scope ?? "allMatching",
         groupBy: c.groupBy,
@@ -697,7 +722,7 @@ export function toMetricQuery<Row>(
         to: 1,
         message: "Metric filters must use server-filterable fields.",
       });
-  // Servers never compute windows, shares or whole intervals; sending the
+  // Servers never compute windows, shares, whole intervals or occurrences; sending the
   // clause unexpanded would silently return the plain metric.
   for (const c of q.aggregations ?? [])
     if (hasMetricSeries(c))
@@ -707,7 +732,7 @@ export function toMetricQuery<Row>(
         from: 0,
         to: 1,
         message:
-          "Windows, shares and whole intervals are computed from plain metrics; expand the query with planMetricSeries first.",
+          "Windows, shares, whole intervals and occurrences are computed from plain metrics; expand the query with planMetricSeries first.",
       });
   for (const c of q.aggregations ?? [])
     if (c.dateGrouping)
@@ -1153,7 +1178,7 @@ export function evaluateMetrics<Row>(
         // out-of-order rows outside it always recompute the correct bucket.
         let dateStart = Infinity,
           dateEnd = -Infinity,
-          dateKey = "";
+          dateKey: MetricValue = "";
         let dateInput: MetricValue | undefined,
           dateTime = NaN;
         for (const row of inputRows) {
@@ -1191,7 +1216,11 @@ export function evaluateMetrics<Row>(
                 config.interval,
                 config.timeZone,
               );
-              dateKey = new Date(dateStart).toISOString();
+              // A cyclic slot is the local hour or weekday of the interval
+              // its record falls in; a calendar key is the interval start.
+              dateKey = isMetricCycle(config.interval)
+                ? metricCycleSlot(dateStart, config.interval, config.timeZone)
+                : new Date(dateStart).toISOString();
             }
             keys[0] = dateKey;
           }
@@ -1242,7 +1271,8 @@ export function evaluateMetrics<Row>(
               tick();
               reserve(8);
               groupBytes += 8;
-              observed.push(metricDateTime(group.keys[0]!));
+              if (!isMetricCycle(config.interval))
+                observed.push(metricDateTime(group.keys[0]!));
               const tuple = group.keys.slice(1);
               const key = JSON.stringify(tuple);
               if (!series.has(key)) {
@@ -1257,13 +1287,35 @@ export function evaluateMetrics<Row>(
             groupBytes += 132;
             series.set("[]", []);
           }
-          const range = metricDateRange(
-            config,
-            q,
-            observed,
-            now,
-            (name) => resolveFieldName(schema, name) ?? name,
-          );
+          // Every slot of a cycle exists, whatever the date range.
+          const slots = isMetricCycle(config.interval)
+            ? metricCycleSlots(config.interval)
+            : undefined;
+          for (const slot of slots ?? [])
+            for (const tuple of series.values()) {
+              tick();
+              const keys: MetricValue[] = [slot, ...tuple];
+              const key = JSON.stringify(keys);
+              if (key.length > keyLimit)
+                throw Error("Metric grouping key length budget exceeded.");
+              if (!groups.has(key)) {
+                if (groups.size >= (options.maxGroups ?? 10000))
+                  throw Error("Metric group budget exceeded.");
+                const bytes = 256 + 16 * keys.length + 4 * key.length;
+                reserve(bytes);
+                groupBytes += bytes;
+                groups.set(key, { keys, rows: [] });
+              }
+            }
+          const range = slots
+            ? undefined
+            : metricDateRange(
+                config,
+                q,
+                observed,
+                now,
+                (name) => resolveFieldName(schema, name) ?? name,
+              );
           if (range)
             for (let time = range[0]; time <= range[1]; ) {
               tick();

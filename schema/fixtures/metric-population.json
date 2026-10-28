@@ -103,6 +103,50 @@
       }
     },
     {
+      "name": "weekday slots fill every day and minCount hides small observed slots",
+      "metric": {
+        "id": "m",
+        "op": "count",
+        "groupBy": ["at"],
+        "dateGrouping": { "field": "at", "interval": "dayOfWeek", "timeZone": "America/New_York", "includeEmpty": true, "range": "query" },
+        "minCount": 2
+      },
+      "expected": {
+        "groupCount": 7,
+        "hiddenGroups": 1,
+        "buckets": [
+          { "keys": [1], "count": 3, "value": 3 },
+          { "keys": [2], "count": 2, "value": 2 },
+          { "keys": [3], "count": 2, "value": 2 },
+          { "keys": [4], "count": 2, "value": 2 },
+          { "keys": [5], "count": 0, "value": 0 },
+          { "keys": [6], "count": 0, "value": 0 },
+          { "keys": [7], "count": 4, "value": 4 }
+        ]
+      }
+    },
+    {
+      "name": "hour slots use the local hour of a fractional-offset zone with other keys",
+      "metric": {
+        "id": "m",
+        "op": "sum",
+        "field": "ms",
+        "groupBy": ["at", "status"],
+        "dateGrouping": { "field": "at", "interval": "hourOfDay", "timeZone": "Asia/Kolkata", "includeEmpty": false, "range": "query" },
+        "where": [{ "field": "kind", "op": "=", "value": "timeout" }, { "field": "ms", "op": ">", "value": "0" }]
+      },
+      "expected": {
+        "groupCount": 5,
+        "buckets": [
+          { "keys": [13, "error"], "count": 1, "value": 90 },
+          { "keys": [14, "ok"], "count": 1, "value": 80 },
+          { "keys": [15, "error"], "count": 1, "value": 120 },
+          { "keys": [16, "error"], "count": 1, "value": 300 },
+          { "keys": [17, "error"], "count": 1, "value": 410 }
+        ]
+      }
+    },
+    {
       "name": "box cohorts use where and minCount",
       "metric": {
         "id": "m",

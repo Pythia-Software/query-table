@@ -393,7 +393,7 @@ export function MetricCard<Row>({
         : buckets !== allBuckets && allBuckets.length > (clause.display?.maxGroups ?? allBuckets.length) && (
             <p className="qt-metric-note">Showing the first {clause.display?.maxGroups} groups in result order{buckets.length > clause.display!.maxGroups! ? " plus Other" : ""}.</p>
           )}
-      {(clause.window || clause.share) && (
+      {(clause.window || clause.share || clause.dateGrouping?.occurrence) && (
         <p className="qt-metric-note">{seriesNote(clause)}</p>
       )}
       {!!result?.hiddenGroups && clause.minCount !== undefined && (
@@ -415,11 +415,31 @@ export function MetricCard<Row>({
   );
 }
 
-/** What one point of a windowed or share metric is. */
+/** What one point of a windowed, share or per-occurrence metric is. */
 function seriesNote(clause: AggregationClause): string {
-  const unit = clause.dateGrouping?.interval ?? "interval",
-    window = clause.window;
+  const interval = clause.dateGrouping?.interval,
+    unit =
+      interval === "hourOfDay"
+        ? "hour of the day"
+        : interval === "dayOfWeek"
+          ? "weekday"
+          : (interval ?? "interval"),
+    window = clause.window,
+    occurrence = clause.dateGrouping?.occurrence;
   const parts: string[] = [];
+  if (occurrence) {
+    const each = `each whole ${occurrence.interval}`;
+    parts.push(
+      clause.distribution?.kind === "box"
+        ? `Spread of the value over ${each}`
+        : `Mean of the value over ${each}`,
+    );
+    parts.push(
+      occurrence.includeEmpty
+        ? `${occurrence.interval}s without rows count as 0 for counts and sums`
+        : `${occurrence.interval}s without rows are left out`,
+    );
+  }
   if (window) {
     const span =
       window.periods === "all"

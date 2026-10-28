@@ -30,7 +30,9 @@
       "day",
       "week",
       "month",
-      "year"
+      "year",
+      "hourOfDay",
+      "dayOfWeek"
     ],
     "timeZone": "string",
     "includeEmpty": "boolean",
@@ -45,6 +47,13 @@
       "include",
       "exclude"
     ]
+  },
+  "occurrence": {
+    "interval": [
+      "hour",
+      "day"
+    ],
+    "includeEmpty": "boolean"
   },
   "display": {
     "kind": [

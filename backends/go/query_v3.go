@@ -83,19 +83,21 @@ type QueryResultV3 struct {
 	Execution   SQLiteComputedExecution `json:"execution"`
 }
 type QueryCapabilitiesV3 struct {
-	RegexSourceFilters        bool   `json:"regexSourceFilters"`
-	RegexAggregateExpressions bool   `json:"regexAggregateExpressions"`
-	MetricFilters             bool   `json:"metricFilters"`
-	MetricMinCount            bool   `json:"metricMinCount"`
-	Version                   int    `json:"version"`
-	GroupedRows               bool   `json:"groupedRows"`
-	CalendarGrouping          bool   `json:"calendarGrouping"`
-	ComputedSourceFilters     bool   `json:"computedSourceFilters"`
-	Regex                     bool   `json:"regex"`
-	MaxRows                   int    `json:"maxRows"`
-	MaxGroups                 int    `json:"maxGroups"`
-	MaxPopulation             int    `json:"maxPopulation"`
-	Profile                   string `json:"profile"`
+	RegexSourceFilters        bool `json:"regexSourceFilters"`
+	RegexAggregateExpressions bool `json:"regexAggregateExpressions"`
+	MetricFilters             bool `json:"metricFilters"`
+	MetricMinCount            bool `json:"metricMinCount"`
+	Version                   int  `json:"version"`
+	GroupedRows               bool `json:"groupedRows"`
+	CalendarGrouping          bool `json:"calendarGrouping"`
+	// CalendarCycles executes the hourOfDay and dayOfWeek date intervals.
+	CalendarCycles        bool   `json:"calendarCycles"`
+	ComputedSourceFilters bool   `json:"computedSourceFilters"`
+	Regex                 bool   `json:"regex"`
+	MaxRows               int    `json:"maxRows"`
+	MaxGroups             int    `json:"maxGroups"`
+	MaxPopulation         int    `json:"maxPopulation"`
+	Profile               string `json:"profile"`
 }
 
 // QueryDatasetV3 works with SQLite and PostgreSQL. SQLite hosts register the
@@ -103,13 +105,13 @@ type QueryCapabilitiesV3 struct {
 // reducers. No database driver, arbitrary request SQL or retained snapshot is
 // supplied by this package.
 type QueryDatasetV3 struct {
-	Schema                            Schema
-	SourceSQL                         string
-	SourceArgs                        []any
-	Scope, Dataset                    string
-	Dialect                           string // sqlite or postgres
-	ComputedGroupable                 map[string]bool
-	ComputedFilterable                map[string]bool
+	Schema             Schema
+	SourceSQL          string
+	SourceArgs         []any
+	Scope, Dataset     string
+	Dialect            string // sqlite or postgres
+	ComputedGroupable  map[string]bool
+	ComputedFilterable map[string]bool
 	// Zero defaults to 10000 rows, 2000 groups and 250000 matching source rows.
 	// Explicit MaxGroups may be 1..100000.
 	MaxRows, MaxGroups, MaxPopulation int
@@ -154,7 +156,7 @@ func (d QueryDatasetV3) Capabilities() QueryCapabilitiesV3 {
 	if d.Dialect == "sqlite" {
 		profile = SQLiteExpressionProfile
 	}
-	return QueryCapabilitiesV3{Version: 3, GroupedRows: true, CalendarGrouping: true, ComputedSourceFilters: len(d.ComputedFilterable) > 0, Regex: false, RegexSourceFilters: d.Dialect == "sqlite", MetricFilters: true, MetricMinCount: true, MaxRows: rows, MaxGroups: groups, MaxPopulation: pop, Profile: profile}
+	return QueryCapabilitiesV3{Version: 3, GroupedRows: true, CalendarGrouping: true, CalendarCycles: true, ComputedSourceFilters: len(d.ComputedFilterable) > 0, Regex: false, RegexSourceFilters: d.Dialect == "sqlite", MetricFilters: true, MetricMinCount: true, MaxRows: rows, MaxGroups: groups, MaxPopulation: pop, Profile: profile}
 }
 func (d QueryDatasetV3) options(ctx context.Context, tx *sql.Tx, q QueryRequestV3, o PlanOptions) (PlanOptions, error) {
 	if err := ctx.Err(); err != nil {

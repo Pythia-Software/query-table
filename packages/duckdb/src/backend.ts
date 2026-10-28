@@ -11,6 +11,9 @@ import {
   histogramCounts,
   compareMetricValues,
   metricDateFloor,
+  isMetricCycle,
+  metricCycleSlot,
+  metricCycleSlots,
   metricDateTime,
   metricDateNext,
   metricDateRange,
@@ -193,6 +196,7 @@ export class DuckDBBackend {
       profile: DUCKDB_PROFILE,
       groupedRows: true,
       calendarGrouping: true,
+      calendarCycles: true,
       computedSourceFilters: definitions.size > 0,
       regex: true,
       regexSourceFilters: true,
@@ -615,7 +619,8 @@ export class DuckDBBackend {
     let dateMapping: string | undefined;
     if (clause.dateGrouping) {
       const config = clause.dateGrouping,
-        source = builder.field(config.field, false);
+        source = builder.field(config.field, false),
+        cycle = isMetricCycle(config.interval) ? config.interval : undefined;
       const dates = await this.run(
         builder.statement(
           `SELECT DISTINCT CAST(${source} AS VARCHAR) AS value FROM ${population} r WHERE ${source} IS NOT NULL`,
@@ -624,7 +629,7 @@ export class DuckDBBackend {
       );
       dateMapping = this.temp(tables);
       await this.sql(
-        `CREATE TEMP TABLE ${id(dateMapping)} (value TIMESTAMPTZ, bucket TIMESTAMPTZ)`,
+        `CREATE TEMP TABLE ${id(dateMapping)} (value TIMESTAMPTZ, bucket ${cycle ? "INTEGER" : "TIMESTAMPTZ"})`,
         [],
         signal,
       );
@@ -636,17 +641,19 @@ export class DuckDBBackend {
             : (this.formatRow({ [config.field]: row.value }, schema)[
                 config.field
               ] as string);
+          const floor = metricDateFloor(
+            metricDateTime(value, config.timeZone),
+            config.interval,
+            config.timeZone,
+          );
+          // A cyclic slot is the local hour or weekday of the record's interval.
           args.push(
             value,
-            new Date(
-              metricDateFloor(
-                metricDateTime(value, config.timeZone),
-                config.interval,
-                config.timeZone,
-              ),
-            ).toISOString(),
+            cycle
+              ? metricCycleSlot(floor, cycle, config.timeZone)
+              : new Date(floor).toISOString(),
           );
-          return `(CAST($${args.length - 1} AS TIMESTAMPTZ), CAST($${args.length} AS TIMESTAMPTZ))`;
+          return `(CAST($${args.length - 1} AS TIMESTAMPTZ), CAST($${args.length} AS ${cycle ? "INTEGER" : "TIMESTAMPTZ"}))`;
         });
         if (values.length)
           await this.sql(
@@ -711,6 +718,8 @@ export class DuckDBBackend {
       return {
         keys: clause.groupBy.map((name, index) => {
           const value = row[`g${index}`] ?? null;
+          if (index === 0 && isMetricCycle(clause.dateGrouping?.interval))
+            return value === null ? null : Number(value);
           return schema.fields.find((field) => field.name === name)?.type ===
             "datetime" && value !== null
             ? (this.formatRow({ [name]: value }, schema)[name] as string)
@@ -740,10 +749,13 @@ export class DuckDBBackend {
     });
     if (clause.dateGrouping?.includeEmpty) {
       const config = clause.dateGrouping,
-        observed = buckets
-          .filter((bucket) => bucket.keys[0] !== null)
-          .map((bucket) => metricDateTime(bucket.keys[0]!));
-      const range = metricDateRange(
+        cycle = isMetricCycle(config.interval) ? config.interval : undefined,
+        observed = cycle
+          ? []
+          : buckets
+              .filter((bucket) => bucket.keys[0] !== null)
+              .map((bucket) => metricDateTime(bucket.keys[0]!));
+      const range = cycle ? undefined : metricDateRange(
         config,
         {
           ...query,
@@ -765,30 +777,33 @@ export class DuckDBBackend {
       const existing = new Set(
         buckets.map((bucket) => JSON.stringify(bucket.keys)),
       );
+      // Every slot of a cycle exists, whatever the date range.
+      const slots: MetricValue[] = cycle ? metricCycleSlots(cycle) : [];
       if (range)
         for (
           let time = range[0];
           time <= range[1];
           time = metricDateNext(time, config.interval, config.timeZone)
-        ) {
-          for (const tuple of series.values()) {
-            const values = [new Date(time).toISOString(), ...tuple];
-            if (!existing.has(JSON.stringify(values))) {
-              if (buckets.length >= this.capabilities.maxGroups)
-                throw Error("DuckDB calendar group budget exceeded.");
-              buckets.push({
-                keys: values,
-                count: 0,
-                value:
-                  (!clause.expression &&
-                    ["count", "count_distinct", "sum"].includes(clause.op)) ||
-                  /^(COUNT|COUNT_DISTINCT|SUM)\([^)]*\)$/.test(
-                    metricExpression(clause),
-                  )
-                    ? 0
-                    : null,
-              });
-            }
+        )
+          slots.push(new Date(time).toISOString());
+      for (const slot of slots)
+        for (const tuple of series.values()) {
+          const values = [slot, ...tuple];
+          if (!existing.has(JSON.stringify(values))) {
+            if (buckets.length >= this.capabilities.maxGroups)
+              throw Error("DuckDB calendar group budget exceeded.");
+            buckets.push({
+              keys: values,
+              count: 0,
+              value:
+                (!clause.expression &&
+                  ["count", "count_distinct", "sum"].includes(clause.op)) ||
+                /^(COUNT|COUNT_DISTINCT|SUM)\([^)]*\)$/.test(
+                  metricExpression(clause),
+                )
+                  ? 0
+                  : null,
+            });
           }
         }
     }

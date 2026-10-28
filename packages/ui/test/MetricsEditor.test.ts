@@ -1017,3 +1017,49 @@ it("clears a window and share when the display changes to one that cannot use th
     expect(saved.display).toEqual({ kind: "box" });
   } finally { act(() => root.unmount()); host.remove(); }
 });
+
+it("offers hour-of-day and day-of-week slots with per-occurrence summaries", async () => {
+  const host = document.createElement("div"); document.body.append(host);
+  const root = createRoot(host), setQuery = vi.fn();
+  const fields: FieldDef<unknown>[] = [
+    { name: "at", label: "At", type: "datetime", source: { kind: "backend" }, aggregate: { groupable: true } },
+    { name: "tokens", label: "Tokens", type: "number", source: { kind: "backend" } },
+  ];
+  const clause: AggregationClause = {
+    id: "m", op: "count", groupBy: ["at"], display: { kind: "line" }, window: { periods: 3 },
+    dateGrouping: { field: "at", interval: "day", includeEmpty: true, range: "query", timeZone: "Asia/Kolkata" },
+  };
+  const api = { aggregations: { clauses: [clause] }, setQuery, rows: [], total: 0, query: { where: [] } } as unknown as QueryTableApi<unknown>;
+  const choose = (label: string, value: string) => act(() => {
+    const select = host.querySelector<HTMLSelectElement>(`[aria-label="${label}"]`)!;
+    select.value = value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  const saved = () => {
+    act(() => [...host.querySelectorAll("button")].find((b) => b.textContent === "Apply metrics")!.click());
+    return setQuery.mock.calls.at(-1)![0]({ where: [] }).aggregations[0] as AggregationClause;
+  };
+  try {
+    await act(async () => root.render(createElement(MetricsEditor, { api, fields, onClose: vi.fn() })));
+    const intervals = [...host.querySelector<HTMLSelectElement>('[aria-label="Date interval"]')!.options].map((o) => o.value);
+    expect(intervals).toEqual(["exact", "hour", "day", "week", "month", "year", "hourOfDay", "dayOfWeek"]);
+    expect(host.querySelector('[aria-label="Summarise each slot"]')).toBeNull();
+    choose("Date interval", "dayOfWeek");
+    // Slots have no window; the timezone is kept.
+    expect(host.querySelector('[aria-label="Window"]')).toBeNull();
+    const weekly = saved();
+    expect(weekly.window).toBeUndefined();
+    expect(weekly.dateGrouping).toMatchObject({ interval: "dayOfWeek", timeZone: "Asia/Kolkata" });
+    choose("Summarise each slot", "day");
+    expect(host.querySelector<HTMLInputElement>('[aria-label="Whole intervals only"]')!.disabled).toBe(true);
+    expect(saved().dateGrouping).toMatchObject({ occurrence: { interval: "day", includeEmpty: true } });
+    act(() => host.querySelector<HTMLInputElement>('[aria-label="Count idle occurrences"]')!.click());
+    expect(saved().dateGrouping?.occurrence).toEqual({ interval: "day", includeEmpty: false });
+    // Hour-of-day slots occur hourly.
+    choose("Date interval", "hourOfDay");
+    expect([...host.querySelector<HTMLSelectElement>('[aria-label="Summarise each slot"]')!.options].map((o) => o.value)).toEqual(["rows", "hour"]);
+    expect(saved().dateGrouping?.occurrence).toEqual({ interval: "hour", includeEmpty: false });
+    choose("Date interval", "day");
+    expect(saved().dateGrouping?.occurrence).toBeUndefined();
+  } finally { act(() => root.unmount()); host.remove(); }
+});

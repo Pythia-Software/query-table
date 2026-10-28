@@ -19,6 +19,7 @@ import {
   finiteMetricNumber,
   metricScale,
   metricGroupLabel,
+  metricGroupKeyLabel,
   metricDateGroupFormat,
   metricPieSlices,
   metricBoxWhiskers,
@@ -636,7 +637,7 @@ export function MetricChart({
           compact && clause.dateGrouping ? calendarLabels.get(b) ?? "" :
           groupFormat
             ? formatMetricOutput(b.keys[0], groupFormat, locale).text
-            : String(b.keys[0]);
+            : metricGroupKeyLabel(b.keys[0], 0, clause, locale);
         const series = new Map<string, typeof ordered>();
         for (const point of ordered) {
           const key = metricTupleKey(point.bucket.keys.slice(1));

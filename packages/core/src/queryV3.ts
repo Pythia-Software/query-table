@@ -2,6 +2,7 @@ import { createGroupingModel, withoutGrouping, type GroupingDefinition } from ".
 import { normalizeQueryState, predicatesOf, type QueryState, type AggregationClause } from "./query";
 import { toServerQuery, type ServerQuery, type AggregationResult } from "./encode";
 import { validateMetric, toMetricQuery } from "./metrics";
+import { isMetricCycle } from "./metricDates";
 import type { ComputedExecution } from "./computed";
 import type { FieldSchema, FieldDef } from "./schema";
 import { evaluationTime } from "./relativeTime";
@@ -11,6 +12,8 @@ export interface QueryCapabilitiesV3 {
   version: 3;
   groupedRows: boolean;
   calendarGrouping: boolean;
+  /** Executes the cyclic `hourOfDay` and `dayOfWeek` date intervals. */
+  calendarCycles?: boolean;
   computedSourceFilters: boolean;
   regex: boolean;
   regexSourceFilters?: boolean;
@@ -97,6 +100,8 @@ export function toQueryRequestV3<Row>(query: QueryState, baseSchema: FieldSchema
   for (const metric of metrics) {
     diagnostics.push(...validateMetric(metric, resultSchema).map(issue => issue.message));
     if (metric.dateGrouping && !capabilities.calendarGrouping) diagnostics.push("This server does not support calendar grouping.");
+    else if (isMetricCycle(metric.dateGrouping?.interval) && !capabilities.calendarCycles)
+      diagnostics.push("This server does not support hour-of-day or day-of-week grouping.");
   }
   const revisions: Record<string, string> = Object.create(null);
   for (const [id, revision] of Object.entries(execution?.resolvedRevisions ?? {})) {

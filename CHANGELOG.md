@@ -47,6 +47,36 @@
   ignoring order. The query builder shows the term as one chip with AND
   branches; its predicates can be edited, negated or removed, and merging
   filters ORs their branches.
+- Hour-of-day and day-of-week grouping. `MetricDateGrouping.interval` accepts
+  `"hourOfDay"` (keys 0–23) and `"dayOfWeek"` (ISO keys 1 for Monday to 7). A
+  record falls in the slot of its timestamp in `dateGrouping.timeZone`,
+  including across daylight-saving changes and in fractional-offset zones.
+  Slots combine with other grouping fields; `includeEmpty` lists all 24 or 7
+  slots for each series without needing a date range, and `minCount`,
+  `hiddenGroups`, sorting, limits, shares and `partialIntervals` work as for
+  calendar intervals. The local engine, `applyAggregations`, DuckDB and the Go
+  v3 executor (SQLite and PostgreSQL) return identical buckets, checked by the
+  shared population fixture and the SQLite parity test. Servers advertise
+  `calendarCycles` in `QueryCapabilitiesV3`. The v1/v2 metric protocols still
+  reject date grouping.
+- Per-occurrence statistics for slots. `dateGrouping.occurrence: { interval:
+  "day" | "hour", includeEmpty }` evaluates the metric once per whole day or
+  hour of each slot, then gives the mean of those values, or a box over them
+  with `distribution: { kind: "box" }`. Occurrences the date bounds cut short,
+  and the one in progress, are left out, as with `partialIntervals:
+  "exclude"`. With `includeEmpty`, idle occurrences count as 0 for direct
+  counts, distinct counts and sums and have no value for ratios. Buckets report
+  their sample size as `occurrences`. `planMetricSeries` computes them from a
+  calendar metric, so servers need no changes.
+- `inspectBucketQuery` drills into one slot with existing predicates: the
+  slot's occurrences inside the date bounds, as a range plus one OR group per
+  gap. It returns `null` without a lower and upper date bound or past the
+  100-predicate budget.
+- Charts, lists and tables label slots "09:00" and "Mon" (`metricCycleLabel`),
+  and line charts order them by slot. The metric editor offers Hour of day and
+  Day of week, and a per-day or per-hour summary for each slot. Link
+  normalization in TypeScript and Go accepts the new interval values and
+  `occurrence`.
 
 ### Changed
 

@@ -169,6 +169,11 @@ export function MetricsEditor<Row>({
   const workbench = useMetricWorkbench(view === "editor");
   const selected = drafts.find((c) => c.id === active);
   const chosen = selected?.display ?? { kind: "auto" as const };
+  // A distribution reads a row formula, except a box over a slot's
+  // occurrences, which summarises the metric itself.
+  const rowInput =
+    ["box", "histogram"].includes(chosen.kind) &&
+    !selected?.dateGrouping?.occurrence;
   const dateField = fields.find(
     (f) => f.name === selected?.groupBy[0] && f.type === "datetime",
   );
@@ -198,6 +203,7 @@ export function MetricsEditor<Row>({
         if (compileRef.current) compileRef.current(c);
         else if (
           c.distribution &&
+          !c.dateGrouping?.occurrence &&
           ["box", "histogram"].includes(c.display?.kind ?? c.distribution.kind)
         )
           compileFormula(c.distribution.input, fields);
@@ -580,7 +586,7 @@ export function MetricsEditor<Row>({
   function changeExpression(source: string, secondary = false) {
     if (!selected) return;
     if (secondary) patch(selected.id, { expressionY: source });
-    else if (["box", "histogram"].includes(chosen.kind))
+    else if (rowInput)
       patch(selected.id, {
         distribution: {
           ...(selected.distribution ?? {
@@ -1440,7 +1446,7 @@ export function MetricsEditor<Row>({
                     <FormulaEditor
                       key={`${selected.id}-x`}
                       value={
-                        ["box", "histogram"].includes(chosen.kind)
+                        rowInput
                           ? (selected.distribution?.input ?? "NULL")
                           : metricExpression(selected)
                       }
@@ -1449,7 +1455,7 @@ export function MetricsEditor<Row>({
                       compile={(source) =>
                         api.aggregations.compile
                           ? api.aggregations.compile(
-                              ["box", "histogram"].includes(chosen.kind)
+                              rowInput
                                 ? {
                                     ...selected,
                                     distribution: {
@@ -1459,7 +1465,7 @@ export function MetricsEditor<Row>({
                                   }
                                 : { ...selected, expression: source },
                             )
-                          : ["box", "histogram"].includes(chosen.kind)
+                          : rowInput
                             ? compileFormula(source, fields)
                             : compileMetric(source, fields)
                       }
@@ -1658,14 +1664,30 @@ export function MetricsEditor<Row>({
                             }
                             const interval = e.target
                               .value as MetricDateGrouping["interval"];
+                            const cyclic =
+                              interval === "hourOfDay" ||
+                              interval === "dayOfWeek";
+                            const { occurrence, ...previous } =
+                              selected.dateGrouping ?? {};
                             patch(selected.id, {
                               dateGrouping: {
                                 field: dateField.name,
                                 includeEmpty: false,
                                 range: "query",
-                                ...selected.dateGrouping,
+                                ...previous,
                                 interval,
+                                // Hour-of-day slots occur hourly.
+                                ...(cyclic && occurrence
+                                  ? {
+                                      occurrence:
+                                        interval === "hourOfDay"
+                                          ? { ...occurrence, interval: "hour" }
+                                          : occurrence,
+                                    }
+                                  : {}),
                               },
+                              // A window spans calendar intervals, not slots.
+                              ...(cyclic ? { window: undefined } : {}),
                             });
                           }}
                         >
@@ -1675,8 +1697,82 @@ export function MetricsEditor<Row>({
                           <option value="week">Week</option>
                           <option value="month">Month</option>
                           <option value="year">Year</option>
+                          <option value="hourOfDay">Hour of day</option>
+                          <option value="dayOfWeek">Day of week</option>
                         </select>
                       </label>
+                      {(selected.dateGrouping?.interval === "hourOfDay" ||
+                        selected.dateGrouping?.interval === "dayOfWeek") && (
+                        <>
+                          <label>
+                            Summarise each slot
+                            <select
+                              aria-label="Summarise each slot"
+                              value={
+                                selected.dateGrouping.occurrence?.interval ??
+                                "rows"
+                              }
+                              onChange={(e) => {
+                                const {
+                                  occurrence,
+                                  partialIntervals: _partial,
+                                  ...rest
+                                } = selected.dateGrouping!;
+                                const value = e.target.value;
+                                patch(selected.id, {
+                                  dateGrouping:
+                                    value === "hour" || value === "day"
+                                      ? {
+                                          ...rest,
+                                          occurrence: {
+                                            includeEmpty:
+                                              occurrence?.includeEmpty ?? true,
+                                            interval: value,
+                                          },
+                                        }
+                                      : rest,
+                                });
+                              }}
+                            >
+                              <option value="rows">Over all its rows</option>
+                              {selected.dateGrouping.interval ===
+                                "dayOfWeek" && (
+                                <option value="day">Per whole day</option>
+                              )}
+                              <option value="hour">Per whole hour</option>
+                            </select>
+                          </label>
+                          {selected.dateGrouping.occurrence && (
+                            <label className="qt-metric-date-toggle">
+                              <input
+                                type="checkbox"
+                                aria-label="Count idle occurrences"
+                                checked={
+                                  selected.dateGrouping.occurrence.includeEmpty
+                                }
+                                onChange={(e) =>
+                                  patch(selected.id, {
+                                    dateGrouping: {
+                                      ...selected.dateGrouping!,
+                                      occurrence: {
+                                        ...selected.dateGrouping!.occurrence!,
+                                        includeEmpty: e.target.checked,
+                                      },
+                                    },
+                                  })
+                                }
+                              />
+                              Count {selected.dateGrouping.occurrence.interval}s
+                              without rows
+                            </label>
+                          )}
+                          <p className="qt-metric-help">
+                            {selected.dateGrouping.occurrence
+                              ? `Each slot shows the mean of its whole ${selected.dateGrouping.occurrence.interval}s inside the date filters, or their spread as a box plot. Counts and sums are 0 for ${selected.dateGrouping.occurrence.interval}s without rows; averages and ratios leave them out.`
+                              : "Each slot pools every row at that local hour or weekday."}
+                          </p>
+                        </>
+                      )}
                       {selected.dateGrouping && (
                         <label>
                           Grouping timezone
@@ -1734,7 +1830,11 @@ export function MetricsEditor<Row>({
                         Add a bucket for every interval, even when no rows
                         match.
                       </p>
-                      {selected.dateGrouping?.includeEmpty && (
+                      {selected.dateGrouping &&
+                        ((selected.dateGrouping.interval === "hourOfDay" ||
+                        selected.dateGrouping.interval === "dayOfWeek")
+                          ? selected.dateGrouping.occurrence?.includeEmpty
+                          : selected.dateGrouping.includeEmpty) && (
                         <>
                           <label>
                             Complete dates across
@@ -1805,7 +1905,10 @@ export function MetricsEditor<Row>({
                         <input
                           type="checkbox"
                           aria-label="Whole intervals only"
-                          disabled={!selected.dateGrouping}
+                          disabled={
+                            !selected.dateGrouping ||
+                            !!selected.dateGrouping.occurrence
+                          }
                           checked={
                             selected.dateGrouping?.partialIntervals ===
                             "exclude"
@@ -2892,7 +2995,15 @@ function MetricSeriesSettings({
   const first =
     fields.find((f) => f.name === clause.groupBy[0])?.label ??
     clause.groupBy[0];
-  const unit = dateGrouping?.interval ?? "interval";
+  const cyclic =
+    dateGrouping?.interval === "hourOfDay" ||
+    dateGrouping?.interval === "dayOfWeek";
+  const unit =
+    dateGrouping?.interval === "hourOfDay"
+      ? "hour of the day"
+      : dateGrouping?.interval === "dayOfWeek"
+        ? "weekday"
+        : (dateGrouping?.interval ?? "interval");
   const mode = !window ? "none" : window.periods === "all" ? "all" : "trailing";
   const setWindow = (next: MetricWindow | undefined) =>
     onChange({
@@ -2924,7 +3035,7 @@ function MetricSeriesSettings({
       {...settings}
       summary={summary || "Values as computed"}
     >
-      {dateGrouping && (
+      {dateGrouping && !cyclic && (
         <>
           <label>
             Window
@@ -3323,6 +3434,7 @@ function MetricInspection({
     <>
       <code className="qt-metric-inspection-expression">
         {clause.distribution &&
+        !clause.dateGrouping?.occurrence &&
         ["box", "histogram"].includes(clause.display?.kind ?? "")
           ? clause.distribution.input
           : metricExpression(clause)}

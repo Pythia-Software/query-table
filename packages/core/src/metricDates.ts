@@ -1,6 +1,10 @@
 import { coerceValue } from "./ops";
 import { isWhereGroup, type QueryState } from "./query";
-import type { MetricDateGrouping, MetricValue } from "./metricTypes";
+import type {
+  MetricCycleInterval,
+  MetricDateGrouping,
+  MetricValue,
+} from "./metricTypes";
 import { Temporal } from "temporal-polyfill";
 
 export const METRIC_DATE_INTERVALS = [
@@ -9,7 +13,54 @@ export const METRIC_DATE_INTERVALS = [
   "week",
   "month",
   "year",
+  "hourOfDay",
+  "dayOfWeek",
 ] as const;
+export const METRIC_CYCLE_INTERVALS = ["hourOfDay", "dayOfWeek"] as const;
+
+/** Whether an interval is cyclic: keyed by slot number, not by date. */
+export function isMetricCycle(
+  interval: string | undefined,
+): interval is MetricCycleInterval {
+  return interval === "hourOfDay" || interval === "dayOfWeek";
+}
+
+/** Every slot of a cyclic interval, in order: 0–23 or 1–7 (ISO, Monday 1). */
+export function metricCycleSlots(interval: MetricCycleInterval): number[] {
+  return interval === "hourOfDay"
+    ? Array.from({ length: 24 }, (_, i) => i)
+    : [1, 2, 3, 4, 5, 6, 7];
+}
+
+/** The calendar interval one occurrence of a slot spans: its hour or day.
+ * Calendar intervals are their own unit. */
+export function metricCalendarUnit(
+  interval: MetricDateGrouping["interval"],
+): Exclude<MetricDateGrouping["interval"], MetricCycleInterval> {
+  return interval === "hourOfDay"
+    ? "hour"
+    : interval === "dayOfWeek"
+      ? "day"
+      : interval;
+}
+
+/** The slot an instant occupies in `timeZone`: its local wall-clock hour
+ * (0–23), or its local ISO weekday (1 = Monday … 7 = Sunday). */
+export function metricCycleSlot(
+  time: number,
+  interval: MetricCycleInterval,
+  timeZone = "UTC",
+): number {
+  if (timeZone === "UTC") {
+    const date = new Date(time);
+    return interval === "hourOfDay"
+      ? date.getUTCHours()
+      : ((date.getUTCDay() + 6) % 7) + 1;
+  }
+  const zoned =
+    Temporal.Instant.fromEpochMilliseconds(time).toZonedDateTimeISO(timeZone);
+  return interval === "hourOfDay" ? zoned.hour : zoned.dayOfWeek;
+}
 
 /** Strict calendar input; timestamps require an explicit offset. */
 export function metricDateTime(value: MetricValue, timeZone = "UTC"): number {
@@ -64,9 +115,10 @@ function metricOffsetTransition(
 
 export function metricDateFloor(
   time: number,
-  interval: MetricDateGrouping["interval"],
+  cycleOrInterval: MetricDateGrouping["interval"],
   timeZone = "UTC",
 ): number {
+  const interval = metricCalendarUnit(cycleOrInterval);
   if (timeZone !== "UTC") {
     const zoned =
       Temporal.Instant.fromEpochMilliseconds(time).toZonedDateTimeISO(timeZone);
@@ -96,9 +148,10 @@ export function metricDateFloor(
 
 export function metricDateNext(
   time: number,
-  interval: MetricDateGrouping["interval"],
+  cycleOrInterval: MetricDateGrouping["interval"],
   timeZone = "UTC",
 ): number {
+  const interval = metricCalendarUnit(cycleOrInterval);
   if (timeZone !== "UTC") {
     const zoned =
       Temporal.Instant.fromEpochMilliseconds(time).toZonedDateTimeISO(timeZone);
@@ -173,7 +226,33 @@ export function validateDateGrouping(config: MetricDateGrouping): void {
       );
     }
   }
-  if (config.includeEmpty && config.range === "custom") {
+  if (config.occurrence !== undefined) {
+    const o = config.occurrence as unknown as Record<string, unknown>;
+    if (
+      !o ||
+      typeof o !== "object" ||
+      Array.isArray(o) ||
+      !["hour", "day"].includes(o.interval as string) ||
+      typeof o.includeEmpty !== "boolean"
+    )
+      throw Error("Invalid date grouping occurrence.");
+    if (!isMetricCycle(config.interval))
+      throw Error(
+        "Occurrences summarise an hour-of-day or day-of-week slot; calendar intervals are already one occurrence each.",
+      );
+    if (config.interval === "hourOfDay" && o.interval !== "hour")
+      throw Error("An hour-of-day slot occurs once per hour: use hourly occurrences.");
+    if (config.partialIntervals === "include")
+      throw Error(
+        "Occurrences are always whole: a partial day or hour would bias the typical value. Leave out partialIntervals.",
+      );
+  }
+  if (
+    config.range === "custom" &&
+    (isMetricCycle(config.interval)
+      ? config.occurrence?.includeEmpty
+      : config.includeEmpty)
+  ) {
     const start = metricDateTime(config.start ?? "", config.timeZone),
       end = metricCustomEndTime(config.end ?? "", config.timeZone);
     if (end < start)

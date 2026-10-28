@@ -378,6 +378,9 @@ export interface AggregationBucket {
   /** Calendar intervals combined into a windowed point (`AggregationClause.window`);
    *  fewer than its periods where the window starts before the first interval. */
   intervals?: number;
+  /** Occurrences summarised by a cyclic slot (`dateGrouping.occurrence`):
+   *  those with a value, the samples of its mean and box. */
+  occurrences?: number;
   /** The metric: a number for count/sum/avg, or the column's value for min/max
    *  (which may be a string for text/datetime). null when undefined (e.g. avg of
    *  an all-null column). */

@@ -7,7 +7,11 @@ import {
   metricDisplayBuckets,
   isMetricOtherBucket,
   metricGroupLabel,
+  metricGroupKeyLabel,
+  metricCycleLabel,
+  metricDateGroupFormat,
 } from "../src/metricChartHelpers";
+import { compactCalendarLabels } from "../src/compactMetricChart";
 import type { MetricBucket, RenderingClause } from "../src/metricTypes";
 const clause: RenderingClause = { id: "x", op: "count", groupBy: ["os"] };
 const bucket = (key: string, value: number | null): MetricBucket => ({
@@ -159,4 +163,27 @@ it("keeps interpolated whiskers outside quartiles and sampled extremes complete 
     if(summary.min<summary.low)expect(metricBoxOutliers(sampled)).toContain(summary.min);
     expect(summary).toEqual(before);
   }
+});
+
+describe("cyclic slot labels", () => {
+  const hours: RenderingClause = { id: "h", op: "count", groupBy: ["at"], dateGrouping: { field: "at", interval: "hourOfDay", timeZone: "Asia/Kolkata", includeEmpty: true, range: "query" } };
+  const days: RenderingClause = { ...hours, dateGrouping: { ...hours.dateGrouping!, interval: "dayOfWeek" } };
+  it("labels hours and ISO weekdays", () => {
+    expect(metricCycleLabel(9, "hourOfDay")).toBe("09:00");
+    expect(metricCycleLabel(23, "hourOfDay", "en-US", true)).toBe("23:00–00:00");
+    expect(metricCycleLabel(1, "dayOfWeek", "en-US")).toBe("Mon");
+    expect(metricCycleLabel(7, "dayOfWeek", "en-US", true)).toBe("Sunday");
+    expect(metricCycleLabel(8, "dayOfWeek")).toBeUndefined();
+    expect(metricGroupKeyLabel(0, 0, hours)).toBe("00:00");
+    expect(metricGroupKeyLabel(3, 0, days, "en-US")).toBe("Wed");
+    expect(metricGroupKeyLabel(null, 0, days)).toBe("NULL");
+    expect(metricDateGroupFormat(days)).toBeUndefined();
+    expect(metricGroupLabel({ keys: [5, "a"], value: 1, count: 1 }, days, "en-US")).toBe("Fri / a");
+  });
+  it("orders slots by number and labels compact axes sparsely", () => {
+    const buckets = [3, 0, 12, 6].map((slot) => ({ keys: [slot], value: 1, count: 1 }));
+    expect(chronologicalBuckets(buckets).map((p) => p.bucket.keys[0])).toEqual([0, 3, 6, 12]);
+    const labels = compactCalendarLabels(buckets.map((bucket, i) => ({ bucket, x: i * 40 })), hours, "en-US");
+    expect([...labels.values()]).toEqual(["00:00", "12:00", "06:00"]);
+  });
 });

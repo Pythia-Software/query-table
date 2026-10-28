@@ -77,3 +77,65 @@ func TestCalendarEmptySeriesDoesNotWalkRange(t *testing.T) {
 		}
 	}
 }
+
+func TestCalendarCycleSlots(t *testing.T) {
+	cases := []struct {
+		zone, interval, instant string
+		want                    int
+	}{
+		{"America/New_York", "hourOfDay", "2026-03-08T06:15:00Z", 1}, // 01:15 EST
+		{"America/New_York", "hourOfDay", "2026-03-08T07:15:00Z", 3}, // 03:15 EDT, after the gap
+		{"America/New_York", "hourOfDay", "2026-11-01T05:15:00Z", 1}, // 01:15 EDT
+		{"America/New_York", "hourOfDay", "2026-11-01T06:15:00Z", 1}, // 01:15 EST, repeated
+		{"Asia/Kolkata", "hourOfDay", "2026-03-02T03:15:00Z", 8},
+		{"Asia/Kolkata", "hourOfDay", "2026-03-02T03:45:00Z", 9},
+		{"Asia/Kolkata", "dayOfWeek", "2026-03-01T18:45:00Z", 1}, // Monday 00:15
+		{"UTC", "dayOfWeek", "2026-03-01T23:59:59Z", 7},
+		{"Australia/Lord_Howe", "hourOfDay", "2026-10-03T15:35:00Z", 2}, // 02:35 after a 30-minute gap
+	}
+	for _, c := range cases {
+		loc, err := calendarLocation(MetricDateGrouping{Field: "at", Interval: c.interval, TimeZone: c.zone, Range: "query"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		instant, _ := time.Parse(time.RFC3339, c.instant)
+		floor, err := calendarFloor(instant, c.interval, loc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := calendarSlot(floor, c.interval, loc); got != c.want || calendarSlot(instant, c.interval, loc) != c.want {
+			t.Errorf("%s %s %s: slot %d, want %d", c.zone, c.interval, c.instant, got, c.want)
+		}
+	}
+	if len(calendarSlots("hourOfDay")) != 24 || calendarSlots("hourOfDay")[23] != 23 || !reflect.DeepEqual(calendarSlots("dayOfWeek"), []float64{1, 2, 3, 4, 5, 6, 7}) {
+		t.Fatal("slot lists")
+	}
+	if _, err := calendarLocation(MetricDateGrouping{Field: "at", Interval: "minuteOfHour", Range: "query"}); err == nil {
+		t.Fatal("unknown cyclic interval accepted")
+	}
+}
+
+// Every slot is filled for each observed series, without a date range.
+func TestCalendarCycleFill(t *testing.T) {
+	config := MetricDateGrouping{Field: "at", Interval: "dayOfWeek", IncludeEmpty: true, Range: "query"}
+	spec := AggSpec{ID: "m", Op: "count", GroupBy: []string{"at", "k"}, DateGrouping: &config}
+	result := SQLiteMetricV2{Buckets: []SQLiteMetricV2Bucket{{Keys: []any{float64(3), "a"}, Count: 2, Value: float64(2)}, {Keys: []any{nil, "b"}, Count: 1, Value: float64(1)}}}
+	if err := fillCalendarBuckets(context.Background(), &result, config, spec, MetricQuery{}, time.Now(), time.UTC, 2000); err != nil {
+		t.Fatal(err)
+	}
+	sortCalendarBuckets(result.Buckets, spec)
+	keys := [][]any{}
+	for _, bucket := range result.Buckets {
+		keys = append(keys, bucket.Keys)
+		if bucket.Count == 0 && bucket.Value != float64(0) {
+			t.Fatalf("empty slot value %v", bucket.Value)
+		}
+	}
+	want := [][]any{{1.0, "a"}, {2.0, "a"}, {3.0, "a"}, {4.0, "a"}, {5.0, "a"}, {6.0, "a"}, {7.0, "a"}, {nil, "b"}}
+	if !reflect.DeepEqual(keys, want) {
+		t.Fatalf("keys %v", keys)
+	}
+	if err := fillCalendarBuckets(context.Background(), &result, config, spec, MetricQuery{}, time.Now(), time.UTC, 8); err != nil {
+		t.Fatal("a complete cycle needs no new groups", err)
+	}
+}

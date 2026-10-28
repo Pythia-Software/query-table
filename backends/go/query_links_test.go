@@ -328,7 +328,7 @@ func TestMetricOptionTablesMatchTypeScript(t *testing.T) {
 		t.Fatal(err)
 	}
 	tables := map[string][]optionSpec{
-		"top": metricTopOptions, "window": metricWindowOptions, "dateGrouping": metricDateOptions,
+		"top": metricTopOptions, "window": metricWindowOptions, "dateGrouping": metricDateOptions, "occurrence": metricOccurrenceOptions,
 		"display": metricDisplayOptions, "scale": metricScaleOptions, "format": metricFormatOptions,
 		"list": metricListOptions, "pivot": metricPivotOptions, "distribution": metricDistributionOptions,
 		"layout": metricLayoutOptions,

@@ -21,13 +21,25 @@ export const METRIC_OPTION_SPECS = {
   },
   dateGrouping: {
     field: "string",
-    interval: ["hour", "day", "week", "month", "year"],
+    interval: [
+      "hour",
+      "day",
+      "week",
+      "month",
+      "year",
+      "hourOfDay",
+      "dayOfWeek",
+    ],
     timeZone: "string",
     includeEmpty: "boolean",
     range: ["query", "observed", "custom"],
     start: "string",
     end: "string",
     partialIntervals: ["include", "exclude"],
+  },
+  occurrence: {
+    interval: ["hour", "day"],
+    includeEmpty: "boolean",
   },
   display: {
     kind: [
@@ -163,6 +175,14 @@ export function normalizeMetricOptions(
         !d.range
       )
         diagnostics.push("Invalid metric date grouping.");
+      const occurrence = raw.dateGrouping.occurrence;
+      if (record(occurrence)) {
+        const o = copy(occurrence, METRIC_OPTION_SPECS.occurrence);
+        if (!o.interval || typeof o.includeEmpty !== "boolean")
+          diagnostics.push("Invalid metric date grouping occurrence.");
+        d.occurrence = o;
+      } else if (occurrence !== undefined)
+        diagnostics.push("Invalid metric date grouping occurrence.");
       out.dateGrouping = d;
     } else diagnostics.push("Invalid metric date grouping.");
   }

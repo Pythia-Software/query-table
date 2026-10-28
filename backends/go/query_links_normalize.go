@@ -473,13 +473,17 @@ var (
 	}
 	metricDateOptions = []optionSpec{
 		{key: "field", kind: optionString},
-		enumOption("interval", "hour", "day", "week", "month", "year"),
+		enumOption("interval", "hour", "day", "week", "month", "year", "hourOfDay", "dayOfWeek"),
 		{key: "timeZone", kind: optionString},
 		{key: "includeEmpty", kind: optionBoolean},
 		enumOption("range", "query", "observed", "custom"),
 		{key: "start", kind: optionString},
 		{key: "end", kind: optionString},
 		enumOption("partialIntervals", "include", "exclude"),
+	}
+	metricOccurrenceOptions = []optionSpec{
+		enumOption("interval", "hour", "day"),
+		{key: "includeEmpty", kind: optionBoolean},
 	}
 	metricDisplayOptions = []optionSpec{
 		enumOption("kind", "auto", "value", "table", "list", "bar-horizontal", "bar-vertical", "line", "pie", "donut",
@@ -593,6 +597,16 @@ func normalizeLinkMetricOptions(raw *jsValue) *jsValue {
 			if !field.isString() || field.s == "" || jsLength(field.s) > 256 || !d.get("interval").truthy() ||
 				includeEmpty == nil || includeEmpty.kind != jsBool || !d.get("range").truthy() {
 				m.diagnostics = append(m.diagnostics, "Invalid metric date grouping.")
+			}
+			if occurrence := dateGrouping.get("occurrence"); occurrence.isRecord() {
+				o := m.copy(occurrence, metricOccurrenceOptions)
+				includeEmpty := o.get("includeEmpty")
+				if !o.get("interval").truthy() || includeEmpty == nil || includeEmpty.kind != jsBool {
+					m.diagnostics = append(m.diagnostics, "Invalid metric date grouping occurrence.")
+				}
+				d.set("occurrence", o)
+			} else if occurrence != nil {
+				m.diagnostics = append(m.diagnostics, "Invalid metric date grouping occurrence.")
 			}
 			out.set("dateGrouping", d)
 		} else {

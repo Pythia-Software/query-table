@@ -7,6 +7,32 @@ import type {
 } from "./metricTypes";
 import { metricTimestamp, formatMetricOutput } from "./metricFormat";
 import { metricTupleKey } from "./metricColors";
+/** A cyclic slot's label: "09:00" for an hour of the day and the locale's
+ * weekday ("Mon", or "Monday" in detail) for an ISO day of the week. */
+export function metricCycleLabel(
+  value: MetricValue | undefined,
+  interval: string | undefined,
+  locale?: string,
+  detailed = false,
+): string | undefined {
+  if (typeof value !== "number" || !Number.isInteger(value)) return undefined;
+  if (interval === "hourOfDay" && value >= 0 && value <= 23) {
+    const hour = `${String(value).padStart(2, "0")}:00`;
+    return detailed
+      ? `${hour}–${String((value + 1) % 24).padStart(2, "0")}:00`
+      : hour;
+  }
+  if (interval === "dayOfWeek" && value >= 1 && value <= 7)
+    // 2024-01-01 was a Monday, ISO day 1.
+    return new Intl.DateTimeFormat(locale, {
+      weekday: detailed ? "long" : "short",
+      timeZone: "UTC",
+    }).format(Date.UTC(2024, 0, value));
+  return undefined;
+}
+const cyclic = (clause?: RenderingClause) =>
+  clause?.dateGrouping?.interval === "hourOfDay" ||
+  clause?.dateGrouping?.interval === "dayOfWeek";
 /** Calendar group labels must describe the same local dates as the computation. */
 export function metricDateGroupFormat(
   clause: RenderingClause,
@@ -14,7 +40,8 @@ export function metricDateGroupFormat(
   const grouping = clause.dateGrouping;
   // Scatter/histogram X formats survive display changes, but describe the
   // measure axis. Only explicit calendar grouping gives them date-key meaning.
-  if (!grouping) return undefined;
+  // Cyclic slots are numbers, labelled by metricGroupKeyLabel.
+  if (!grouping || cyclic(clause)) return undefined;
   const format = clause.display?.xFormat;
   return {
     kind: "date",
@@ -43,6 +70,11 @@ export function metricGroupKeyLabel(
 ): string {
   if (value == null) return "NULL";
   if (axis !== 0 || !clause?.dateGrouping) return String(value);
+  if (cyclic(clause))
+    return (
+      metricCycleLabel(value, clause.dateGrouping.interval, locale, detailed) ??
+      String(value)
+    );
   const format = detailed
     ? {
         kind: "datetime" as const,
