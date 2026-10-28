@@ -47,6 +47,7 @@
     "test:filter-values": "node demo/filter-value-test.mjs",
     "test:feedback": "node demo/agentation-test.mjs",
     "test:cells": "node demo/cell-display-test.mjs",
+    "test:charts": "node demo/chart-layout-test.mjs",
     "test:computed": "node demo/computed-test.mjs",
     "test:grouping": "node demo/grouping-library-test.mjs && node demo/grouping-test.mjs && node demo/representative-test.mjs && node demo/grouping-editor-test.mjs && node demo/grouping-landscape-test.mjs && npm run test:grouping-metrics && npm run test:grouping-links && node demo/grouping-migration-test.mjs",
     "test:grouping-metrics": "node --experimental-strip-types demo/grouping-metrics-test.mjs",

@@ -482,7 +482,8 @@ function BarList({
   onInspect: ((bucket: AggregationBucket) => void) | undefined;
 }) {
   const colors = createMetricColorResolver(theme),
-    options = clause.display?.list;
+    options = clause.display?.list,
+    shade = colors.tupleColors(clause.groupBy, buckets.filter((b) => !isMetricOtherBucket(b)).map((b) => b.keys));
   const below = options?.barPosition === "below", showValues = options?.showValues !== false;
   const requestedLines = options?.maxLabelLines;
   const maxLabelLines = below && typeof requestedLines === "number"
@@ -526,7 +527,7 @@ function BarList({
                   style={{
                     background: isMetricOtherBucket(b)
                       ? colors.token("other")
-                      : colors.color(clause.groupBy[0] ?? "", b.keys[0] ?? null),
+                      : shade(b.keys),
                     marginInlineEnd: ".35rem",
                   }}
                 />
@@ -543,7 +544,7 @@ function BarList({
                       ? {
                           background: isMetricOtherBucket(b)
                             ? colors.token("other")
-                            : colors.color(clause.groupBy[0] ?? "", b.keys[0] ?? null),
+                            : shade(b.keys),
                         }
                       : {}),
                   }}

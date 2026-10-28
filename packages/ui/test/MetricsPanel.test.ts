@@ -90,8 +90,9 @@ describe("shared metric card", () => {
       expect(html).toContain(">Oct 01</text>");
       expect(html).toContain(">Oct 03</text>");
       expect(html).toContain("2026-10-01 00:00 +00:00");
-      expect(render({ ...clause, display: { kind } }, dateBuckets)).toContain(
-        ">2026-10-01T00:00:00.000Z</text>",
+      // A raw label too wide for its bar's slot keeps its start and full title.
+      expect(render({ ...clause, display: { kind } }, dateBuckets)).toMatch(
+        kind === "line" ? />2026-10-01T00:00:00.000Z<\/text>/ : /<title>2026-10-01T00:00:00.000Z<\/title>2026-10-01T[^<]*…<\/text>/,
       );
     }
     expect(dateBuckets[0]!.keys[0]).toBe("2026-10-01T00:00:00.000Z");

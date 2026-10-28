@@ -48,6 +48,14 @@ With the dev server running, `npm run test:cells` checks desktop/mobile search,
 copying, detail surfaces, property editing, and shared-link restoration, and
 writes screenshots to `.context/`.
 
+## Chart layout
+
+Open http://localhost:5179/chart-layout for box, bar, pie and line charts with
+long group labels, two-key colors and crossing series. With the dev server
+running, `npm run test:charts` checks in Chromium and WebKit that labels stay
+inside their charts, two-key slices differ in color and clicks inspect the
+nearest point.
+
 ## Date metric prototype
 
 Open http://localhost:5179/date-metrics for an isolated metric-definition prototype.

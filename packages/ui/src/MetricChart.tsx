@@ -23,6 +23,8 @@ import {
   metricPieSlices,
   metricBoxWhiskers,
   metricBoxOutliers,
+  metricLabelWidth,
+  truncateMetricLabel,
 } from "./metricChartHelpers";
 import type {
   MetricBucket,
@@ -33,6 +35,7 @@ import type {
 } from "./metricTypes";
 
 import { MetricTooltip } from "./MetricTooltip";
+import { MetricPointLayer, type MetricPoint } from "./MetricPointLayer";
 
 import { compactMetricScale, compactMetricTick, compactTickStep, compactCalendarLabels } from "./compactMetricChart";
 
@@ -101,10 +104,15 @@ export function MetricChart({
       },
       locale,
     ).text;
+  // One mark per group takes the whole key's colour. A scatter's first key
+  // names its series; the remaining keys identify points within it.
+  const tupleShade = colors.tupleColors(clause.groupBy, buckets.map((b) => b.keys));
   const shade = (b: MetricBucket) =>
-    b.keys.length
-      ? colors.color(clause.groupBy[0] ?? "", b.keys[0] ?? null)
-      : colors.token("accent");
+    !b.keys.length
+      ? colors.token("accent")
+      : kind === "scatter"
+        ? colors.color(clause.groupBy[0] ?? "", b.keys[0] ?? null)
+        : tupleShade(b.keys);
   const groupLabel = (b: MetricBucket) => metricGroupLabel(b, clause, locale);
   const groupFormat = metricDateGroupFormat(clause);
   const detail = (b: MetricBucket) =>
@@ -132,27 +140,49 @@ export function MetricChart({
     },
   });
   const compactBox = compact && kind === "box";
-  const left = compactBox ? 8 : compact ? 44 : Math.min(78, W * 0.24),
-    right = W - (compactBox ? 8 : compact ? 8 : 32),
-    top = compactBox ? 0 : 12,
+  const top = compactBox ? 0 : 12,
     bottom = H - (compact ? 20 : 42),
-    plotW = right - left,
     plotH = bottom - top;
+  // Box rows and horizontal bars label each group in a left gutter. It grows
+  // to the widest drawn label, up to 40% of the chart, and longer labels
+  // keep their start and lose their end.
+  const rowGap = kind === "box" ? 8 : 7;
+  const rows =
+    kind === "box" && !compact
+      ? buckets.slice(0, Math.max(1, Math.floor(plotH / 22)))
+      : kind === "bar-horizontal"
+        ? buckets.slice(0, Math.max(1, Math.floor(plotH / 20)))
+        : [];
+  const gutter = compactBox ? 8 : compact ? 44 : Math.min(78, W * 0.24);
+  const left = rows.length
+      ? Math.max(gutter, Math.min(W * 0.4, Math.max(...rows.map((b) => metricLabelWidth(groupLabel(b)))) + rowGap + 4))
+      : gutter,
+    right = W - (compactBox ? 8 : compact ? 8 : 32),
+    plotW = right - left;
   const text = (
     x: number,
     y: number,
     label: string,
     anchor: "start" | "middle" | "end" = "middle",
-  ) => (
-    <text
-      x={compact && anchor === "middle" ? Math.max(label.length * 2.7 + 2, Math.min(W - label.length * 2.7 - 2, x)) : x}
-      y={y}
-      textAnchor={anchor}
-      className={`qt-metric-axis ${classNames?.axis ?? ""}`}
-    >
-      {label}
-    </text>
-  );
+    title?: string,
+  ) => {
+    const half = metricLabelWidth(label) / 2;
+    return (
+      <text
+        x={anchor === "middle" ? Math.max(half + 2, Math.min(W - half - 2, x)) : x}
+        y={y}
+        textAnchor={anchor}
+        className={`qt-metric-axis ${classNames?.axis ?? ""}`}
+      >
+        {title !== undefined && title !== label && <title>{title}</title>}
+        {label}
+      </text>
+    );
+  };
+  const rowLabel = (b: MetricBucket, y: number) => {
+    const full = groupLabel(b);
+    return text(left - rowGap, y, truncateMetricLabel(full, left - rowGap - 2), "end", full);
+  };
   const grid = (x1: number, y1: number, x2: number, y2: number) => (
     <line
       x1={x1}
@@ -162,7 +192,18 @@ export function MetricChart({
       className={`qt-metric-grid ${classNames?.grid ?? ""}`}
     />
   );
+  // Line and scatter points take the pointer through one nearest-point layer;
+  // each point stays focusable and keyboard-activated on its own.
+  const pointMark = (b: MetricBucket, key: number, cx: number, cy: number, color: string) => {
+    points.push({ x: cx, y: cy, bucket: b, label: detail(b), color });
+    return (
+      <g key={key} {...interaction(b, detail(b), true, color)} pointerEvents="none">
+        <circle cx={cx} cy={cy} r={4} fill={color} />
+      </g>
+    );
+  };
   let marks: ReactNode = null,
+    points: MetricPoint[] = [],
     axes: ReactNode = null,
     note = "",
     disclosure = "",
@@ -184,14 +225,18 @@ export function MetricChart({
   };
   let legend: Array<{ key: string; label: string; color: string; value?: string; share?: string }> = Array.from(
     new Map(
-      buckets.map((b) => [
-        typedMetricKey(b.keys[0]),
-        {
-          key: typedMetricKey(b.keys[0]),
-          label: String(b.keys[0] ?? "NULL"),
-          color: shade(b),
-        },
-      ]),
+      buckets.map((b) => {
+        const whole = kind !== "scatter" && b.keys.length > 1,
+          key = whole ? metricTupleKey(b.keys) : typedMetricKey(b.keys[0]);
+        return [
+          key,
+          {
+            key,
+            label: whole ? groupLabel(b) : String(b.keys[0] ?? "NULL"),
+            color: shade(b),
+          },
+        ];
+      }),
     ).values(),
   );
   if (kind === "pie" || kind === "donut") {
@@ -300,7 +345,7 @@ export function MetricChart({
         display.xScale,
       ),
       x = (v: number) => left + axis.fraction(v) * plotW;
-    const visible = buckets.slice(0, Math.max(1, Math.floor(plotH / 22))),
+    const visible = rows,
       step = plotH / Math.max(1, visible.length);
     axes = axis.ticks.map((v, i) => (
       <g key={i}>
@@ -318,7 +363,7 @@ export function MetricChart({
         : detail(b);
       return (
         <g key={i}>
-          {text(left - 8, y + 4, groupLabel(b), "end")}
+          {rowLabel(b, y + 4)}
           {!s || b.error || !axis.accepts(s.min) ? (
             text(
               (left + right) / 2,
@@ -519,7 +564,7 @@ export function MetricChart({
       disclosure = `${series.length} of ${buckets.length} returned groups drawn; ${buckets.length - valid.length} empty/error groups. Additional bins are not drawn.`;
     note = `${series.length} of ${result?.groupCount ?? buckets.length} groups drawn; Hover a bin for its count. Shared edges; final upper bound included. Frequencies are row counts.`;
   } else if (kind === "scatter") {
-    const points = buckets.filter(
+    const paired = buckets.filter(
       (b) =>
         !b.error &&
         !b.yError &&
@@ -527,13 +572,13 @@ export function MetricChart({
         finiteMetricNumber(b.y),
     );
     const xa = scale(
-        points.map((b) => b.value as number),
+        paired.map((b) => b.value as number),
         display.xScale,
         false,
         display.xFormat,
       ),
       ya = scale(
-        points.map((b) => b.y as number),
+        paired.map((b) => b.y as number),
         display.yScale,
         false,
         display.yFormat,
@@ -556,27 +601,12 @@ export function MetricChart({
         ))}
       </>
     );
-    marks = points
+    marks = paired
       .filter((b) => xa.accepts(b.value as number) && ya.accepts(b.y as number))
-      .map((b, i) => (
-        <g key={i} {...interaction(b)}>
-          <circle
-            cx={x(b.value as number)}
-            cy={y(b.y as number)}
-            r={4}
-            fill={shade(b)}
-          />
-          <circle
-            cx={x(b.value as number)}
-            cy={y(b.y as number)}
-            r={12}
-            fill="transparent"
-          />
-        </g>
-      ));
-    if (points.length < buckets.length)
-      disclosure = `${points.length} paired points; ${buckets.length - points.length} missing/error pairs.`;
-    note = `${points.length} paired points; ${buckets.length - points.length} missing/error pairs. Coordinates use raw paired values.`;
+      .map((b, i) => pointMark(b, i, x(b.value as number), y(b.y as number), shade(b)));
+    if (paired.length < buckets.length)
+      disclosure = `${paired.length} paired points; ${buckets.length - paired.length} missing/error pairs.`;
+    note = `${paired.length} paired points; ${buckets.length - paired.length} missing/error pairs. Coordinates use raw paired values.`;
   } else {
     if (buckets.some((b) => b.value !== null && !finiteMetricNumber(b.value)))
       problem = "This chart requires finite numeric values.";
@@ -662,26 +692,9 @@ export function MetricChart({
               !b.error &&
               finiteMetricNumber(b.value) &&
               axis.accepts(b.value) &&
-              timeAxis.accepts(time) ? (
-                <g key={i} {...interaction(b, detail(b), true, clause.groupBy.length > 1 ? colors.color(clause.groupBy[1]!, b.keys[1] ?? null) : colors.token("accent"))}>
-                  <circle
-                    cx={tx(time)}
-                    cy={y(b.value)}
-                    r={4}
-                    fill={
-                      clause.groupBy.length > 1
-                        ? colors.color(clause.groupBy[1]!, b.keys[1] ?? null)
-                        : colors.token("accent")
-                    }
-                  />
-                  <circle
-                    cx={tx(time)}
-                    cy={y(b.value)}
-                    r={12}
-                    fill="transparent"
-                  />
-                </g>
-              ) : null,
+              timeAxis.accepts(time)
+                ? pointMark(b, i, tx(time), y(b.value), clause.groupBy.length > 1 ? colors.color(clause.groupBy[1]!, b.keys[1] ?? null) : colors.token("accent"))
+                : null,
             )}
             {ordered
               .filter(
@@ -723,10 +736,10 @@ export function MetricChart({
           "Line charts require strict ISO dates/timestamps or numeric group coordinates.";
       }
     } else {
-      const visible = horizontal
-          ? buckets.slice(0, Math.max(1, Math.floor(plotH / 20)))
-          : buckets,
-        step = (horizontal ? plotH : plotW) / Math.max(1, visible.length);
+      const visible = horizontal ? rows : buckets,
+        step = (horizontal ? plotH : plotW) / Math.max(1, visible.length),
+        // A vertical bar's label may use the slots up to the next labelled bar.
+        labelSlot = step > 42 ? step : step * Math.ceil(42 / step);
       const calendarLabels = compactCalendarLabels(compact && !horizontal ? visible.map((bucket, i) => ({ bucket, x: left + step * (i + .5) })) : [], clause, locale);
       marks = visible.map((b, i) => {
         const center = (horizontal ? top : left) + step * (i + 0.5),
@@ -735,15 +748,17 @@ export function MetricChart({
           value = valid ? (b.value as number) : 0;
         return (
           <g key={i}>
-            {(compact && clause.dateGrouping && !horizontal ? calendarLabels.has(b) : horizontal || step > 42 || i % Math.ceil(42 / step) === 0) &&
-              text(
-                horizontal ? left - 7 : center,
-                horizontal ? center + 4 : bottom + 18,
-                compact && clause.dateGrouping && !horizontal ? calendarLabels.get(b)! : !horizontal && groupFormat && b.keys.length === 1
-                  ? formatMetricOutput(b.keys[0], groupFormat, locale).text
-                  : groupLabel(b),
-                horizontal ? "end" : "middle",
-              )}
+            {horizontal
+              ? rowLabel(b, center + 4)
+              : (compact && clause.dateGrouping ? calendarLabels.has(b) : step > 42 || i % Math.ceil(42 / step) === 0) &&
+                (compact && clause.dateGrouping
+                  ? text(center, bottom + 18, calendarLabels.get(b)!)
+                  : (() => {
+                      const full = groupFormat && b.keys.length === 1
+                        ? formatMetricOutput(b.keys[0], groupFormat, locale).text
+                        : groupLabel(b);
+                      return text(center, bottom + 18, truncateMetricLabel(full, Math.max(labelSlot - 4, metricLabelWidth("W…"))), "middle", full);
+                    })())}
             {valid ? (
               <g {...interaction(b)}>
                 <rect
@@ -864,6 +879,9 @@ export function MetricChart({
               </defs>
               {axes}
               {marks}
+              {points.length > 0 && (
+                <MetricPointLayer points={points} x={left} y={top} width={plotW} height={plotH} onInspect={onInspect} />
+              )}
               {!compact && !["pie", "donut"].includes(kind) && (
                 <>
                   {text(

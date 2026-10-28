@@ -73,33 +73,75 @@ export function createMetricColorResolver(theme: MetricTheme = {}) {
     validColor(theme.tokens?.[name])
       ? theme.tokens![name]!
       : `var(--qt-metric-${name}, ${name === "accent" ? "var(--qt-accent, #0969da)" : name === "text" ? "var(--qt-text, #24292f)" : name === "muted" ? "var(--qt-muted, #68717d)" : name === "surface" ? "var(--qt-bg, #fff)" : name === "grid" ? "var(--qt-border-subtle, #eaeef2)" : name === "error" ? "#c23934" : name === "null" ? "#858585" : "#8c959f"})`;
+  const layerColors = (field: string, identity: string) => {
+    const dim = theme.dimensions?.[field];
+    return (
+      (
+        layers.find((l) => l.id === dim?.layer) ??
+        (dim ? undefined : layers[hash(identity) % layers.length])
+      )?.colors ?? palette
+    );
+  };
+  const color = (field: string, value: MetricValue): string => {
+    const dim = theme.dimensions?.[field],
+      identity = dim?.identity ?? field;
+    const override = dim?.overrides
+      ?.slice(0, 4096)
+      .find(
+        (o) =>
+          typedMetricKey(o.value) === typedMetricKey(value) &&
+          validColor(o.color),
+      );
+    if (override) return override.color;
+    if (value === null) return token("null");
+    const colors = layerColors(field, identity);
+    const index =
+      dim?.domain
+        ?.slice(0, 4096)
+        .findIndex((v) => typedMetricKey(v) === typedMetricKey(value)) ?? -1;
+    return colors[
+      (index >= 0 ? index : hash(`${identity}\0${typedMetricKey(value)}`)) %
+        colors.length
+    ]!;
+  };
   return {
     token,
-    color(field: string, value: MetricValue): string {
-      const dim = theme.dimensions?.[field],
-        identity = dim?.identity ?? field;
-      const override = dim?.overrides
-        ?.slice(0, 4096)
-        .find(
-          (o) =>
-            typedMetricKey(o.value) === typedMetricKey(value) &&
-            validColor(o.color),
-        );
-      if (override) return override.color;
-      if (value === null) return token("null");
-      const colors =
-        (
-          layers.find((l) => l.id === dim?.layer) ??
-          (dim ? undefined : layers[hash(identity) % layers.length])
-        )?.colors ?? palette;
-      const index =
-        dim?.domain
-          ?.slice(0, 4096)
-          .findIndex((v) => typedMetricKey(v) === typedMetricKey(value)) ?? -1;
-      return colors[
-        (index >= 0 ? index : hash(`${identity}\0${typedMetricKey(value)}`)) %
-          colors.length
-      ]!;
+    color,
+    /**
+     * Colours whole group keys drawn together. Single values resolve as
+     * `color`. A tuple's colour depends only on the theme and its values,
+     * except that tuples sharing a chart take the next free colour rather
+     * than repeat one while the palette has room.
+     */
+    tupleColors(
+      fields: readonly string[],
+      tuples: ReadonlyArray<readonly MetricValue[]>,
+    ): (values: readonly MetricValue[]) => string {
+      const identity = fields
+        .map((field) => theme.dimensions?.[field]?.identity ?? field)
+        .join("\0");
+      const colors = layerColors(fields[0] ?? "", identity);
+      const preferred = (values: readonly MetricValue[]) =>
+        hash(`${identity}\0${metricTupleKey(values)}`) % colors.length;
+      const assigned = new Map<string, number>();
+      let used = new Set<number>();
+      const keyed = new Map(
+        tuples
+          .filter((values) => values.length > 1 && values.some((v) => v !== null))
+          .map((values) => [metricTupleKey(values), values] as const),
+      );
+      for (const key of [...keyed.keys()].sort()) {
+        if (used.size === colors.length) used = new Set();
+        let index = preferred(keyed.get(key)!);
+        while (used.has(index)) index = (index + 1) % colors.length;
+        used.add(index);
+        assigned.set(key, index);
+      }
+      return (values) => {
+        if (values.length <= 1) return color(fields[0] ?? "", values[0] ?? null);
+        if (values.every((v) => v === null)) return token("null");
+        return colors[assigned.get(metricTupleKey(values)) ?? preferred(values)]!;
+      };
     },
   };
 }

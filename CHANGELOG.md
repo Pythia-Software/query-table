@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Changed
+
+- `MetricChart` colours pie, donut, bar, box, histogram and list marks
+  grouped by several keys by their whole key, so `claude / opus` and
+  `claude / sonnet` no longer share a colour, and the legend lists each key
+  once. A key keeps its colour across renders and across charts sharing a
+  `MetricTheme`; two keys drawn together take different colours while the
+  palette has room. Single-key charts are unchanged, and scatter charts still
+  colour by their first (series) key. `createMetricColorResolver` gains
+  `tupleColors(fields, tuples)`.
+- Line and scatter charts pick the nearest drawn point under the pointer, with
+  exact ties going to the point drawn on top, instead of letting the 12 px hit
+  circle of a later series cover an earlier series' visible point. A ring
+  marks the point a click would inspect. Keyboard focus, tooltips and the
+  bucket passed to `onInspect` are unchanged.
+
+### Fixed
+
+- Box and horizontal-bar charts size their label gutter to the widest drawn
+  group label, up to 40% of the chart, and shorten longer labels at their end
+  with an ellipsis. Labels used to lose their start ("odel_family-0") past a
+  fixed margin. Vertical-bar labels are shortened to their slot, axis labels
+  stay inside the chart, and the full label stays in a `<title>` and the
+  mark's `aria-label`. Charts with short labels keep their layout.
+
 ## 0.9.6 — 2026-10-28
 
 ### Added
