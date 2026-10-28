@@ -66,6 +66,12 @@
 
 ### Fixed
 
+- Source filter controls no longer flood metadata requests while a grouped
+  view initialises. The grouping source API's `filterValues` and `fieldStats`
+  keep their identity across renders, and a filter value combobox reads
+  suggestions only while its editor is open, once per search, instead of on
+  every mount and render. Over HTTP/1 the repeated reads used to fill the
+  connection pool and hold back the rows and metrics.
 - Screen fitting (`fitToScreen`) no longer narrows a column below what its
   native controls need. Each column's minimum counts the cell padding and its
   buttons (Detail modes, JSON previews, including the invalid-JSON "JSON?"

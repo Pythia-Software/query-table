@@ -143,4 +143,16 @@ describe("group details", () => {
     await settle();
     expect(current.api.itemDetails!.record!.row).toMatchObject({ id: 1, conversation: "alpha" });
   });
+
+  it("keeps source filter metadata callbacks stable across renders", async () => {
+    const current = mount({ initialQuery: grouped() });
+    await settle();
+    const { filterValues, fieldStats } = current.api.grouping!.source;
+    act(() => current.api.nextPage());
+    await settle();
+    act(() => current.api.itemDetails!.open(idOf(current.api, null), "modal"));
+    await settle();
+    expect(current.api.grouping!.source.filterValues).toBe(filterValues);
+    expect(current.api.grouping!.source.fieldStats).toBe(fieldStats);
+  });
 });

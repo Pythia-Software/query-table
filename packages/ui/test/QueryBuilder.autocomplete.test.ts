@@ -134,6 +134,8 @@ it("retains known options when editing an OR member but invalidates them when a 
   await act(async () => api.setQuery(query => ({ ...query, where: [{ any: [
     { field: "repository_name", op: "=", value: "" }, { field: "status", op: "=", value: "ready" },
   ] }] })));
+  // Opening the editor reads suggestions once; typing then filters them at once.
+  await act(async () => input().focus());
   await tick();
   await type("exploration-");
   expect(options().map(option => option.textContent)).toEqual(names.slice(1, 3));
@@ -233,4 +235,29 @@ it("retains static selects and closes suggestions when focus leaves", async () =
   await act(async () => api.setQuery(query => ({ ...query, where: [{ field: "status", op: "=", value: "ready" }] })));
   const select = document.querySelector<HTMLSelectElement>('[aria-label="Value for Status"]')!;
   expect(select.tagName).toBe("SELECT"); expect(select.value).toBe("ready");
+});
+
+it("reads suggestions only for an open value editor, once per search", async () => {
+  vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+  await act(async () => root.render(h(Fixture)));
+  await act(async () => api.setQuery(query => ({ ...query, where: [
+    { field: "repository_name", op: "=", value: "" },
+    { field: "tags", op: "=", value: "" },
+    { field: "repository_name", op: "!=", value: "" },
+  ] })));
+  await tick(1000);
+  rerender(); await tick(1000);
+  // Three closed autocomplete controls, several renders: no metadata reads.
+  expect(fetchValues).not.toHaveBeenCalled();
+  const inputs = () => Array.from(document.querySelectorAll<HTMLInputElement>('[role="combobox"][aria-label^="Value for"]'));
+  expect(inputs()).toHaveLength(3);
+  await act(async () => inputs()[1]!.focus());
+  await tick(); rerender(); await tick(1000);
+  expect(fetchValues.mock.calls).toEqual([["tags", ""]]);
+  // Closing and reopening the same search reuses its answer.
+  await act(async () => inputs()[0]!.focus());
+  await tick();
+  await act(async () => inputs()[1]!.focus());
+  await tick();
+  expect(fetchValues.mock.calls).toEqual([["tags", ""], ["repository_name", ""]]);
 });

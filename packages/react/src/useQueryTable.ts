@@ -1646,29 +1646,33 @@ export function useQueryTable<Row>(
     visibleFields,
     rowId,
   };
+  // Source filter controls key their metadata reads by these identities, so
+  // they must not change on every render of a grouped view.
+  const sourceFilterValues = useCallback<GroupingSourceApi<Row>["filterValues"]>(async (name, search) => {
+    if (metadataTransport?.fetchDistinctValues) return metadataTransport.fetchDistinctValues({ field: name, search });
+    const field = groupingModel.sourceField(name);
+    return field && sourceRows ? { ...distinctValuesFromRows(field, sourceRows, search), hasNull: fieldHasNullInRows(field, sourceRows) } : { values: [], hasMore: false };
+  }, [metadataTransport, groupingModel, sourceRows]);
+  const sourceFieldStats = useCallback<GroupingSourceApi<Row>["fieldStats"]>(async (names, signal) => {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    const requested = [...new Set(names)];
+    if (metadataTransport?.fetchFieldStats) {
+      const backendFields = requested.filter(
+        name => sourceCatalogue.fields.find(field => field.name === name)?.source.kind === "backend",
+      );
+      return backendFields.length ? metadataTransport.fetchFieldStats(backendFields, signal) : {};
+    }
+    return Object.fromEntries(requested.flatMap(name => {
+      const field = groupingModel.sourceField(name);
+      return field && sourceRows ? [[name, { distinct: new Set(sourceRows.map(row => JSON.stringify(readFieldValue(field, row)))).size }]] : [];
+    }));
+  }, [metadataTransport, groupingModel, sourceRows, sourceCatalogue]);
   const sourceApi: GroupingSourceApi<Row> = {
     ...sourceFilters, loading, rowId: sourceRowId, query: sourceQuery, setQuery: setSourceQuery,
     ...(itemDetails ? { itemDetails } : {}),
     schema: sourceCatalogue,
-    filterValues: async (name, search) => {
-      if (metadataTransport?.fetchDistinctValues) return metadataTransport.fetchDistinctValues({ field: name, search });
-      const field = groupingModel.sourceField(name);
-      return field && sourceRows ? { ...distinctValuesFromRows(field, sourceRows, search), hasNull: fieldHasNullInRows(field, sourceRows) } : { values: [], hasMore: false };
-    },
-    fieldStats: async (names, signal) => {
-      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-      const requested = [...new Set(names)];
-      if (metadataTransport?.fetchFieldStats) {
-        const backendFields = requested.filter(
-          name => sourceCatalogue.fields.find(field => field.name === name)?.source.kind === "backend",
-        );
-        return backendFields.length ? metadataTransport.fetchFieldStats(backendFields, signal) : {};
-      }
-      return Object.fromEntries(requested.flatMap(name => {
-        const field = groupingModel.sourceField(name);
-        return field && sourceRows ? [[name, { distinct: new Set(sourceRows.map(row => JSON.stringify(readFieldValue(field, row)))).size }]] : [];
-      }));
-    },
+    filterValues: sourceFilterValues,
+    fieldStats: sourceFieldStats,
   };
   const grouping = useGroupingController(api, sourceApi, groupingModel, prepared?.inputs ?? sourceRows ?? [], groupingSupported, viewRevision.current,
     { inputsReady: !remoteGrouping, ...(remoteGrouping ? { preview: previewGrouping } : {}) });
