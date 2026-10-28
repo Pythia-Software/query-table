@@ -369,12 +369,82 @@ before result sorting and limits, within the normal metric budgets, and does
 not add records to the table. Clearing or changing the first grouping field
 clears its date settings.
 
+`partialIntervals: "exclude"` keeps only whole intervals: it leaves out an
+interval that the query's (or the metric's own) conjunctive date bounds cut
+short, and any interval that has not ended by the evaluation clock, such as
+today. The excluded rows leave the metric, so they never appear as a short
+first or last bucket, and completion does not refill those intervals as empty.
+When no interval is whole the result has no buckets.
+
 Calendar metrics execute on the v3 backend, locally on datasets already in
 memory, or over committed shown rows. Legacy v1/v2 server execution rejects date
 grouping explicitly. An unsupported server operation never triggers a population
 download. Settings are
 serialized with the query and participate in metric computation identity.
 
+
+### Windows, running values and shares
+
+A calendar metric can show each point as a trailing window or a running value,
+and any grouped sum or count can be shown as a share:
+
+```ts
+const cacheShare: AggregationClause = {
+  id: "cache-share",
+  op: "count",
+  expression: "SUM([cache_read]) / NULLIF(SUM([input]), 0)",
+  groupBy: ["at", "model"],
+  dateGrouping: { field: "at", interval: "day", includeEmpty: true,
+    range: "query", partialIntervals: "exclude" },
+  window: { periods: 7 },          // or { periods: "all" } for a running value
+};
+const modelShare: AggregationClause = {
+  id: "model-share", op: "sum", field: "tokens", groupBy: ["at", "model"],
+  dateGrouping: { field: "at", interval: "day", includeEmpty: true, range: "query" },
+  window: { periods: 7 },
+  share: "group0",                 // each model's part of the day's total
+};
+```
+
+- **Window total** (`reduce: "total"`, the default). Each point is the metric
+  over every row of its trailing `periods` intervals (2–1,000), or of every
+  interval so far with `"all"`. Aggregates are rebuilt from per-interval
+  parts: SUM, COUNT, MIN and MAX merge, and AVG is SUM / COUNT of its input, so
+  `SUM([a]) / SUM([b])` pools its parts instead of averaging each interval's
+  ratio. COUNT_DISTINCT and MEDIAN cannot be merged across intervals and are
+  refused, because one value can occur in several intervals.
+- **Mean per interval** (`reduce: "mean"`). The mean of the per-interval
+  values of a single SUM, COUNT or COUNT_DISTINCT; empty intervals count as 0.
+  For a distinct count this is the mean of daily counts, so a user active on
+  two days counts on each. Ratios and averages are refused: they would weight
+  every interval equally.
+- **Partial windows.** A window needs every interval, so it requires
+  `includeEmpty: true`. Points whose window starts before the first interval
+  have no value unless `partial: "include"`, which uses the intervals
+  available (and divides a mean by their number). Widen the query range to
+  give early points a full window. Each windowed bucket reports the rows in
+  its window as `count` and the intervals it combined as `intervals`. Rows
+  without a date keep their own bucket and are not windowed.
+- **Shares.** `share: "group0"` divides each bucket by the total of its first
+  grouping key, such as one day over every series; `share: "total"` divides by
+  the total over all groups. Shares need an additive measure (a single SUM or
+  COUNT) and are fractions, so pair them with a percent format. The
+  denominator is the same measure grouped by fewer keys, so groups past
+  `groupLimit` still count. With a window, both are windowed before dividing.
+  A share of the total cannot be windowed.
+- **Ordering and limits.** `sort`, `groupLimit` and `minCount` apply to the
+  combined buckets; `minCount` counts the rows in a point's window. Windowed
+  and share results have no Other remainder.
+- **Drilldown.** `inspectBucketQuery` opens a windowed point's whole window,
+  or every interval up to the point for a running value.
+
+These options are computed from plain metrics. `planMetricSeries(query,
+schema, { now })` returns plain metric queries, each within the 20-metric
+budget with one clause's parts in the same query, and a `combine` function
+for their results; `executeMetrics` and `evaluateMetrics` call it, so every
+engine supports them. A host that sends metric requests itself calls it the
+same way. Servers never receive these fields: `toMetricQuery` and
+`toQueryRequestV3` report an `unexpanded_series` diagnostic instead.
 
 ### Compact chart integration
 

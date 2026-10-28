@@ -138,7 +138,7 @@ export function metricDateNext(
 }
 
 /** A date-only Through value includes the whole local day, even for hourly groups. */
-function customEndTime(value: string, timeZone = "UTC"): number {
+export function metricCustomEndTime(value: string, timeZone = "UTC"): number {
   const time = metricDateTime(value, timeZone);
   return value.length === 10 ? metricDateNext(time, "day", timeZone) - 1 : time;
 }
@@ -150,7 +150,9 @@ export function validateDateGrouping(config: MetricDateGrouping): void {
     config.field.length > 256 ||
     !METRIC_DATE_INTERVALS.includes(config.interval) ||
     typeof config.includeEmpty !== "boolean" ||
-    !["query", "observed", "custom"].includes(config.range)
+    !["query", "observed", "custom"].includes(config.range) ||
+    (config.partialIntervals !== undefined &&
+      !["include", "exclude"].includes(config.partialIntervals))
   )
     throw Error("Invalid date grouping definition.");
   if (config.timeZone !== undefined) {
@@ -173,7 +175,7 @@ export function validateDateGrouping(config: MetricDateGrouping): void {
   }
   if (config.includeEmpty && config.range === "custom") {
     const start = metricDateTime(config.start ?? "", config.timeZone),
-      end = customEndTime(config.end ?? "", config.timeZone);
+      end = metricCustomEndTime(config.end ?? "", config.timeZone);
     if (end < start)
       throw Error("The end date must be on or after the start date.");
   }
@@ -202,7 +204,7 @@ export function metricDateRange(
       config.timeZone,
     );
     const end = metricDateFloor(
-      customEndTime(config.end ?? "", config.timeZone),
+      metricCustomEndTime(config.end ?? "", config.timeZone),
       config.interval,
       config.timeZone,
     );

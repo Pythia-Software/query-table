@@ -13,7 +13,26 @@ export interface MetricDateGrouping {
   range: "query" | "observed" | "custom";
   start?: string;
   end?: string;
+  /** "exclude" leaves out intervals the query's bounds cut, and intervals that
+   * have not ended by the evaluation time; omitted includes them. */
+  partialIntervals?: "include" | "exclude";
 }
+/** A trailing window over a calendar metric's intervals. */
+export interface MetricWindow {
+  /** Intervals per point, its own included (2–1,000), or "all" for a running
+   * value from the first interval. */
+  periods: number | "all";
+  /** "total" (default) evaluates the metric over every row in the window, so
+   * ratios pool their parts. "mean" averages the per-interval values of a
+   * single SUM, COUNT or COUNT_DISTINCT. */
+  reduce?: "total" | "mean";
+  /** Points whose window starts before the first interval have no value
+   * ("omit", default) or use the intervals available ("include"). */
+  partial?: "omit" | "include";
+}
+/** Divide each bucket by the total of all groups ("total") or of its first
+ * grouping key ("group0"), such as one calendar interval. */
+export type MetricShare = "total" | "group0";
 export interface MetricValueFormat {
   kind: "number" | "percent" | "duration" | "date" | "time" | "datetime";
   decimals?: number;

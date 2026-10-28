@@ -393,6 +393,9 @@ export function MetricCard<Row>({
         : buckets !== allBuckets && allBuckets.length > (clause.display?.maxGroups ?? allBuckets.length) && (
             <p className="qt-metric-note">Showing the first {clause.display?.maxGroups} groups in result order{buckets.length > clause.display!.maxGroups! ? " plus Other" : ""}.</p>
           )}
+      {(clause.window || clause.share) && (
+        <p className="qt-metric-note">{seriesNote(clause)}</p>
+      )}
       {!!result?.hiddenGroups && clause.minCount !== undefined && (
         <p className="qt-metric-note">
           {result.hiddenGroups.toLocaleString()}{" "}
@@ -410,6 +413,31 @@ export function MetricCard<Row>({
         )}
     </div>
   );
+}
+
+/** What one point of a windowed or share metric is. */
+function seriesNote(clause: AggregationClause): string {
+  const unit = clause.dateGrouping?.interval ?? "interval",
+    window = clause.window;
+  const parts: string[] = [];
+  if (window) {
+    const span =
+      window.periods === "all"
+        ? `from the first ${unit}`
+        : `over the trailing ${window.periods} ${unit}s`;
+    parts.push(
+      window.reduce === "mean" ? `Mean per ${unit} ${span}` : `Total ${span}`,
+    );
+    if (window.periods !== "all" && window.partial !== "include")
+      parts.push("shorter windows at the start have no value");
+  }
+  if (clause.share)
+    parts.push(
+      clause.share === "group0"
+        ? `${parts.length ? "as a share" : "Share"} of each ${clause.dateGrouping ? unit : "first group"}'s total`
+        : `${parts.length ? "as a share" : "Share"} of the total`,
+    );
+  return `${parts.join("; ")}.`;
 }
 
 // ---- 0 group-by: one big number -------------------------------------------

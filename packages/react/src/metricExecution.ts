@@ -5,6 +5,8 @@ import {
   metricPlans,
   hasRegex,
   metricPopulationError,
+  hasMetricSeries,
+  planMetricSeries,
   predicatesOf,
   toAggregationQuery,
   toMetricQuery,
@@ -90,7 +92,8 @@ async function localMetrics<Row>(
       c.sort ||
       c.groupLimit !== undefined ||
       c.where !== undefined ||
-      c.minCount !== undefined,
+      c.minCount !== undefined ||
+      hasMetricSeries(c),
   );
   if (
     advanced.length &&
@@ -233,6 +236,18 @@ export async function executeMetrics<Row>(
   abort(signal);
   const clauses = query.aggregations ?? [];
   if (!clauses.length) return { metrics: [] };
+  // Windows, shares and whole intervals are combined from plain metrics, so
+  // every engine below runs them.
+  const series = planMetricSeries(query, context.schema, {
+    ...(context.now !== undefined ? { now: context.now } : {}),
+    ...(context.resolveComputed ? { resolveComputed: context.resolveComputed } : {}),
+  });
+  if (series) {
+    const parts = await Promise.all(
+      series.queries.map((part) => executeMetrics(part, context, signal)),
+    );
+    return { metrics: series.combine(parts.flatMap((part) => part.metrics)) };
+  }
   if (context.executeV3) return context.executeV3(query, signal);
   if (context.rowsReady === false && clauses.some(c => usesLocalMetricPage(c, context)))
     throw Error("Wait for the current table page before previewing shown-row metrics.");

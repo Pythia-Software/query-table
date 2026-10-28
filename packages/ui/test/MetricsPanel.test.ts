@@ -944,3 +944,17 @@ describe("metric population notes", () => {
     expect(none).not.toContain("hidden (fewer");
   });
 });
+
+it("says what one point of a windowed or share metric is", () => {
+  const dated: RenderingClause = {
+    ...clause, groupBy: ["group", "kind"], dateGrouping: { field: "group", interval: "day", includeEmpty: true, range: "observed" },
+  };
+  expect(render({ ...dated, window: { periods: 7 } })).toContain(
+    "Total over the trailing 7 days; shorter windows at the start have no value.",
+  );
+  expect(render({ ...dated, window: { periods: "all", reduce: "mean" }, share: "group0" })).toContain(
+    "Mean per day from the first day; as a share of each day&#x27;s total.",
+  );
+  expect(render({ ...clause, share: "total" })).toContain("Share of the total.");
+  expect(render(clause)).not.toContain("trailing");
+});

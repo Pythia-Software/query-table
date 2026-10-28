@@ -89,7 +89,7 @@ export function toQueryRequestV3<Row>(query: QueryState, baseSchema: FieldSchema
   // The projection keeps only pushdown metric-filter terms; never send the
   // narrowed population silently. (Its other diagnostics, such as calendar
   // grouping, describe the v2 transport and do not apply here.)
-  diagnostics.push(...metricQuery.diagnostics.filter(issue => issue.code === "residual_metric_filter").map(issue => issue.message));
+  diagnostics.push(...metricQuery.diagnostics.filter(issue => issue.code === "residual_metric_filter" || issue.code === "unexpanded_series").map(issue => issue.message));
   const metrics = metricQuery.metrics.map(metric => {
     const dateGrouping = q.aggregations?.find(clause => clause.id === metric.id)?.dateGrouping;
     return dateGrouping ? { ...metric, dateGrouping } : metric;

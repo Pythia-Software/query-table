@@ -1,5 +1,5 @@
 import { normalizePropertyView, type PropertyViewState } from "./properties";
-import type { MetricDisplay, MetricLayout, MetricDistribution, MetricSort, MetricScope, MetricDateGrouping } from "./metricTypes";
+import type { MetricDisplay, MetricLayout, MetricDistribution, MetricSort, MetricScope, MetricDateGrouping, MetricWindow, MetricShare } from "./metricTypes";
 import { normalizeMetricOptions } from "./metricNormalize";
 import type { GroupingState, SummaryColumn, RepresentativeOrder, LinkSpec, LinkDestination } from "./grouping";
 import type { QueryFacet, QueryPatch } from "./queryPatch";
@@ -171,6 +171,11 @@ export interface AggregationClause {
    *  sorting, `groupLimit` and Other. Requires at least one grouping field;
    *  integer 1–1,000,000. Removed groups are reported as `hiddenGroups`. */
   minCount?: number;
+  /** A trailing window or running value over the calendar intervals of
+   * `dateGrouping`. Computed from ordinary metrics, so every engine supports it. */
+  window?: MetricWindow;
+  /** Express each bucket as a fraction of a total of the same measure. */
+  share?: MetricShare;
 }
 
 /** Detail affordances are presentation state, never backend SELECT fields. */

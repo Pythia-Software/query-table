@@ -590,3 +590,60 @@ describe("metric population capability negotiation", () => {
     ]);
   });
 });
+
+describe("metric series execution", () => {
+  it("sends shares to a v2 server as plain metrics and divides the results", async () => {
+    const sent: string[][] = [];
+    const fetchMetrics = vi.fn<NonNullable<Transport<Row>["fetchMetrics"]>>(async (request) => {
+      sent.push(request.metrics.map((m) => `${m.expression ?? m.op}:${m.groupBy.join(",")}`));
+      expect(request.diagnostics).toEqual([]);
+      return {
+        metrics: request.metrics.map((m) => ({
+          id: m.id,
+          buckets: m.groupBy.length
+            ? [{ keys: ["a"], value: 40, count: 2 }, { keys: ["b"], value: 20, count: 1 }]
+            : [{ keys: [], value: 60, count: 3 }],
+        })),
+      };
+    });
+    const transport: Transport<Row> = {
+      fetchRows: async () => ({ rows: [], total: 0 }),
+      fetchMetrics,
+      metricCapabilities: { version: 2, expressions: true },
+    };
+    const share = { id: "share", op: "sum" as const, field: "x", groupBy: ["group"], share: "total" as const };
+    const result = await executeMetrics({ ...EMPTY_QUERY, aggregations: [share, clause] }, { schema, transport });
+    expect(sent).toEqual([["sum:group", "sum:", "SUM([x]) / SUM([y]):group"]]);
+    expect(result.metrics.map((m) => m.id)).toEqual(["share", "ratio"]);
+    expect(result.metrics[0]!.buckets.map((b) => [b.keys[0], b.value])).toEqual([["a", 40 / 60], ["b", 20 / 60]]);
+  });
+
+  it("runs windows through the v3 executor in budgeted batches", async () => {
+    const batches: number[] = [];
+    const executeV3 = vi.fn(async (query: Parameters<NonNullable<Parameters<typeof executeMetrics>[1]["executeV3"]>>[0]) => {
+      batches.push(query.aggregations!.length);
+      expect(query.aggregations!.every((m) => m.window === undefined)).toBe(true);
+      return {
+        metrics: query.aggregations!.map((m) => ({
+          id: m.id,
+          buckets: ["2026-10-01T00:00:00.000Z", "2026-10-02T00:00:00.000Z", "2026-10-03T00:00:00.000Z"].map((day, i) => ({
+            keys: [day], value: m.expression === "SUM([x])" ? i + 1 : 2, count: 1,
+          })),
+        })),
+      };
+    });
+    const dated: FieldSchema<Row> = {
+      ...schema,
+      fields: [...schema.fields, { name: "at", label: "at", type: "datetime", source: { kind: "backend" }, aggregate: { groupable: true } }],
+    };
+    const windows = Array.from({ length: 11 }, (_, i) => ({
+      id: `w${i}`, op: "count" as const, groupBy: ["at"], expression: "SUM([x]) / SUM([y])",
+      dateGrouping: { field: "at", interval: "day" as const, includeEmpty: true, range: "observed" as const },
+      window: { periods: 2 },
+    }));
+    const result = await executeMetrics({ ...EMPTY_QUERY, aggregations: windows }, { schema: dated, executeV3 });
+    expect(batches).toEqual([20, 2]);
+    expect(result.metrics.map((m) => m.id)).toEqual(windows.map((w) => w.id));
+    expect(result.metrics[10]!.buckets.map((b) => b.value)).toEqual([null, 3 / 4, 5 / 4]);
+  });
+});
