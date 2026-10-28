@@ -1,4 +1,107 @@
 import type { AggregationClause } from "./query";
+
+/** How normalizeMetricOptions validates one option: an allowed value list or a type. */
+export type MetricOptionSpec = readonly string[] | "string" | "boolean" | "integer" | "positiveInteger" | "number";
+
+/** The option tables normalizeMetricOptions copies from, in output order. Other
+ *  implementations of query links (the Go module) are checked against this
+ *  table through schema/fixtures/metric-options.json. */
+export const METRIC_OPTION_SPECS = {
+  top: {
+    expression: "string",
+    expressionY: "string",
+    scope: ["allMatching", "shownRows"],
+    groupLimit: "integer",
+    minCount: "positiveInteger",
+    share: ["total", "group0"],
+  },
+  window: {
+    reduce: ["total", "mean"],
+    partial: ["omit", "include"],
+  },
+  dateGrouping: {
+    field: "string",
+    interval: ["hour", "day", "week", "month", "year"],
+    timeZone: "string",
+    includeEmpty: "boolean",
+    range: ["query", "observed", "custom"],
+    start: "string",
+    end: "string",
+    partialIntervals: ["include", "exclude"],
+  },
+  display: {
+    kind: [
+      "auto",
+      "value",
+      "table",
+      "list",
+      "bar-horizontal",
+      "bar-vertical",
+      "line",
+      "pie",
+      "donut",
+      "scatter",
+      "box",
+      "histogram",
+    ],
+    valueLabel: "string",
+    xLabel: "string",
+    yLabel: "string",
+    legendPosition: ["left", "right", "top", "bottom", "none"],
+    maxGroups: "positiveInteger",
+    showOther: "boolean",
+    boxMean: "boolean",
+  },
+  scale: {
+    mode: ["linear", "log"],
+    min: "number",
+    max: "number",
+  },
+  format: {
+    kind: ["number", "percent", "duration", "date", "time", "datetime"],
+    decimals: "integer",
+    sourceUnit: [
+      "milliseconds",
+      "seconds",
+      "minutes",
+      "hours",
+      "days",
+      "iso",
+      "epochSeconds",
+      "epochMilliseconds",
+      "secondsOfDay",
+      "millisecondsOfDay",
+    ],
+    style: ["human", "long", "clock", "custom", "iso"],
+    pattern: "string",
+    timeZone: "string",
+  },
+  list: {
+    showBars: "boolean",
+    useGroupColors: "boolean",
+    showValues: "boolean",
+    barPosition: ["inline", "below"],
+    maxLabelLines: "positiveInteger",
+  },
+  pivot: {
+    swap: "boolean",
+    rowDir: ["asc", "desc"],
+    columnDir: ["asc", "desc"],
+  },
+  distribution: {
+    kind: ["box", "histogram"],
+    input: "string",
+    whiskers: ["minmax", "tukey"],
+    bins: "integer",
+  },
+  layout: {
+    widthRem: "integer",
+    heightRem: "integer",
+    minWidthRem: "integer",
+    minHeightRem: "integer",
+  },
+} as const satisfies Record<string, Record<string, MetricOptionSpec>>;
+
 /** Whitelist every nested property: URL/storage objects never become executable plans. */
 export function normalizeMetricOptions(
   raw: Record<string, unknown>,
@@ -9,10 +112,7 @@ export function normalizeMetricOptions(
     !!x && typeof x === "object" && !Array.isArray(x);
   const copy = (
     input: Record<string, unknown>,
-    specs: Record<
-      string,
-      readonly string[] | "string" | "boolean" | "integer" | "positiveInteger" | "number"
-    >,
+    specs: Readonly<Record<string, MetricOptionSpec>>,
   ): Record<string, unknown> => {
     const result: Record<string, unknown> = {};
     for (const [key, spec] of Object.entries(specs)) {
@@ -39,21 +139,11 @@ export function normalizeMetricOptions(
   };
   Object.assign(
     out,
-    copy(raw, {
-      expression: "string",
-      expressionY: "string",
-      scope: ["allMatching", "shownRows"],
-      groupLimit: "integer",
-      minCount: "positiveInteger",
-      share: ["total", "group0"],
-    }),
+    copy(raw, METRIC_OPTION_SPECS.top),
   );
   if (raw.window !== undefined) {
     if (record(raw.window)) {
-      const w = copy(raw.window, {
-        reduce: ["total", "mean"],
-        partial: ["omit", "include"],
-      });
+      const w = copy(raw.window, METRIC_OPTION_SPECS.window);
       const periods = raw.window.periods;
       if (periods === "all" || (Number.isSafeInteger(periods) && (periods as number) >= 0 && (periods as number) <= 1000000))
         w.periods = periods;
@@ -63,16 +153,7 @@ export function normalizeMetricOptions(
   }
   if (raw.dateGrouping !== undefined) {
     if (record(raw.dateGrouping)) {
-      const d = copy(raw.dateGrouping, {
-        field: "string",
-        interval: ["hour", "day", "week", "month", "year"],
-        timeZone: "string",
-        includeEmpty: "boolean",
-        range: ["query", "observed", "custom"],
-        start: "string",
-        end: "string",
-        partialIntervals: ["include", "exclude"],
-      });
+      const d = copy(raw.dateGrouping, METRIC_OPTION_SPECS.dateGrouping);
       if (
         typeof d.field !== "string" ||
         !d.field ||
@@ -89,94 +170,30 @@ export function normalizeMetricOptions(
     if (record(raw.display)) {
       if (typeof raw.display.kind !== "string")
         diagnostics.push("Invalid metric display kind.");
-      const d = copy(raw.display, {
-        kind: [
-          "auto",
-          "value",
-          "table",
-          "list",
-          "bar-horizontal",
-          "bar-vertical",
-          "line",
-          "pie",
-          "donut",
-          "scatter",
-          "box",
-          "histogram",
-        ],
-        valueLabel: "string",
-        xLabel: "string",
-        yLabel: "string",
-        legendPosition: ["left", "right", "top", "bottom", "none"],
-        maxGroups: "positiveInteger",
-        showOther: "boolean",
-        boxMean: "boolean",
-      });
+      const d = copy(raw.display, METRIC_OPTION_SPECS.display);
       for (const k of ["xScale", "yScale"]) {
         if (record(raw.display[k]))
-          d[k] = copy(raw.display[k], {
-            mode: ["linear", "log"],
-            min: "number",
-            max: "number",
-          });
+          d[k] = copy(raw.display[k], METRIC_OPTION_SPECS.scale);
         else if (raw.display[k] !== undefined)
           diagnostics.push(`Invalid metric ${k}.`);
       }
       for (const k of ["format", "xFormat", "yFormat"])
         if (record(raw.display[k]))
-          d[k] = copy(raw.display[k], {
-            kind: ["number", "percent", "duration", "date", "time", "datetime"],
-            decimals: "integer",
-            sourceUnit: [
-              "milliseconds",
-              "seconds",
-              "minutes",
-              "hours",
-              "days",
-              "iso",
-              "epochSeconds",
-              "epochMilliseconds",
-              "secondsOfDay",
-              "millisecondsOfDay",
-            ],
-            style: ["human", "long", "clock", "custom", "iso"],
-            pattern: "string",
-            timeZone: "string",
-          });
+          d[k] = copy(raw.display[k], METRIC_OPTION_SPECS.format);
       if (record(raw.display.list))
-        d.list = copy(raw.display.list, {
-          showBars: "boolean",
-          useGroupColors: "boolean",
-          showValues: "boolean",
-          barPosition: ["inline", "below"],
-          maxLabelLines: "positiveInteger",
-        });
+        d.list = copy(raw.display.list, METRIC_OPTION_SPECS.list);
       if (record(raw.display.pivot))
-        d.pivot = copy(raw.display.pivot, {
-          swap: "boolean",
-          rowDir: ["asc", "desc"],
-          columnDir: ["asc", "desc"],
-        });
+        d.pivot = copy(raw.display.pivot, METRIC_OPTION_SPECS.pivot);
       out.display = { kind: "auto", ...d };
     } else diagnostics.push("Invalid metric display.");
   }
   if (raw.distribution !== undefined) {
     if (record(raw.distribution))
-      out.distribution = copy(raw.distribution, {
-        kind: ["box", "histogram"],
-        input: "string",
-        whiskers: ["minmax", "tukey"],
-        bins: "integer",
-      });
+      out.distribution = copy(raw.distribution, METRIC_OPTION_SPECS.distribution);
     else diagnostics.push("Invalid metric distribution.");
   }
   if (record(raw.layout)) {
-    const l = copy(raw.layout, {
-      widthRem: "integer",
-      heightRem: "integer",
-      minWidthRem: "integer",
-      minHeightRem: "integer",
-    });
+    const l = copy(raw.layout, METRIC_OPTION_SPECS.layout);
     for (const k of ["widthRem", "heightRem", "minWidthRem", "minHeightRem"])
       l[k] = Math.max(1, Math.min(1000, Number(l[k] ?? 1)));
     l.widthRem = Math.max(Number(l.widthRem), Number(l.minWidthRem));

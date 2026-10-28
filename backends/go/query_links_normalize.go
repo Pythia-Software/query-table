@@ -151,7 +151,8 @@ func normalizeLinkSetFilter(item *jsValue) *jsValue {
 	}
 	id, idOK := boundedJSString(item.get("id"), linkMaxFieldName)
 	values := item.get("values")
-	if !idOK || !linkSetModes[jsToString(item.get("mode"))] || !values.isArray() {
+	mode := item.get("mode")
+	if !idOK || !mode.isString() || !linkSetModes[mode.s] || !values.isArray() {
 		return nil
 	}
 	if len(values.a) > MaxWhereClauses {
@@ -162,7 +163,7 @@ func normalizeLinkSetFilter(item *jsValue) *jsValue {
 			return nil
 		}
 	}
-	return jsObj().set("id", jsStr(id)).set("mode", item.get("mode")).set("values", jsArr(values.a...))
+	return jsObj().set("id", jsStr(id)).set("mode", mode).set("values", jsArr(values.a...))
 }
 
 func normalizeLinkWhereTerms(input []*jsValue) []*jsValue {

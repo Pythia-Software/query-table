@@ -317,7 +317,7 @@ function cloneWhereTerm(term: WhereTerm): WhereTerm {
 function normalizeSetFilter(item: unknown): SetFilterMetadata | undefined {
   if (!isRecord(item)) return undefined;
   const id = boundedString(item.id, MAX_FIELD_NAME_LENGTH);
-  if (!id || !["any", "all", "none", "empty"].includes(String(item.mode)) || !Array.isArray(item.values)) return undefined;
+  if (!id || typeof item.mode !== "string" || !["any", "all", "none", "empty"].includes(item.mode) || !Array.isArray(item.values)) return undefined;
   if (item.values.length > MAX_WHERE_CLAUSES || !item.values.every((value) => typeof value === "string" && value.length <= MAX_FILTER_VALUE_LENGTH)) return undefined;
   return { id, mode: item.mode as SetFilterMode, values: [...item.values] as string[] };
 }

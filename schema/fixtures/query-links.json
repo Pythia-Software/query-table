@@ -4037,6 +4037,82 @@
       "packed": "{\"l\":9}"
     },
     {
+      "name": "byte order mark in a plain token",
+      "token": "2j.77u_eyJsIjo5fQ",
+      "normalized": {
+        "select": [],
+        "where": [],
+        "orderBy": [],
+        "limit": 9,
+        "offset": 0
+      },
+      "packed": "{\"l\":9}"
+    },
+    {
+      "name": "byte order mark in a legacy token",
+      "token": "77u_eyJsIjo5fQ",
+      "normalized": {
+        "select": [],
+        "where": [],
+        "orderBy": [],
+        "limit": 9,
+        "offset": 0
+      },
+      "packed": "{\"l\":9}"
+    },
+    {
+      "name": "byte order mark after the start of a plain token",
+      "token": "2j.eyJzIjpbWyLvu79hIl1dfQ",
+      "normalized": {
+        "select": [
+          {
+            "field": "﻿a"
+          }
+        ],
+        "where": [],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0
+      },
+      "packed": "{\"s\":[[\"﻿a\"]]}"
+    },
+    {
+      "name": "set mode that is a list",
+      "token": "2j.eyJ3IjpbeyJmaWVsZCI6InRhZ3MiLCJvcCI6ImluY2x1ZGVzIiwidmFsdWUiOiJhIiwic2V0RmlsdGVyIjp7ImlkIjoieCIsIm1vZGUiOlsiYW55Il0sInZhbHVlcyI6WyJhIl19fV19",
+      "normalized": {
+        "select": [],
+        "where": [
+          {
+            "field": "tags",
+            "op": "includes",
+            "value": "a"
+          }
+        ],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0
+      },
+      "packed": "{\"w\":[{\"field\":\"tags\",\"op\":\"includes\",\"value\":\"a\"}]}"
+    },
+    {
+      "name": "set mode with an own toString",
+      "token": "2j.eyJ3IjpbeyJmaWVsZCI6ImEiLCJvcCI6Ij0iLCJ2YWx1ZSI6IngiLCJzZXRGaWx0ZXIiOnsiaWQiOiJzIiwibW9kZSI6eyJ0b1N0cmluZyI6MX0sInZhbHVlcyI6W119fV19",
+      "normalized": {
+        "select": [],
+        "where": [
+          {
+            "field": "a",
+            "op": "=",
+            "value": "x"
+          }
+        ],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0
+      },
+      "packed": "{\"w\":[{\"field\":\"a\",\"op\":\"=\",\"value\":\"x\"}]}"
+    },
+    {
       "name": "whitespace in compressed JSON",
       "token": "2d.U6hWUMpRUrBSsFTQUVAqB7GiFWIVahW4AA",
       "normalized": {
@@ -4643,11 +4719,6 @@
       "code": "invalid"
     },
     {
-      "name": "byte order mark in a plain token",
-      "token": "2j.77u_e30",
-      "code": "invalid"
-    },
-    {
       "name": "corrupt compression",
       "token": "2d.____",
       "code": "invalid"
@@ -4800,11 +4871,6 @@
     {
       "name": "set filters over the budget",
       "token": "2j.eyJ3IjpbWyJzZXQiLCJ0YWdzIiwiYWxsIixbImEwIiwiYTEiLCJhMiIsImEzIiwiYTQiLCJhNSIsImE2IiwiYTciLCJhOCIsImE5IiwiYTEwIiwiYTExIiwiYTEyIiwiYTEzIiwiYTE0IiwiYTE1IiwiYTE2IiwiYTE3IiwiYTE4IiwiYTE5IiwiYTIwIiwiYTIxIiwiYTIyIiwiYTIzIiwiYTI0IiwiYTI1IiwiYTI2IiwiYTI3IiwiYTI4IiwiYTI5IiwiYTMwIiwiYTMxIiwiYTMyIiwiYTMzIiwiYTM0IiwiYTM1IiwiYTM2IiwiYTM3IiwiYTM4IiwiYTM5IiwiYTQwIiwiYTQxIiwiYTQyIiwiYTQzIiwiYTQ0IiwiYTQ1IiwiYTQ2IiwiYTQ3IiwiYTQ4IiwiYTQ5IiwiYTUwIiwiYTUxIiwiYTUyIiwiYTUzIiwiYTU0IiwiYTU1IiwiYTU2IiwiYTU3IiwiYTU4IiwiYTU5Il0sImEiXSxbInNldCIsInRhZ3MiLCJhbGwiLFsiYjAiLCJiMSIsImIyIiwiYjMiLCJiNCIsImI1IiwiYjYiLCJiNyIsImI4IiwiYjkiLCJiMTAiLCJiMTEiLCJiMTIiLCJiMTMiLCJiMTQiLCJiMTUiLCJiMTYiLCJiMTciLCJiMTgiLCJiMTkiLCJiMjAiLCJiMjEiLCJiMjIiLCJiMjMiLCJiMjQiLCJiMjUiLCJiMjYiLCJiMjciLCJiMjgiLCJiMjkiLCJiMzAiLCJiMzEiLCJiMzIiLCJiMzMiLCJiMzQiLCJiMzUiLCJiMzYiLCJiMzciLCJiMzgiLCJiMzkiLCJiNDAiXSwiYiJdXX0",
-      "code": "invalid"
-    },
-    {
-      "name": "own toString in a set mode",
-      "token": "2j.eyJ3IjpbeyJmaWVsZCI6ImEiLCJvcCI6Ij0iLCJ2YWx1ZSI6IngiLCJzZXRGaWx0ZXIiOnsiaWQiOiJzIiwibW9kZSI6eyJ0b1N0cmluZyI6MX0sInZhbHVlcyI6W119fV19",
       "code": "invalid"
     },
     {

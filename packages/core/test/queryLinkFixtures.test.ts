@@ -1,6 +1,7 @@
 // Query link parity with the Go module. This test owns
-// schema/fixtures/query-links.json: it rebuilds the fixture from
-// ./queryLinkCases and fails when the checked-in file is stale. Regenerate with
+// schema/fixtures/query-links.json, rebuilt from ./queryLinkCases, and
+// metric-options.json, the METRIC_OPTION_SPECS tables the Go port must match.
+// It fails when either checked-in file is stale. Regenerate with
 //
 //   UPDATE_QUERY_LINK_FIXTURES=1 npx vitest run packages/core/test/queryLinkFixtures.test.ts
 //
@@ -17,10 +18,12 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { inflateSync } from "fflate";
 import { describe, expect, it } from "vitest";
 import { decodeQueryStrict, encodeQuery, QueryDecodeError, type QueryState } from "../src/index";
+import { METRIC_OPTION_SPECS } from "../src/metricNormalize";
 import { encodeInvalidCases, expandGenerators, expandToken, invalidCases, stateCases, tokenCases } from "./queryLinkCases";
 
 const fixturePath = new URL("../../../schema/fixtures/query-links.json", import.meta.url);
 const goTokensPath = new URL("../../../schema/fixtures/query-links-go.json", import.meta.url);
+const metricOptionsPath = new URL("../../../schema/fixtures/metric-options.json", import.meta.url);
 
 /** The JSON text a token carries, before compression. */
 function payloadJSON(token: string): string {
@@ -59,11 +62,12 @@ function buildFixture() {
   return { valid, invalid, encodeInvalid };
 }
 
-/** Every option name normalizeMetricOptions reads: the keys of each `copy`
- * spec, the members it reads from `raw` and the keys of its loops. */
+/** Every option name normalizeMetricOptions reads: the keys of its option
+ * tables and of inline `copy` specs, the members it reads from `raw` and the
+ * keys of its loops. */
 function metricOptionKeys(): string[] {
   const source = readFileSync(new URL("../src/metricNormalize.ts", import.meta.url), "utf8");
-  const keys = new Set<string>();
+  const keys = new Set<string>(Object.values(METRIC_OPTION_SPECS).flatMap((spec) => Object.keys(spec)));
   for (const [, spec] of source.matchAll(/copy\([^,]+,\s*\{([^}]*)\}/g))
     for (const [, key] of spec!.matchAll(/(\w+)\s*:/g)) keys.add(key!);
   for (const [, path, call] of source.matchAll(/\braw((?:\.\w+)+)(\s*\()?/g)) {
@@ -94,6 +98,15 @@ describe("query link fixtures", () => {
     if (process.env.UPDATE_QUERY_LINK_FIXTURES === "1") writeFileSync(fixturePath, expected);
     const actual = existsSync(fixturePath) ? readFileSync(fixturePath, "utf8") : "";
     expect(actual === expected, "schema/fixtures/query-links.json is stale; rerun with UPDATE_QUERY_LINK_FIXTURES=1").toBe(true);
+  });
+
+  // The Go tests compare their option tables with this file, so a new option,
+  // value or type fails there until Go copies it.
+  it("publish the metric option tables", () => {
+    const expected = JSON.stringify(METRIC_OPTION_SPECS, null, 2) + "\n";
+    if (process.env.UPDATE_QUERY_LINK_FIXTURES === "1") writeFileSync(metricOptionsPath, expected);
+    const actual = existsSync(metricOptionsPath) ? readFileSync(metricOptionsPath, "utf8") : "";
+    expect(actual === expected, "schema/fixtures/metric-options.json is stale; rerun with UPDATE_QUERY_LINK_FIXTURES=1").toBe(true);
   });
 
   // Go ports normalizeMetricOptions key by key. A new option must reach the

@@ -1,0 +1,157 @@
+{
+  "top": {
+    "expression": "string",
+    "expressionY": "string",
+    "scope": [
+      "allMatching",
+      "shownRows"
+    ],
+    "groupLimit": "integer",
+    "minCount": "positiveInteger",
+    "share": [
+      "total",
+      "group0"
+    ]
+  },
+  "window": {
+    "reduce": [
+      "total",
+      "mean"
+    ],
+    "partial": [
+      "omit",
+      "include"
+    ]
+  },
+  "dateGrouping": {
+    "field": "string",
+    "interval": [
+      "hour",
+      "day",
+      "week",
+      "month",
+      "year"
+    ],
+    "timeZone": "string",
+    "includeEmpty": "boolean",
+    "range": [
+      "query",
+      "observed",
+      "custom"
+    ],
+    "start": "string",
+    "end": "string",
+    "partialIntervals": [
+      "include",
+      "exclude"
+    ]
+  },
+  "display": {
+    "kind": [
+      "auto",
+      "value",
+      "table",
+      "list",
+      "bar-horizontal",
+      "bar-vertical",
+      "line",
+      "pie",
+      "donut",
+      "scatter",
+      "box",
+      "histogram"
+    ],
+    "valueLabel": "string",
+    "xLabel": "string",
+    "yLabel": "string",
+    "legendPosition": [
+      "left",
+      "right",
+      "top",
+      "bottom",
+      "none"
+    ],
+    "maxGroups": "positiveInteger",
+    "showOther": "boolean",
+    "boxMean": "boolean"
+  },
+  "scale": {
+    "mode": [
+      "linear",
+      "log"
+    ],
+    "min": "number",
+    "max": "number"
+  },
+  "format": {
+    "kind": [
+      "number",
+      "percent",
+      "duration",
+      "date",
+      "time",
+      "datetime"
+    ],
+    "decimals": "integer",
+    "sourceUnit": [
+      "milliseconds",
+      "seconds",
+      "minutes",
+      "hours",
+      "days",
+      "iso",
+      "epochSeconds",
+      "epochMilliseconds",
+      "secondsOfDay",
+      "millisecondsOfDay"
+    ],
+    "style": [
+      "human",
+      "long",
+      "clock",
+      "custom",
+      "iso"
+    ],
+    "pattern": "string",
+    "timeZone": "string"
+  },
+  "list": {
+    "showBars": "boolean",
+    "useGroupColors": "boolean",
+    "showValues": "boolean",
+    "barPosition": [
+      "inline",
+      "below"
+    ],
+    "maxLabelLines": "positiveInteger"
+  },
+  "pivot": {
+    "swap": "boolean",
+    "rowDir": [
+      "asc",
+      "desc"
+    ],
+    "columnDir": [
+      "asc",
+      "desc"
+    ]
+  },
+  "distribution": {
+    "kind": [
+      "box",
+      "histogram"
+    ],
+    "input": "string",
+    "whiskers": [
+      "minmax",
+      "tukey"
+    ],
+    "bins": "integer"
+  },
+  "layout": {
+    "widthRem": "integer",
+    "heightRem": "integer",
+    "minWidthRem": "integer",
+    "minHeightRem": "integer"
+  }
+}

@@ -333,6 +333,14 @@ export const tokenCases: TokenCase[] = [
   { name: "escaped surrogates", token: plain('{"w":[{"field":"pair","op":"=","value":"\\ud83d\\ude00"},{"field":"lone","op":"=","value":"x\\udc00y\\ud800"}]}') },
   { name: "invalid UTF-8 is replaced in plain tokens", token: "2j." + base64url(Buffer.concat([Buffer.from('{"w":[{"field":"a","op":"=","value":"'), Buffer.from([0xed, 0xa0, 0x80, 0xf0, 0x9f, 0xe0, 0x80, 0xc0, 0xaf]), Buffer.from('"}]}')])) },
   { name: "byte order mark in a compressed token", token: deflated("﻿" + JSON.stringify({ l: 9 })) },
+  // Decided for 0.9.6: a plain token drops a leading BOM on every engine, as a compressed one does.
+  { name: "byte order mark in a plain token", token: plain("\uFEFF" + JSON.stringify({ l: 9 })) },
+  { name: "byte order mark in a legacy token", token: legacy("\uFEFF" + JSON.stringify({ l: 9 })) },
+  { name: "byte order mark after the start of a plain token", token: plain(JSON.stringify({ s: [["\uFEFFa"]] })) },
+  // Decided for 0.9.6: set metadata whose mode is not a string is dropped like other malformed
+  // metadata; the predicate stays.
+  { name: "set mode that is a list", token: plain({ w: [{ field: "tags", op: "includes", value: "a", setFilter: { id: "x", mode: ["any"], values: ["a"] } }] }) },
+  { name: "set mode with an own toString", token: plain({ w: [{ field: "a", op: "=", value: "x", setFilter: { id: "s", mode: { toString: 1 }, values: [] } }] }) },
   { name: "whitespace in compressed JSON", token: deflated(' { "l" : 9 , "w" : [ ] } \n') },
   { name: "trailing bytes after the compressed stream", token: "2d." + base64url(Buffer.concat([Buffer.from(deflateSync(Buffer.from('{"l":3}'))), Buffer.from([1, 2, 3])])) },
   {
@@ -392,7 +400,6 @@ export const invalidCases: InvalidCase[] = [
   { name: "object where", token: plain({ w: {} }), code: "invalid" },
   { name: "null metrics", token: plain({ g: null }), code: "invalid" },
   { name: "string where", token: legacy({ w: "a" }), code: "invalid" },
-  { name: "byte order mark in a plain token", token: plain("﻿{}"), code: "invalid" },
   { name: "corrupt compression", token: "2d.____", code: "invalid" },
   { name: "truncated compression", token: "2d." + base64url(deflateSync(Buffer.from(JSON.stringify({ s: [["a"], ["b"], ["c"]] }))).subarray(0, 6)), code: "invalid" },
   { name: "invalid UTF-8 in compressed JSON", token: deflated(new Uint8Array([0x7b, 0x7d, 0xff])), code: "invalid" },
@@ -424,7 +431,6 @@ export const invalidCases: InvalidCase[] = [
   { name: "predicate budget exceeded", token: plain({ w: tooManyPredicates }), code: "invalid" },
   { name: "group over the budget", token: plain({ w: [{ any: tooManyPredicates }] }), code: "invalid" },
   { name: "set filters over the budget", token: plain({ w: [["set", "tags", "all", Array.from({ length: 60 }, (_, i) => `a${i}`), "a"], ["set", "tags", "all", Array.from({ length: 41 }, (_, i) => `b${i}`), "b"]] }), code: "invalid" },
-  { name: "own toString in a set mode", token: plain({ w: [{ field: "a", op: "=", value: "x", setFilter: { id: "s", mode: { toString: 1 }, values: [] } }] }), code: "invalid" },
   { name: "own toString in a summary op", token: plain({ b: { keys: ["k"], summaries: [{ id: "x", op: { toString: 1 } }], source: {} } }), code: "invalid" },
   { name: "own toString inside an array op", token: plain({ b: { keys: ["k"], summaries: [{ id: "x", op: [1, [{ toString: null }]] }], source: {} } }), code: "invalid" },
   { name: "own toString in a representative direction", token: plain({ b: { keys: ["k"], summaries: [], representative: { orderBy: [{ field: "t", dir: { toString: "asc" } }] }, source: {} } }), code: "invalid" },

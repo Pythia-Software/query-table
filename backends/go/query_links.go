@@ -94,7 +94,11 @@ type LinkQuery struct {
 // v2 wire form and returns a "2j." (base64url JSON) or "2d." (base64url raw
 // DEFLATE) token, whichever is shorter. decodeQueryStrict and DecodeQueryLink
 // read the token back as the normalized state; the JSON before compression is
-// byte-identical to the TypeScript encoder's.
+// byte-identical to the TypeScript encoder's. The DEFLATE bytes are not: Go's
+// compressor differs from fflate's, so a "2d." token can differ from the
+// TypeScript one, and when the two forms are close in length Go may pick the
+// other prefix. Compare links by their decoded LinkQuery values (equal states
+// decode to reflect.DeepEqual values), never by token text.
 //
 // Unlike encodeQuery, it applies decodeQueryStrict's own checks first, so it
 // never builds a link whose top-level filters or metrics are dropped or
@@ -102,8 +106,9 @@ type LinkQuery struct {
 // matches nothing, and which normalization would drop), or an aggregation that
 // normalization would discard is a QueryLinkInvalid error. Filters nested in
 // metrics, grouping and link patches are normalized as in TypeScript, which
-// records a diagnostic or drops the link when it loses a predicate. A state over MaxQueryStateBytes or a token over
-// MaxQueryTokenLength is QueryLinkTooLarge.
+// records a diagnostic or drops the link when it loses a predicate. A state
+// over MaxQueryStateBytes or a token over MaxQueryTokenLength is
+// QueryLinkTooLarge.
 func EncodeQueryLink(q LinkQuery) (token string, err error) {
 	defer recoverJSThrow(&err)
 	for _, term := range q.Where {
@@ -131,6 +136,9 @@ func EncodeQueryLink(q LinkQuery) (token string, err error) {
 
 // DecodeQueryLink is decodeQueryStrict. It reads "2j.", "2d." and legacy
 // unprefixed tokens and returns the normalized state; "" is the empty query.
+// Text decoding follows the TypeScript core on every engine: invalid UTF-8 in
+// a "2j." or legacy token becomes U+FFFD while a "2d." token must be valid
+// UTF-8, and a leading byte order mark is dropped in all three.
 // It rejects other versions (QueryLinkUnsupportedVersion), bad encodings,
 // incomplete or corrupt compression, malformed set-filter tuples or property
 // view references, malformed or over-budget predicates and metrics
@@ -142,7 +150,7 @@ func DecodeQueryLink(token string) (q LinkQuery, err error) {
 	if err != nil {
 		return LinkQuery{}, err
 	}
-	return linkQueryFromState(state)
+	return linkQueryFromState(state), nil
 }
 
 // recoverJSThrow reports a JavaScript exception raised during normalization
@@ -227,8 +235,9 @@ func decodeLinkState(token string) (*jsValue, error) {
 			return nil, err
 		}
 	} else {
-		// Node's Buffer#toString: invalid UTF-8 becomes U+FFFD and a BOM stays.
-		text = whatwgUTF8(data)
+		// fromBase64Url: invalid UTF-8 becomes U+FFFD and a leading byte
+		// order mark is dropped, as in a compressed token.
+		text = strings.TrimPrefix(whatwgUTF8(data), "\uFEFF")
 	}
 	if len(text) > MaxQueryStateBytes {
 		return nil, linkError(QueryLinkTooLarge, "Query state exceeds the storage limit.")
@@ -743,24 +752,18 @@ func (q LinkQuery) jsState() (*jsValue, error) {
 
 func rawJS(v *jsValue) json.RawMessage { return json.RawMessage(stringifyJS(v)) }
 
-func linkSetFilterFrom(v *jsValue) (*SetFilterMetadata, error) {
+func linkSetFilterFrom(v *jsValue) *SetFilterMetadata {
 	if v == nil {
-		return nil, nil
+		return nil
 	}
-	mode := v.get("mode")
-	if !mode.isString() {
-		// normalizeQueryState keeps any mode whose String() is valid, such as
-		// ["any"]; encodeQuery then throws on it. Refuse it here instead.
-		return nil, linkError(QueryLinkInvalid, "Invalid set filter mode in query link.")
-	}
-	metadata := &SetFilterMetadata{ID: v.get("id").s, Mode: mode.s, Values: []string{}}
+	metadata := &SetFilterMetadata{ID: v.get("id").s, Mode: v.get("mode").s, Values: []string{}}
 	for _, value := range v.get("values").a {
 		metadata.Values = append(metadata.Values, value.s)
 	}
-	return metadata, nil
+	return metadata
 }
 
-func linkQueryFromState(state *jsValue) (LinkQuery, error) {
+func linkQueryFromState(state *jsValue) LinkQuery {
 	q := LinkQuery{
 		Select:  []LinkColumn{},
 		Where:   []WhereTerm{},
@@ -793,11 +796,7 @@ func linkQueryFromState(state *jsValue) (LinkQuery, error) {
 			literal := clause(term)
 			item = WhereTerm{Field: literal.Field, Op: literal.Op, Value: literal.Value, Negated: literal.Negated}
 		}
-		metadata, err := linkSetFilterFrom(term.get("setFilter"))
-		if err != nil {
-			return LinkQuery{}, err
-		}
-		item.SetFilter = metadata
+		item.SetFilter = linkSetFilterFrom(term.get("setFilter"))
 		q.Where = append(q.Where, item)
 	}
 	for _, term := range state.get("orderBy").a {
@@ -822,5 +821,5 @@ func linkQueryFromState(state *jsValue) (LinkQuery, error) {
 	if details := state.get("itemDetails"); details != nil {
 		q.ItemDetails = rawJS(details)
 	}
-	return q, nil
+	return q
 }

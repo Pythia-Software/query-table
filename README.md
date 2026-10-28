@@ -81,6 +81,12 @@ rejects filters and metrics that a strict decode would reject, rather than
 dropping them. Shared fixtures in `schema/fixtures/query-links.json` hold the
 TypeScript and Go codecs to the same tokens.
 
+The JSON inside a token is byte-identical to `encodeQuery`'s, but the DEFLATE
+bytes are not, so a Go `2d.` token can differ from the TypeScript one, and when
+the two forms are close in length either side may pick the other prefix.
+Compare links by decoding them: equal states decode to equal `LinkQuery`
+values (`reflect.DeepEqual`).
+
 For schema generation:
 
 ```bash

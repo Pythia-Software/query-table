@@ -25,6 +25,7 @@ import (
 const (
 	queryLinkFixturePath   = "../../schema/fixtures/query-links.json"
 	queryLinkGoTokensPath  = "../../schema/fixtures/query-links-go.json"
+	metricOptionsPath      = "../../schema/fixtures/metric-options.json"
 	queryLinkUpdateFixture = "UPDATE_QUERY_LINK_FIXTURES"
 )
 
@@ -180,7 +181,8 @@ func TestQueryLinkFixtures(t *testing.T) {
 		// state would (not always as `want`: see the TypeScript test).
 		again, err := DecodeQueryLink(token)
 		reference, referenceErr := DecodeQueryLink("2j." + base64.RawURLEncoding.EncodeToString([]byte(c.Packed)))
-		if err != nil || referenceErr != nil || linkQueryState(t, again) != linkQueryState(t, reference) {
+		// Hosts compare links this way, so equal states must decode to equal values.
+		if err != nil || referenceErr != nil || !reflect.DeepEqual(again, reference) {
 			t.Errorf("%s: decoding the Go token: %v, %v", c.Name, err, referenceErr)
 		}
 		goTokens[c.Name] = token
@@ -310,12 +312,60 @@ func TestQueryLinkDashboardFilter(t *testing.T) {
 	}
 }
 
-// normalizeQueryState keeps a set filter whose mode only stringifies to a
-// valid one, which encodeQuery then cannot encode. LinkQuery cannot hold it.
-func TestDecodeQueryLinkRejectsNonStringSetMode(t *testing.T) {
-	token := "2j." + base64.RawURLEncoding.EncodeToString([]byte(`{"w":[{"field":"tags","op":"includes","value":"a","setFilter":{"id":"x","mode":["any"],"values":["a"]}}]}`))
-	if _, err := DecodeQueryLink(token); linkErrorCode(err) != string(QueryLinkInvalid) {
-		t.Fatalf("got %v", err)
+// The TypeScript test writes METRIC_OPTION_SPECS to metric-options.json. A new
+// option, allowed value or type there fails here until Go copies it.
+func TestMetricOptionTablesMatchTypeScript(t *testing.T) {
+	data, err := os.ReadFile(metricOptionsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	specs, err := parseJSValue(string(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tables := map[string][]optionSpec{
+		"top": metricTopOptions, "window": metricWindowOptions, "dateGrouping": metricDateOptions,
+		"display": metricDisplayOptions, "scale": metricScaleOptions, "format": metricFormatOptions,
+		"list": metricListOptions, "pivot": metricPivotOptions, "distribution": metricDistributionOptions,
+		"layout": metricLayoutOptions,
+	}
+	kinds := map[string]optionKind{
+		"string": optionString, "boolean": optionBoolean, "integer": optionInteger,
+		"positiveInteger": optionPositiveInteger, "number": optionNumber,
+	}
+	names := specs.o.keys()
+	if len(names) != len(tables) {
+		t.Errorf("TypeScript has option tables %v; Go has %d", names, len(tables))
+	}
+	for _, name := range names {
+		table, ok := tables[name]
+		if !ok {
+			t.Errorf("Go has no %q option table", name)
+			continue
+		}
+		keys := specs.o.values[name].o.keys()
+		if len(keys) != len(table) {
+			t.Errorf("%s: TypeScript options %v; Go has %d", name, keys, len(table))
+			continue
+		}
+		for i, key := range keys {
+			spec, goSpec := specs.o.values[name].o.values[key], table[i]
+			kind, known := kinds[spec.s]
+			want := optionSpec{key: key, kind: kind}
+			if !spec.isArray() && !known {
+				t.Errorf("%s.%s: Go has no %q options", name, key, spec.s)
+				continue
+			}
+			if spec.isArray() {
+				want = optionSpec{key: key, kind: optionEnum, values: map[string]bool{}}
+				for _, value := range spec.a {
+					want.values[value.s] = true
+				}
+			}
+			if goSpec.key != want.key || goSpec.kind != want.kind || !reflect.DeepEqual(goSpec.values, want.values) {
+				t.Errorf("%s option %d: Go has %+v, TypeScript %+v", name, i, goSpec, want)
+			}
+		}
 	}
 }
 
