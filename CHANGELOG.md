@@ -15,6 +15,21 @@
   table. Record item Detail is unchanged, including after leaving grouping.
   `ItemDetailsActions` takes a `label`, and `ObjectProperties` a `query` for
   its renderers.
+- Host query state. `useQueryTable({ hostQuery: { ownedParameters, defaults,
+  normalize } })` registers state a host owns, such as a keyword clause it
+  runs itself, as part of the query definition: `QueryState.hostState`
+  (`{ version, params }`). The native Save, Update, Saved, Default, Share,
+  Reset and Undo/Redo controls, query links and durable snapshots carry it
+  with the table query, and every request carries the host state it runs
+  with. `api.definition` and `api.setDefinition` read and commit both as one
+  history entry. Saves without host state restore the host defaults; host
+  state the host rejects fails the whole restore or load instead of running a
+  broader table-only query, and tables without `hostQuery` reject it. URL
+  writes replace exactly the owned parameters. `StorageAdapter.storesHostState`
+  marks adapters that keep it; the built-in adapters do, and Save refuses
+  others. The Go link codec (`LinkQuery.HostState`) round-trips it, and
+  `QueryRequestV3`, `ServerQueryV2` and `MetricQuery` accept and expose a
+  `HostState` field.
 - `useQueryTable({ persistLast: "succeeded" })` saves the last-used query only
   after its rows and every metric have loaded. A query that fails, times out
   or is cancelled no longer replaces the last-used query, so a bare reload

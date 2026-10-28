@@ -30,6 +30,8 @@ export interface QueryCapabilitiesV3 {
   profile: string;
 }
 export interface QueryRequestV3 {
+  /** The table's host-owned state when `hostQuery` is configured. */
+  hostState?: import("./query").HostQueryState;
   version: 3;
   profile: string;
   now: number;

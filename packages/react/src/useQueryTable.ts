@@ -32,6 +32,7 @@ import {
   applyQuery,
   memoryStorageAdapter,
   normalizeQueryState,
+  parseHostQueryState,
   readFieldValue,
   selectedFields,
   toServerQuery,
@@ -53,6 +54,7 @@ const AUTOCOMPLETE_LIMIT = 50;
 const MAX_AUTO_REFRESH_POLLS = 1000;
 import type {
   QueryState,
+  HostQueryState,
   WhereClause,
   WhereBranch,
   WhereTerm,
@@ -116,6 +118,10 @@ export interface UseQueryTableOptions<Row> {
    * previous last-used query; explicit links, named saves and the default are
    * separate choices and are never touched by it. */
   persistLast?: "always" | "succeeded";
+  /** Host-owned query state that travels with the table query as one
+   * definition: saved, restored, shared, reset and undone together. The host
+   * keeps rendering and running its own clauses from `api.definition`. */
+  hostQuery?: HostQueryOptions;
   /** Shared reusable definitions, independent of saved-query storage. */
   computedColumnStore?: ComputedColumnStore;
   /** Authoritative host handshake for versioned server SELECT, sorts, and metrics. */
@@ -209,6 +215,25 @@ export interface AggregationsApi {
   contextKey?: string;
 }
 
+/** Registers host-owned query state with `useQueryTable`. */
+export interface HostQueryOptions {
+  /** URL parameters that mirror `hostState.params` when `syncUrl` is on. URL
+   * writes replace exactly these, keeping every other parameter. They may not
+   * include the table's own query parameter. */
+  ownedParameters: readonly string[];
+  /** The state a query without host state takes, including every save made
+   * before the host registered, and the state Reset restores. */
+  defaults: HostQueryState;
+  /** Validate, migrate and canonicalize; throw to reject. A rejected state
+   * rejects the whole restore or edit, leaving the live definition as it was. */
+  normalize?: (state: HostQueryState) => HostQueryState;
+}
+/** The committed table query and host state, as one unit. */
+export interface QueryDefinition {
+  query: QueryState;
+  hostState: HostQueryState;
+}
+
 /** The outcome of executing one exact query; see `QueryTableApi.execution`. */
 export interface QueryExecutionReceipt {
   /** The query whose rows and metrics this receipt describes. */
@@ -234,6 +259,12 @@ export interface QueryTableApi<Row> {
    * restoring, after a restoration error and while the table is inactive, so
    * a cancelled or hidden table never publishes a stale receipt. */
   execution: QueryExecutionReceipt | null;
+  /** With `hostQuery`: the committed definition (`query` without its
+   * `hostState`, and the host state). */
+  definition?: QueryDefinition;
+  /** With `hostQuery`: commit a new definition as one history entry and one
+   * execution. Throws, changing nothing, when `hostQuery.normalize` rejects. */
+  setDefinition?: (next: QueryDefinition | ((previous: QueryDefinition) => QueryDefinition)) => void;
   /** Call after a host pushState/router update, with an absolute URL or a location
    * relative to window.location.href. Supersedes prior resolution;
    * abort or an intervening query edit prevents stale publication. */
@@ -381,6 +412,7 @@ function cloneQueryState(q: QueryState): QueryState {
     offset: q.offset,
   };
   if (q.fitToScreen) clone.fitToScreen = true;
+  if (q.hostState) clone.hostState = { version: q.hostState.version, params: Object.fromEntries(Object.entries(q.hostState.params).map(([name, values]) => [name, [...values]])) };
   if (q.aggregations)
     clone.aggregations = JSON.parse(
       JSON.stringify(q.aggregations),
@@ -469,14 +501,69 @@ function queryParameter<Row>(opts: UseQueryTableOptions<Row>): string {
   return opts.queryParameter ?? (typeof opts.itemDetails === "object" ? opts.itemDetails.queryParameter : undefined) ?? "q";
 }
 
+/** The query with the host state it runs with: the host defaults when it has
+ * none, otherwise the host's normalized form. Throws when the state cannot
+ * be accepted, including host state on a table that registers none. */
+function withHostState(query: QueryState, host: HostQueryOptions | undefined): QueryState {
+  if (!host) {
+    if (query.hostState) throw Error("This query includes host state that this table does not support.");
+    return query;
+  }
+  const raw = query.hostState ?? host.defaults;
+  if (raw.version === 0) throw Error("This query's host state could not be read.");
+  const state = parseHostQueryState(host.normalize ? host.normalize(parseHostQueryState(raw)) : raw);
+  return { ...query, hostState: state };
+}
+function withoutHostState(query: QueryState): QueryState {
+  const { hostState: _hostState, ...rest } = query;
+  return rest;
+}
+/** Host state mirrored into a URL's owned parameters, or undefined when it has none. */
+function hostStateFromUrl(location: string, host: HostQueryOptions): HostQueryState | undefined {
+  const url = new URL(location);
+  const params: Record<string, string[]> = {};
+  for (const name of host.ownedParameters) {
+    const values = url.searchParams.getAll(name);
+    if (values.length) params[name] = values;
+  }
+  return Object.keys(params).length ? { version: host.defaults.version, params } : undefined;
+}
+/** Replace exactly the owned parameters of `url` with `state`. */
+function writeHostParameters(url: string, host: HostQueryOptions, state: HostQueryState | undefined): string {
+  const next = new URL(url);
+  for (const name of host.ownedParameters) next.searchParams.delete(name);
+  for (const name of host.ownedParameters)
+    for (const value of state?.params[name] ?? []) next.searchParams.append(name, value);
+  return next.toString();
+}
+const HOST_REQUEST_METHODS = new Set(["fetchRows", "fetchRowsV2", "fetchQueryV3", "fetchMetrics", "fetchAggregations", "fetchDistinctValues"]);
+/** Requests carry the host state of the query they execute. The wrapper is
+ * rebuilt with every host state, alongside the query, so a request never
+ * pairs one definition's table query with another's host state. */
+function withHostTransport<T extends object>(transport: T | undefined, hostStateKey: string): T | undefined {
+  if (!transport || !hostStateKey) return transport;
+  const hostState = JSON.parse(hostStateKey) as HostQueryState;
+  const wrappers = new Map<PropertyKey, unknown>();
+  return new Proxy(Object.create(transport) as T, {
+    get(_target, key) {
+      const method = Reflect.get(transport, key, transport) as unknown;
+      if (!HOST_REQUEST_METHODS.has(String(key)) || typeof method !== "function") return method;
+      if (!wrappers.has(key))
+        wrappers.set(key, (request: object, signal?: AbortSignal) =>
+          (method as (request: object, signal?: AbortSignal) => unknown).call(transport, { ...request, hostState }, signal));
+      return wrappers.get(key);
+    },
+  });
+}
+
 function resolveInitial<Row>(opts: UseQueryTableOptions<Row>): {
   q: QueryState;
   fromUrl: boolean;
 } {
-  const defaults = defaultsFor(opts.schema, Boolean(opts.itemDetails));
+  const defaults = withHostState(defaultsFor(opts.schema, Boolean(opts.itemDetails)), opts.hostQuery);
   if (opts.initialQuery)
     return {
-      q: normalizeQueryState(opts.initialQuery, defaults),
+      q: withHostState(normalizeQueryState(opts.initialQuery, defaults), opts.hostQuery),
       fromUrl: false,
     };
   if (opts.syncUrl === true && opts.active !== false && typeof window !== "undefined") {
@@ -503,9 +590,14 @@ export function useQueryTable<Row>(
   const active = opts.active !== false;
   const urlSyncEnabled = opts.syncUrl === true;
   const syncUrl = urlSyncEnabled && active;
-  const { transport: metadataTransport, metricTransport, activity: requestActivity } =
+  const { transport: activityTransport, metricTransport: activityMetricTransport, activity: requestActivity } =
     useRequestActivity(sourceTransport, opts.metricTransport);
-  const transport = metadataTransport;
+  const host = opts.hostQuery;
+  const hostRef = useRef(host);
+  hostRef.current = host;
+  const hostDefaultsKey = host ? JSON.stringify(host.defaults) : "";
+  if (host?.ownedParameters.includes(queryParameter(opts)))
+    throw Error(`hostQuery.ownedParameters cannot include the table's own "${queryParameter(opts)}" parameter.`);
   const storage = useMemo(
     () => opts.storage ?? memoryStorageAdapter(),
     [opts.storage],
@@ -516,7 +608,8 @@ export function useQueryTable<Row>(
   const now = opts.now ?? Date.now;
   const nowRef = useRef(now);
   const onRefreshRef = useRef(opts.onRefresh);
-  const defaults = useMemo(() => defaultsFor(sourceSchema, Boolean(opts.itemDetails)), [sourceSchema, Boolean(opts.itemDetails)]);
+  const defaults = useMemo(() => withHostState(defaultsFor(sourceSchema, Boolean(opts.itemDetails)), hostRef.current),
+    [sourceSchema, Boolean(opts.itemDetails), hostDefaultsKey]);
 
   const initRef = useRef(resolveInitial(opts));
   const [restoration, setRestoration] = useState<{ loading: boolean; error: Error | null }>({ loading: initRef.current.fromUrl, error: null });
@@ -561,6 +654,10 @@ export function useQueryTable<Row>(
     () => opts.canonicalizeQuery?.(storedQuery) ?? storedQuery,
     [storedQuery, opts.canonicalizeQuery],
   );
+  const hostStateKey = host && query.hostState ? JSON.stringify(query.hostState) : "";
+  const metadataTransport = useMemo(() => withHostTransport(activityTransport, hostStateKey), [activityTransport, hostStateKey]);
+  const metricTransport = useMemo(() => withHostTransport(activityMetricTransport, hostStateKey), [activityMetricTransport, hostStateKey]);
+  const transport = metadataTransport;
   const sourceCatalogue = useMemo(() => sourceExecutionSchema(sourceSchema, opts.computedExecution), [sourceSchema, opts.computedExecution]);
   const sourceRows = providedRows;
   const groupingModel = useMemo(() => createGroupingModel(sourceCatalogue), [sourceCatalogue]);
@@ -649,7 +746,9 @@ export function useQueryTable<Row>(
           typeof next === "function"
             ? (next as (p: QueryState) => QueryState)(prev)
             : next;
-        const nextQuery = normalizeQueryState(candidate, defaults);
+        // An edit that does not mention host state keeps the current one.
+        const normalized = normalizeQueryState(candidate, defaults);
+        const nextQuery = withHostState(normalized.hostState || !prev.hostState ? normalized : { ...normalized, hostState: prev.hostState }, hostRef.current);
         if (queriesEqual(prev, nextQuery)) return history;
         return { query: cloneQueryState(nextQuery), past: [...history.past, cloneQueryState(prev)], future: [] };
       });
@@ -673,8 +772,11 @@ export function useQueryTable<Row>(
   const recordQueryUrl = useCallback((url: string) => {
     observedQueryUrl.current = JSON.stringify(new URL(url).searchParams.getAll(parameter));
   }, [parameter]);
+  const ownedParametersKey = JSON.stringify(host?.ownedParameters ?? null);
+  const decorateLink = useCallback((url: string, q: QueryState) =>
+    hostRef.current ? writeHostParameters(url, hostRef.current, q.hostState) : url, [ownedParametersKey]);
   const links = useQueryLinks(query, linkService, syncUrl, storageReady && !restoration.loading && !restoration.error,
-    parameter, opts.links?.maxUrlBytes ?? 2000, recordQueryUrl);
+    parameter, opts.links?.maxUrlBytes ?? 2000, recordQueryUrl, decorateLink);
   const restoreSources = useRef({ storage, linkService, defaults, initialQuery });
   restoreSources.current = { storage, linkService, defaults, initialQuery };
 
@@ -702,11 +804,19 @@ export function useQueryTable<Row>(
         if (currentController.signal.aborted) throw new DOMException("Query restoration cancelled.", "AbortError");
         const fromUrl = location && (navigation || urlSyncEnabled) ? await linkService.resolve(location, parameter, currentController.signal) : null;
         const defaultSaved = fromUrl ? null : await storage.loadDefaultSaved?.(sourceSchema.name);
-        const restored = fromUrl ?? defaultSaved?.query ?? (navigation ? defaults : await storage.loadLast(sourceSchema.name));
+        let restored = fromUrl ?? defaultSaved?.query ?? (navigation ? defaults : await storage.loadLast(sourceSchema.name));
         if (currentController.signal.aborted) throw new DOMException("Query restoration cancelled.", "AbortError");
+        // A link without host state reads the host's own URL parameters.
+        const host = hostRef.current;
+        if (fromUrl && !fromUrl.hostState && host && location) {
+          const hostState = hostStateFromUrl(location, host);
+          if (hostState) restored = { ...fromUrl, hostState };
+        }
         if (!cancelled && run === generation && epoch === manualQueryEpoch.current) {
           if (restored) {
-            const normalized = normalizeQueryState(restored, defaults);
+            // Host state is resolved before anything commits; a rejected one
+            // fails the whole restore and leaves the live definition alone.
+            const normalized = withHostState(normalizeQueryState(restored, defaults), host);
             savedBaseline.current = defaultSaved || fromUrl?.grouping
               ? { source: sourceSchema.name, query: cloneQueryState(normalized) }
               : null;
@@ -1037,11 +1147,13 @@ export function useQueryTable<Row>(
   // Persist last query (debounced). The "succeeded" policy waits for the
   // execution receipt below.
   const persistLast = opts.persistLast ?? "always";
+  // Last-used state through storage that drops host state would restore a table-only query.
+  const hostStorageUnsupported = Boolean(host) && !storage.storesHostState;
   useEffect(() => {
-    if (persistLast !== "always" || !storageReady || restoration.loading || restoration.error) return;
+    if (persistLast !== "always" || !storageReady || restoration.loading || restoration.error || hostStorageUnsupported) return;
     const t = setTimeout(() => void storage.saveLast(sourceSchema.name, query), 400);
     return () => clearTimeout(t);
-  }, [persistLast, queryKey, storage, sourceSchema.name, query, restoration, storageReady]);
+  }, [persistLast, queryKey, storage, sourceSchema.name, query, restoration, storageReady, hostStorageUnsupported]);
 
   // Resolved id accessor.
   const idField = useMemo(
@@ -1073,7 +1185,9 @@ export function useQueryTable<Row>(
     sourceSchema.name,
     query,
     (q) => {
-      const normalized = normalizeQueryState(q, defaults);
+      // A save without host state takes the host defaults rather than keep
+      // the live state; an unacceptable one throws before anything changes.
+      const normalized = withHostState(normalizeQueryState(q, defaults), hostRef.current);
       savedBaseline.current = { source: sourceSchema.name, query: cloneQueryState(normalized) };
       viewRevision.current++;
       setQuery(normalized);
@@ -1082,11 +1196,22 @@ export function useQueryTable<Row>(
     now,
     links.snapshot,
   );
-  const saved: SavedQueriesApi = { ...savedQueries, save: async name => {
+  // With host state, saved items compare as the definitions they load, and
+  // saving refuses storage that would drop the host state.
+  const hostStorageError = host && !storage.storesHostState
+    ? "This storage adapter cannot save host query state (set StorageAdapter.storesHostState once it keeps QueryState.hostState)." : null;
+  const savedItems = useMemo(() => !host ? savedQueries.items : savedQueries.items.map(item => {
+    try { return { ...item, query: withHostState(normalizeQueryState(item.query, defaults), hostRef.current) }; } catch { return item; }
+  }), [savedQueries.items, Boolean(host), defaults]);
+  const saved: SavedQueriesApi = { ...savedQueries, items: savedItems, save: async name => {
+    if (hostStorageError) throw Error(hostStorageError);
     const item = await savedQueries.save(name);
-    savedBaseline.current = { source: sourceSchema.name, query: cloneQueryState(normalizeQueryState(item.query, defaults)) };
+    savedBaseline.current = { source: sourceSchema.name, query: cloneQueryState(withHostState(normalizeQueryState(item.query, defaults), hostRef.current)) };
     viewRevision.current++;
     return item;
+  }, update: async id => {
+    if (hostStorageError) throw Error(hostStorageError);
+    return savedQueries.update(id);
   } };
   const pageReady =
     committedPage === pageContext &&
@@ -1537,10 +1662,10 @@ export function useQueryTable<Row>(
     aggState.error, aggState.results, aggState.loading, query, executionIdentity]);
   const succeededQuery = execution?.status === "succeeded" ? execution.query : null;
   useEffect(() => {
-    if (persistLast !== "succeeded" || !succeededQuery) return;
+    if (persistLast !== "succeeded" || !succeededQuery || hostStorageUnsupported) return;
     const t = setTimeout(() => void storage.saveLast(sourceSchema.name, succeededQuery), 400);
     return () => clearTimeout(t);
-  }, [persistLast, succeededQuery, storage, sourceSchema.name]);
+  }, [persistLast, succeededQuery, storage, sourceSchema.name, hostStorageUnsupported]);
 
   const sourceRowId = useCallback((row: Row): RowId | null => {
     const field = sourceSchema.fields.find(f => f.name === sourceSchema.idField);
@@ -1600,6 +1725,17 @@ export function useQueryTable<Row>(
     restoration: { status: restoration.error ? "error" : !storageReady || restoration.loading ? "resolving" : "ready",
       ready: active && storageReady && !restoration.loading && !restoration.error, error: restoration.error },
     execution,
+    ...(host && query.hostState ? {
+      definition: { query: withoutHostState(query), hostState: query.hostState },
+      setDefinition: (next: QueryDefinition | ((previous: QueryDefinition) => QueryDefinition)) => {
+        const current = queryHistoryRef.current.query;
+        const value = typeof next === "function"
+          ? next({ query: withoutHostState(current), hostState: current.hostState! })
+          : next;
+        // Validate before committing, so a rejected host state changes nothing.
+        setQuery(withHostState({ ...normalizeQueryState(value.query, defaults), hostState: value.hostState }, hostRef.current));
+      },
+    } : {}),
     restoreLocation,
     links,
     schema: columnSchema,

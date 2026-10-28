@@ -15,7 +15,9 @@ export interface QueryLinksApi {
 }
 
 export function useQueryLinks(query: QueryState, service: QueryLinkService, syncUrl: boolean, ready: boolean, parameter: string, maxUrlBytes: number,
-  onUrlChange: (url: string) => void): QueryLinksApi {
+  onUrlChange: (url: string) => void,
+  /** Rewrites parameters the host owns for this query, such as host state. */
+  decorate: (url: string, query: QueryState) => string = (url) => url): QueryLinksApi {
   const latest = useRef(query); latest.current = query;
   const [kind, setKind] = useState<QueryLink["kind"] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -29,11 +31,12 @@ export function useQueryLinks(query: QueryState, service: QueryLinkService, sync
     try {
       // Preserve an already-promoted link until the query actually changes.
       const result = service.local(query, window.location.href, parameter);
-      window.history.replaceState(window.history.state, "", result.url);
-      onUrlChange(result.url);
+      const url = decorate(result.url, query);
+      window.history.replaceState(window.history.state, "", url);
+      onUrlChange(url);
       setKind(result.kind); setError(null);
     } catch (e) { setError(e instanceof Error ? e : Error(String(e))); }
-  }, [queryKey, syncUrl, ready, service, parameter, onUrlChange]);
+  }, [queryKey, syncUrl, ready, service, parameter, onUrlChange, decorate]);
 
   const snapshot = useCallback(async (q: QueryState) => {
     const captured = encodeQuery(q);
@@ -45,13 +48,14 @@ export function useQueryLinks(query: QueryState, service: QueryLinkService, sync
       if (saved && base && mounted.current && syncUrl && ready && window.location.href === base && encodeQuery(latest.current) === captured) {
         const url = new URL(base); url.searchParams.set(parameter, "@" + saved.code);
         const result = service.local(q, url.toString(), parameter);
-        window.history.replaceState(window.history.state, "", result.url); onUrlChange(result.url); setKind("durable");
+        const next = decorate(result.url, q);
+        window.history.replaceState(window.history.state, "", next); onUrlChange(next); setKind("durable");
       }
       return saved;
     }
     catch (e) { if (mounted.current) setError(e instanceof Error ? e : Error(String(e))); throw e; }
     finally { operations.current--; if (mounted.current) setBusy(operations.current > 0); }
-  }, [service, syncUrl, ready, parameter, onUrlChange]);
+  }, [service, syncUrl, ready, parameter, onUrlChange, decorate]);
   const create = useCallback(async (q = latest.current, options: { baseUrl?: string; parameter?: string } = {}) => {
     const baseUrl = options.baseUrl ?? window.location.href;
     const param = options.parameter ?? parameter;
@@ -59,7 +63,8 @@ export function useQueryLinks(query: QueryState, service: QueryLinkService, sync
     operations.current++; setBusy(true); setError(null);
     try {
       if (!ready) throw Error("Resolve or reset the query link before sharing it.");
-      const result = await service.durable(q, baseUrl, param);
+      const durable = await service.durable(q, baseUrl, param);
+      const result = param === parameter ? { ...durable, url: decorate(durable.url, q) } : durable;
       if (mounted.current && syncUrl && ready && param === parameter &&
         window.location.href === baseUrl && encodeQuery(latest.current) === captured) {
         window.history.replaceState(window.history.state, "", result.url);
@@ -69,7 +74,10 @@ export function useQueryLinks(query: QueryState, service: QueryLinkService, sync
       return result;
     } catch (e) { if (mounted.current) setError(e instanceof Error ? e : Error(String(e))); throw e; }
     finally { operations.current--; if (mounted.current) setBusy(operations.current > 0); }
-  }, [service, syncUrl, ready, parameter, onUrlChange]);
-  const local = useCallback((q: QueryState, base = window.location.href, param = parameter) => service.local(q, base, param), [service, parameter]);
+  }, [service, syncUrl, ready, parameter, onUrlChange, decorate]);
+  const local = useCallback((q: QueryState, base = window.location.href, param = parameter) => {
+    const result = service.local(q, base, param);
+    return param === parameter ? { ...result, url: decorate(result.url, q) } : result;
+  }, [service, parameter, decorate]);
   return { maxUrlBytes, kind, busy, error, create, local, snapshot };
 }

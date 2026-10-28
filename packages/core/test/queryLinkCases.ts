@@ -48,6 +48,24 @@ const tenPairs = [
 ] as const;
 
 export const stateCases: StateCase[] = [
+  {
+    name: "host state",
+    state: {
+      ...EMPTY_QUERY,
+      where: [{ field: "status", op: "=", value: "error" }],
+      hostState: { version: 1, params: { record_tool_calls: ["command", "(cache OR buffer) NOT obsolete"], view: ["table"] } },
+    },
+  },
+  {
+    name: "grouped host state",
+    state: {
+      ...EMPTY_QUERY,
+      grouping: { keys: ["tool"], summaries: [{ id: "calls", op: "count" }], representative: null, source: { ...EMPTY_QUERY, where: [{ field: "status", op: "=", value: "error" }] } },
+      select: [{ field: "tool" }, { field: "calls" }],
+      where: [{ field: "calls", op: ">", value: "2" }],
+      hostState: { version: 2, params: { search: ["phrase"], case: [] } },
+    },
+  },
   { name: "empty query", state: EMPTY_QUERY },
   {
     name: "dashboard filter",
@@ -290,6 +308,8 @@ const emoji = (n: number) => "😀".repeat(n);
 const linkSummary = (id: string, to: Record<string, unknown>) => ({ id, op: "link", link: { label: id, to: { kind: "query", target: "t", ...to } } });
 
 export const tokenCases: TokenCase[] = [
+  { name: "host state is canonicalized", token: plain({ h: { params: { z: ["2"], a: ["1"] }, version: 1 } }) },
+  { name: "grouping source host state is dropped", token: plain({ b: { keys: ["a"], summaries: [], representative: null, source: { hostState: { version: 1, params: {} } } }, h: { version: 1, params: { a: [] } } }) },
   { name: "legacy names and single order", token: legacy({ c: ["a", "b"], o: { field: "a", dir: "desc" }, l: 20, w: [{ field: "a", op: "=", value: "1" }] }) },
   { name: "legacy string select", token: legacy({ s: ["x", "y"], f: 10 }) },
   { name: "legacy width tuples", token: legacy({ s: [["x", 200], ["y"]] }) },
@@ -450,6 +470,9 @@ const bomb = deflateSync(new Uint8Array(4 * 1024 * 1024 + 1).fill(0x20));
 const tooManyPredicates = Array.from({ length: 101 }, (_, i) => ({ field: "n", op: "!=", value: String(i) }));
 
 export const invalidCases: InvalidCase[] = [
+  { name: "malformed host state", token: plain({ h: { version: 1, params: { a: "x" } } }), code: "invalid" },
+  { name: "unsupported host state version", token: plain({ h: { version: 0, params: {} } }), code: "invalid" },
+  { name: "oversized host state", token: plain({ h: { version: 1, params: Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`p${i}`, Array.from({ length: 2 }, () => "x".repeat(3999))])) } }), code: "invalid" },
   { name: "unknown version", token: "3j.e30", code: "unsupported_version" },
   { name: "dotted legacy token", token: "e30.e30", code: "unsupported_version" },
   { name: "bare dot", token: ".", code: "unsupported_version" },

@@ -2,6 +2,7 @@ package querytable
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -38,6 +39,8 @@ type MetricQuery struct {
 	Offset            int               `json:"offset"`
 	Metrics           []AggSpec         `json:"metrics"`
 	Diagnostics       []any             `json:"diagnostics,omitempty"`
+	// HostState is the table's host-owned query state; see ServerQueryV2.
+	HostState json.RawMessage `json:"hostState,omitempty"`
 }
 type MetricSQLPlan struct {
 	ID string

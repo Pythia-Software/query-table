@@ -85,6 +85,52 @@ Update only when `api.saved.canUpdate` is true. Optional last/default storage re
 failures fall back to table defaults; explicit broken URL links still block
 execution. A single empty `?q=` is treated as an absent query.
 
+### Host query state
+
+A host that adds its own clauses to the builder (for example a keyword
+condition rendered through the `whereRow` slot) can register their state so
+the native Save, Update, Saved, Default, Share, Reset and Undo/Redo controls
+treat it and the table query as one definition:
+
+```ts
+const api = useQueryTable({
+  schema, transport, syncUrl: true,
+  hostQuery: {
+    ownedParameters: ["record_tool_calls"],          // mirrored in the URL
+    defaults: { version: 1, params: {} },             // legacy saves and Reset
+    normalize: normalizeKeywordState,                 // validate, migrate; throw to reject
+  },
+});
+api.definition;                                       // { query, hostState }
+api.setDefinition(previous => ({ query: { ...previous.query, offset: 0 }, hostState: next }));
+```
+
+`hostState` is `{ version, params: Record<string, string[]> }`. It rides in
+`QueryState.hostState`, so history, saves, `encodeQuery` links and durable
+`@…` snapshots carry it with the query, within the existing size budgets.
+Every request the table sends carries the `hostState` it runs with
+(`ServerQuery`, `ServerQueryV2`, `QueryRequestV3`, `MetricQuery`,
+`AggregationRequest` and distinct-value requests), so the host's transport
+never sees one definition's table query with another's host state; the Go
+request types accept and expose it without interpreting it.
+
+- One `setDefinition` is one history entry and one execution. Edits through
+  `setQuery` keep the current host state unless they set one.
+- A save without host state, including every existing save, restores the
+  host `defaults`. Saved items compare as the definitions they load.
+- `normalize` rejecting a state, or unreadable host state, fails the whole
+  restore or load: the live definition and URL stay as they were, and
+  `saved.load` throws. A table without `hostQuery` rejects a save that carries
+  host state rather than drop it.
+- URL writes replace exactly `ownedParameters` and keep other parameters. A
+  table-only link restores host state from those parameters.
+- Grouping, HAVING and column edits keep the host state; it stays on the
+  grouped query, and leaving grouping or following a Records drill-down
+  carries it back to the source query.
+- Storage must set `storesHostState: true` (the built-in adapters do) to save
+  or persist last-used definitions; otherwise Save reports that it cannot,
+  instead of storing a table-only query.
+
 ### Last-used query and execution receipts
 
 By default the last-used query is saved 400 ms after every change, even if it

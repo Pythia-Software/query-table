@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"sort"
 	"strings"
 	"unicode/utf8"
 )
@@ -88,6 +89,16 @@ type LinkQuery struct {
 	FitToScreen bool            `json:"fitToScreen,omitempty"`
 	// Grouping is the GroupingState JSON, or nil.
 	Grouping json.RawMessage `json:"grouping,omitempty"`
+	// HostState is the host-owned state registered with useQueryTable's
+	// hostQuery, or nil. Version 0 marks an unreadable payload.
+	HostState *HostQueryState `json:"hostState,omitempty"`
+}
+
+// HostQueryState is QueryState.hostState: named lists of strings a host
+// interprets itself. Query Table carries it through links unchanged.
+type HostQueryState struct {
+	Version int                 `json:"version"`
+	Params  map[string][]string `json:"params"`
 }
 
 // EncodeQueryLink is encodeQuery: it normalizes q, packs it into the compact
@@ -288,7 +299,12 @@ func decodeLinkState(token string) (*jsValue, error) {
 		input.set("where", jsArr())
 	}
 	input.set("orderBy", compactOrderBy(c.get("o")))
-	for key, name := range map[string]string{"l": "limit", "f": "offset", "g": "aggregations", "d": "itemDetails", "fs": "fitToScreen", "b": "grouping"} {
+	if host := c.get("h"); host != nil {
+		if _, err := normalizeLinkHostState(host); err != nil {
+			return nil, linkError(QueryLinkInvalid, "Invalid host state in query link.")
+		}
+	}
+	for key, name := range map[string]string{"l": "limit", "f": "offset", "g": "aggregations", "d": "itemDetails", "fs": "fitToScreen", "b": "grouping", "h": "hostState"} {
 		if value := c.get(key); value != nil {
 			input.set(name, value)
 		}
@@ -426,6 +442,9 @@ func compactLinkQuery(state *jsValue) *jsValue {
 	}
 	if grouping := q.get("grouping"); grouping.truthy() {
 		c.set("b", grouping)
+	}
+	if host := q.get("hostState"); host.truthy() {
+		c.set("h", host)
 	}
 	return c
 }
@@ -749,6 +768,18 @@ func (q LinkQuery) jsState() (*jsValue, error) {
 	if q.FitToScreen {
 		state.set("fitToScreen", jsBoolValue(true))
 	}
+	if q.HostState != nil {
+		params := jsObj()
+		names := make([]string, 0, len(q.HostState.Params))
+		for name := range q.HostState.Params {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			params.set(name, jsStrings(q.HostState.Params[name]))
+		}
+		state.set("hostState", jsObj().set("version", jsNum(float64(q.HostState.Version))).set("params", params))
+	}
 	if len(q.Grouping) > 0 {
 		grouping, err := parseLinkJSON(q.Grouping, "grouping")
 		if err != nil {
@@ -845,6 +876,17 @@ func linkQueryFromState(state *jsValue) LinkQuery {
 		q.OrderBy = append(q.OrderBy, item)
 	}
 	q.FitToScreen = state.get("fitToScreen") != nil
+	if host := state.get("hostState"); host != nil {
+		q.HostState = &HostQueryState{Version: int(host.get("version").n), Params: map[string][]string{}}
+		params := host.get("params")
+		for _, name := range params.o.keys() {
+			values := []string{}
+			for _, value := range params.get(name).a {
+				values = append(values, value.s)
+			}
+			q.HostState.Params[name] = values
+		}
+	}
 	if grouping := state.get("grouping"); grouping != nil {
 		q.Grouping = rawJS(grouping)
 	}

@@ -19,6 +19,7 @@ export type {
   ItemPageOptions,
   ItemDetailsState,
   RowId,
+  HostQueryState,
 } from "./query";
 export { itemPageFields, validateItemPageTemplate, renderItemPageTemplate } from "./itemPage";
 export {
@@ -40,6 +41,11 @@ export {
   isWhereGroup,
   predicatesOf,
   branchesOf,
+  parseHostQueryState,
+  MAX_HOST_QUERY_PARAMS,
+  MAX_HOST_QUERY_VALUES,
+  MAX_HOST_QUERY_VALUE_LENGTH,
+  MAX_HOST_QUERY_STATE_BYTES,
 } from "./query";
 
 export type {

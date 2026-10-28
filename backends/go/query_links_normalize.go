@@ -11,6 +11,7 @@ package querytable
 import (
 	"math"
 	"regexp"
+	"sort"
 	"strconv"
 )
 
@@ -318,6 +319,18 @@ func normalizeLinkQuery(input *jsValue, links bool) *jsValue {
 
 	if fit := raw.get("fitToScreen"); fit != nil && fit.kind == jsBool && fit.b {
 		out.set("fitToScreen", jsBoolValue(true))
+	}
+
+	// Unreadable host state is kept as version 0 rather than dropped, so a
+	// restore can reject it instead of running a broadened table-only query.
+	if links {
+		if host := raw.get("hostState"); host != nil {
+			if state, err := normalizeLinkHostState(host); err == nil {
+				out.set("hostState", state)
+			} else {
+				out.set("hostState", jsObj().set("version", jsNum(0)).set("params", jsObj()))
+			}
+		}
 	}
 
 	if grouping := raw.get("grouping"); !grouping.isNullish() {
@@ -1208,6 +1221,7 @@ func normalizeLinkGrouping(value *jsValue, links bool) *jsValue {
 	}
 	source := rawSource.spread()
 	source.del("grouping")
+	source.del("hostState")
 	if retained := raw.get("diagnostics"); retained.isArray() {
 		for _, message := range firstN(retained.a, 20) {
 			if message.isString() && message.s != "" {
@@ -1350,4 +1364,67 @@ func normalizeLinkPatch(value *jsValue) *jsValue {
 		}
 	}
 	return jsObj().set("id", jsStr(id)).set("owns", jsStrings(jsUniqueStrings(facets))).set("query", query)
+}
+
+// Host query state limits; see parseHostQueryState in TypeScript.
+const (
+	MaxHostQueryParams      = 64
+	MaxHostQueryValues      = 64
+	MaxHostQueryValueLength = 4000
+	MaxHostQueryStateBytes  = 32 * 1024
+)
+
+var hostQueryParamName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]{0,127}$`)
+
+// normalizeLinkHostState is parseHostQueryState: the canonical host state
+// (parameters sorted by name, values in order) or an error for a malformed or
+// oversized payload.
+func normalizeLinkHostState(input *jsValue) (*jsValue, error) {
+	invalid := func(why string) (*jsValue, error) {
+		return nil, linkError(QueryLinkInvalid, "Invalid host query state: "+why)
+	}
+	if !input.isRecord() {
+		return invalid("expected an object.")
+	}
+	for _, key := range input.o.keys() {
+		if key != "version" && key != "params" {
+			return invalid("unexpected properties.")
+		}
+	}
+	version := input.get("version")
+	if !version.isNumber() || !jsIsSafeInteger(version) || version.n < 1 {
+		return invalid("unsupported version.")
+	}
+	params := input.get("params")
+	if !params.isRecord() {
+		return invalid("params must be an object.")
+	}
+	names := append([]string(nil), params.o.keys()...)
+	sort.Strings(names)
+	if len(names) > MaxHostQueryParams {
+		return invalid("too many parameters.")
+	}
+	out := jsObj()
+	for _, name := range names {
+		values := params.get(name)
+		if !hostQueryParamName.MatchString(name) {
+			return invalid("invalid parameter name.")
+		}
+		if !values.isArray() || len(values.a) > MaxHostQueryValues {
+			return invalid("parameter " + name + " must be a list of strings.")
+		}
+		list := jsArr()
+		for _, value := range values.a {
+			if !value.isString() || jsLength(value.s) > MaxHostQueryValueLength {
+				return invalid("parameter " + name + " must be a list of strings.")
+			}
+			list.a = append(list.a, jsStr(value.s))
+		}
+		out.set(name, list)
+	}
+	state := jsObj().set("version", jsNum(version.n)).set("params", out)
+	if len(stringifyJS(state)) > MaxHostQueryStateBytes {
+		return invalid("payload too large.")
+	}
+	return state, nil
 }

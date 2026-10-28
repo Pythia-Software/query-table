@@ -3,6 +3,7 @@ package querytable
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -44,6 +45,8 @@ type QueryRequestV3 struct {
 	Rows              bool                `json:"rows"`
 	Metrics           []AggSpec           `json:"metrics"`
 	Diagnostics       []string            `json:"diagnostics,omitempty"`
+	// HostState is the table's host-owned query state; see ServerQueryV2.
+	HostState json.RawMessage `json:"hostState,omitempty"`
 }
 
 // Validate classifies malformed wire stages and metrics as request diagnostics,

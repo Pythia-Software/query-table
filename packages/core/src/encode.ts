@@ -19,9 +19,9 @@ import { createSetFilter, readSetFilter } from "./setFilter";
 // Back-compat: decodeQuery accepts legacy compact shapes: `o` as a single
 // object (pre-multi-sort) and `c`/`s` as a string[] (pre-width).
 
-import { EMPTY_QUERY, MAX_QUERY_TOKEN_LENGTH, normalizeQueryState, predicatesOf, suppliedPredicateCount } from "./query";
+import { EMPTY_QUERY, MAX_QUERY_TOKEN_LENGTH, normalizeQueryState, parseHostQueryState, predicatesOf, suppliedPredicateCount } from "./query";
 import { stripSetFilter } from "./setFilter";
-import type { QueryState, WhereTerm, OrderByClause, SelectColumn, AggregationClause, SetFilterMode } from "./query";
+import type { QueryState, WhereTerm, OrderByClause, SelectColumn, AggregationClause, SetFilterMode, HostQueryState } from "./query";
 import type { FieldSchema, FieldDef } from "./schema";
 import type { CellDisplay } from "./cellDisplay";
 import { indexFields, isFilterable, isPushdownFilter, isSortable, resolveFieldName, selectedFields } from "./schema";
@@ -71,6 +71,7 @@ interface CompactQuery {
   c?: string[]; // legacy alias for select column names
   fs?: boolean;
   b?: QueryState["grouping"];
+  h?: QueryState["hostState"];
 }
 
 /** Canonical query projected into the URL wire form. */
@@ -89,6 +90,7 @@ function compactQuery(q: QueryState): CompactQuery {
   if (q.itemDetails) c.d = q.itemDetails;
   if (q.fitToScreen) c.fs = true;
   if (q.grouping) c.b = q.grouping;
+  if (q.hostState) c.h = q.hostState;
   return c;
 }
 
@@ -238,7 +240,11 @@ function decodeToken(token: string, strict: boolean): QueryState {
       itemDetails: c.d,
       fitToScreen: c.fs,
       grouping: c.b,
+      hostState: c.h,
     });
+    if (strict && c.h !== undefined) {
+      try { parseHostQueryState(c.h); } catch { throw new QueryDecodeError("invalid", "Invalid host state in query link."); }
+    }
     if (strict && c.g && out.aggregations?.length !== c.g.length) throw new QueryDecodeError("invalid", "Invalid query metrics.");
     return out;
   } catch (error) {
@@ -284,6 +290,9 @@ export interface ServerQuery {
   orderBy: OrderByClause[];
   limit: number;
   offset: number;
+  /** The table's host-owned state when `hostQuery` is configured; hosts run
+   *  their own clauses from it. Query Table does not interpret it. */
+  hostState?: HostQueryState;
 }
 
 /** Project a QueryState into the server request, dropping client-only filters,
@@ -355,6 +364,8 @@ function termIsPushdown<Row>(
  *  metrics describe every matching row, not the visible page. Mirrors the Go
  *  AggSpec list. */
 export interface AggregationRequest {
+  /** The table's host-owned state when `hostQuery` is configured. */
+  hostState?: HostQueryState;
   diagnostics?: MetricDiagnostic[];
   where: WhereTerm[];
   aggregations: AggregationClause[];

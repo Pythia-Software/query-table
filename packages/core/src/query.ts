@@ -253,7 +253,54 @@ export interface ItemDetailsState {
   active?: { id: RowId; mode: "modal" | "expand" };
 }
 
+/**
+ * Query state a host owns and registers with `useQueryTable({ hostQuery })`,
+ * such as a keyword clause it runs itself. It travels with the table query
+ * through saves, links, history and resets as one definition. `params` are
+ * named lists of strings, like URL search parameters; the host's own
+ * `normalize` interprets them. Version 0 marks a payload that could not be
+ * read, and is always rejected on restore.
+ */
+export interface HostQueryState {
+  version: number;
+  params: Record<string, string[]>;
+}
+export const MAX_HOST_QUERY_PARAMS = 64;
+export const MAX_HOST_QUERY_VALUES = 64;
+export const MAX_HOST_QUERY_VALUE_LENGTH = 4000;
+export const MAX_HOST_QUERY_STATE_BYTES = 32 * 1024;
+/** URL-style names; ASCII keeps the sorted order identical in every codec. */
+const HOST_QUERY_PARAM_NAME = /^[A-Za-z_][A-Za-z0-9_.-]{0,127}$/;
+
+/** Validates host state and returns its canonical form (parameters sorted by
+ * name, values in order). Throws on a malformed or oversized payload. */
+export function parseHostQueryState(input: unknown): HostQueryState {
+  const fail = (why: string): never => { throw Error(`Invalid host query state: ${why}`); };
+  if (!isRecord(input)) return fail("expected an object.");
+  if (Object.keys(input).some((key) => key !== "version" && key !== "params")) fail("unexpected properties.");
+  const version = input.version;
+  if (typeof version !== "number" || !Number.isSafeInteger(version) || version < 1) return fail("unsupported version.");
+  if (!isRecord(input.params)) return fail("params must be an object.");
+  const names = Object.keys(input.params).sort();
+  if (names.length > MAX_HOST_QUERY_PARAMS) fail("too many parameters.");
+  const params: Record<string, string[]> = {};
+  for (const name of names) {
+    const values = input.params[name];
+    if (!HOST_QUERY_PARAM_NAME.test(name)) fail("invalid parameter name.");
+    if (!Array.isArray(values) || values.length > MAX_HOST_QUERY_VALUES ||
+      values.some((value) => typeof value !== "string" || value.length > MAX_HOST_QUERY_VALUE_LENGTH))
+      fail(`parameter ${name} must be a list of strings.`);
+    params[name] = [...values as string[]];
+  }
+  const state = { version, params };
+  if (new TextEncoder().encode(JSON.stringify(state)).length > MAX_HOST_QUERY_STATE_BYTES) fail("payload too large.");
+  return state;
+}
+
 export interface QueryState {
+  /** Host-owned state registered through `useQueryTable({ hostQuery })`.
+   * Only the top-level query carries it; a grouping source never does. */
+  hostState?: HostQueryState;
   /** Optional row-producing stage. `grouping.source` is the original record
    * query (its WHERE runs first). This query selects/filters/sorts the groups;
    * its `where` therefore represents HAVING. Only one stage is supported. */
@@ -530,6 +577,12 @@ function normalizeQuery(input: unknown, fallback: QueryState, links: boolean): Q
 
   if (raw.fitToScreen === true) out.fitToScreen = true;
 
+  // Unreadable host state is kept as version 0 rather than dropped, so a
+  // restore can reject it instead of running a broadened table-only query.
+  if (links && raw.hostState !== undefined) {
+    try { out.hostState = parseHostQueryState(raw.hostState); } catch { out.hostState = { version: 0, params: {} }; }
+  }
+
   if (raw.grouping != null) out.grouping = normalizeGroupingState(raw.grouping, links);
 
   if (Array.isArray(raw.aggregations)) {
@@ -672,7 +725,7 @@ function normalizeGroupingState(value: unknown, links: boolean): GroupingState {
   }
   if (!isRecord(raw.source)) fail("source must be the record query that is grouped.");
   else if (raw.source.grouping != null) fail("only one grouping stage is supported; the source query cannot itself be grouped.");
-  const { grouping: _nested, ...source } = isRecord(raw.source) ? raw.source : {};
+  const { grouping: _nested, hostState: _host, ...source } = isRecord(raw.source) ? raw.source : {};
   // Retain earlier diagnostics (bounded) instead of collapsing them.
   if (Array.isArray(raw.diagnostics))
     for (const message of raw.diagnostics.slice(0, 20))
@@ -769,6 +822,7 @@ export function queriesEqual(a: QueryState, b: QueryState): boolean {
   if (!sameArray(a.aggregations ?? [], b.aggregations ?? [])) return false;
   if (JSON.stringify(a.itemDetails) !== JSON.stringify(b.itemDetails)) return false;
   if (JSON.stringify(a.grouping) !== JSON.stringify(b.grouping)) return false;
+  if (JSON.stringify(a.hostState) !== JSON.stringify(b.hostState)) return false;
   return true;
 }
 

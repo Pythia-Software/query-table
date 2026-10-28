@@ -180,6 +180,8 @@ export interface MetricDiagnostic extends FormulaDiagnostic {
 }
 /** Host must enforce snapshot against the row response; this token alone does not pin data. */
 export interface MetricQuery {
+  /** The table's host-owned state when `hostQuery` is configured. */
+  hostState?: import("./query").HostQueryState;
   snapshot?: string;
   profile?: string;
   expectedRevisions?: Record<string, string>;

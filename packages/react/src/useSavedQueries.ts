@@ -18,7 +18,8 @@ export interface SavedQueriesApi {
   canUpdate: boolean;
   /** Replace a saved query with the current state, retaining its id and default. */
   update: (id: string) => Promise<SavedQuery>;
-  /** Load a saved query into the live controller. */
+  /** Load a saved query into the live controller. Throws, changing nothing,
+   * when the table cannot accept it (for example unreadable host state). */
   load: (id: string) => void;
   /** Mark a saved query as the default view. No-op when storage lacks support. */
   setDefault: (id: string) => Promise<void>;

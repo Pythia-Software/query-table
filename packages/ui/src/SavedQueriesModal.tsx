@@ -1,7 +1,7 @@
 // SavedQueriesModal — list / load / delete named saved queries. Thin view over
 // api.saved; loading one pushes its QueryState into the controller (and the URL).
 
-import { type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { SavedQueriesApi } from "@pythia-software/query-table-react";
 import { ModalSurface } from "./AdaptiveOverlay";
 
@@ -12,9 +12,13 @@ export interface SavedQueriesModalProps {
 }
 
 export function SavedQueriesModal({ saved, onClose, onLoad }: SavedQueriesModalProps): ReactNode {
+  // A save the table cannot accept (such as unreadable host state) stays
+  // listed with its reason; the live query is left as it was.
+  const [loadError, setLoadError] = useState<string | null>(null);
   return (
     <ModalSurface title="Saved queries" onClose={onClose}>
       <div className="qt-overlay-body">
+        {loadError && <p className="qt-saved-error" role="alert">{loadError}</p>}
         {saved.loading ? (
           <p className="qt-muted">Loading…</p>
         ) : saved.items.length === 0 ? (
@@ -30,8 +34,13 @@ export function SavedQueriesModal({ saved, onClose, onLoad }: SavedQueriesModalP
                     type="button"
                     className="qt-saved-pick"
                     onClick={() => {
+                      try {
+                        saved.load(s.id);
+                      } catch (error) {
+                        setLoadError(`Could not open "${s.name}": ${error instanceof Error ? error.message : String(error)}`);
+                        return;
+                      }
                       onLoad?.(s.id);
-                      saved.load(s.id);
                       onClose();
                     }}
                   >

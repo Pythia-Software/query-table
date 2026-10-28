@@ -141,10 +141,13 @@ export function withoutGrouping(query: QueryState): QueryState {
 }
 
 /** Leave the grouping stage: the source snapshot restores the record WHERE,
- * layout, ordering, paging, metrics and item details. Ungrouped queries are
- * returned unchanged. */
+ * layout, ordering, paging, metrics and item details, and keeps the host
+ * state of the grouped query. Ungrouped queries are returned unchanged. */
 export function exitGrouping(query: QueryState): QueryState {
-  return query.grouping ? query.grouping.source : query;
+  if (!query.grouping) return query;
+  if (!query.hostState && !query.grouping.source.hostState) return query.grouping.source;
+  const { hostState: _source, ...source } = query.grouping.source;
+  return query.hostState ? { ...source, hostState: query.hostState } : source;
 }
 
 /** The grouping-key transition behind the grouping controls. Empty keys exit
@@ -154,15 +157,19 @@ export function exitGrouping(query: QueryState): QueryState {
 export function withGroupingKeys(query: QueryState, keys: string[]): QueryState {
   const before = query.grouping;
   if (!keys.length) return exitGrouping(query);
-  if (!before)
+  if (!before) {
+    // Host state stays on the grouped query, which owns the whole definition.
+    const { hostState, ...source } = query;
     return {
       select: keys.map((field) => ({ field })),
       where: [],
       orderBy: [],
       limit: query.limit,
       offset: 0,
-      grouping: { keys, summaries: [], representative: null, source: query },
+      grouping: { keys, summaries: [], representative: null, source },
+      ...(hostState ? { hostState } : {}),
     };
+  }
   const removed = new Set(before.keys.filter((key) => !keys.includes(key)));
   // An empty SELECT shows the existing keys by default. Materialize them
   // before adding keys so introducing an explicit SELECT keeps those columns.
