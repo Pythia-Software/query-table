@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.9.7 — 2026-10-28
+
 ### Added
 
 - Native Detail for grouped results. With `itemDetails` enabled, a grouped
