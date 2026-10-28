@@ -651,6 +651,10 @@ function validateMinCount(c: AggregationClause, schema: FieldSchema): void {
       throw new FormulaError(
         "A distinct minimum cannot be combined across a window's intervals.",
       );
+    if (c.dateGrouping?.occurrence)
+      throw new FormulaError(
+        "A distinct or summed minimum does not apply to occurrences of a slot; use a minimum of rows.",
+      );
   }
   if (!c.groupBy.length)
     throw new FormulaError(`${label} requires at least one grouping field.`);

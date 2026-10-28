@@ -153,7 +153,7 @@ func TestV3FrontendParity(t *testing.T) {
 						}
 						spec := qt.AggSpec{ID: "cycle", Op: op, Field: field, GroupBy: groupBy, DateGrouping: &qt.MetricDateGrouping{Field: "at", Interval: interval, TimeZone: c.zone, IncludeEmpty: includeEmpty, Range: "query"}}
 						if !includeEmpty {
-							spec.MinCount = 2
+							spec.MinCount = qt.MetricMinCount{Min: 2}
 						}
 						q := qt.QueryRequestV3{Version: 3, Profile: qt.SQLiteExpressionProfile, Now: time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC).UnixMilli(), Result: qt.WireQuery{Select: []string{"id"}, Limit: 10}, Metrics: []qt.AggSpec{spec}}
 						run(fmt.Sprintf("cycle/%s/%s/%s/%t/%t", c.name, interval, op, extra, includeEmpty), rows, q)

@@ -888,9 +888,11 @@ function combineOccurrences(
     return bucket;
   });
   let hiddenGroups: number | undefined;
-  if (c.minCount !== undefined) {
+  // Occurrence slots take row minimums only (validation refuses measures).
+  const min = metricMinCount(c);
+  if (min !== undefined) {
     const kept = buckets.filter(
-      (b) => b.count === 0 || b.count >= c.minCount!,
+      (b) => b.count === 0 || b.count >= min,
     );
     hiddenGroups = buckets.length - kept.length;
     buckets = kept;

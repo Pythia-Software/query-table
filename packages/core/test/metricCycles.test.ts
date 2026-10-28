@@ -171,6 +171,14 @@ describe("per-occurrence statistics", () => {
   const weekday = (extra: Partial<AggregationClause> = {}, occurrence = { interval: "day" as const, includeEmpty: true }) =>
     clause({ interval: "dayOfWeek", includeEmpty: true, occurrence }, extra);
 
+  it("takes row minimums and refuses distinct or summed ones", () => {
+    const measured = (minCount: NonNullable<AggregationClause["minCount"]>) =>
+      validateMetric({ ...weekday(), groupBy: ["at", "kind"], minCount }, schema)[0]?.message;
+    expect(measured({ min: 2, distinct: "kind" })).toMatch(/occurrences of a slot/);
+    expect(measured({ min: 2, sum: "ms" })).toMatch(/occurrences of a slot/);
+    expect(measured(2)).toBeUndefined();
+  });
+
   it("summarises each whole date's total, counting idle dates as zero", () => {
     const result = run(data, weekday({ distribution: { kind: "box", input: "" } }), { where }, now);
     expect(result.buckets.map((b) => b.keys[0])).toEqual([1, 2, 3, 4, 5, 6, 7]);
