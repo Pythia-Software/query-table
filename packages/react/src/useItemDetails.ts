@@ -29,6 +29,8 @@ export interface ItemDetailsOptions<Row> {
   loadRow?: (id: RowId, signal: AbortSignal) => Promise<ItemDetailRecord<Row> | null>;
 }
 export interface ItemDetailsApi<Row> {
+  /** "group" details describe grouped result rows, identified by their group identity. */
+  subject?: "item" | "group";
   links?: QueryLinksApi;
   schema: FieldSchema<Row>;
   /** Collection catalogue used to resolve Page template fields. */
@@ -60,7 +62,8 @@ export function initialDetailModes<Row>(config: ItemDetailsOptions<Row> | undefi
 
 /** Synchronize a single modality without overwriting its siblings. */
 function useDetailProperties<Row>(mode: ItemPropertyMode, schema: FieldSchema<Row>, config: ItemDetailsOptions<Row> | undefined,
-  query: QueryState, setQuery: (next: QueryState | ((previous: QueryState) => QueryState)) => void, enabled: boolean): PropertyViewApi {
+  query: QueryState, setQuery: (next: QueryState | ((previous: QueryState) => QueryState)) => void, enabled: boolean,
+  readOnly = false): PropertyViewApi {
   const snapshot = query.itemDetails?.views?.[mode] ?? query.itemDetails?.view;
   const seed = useRef(snapshot);
   const properties = usePropertyView({ schema,
@@ -89,7 +92,7 @@ function useDetailProperties<Row>(mode: ItemPropertyMode, schema: FieldSchema<Ro
       if (target !== localViewKey) properties.setView(next);
     } else if (pendingView.current && pendingView.current.query === queryViewKey) {
       if (pendingView.current.local === localViewKey) pendingView.current = null;
-    } else if (!properties.loading && localViewKey !== queryViewKey && (queryViewKey !== undefined || localViewKey !== previous.local)) {
+    } else if (!readOnly && !properties.loading && localViewKey !== queryViewKey && (queryViewKey !== undefined || localViewKey !== previous.local)) {
       setQuery((current) => ({ ...current, itemDetails: {
         modes: current.itemDetails?.modes ?? initialDetailModes(config),
         ...current.itemDetails,
@@ -102,7 +105,7 @@ function useDetailProperties<Row>(mode: ItemPropertyMode, schema: FieldSchema<Ro
 
 /** Independent, type-level property controllers for each detail modality. */
 export function useItemDetails<Row>({
-  schema, query, setQuery, options, rows, clientRows, rowId, transport, refreshKey, links, queryReady = true, queryParameter,
+  schema, query, setQuery, options, rows, clientRows, rowId, transport, refreshKey, links, queryReady = true, queryParameter, lookupRow, subject,
 }: {
   schema: FieldSchema<Row>;
   query: QueryState;
@@ -117,6 +120,10 @@ export function useItemDetails<Row>({
   queryParameter?: string;
   /** Hold property-view synchronization while the collection query is restoring. */
   queryReady?: boolean;
+  /** Resolves records synchronously from rows already held, without loading
+   * by ID; `undefined` means still loading and `null` unavailable. */
+  lookupRow?: (id: RowId) => ItemDetailRecord<Row> | null | undefined;
+  subject?: "item" | "group";
 }): ItemDetailsApi<Row> | undefined {
   const enabled = Boolean(options);
   const config = typeof options === "object" ? options : undefined;
@@ -131,9 +138,12 @@ export function useItemDetails<Row>({
   // Property storage can hydrate independently, but must not apply its view to
   // a placeholder query and thereby cancel a pending URL/saved-query restore.
   const syncProperties = enabled && queryReady;
-  const modalProperties = useDetailProperties("modal", detailSchema, config, query, setQuery, syncProperties);
-  const hoverProperties = useDetailProperties("hover", detailSchema, config, query, setQuery, syncProperties);
-  const expandProperties = useDetailProperties("expand", detailSchema, config, query, setQuery, syncProperties);
+  // A group schema changes with every summary edit. Group views reach the
+  // query when a group is opened or shared, never as a side effect of one.
+  const readOnly = subject === "group";
+  const modalProperties = useDetailProperties("modal", detailSchema, config, query, setQuery, syncProperties, readOnly);
+  const hoverProperties = useDetailProperties("hover", detailSchema, config, query, setQuery, syncProperties, readOnly);
+  const expandProperties = useDetailProperties("expand", detailSchema, config, query, setQuery, syncProperties, readOnly);
   const propertiesByMode = { modal: modalProperties, hover: hoverProperties, expand: expandProperties };
   const views: Record<ItemPropertyMode, PropertyViewState> = {
     modal: modalProperties.view, hover: hoverProperties.view, expand: expandProperties.view,
@@ -142,12 +152,16 @@ export function useItemDetails<Row>({
   const customLoad = config?.loadRow;
   const customLoadRef = useRef(customLoad);
   customLoadRef.current = customLoad;
+  const lookupRef = useRef(lookupRow);
+  lookupRef.current = lookupRow;
+  const hasLookup = Boolean(lookupRow);
   // Inline host callbacks should not restart a request on every controller
   // render. Data-source/type changes and explicit refresh/retry still reload.
   const hasCustomLoad = Boolean(customLoad);
   const sourceType = config?.objectType ?? detailSchema.name;
   const fallbackRows = !customLoad && !clientRows && !transport?.fetchRow ? rows : undefined;
   const loadRow = useCallback(async (id: RowId, signal: AbortSignal): Promise<ItemDetailRecord<Row> | null> => {
+    if (lookupRef.current) return lookupRef.current(id) ?? null;
     if (customLoadRef.current) return customLoadRef.current(id, signal);
     if (clientRows) {
       const row = clientRows.find((row) => rowId(row) === id);
@@ -159,12 +173,12 @@ export function useItemDetails<Row>({
     }
     const row = rows.find((row) => rowId(row) === id);
     return row ? { row, loadedFields: Object.keys(row as object) } : null;
-  }, [hasCustomLoad, sourceType, clientRows, transport?.fetchRow, fallbackRows, rowId]);
+  }, [hasLookup, hasCustomLoad, sourceType, clientRows, transport?.fetchRow, fallbackRows, rowId]);
   const [retryKey, setRetryKey] = useState(0);
   const [result, setResult] = useState<{
     source: typeof loadRow | undefined; epoch: string; id: RowId | undefined; record: ItemDetailRecord<Row> | null; loading: boolean; error: Error | null;
   }>({ source: undefined, epoch: "", id: undefined, record: null, loading: false, error: null });
-  const activeId = enabled ? active?.id : undefined;
+  const activeId = enabled && !lookupRow ? active?.id : undefined;
   const epoch = `${refreshKey}:${retryKey}`;
   const currentResult = result.id === activeId && result.source === loadRow && result.epoch === epoch;
   useEffect(() => {
@@ -183,13 +197,15 @@ export function useItemDetails<Row>({
     return () => controller.abort();
   }, [activeId, loadRow, refreshKey, retryKey]);
   if (!enabled) return;
+  const looked = lookupRow && active ? lookupRow(active.id) : null;
   return {
+    ...(subject ? { subject } : {}),
     ...(links ? { links } : {}),
     schema: detailSchema, queryParameter: queryParameter ?? config?.queryParameter ?? "q", properties: modalProperties, propertiesByMode, availableModes, modes, active,
     page, pageSchema: schema,
-    record: currentResult ? result.record : null,
-    loading: activeId !== undefined && (!currentResult || result.loading),
-    error: currentResult ? result.error : null,
+    record: lookupRow ? looked ?? null : currentResult ? result.record : null,
+    loading: lookupRow ? looked === undefined : activeId !== undefined && (!currentResult || result.loading),
+    error: lookupRow ? null : currentResult ? result.error : null,
     ...(config?.relationships ? { relationships: config.relationships } : {}),
     loadRow,
     retry: () => setRetryKey((value) => value + 1),

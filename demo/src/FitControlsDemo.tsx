@@ -51,16 +51,19 @@ const groupQuery: QueryState = {
     ],
     representative: null,
   },
-  select: ["conversation", "messages", "word_total", "token_total", "cost_total", "max_words", "tools", "records", "open"].map((field) => ({ field })),
-  where: [], orderBy: [{ field: "conversation", dir: "asc" }], limit: 25, offset: 0, fitToScreen: true,
+  // Detail comes last, after the link summaries.
+  select: ["conversation", "messages", "word_total", "token_total", "cost_total", "max_words", "tools", "records", "open", ITEM_DETAILS_COLUMN].map((field) => ({ field })),
+  where: [], orderBy: [{ field: "conversation", dir: "asc" }], limit: 3, offset: 0, fitToScreen: true,
 };
 const linkTargets: LinkTargets = { fixture: (query) => `/fit-controls?items=${encodeQuery(query)}` };
 
 /** Fitted tables whose cells hold native controls; see demo/fit-controls-test.mjs. */
 export function FitControlsDemo() {
-  const items = useQueryTable({ schema: itemSchema, clientRows: rows, initialQuery: itemQuery, syncUrl: true, queryParameter: "items", debounceMs: 0,
+  // An initial query takes precedence over the address bar, so only seed tables without one.
+  const linked = new URLSearchParams(window.location.search);
+  const items = useQueryTable({ schema: itemSchema, clientRows: rows, ...(linked.has("items") ? {} : { initialQuery: itemQuery }), syncUrl: true, queryParameter: "items", debounceMs: 0,
     itemDetails: { modes: ["modal", "expand"], defaultModes: ["modal", "expand"] } });
-  const groups = useQueryTable({ schema: groupSchema, clientRows: rows, initialQuery: groupQuery, syncUrl: true, queryParameter: "groups", debounceMs: 0,
+  const groups = useQueryTable({ schema: groupSchema, clientRows: rows, ...(linked.has("groups") ? {} : { initialQuery: groupQuery }), syncUrl: true, queryParameter: "groups", debounceMs: 0,
     itemDetails: { modes: ["modal", "expand"], defaultModes: ["modal", "expand"] } });
   return (
     <main className="qt-demo">

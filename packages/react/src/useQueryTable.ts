@@ -563,6 +563,7 @@ export function useQueryTable<Row>(
   const executionQuery = useMemo(() => withoutGrouping(query), [query]);
   const byName = useMemo(() => new Map(schema.fields.map(field => [field.name, field])), [schema]);
   const detailsEnabled = Boolean(opts.itemDetails) && !query.grouping;
+  const groupDetailsEnabled = Boolean(opts.itemDetails) && Boolean(query.grouping);
   // Normalization clones grouping even for presentation edits. Only a change
   // in its content should invalidate row and metric execution.
   const validateExecution = useCallback((q: QueryState) => {
@@ -1027,7 +1028,7 @@ export function useQueryTable<Row>(
   const selection = useSelection(displayedIds);
   const identityScope = JSON.stringify([sourceSchema.name, query.grouping?.keys ?? null]);
   useEffect(() => { selection.clear(); }, [identityScope, selection.clear]);
-  const columnSchema = useMemo(() => detailColumnSchema(displaySchema, detailsEnabled), [displaySchema, detailsEnabled]);
+  const columnSchema = useMemo(() => detailColumnSchema(displaySchema, detailsEnabled || groupDetailsEnabled), [displaySchema, detailsEnabled, groupDetailsEnabled]);
   const resultDefaults = useMemo(() => query.grouping ? defaultsFor(schema) : defaults, [Boolean(query.grouping), schema, defaults]);
   const select = useSelect(query, setQuery, columnSchema);
   const columnDrag = useColumnDrag();
@@ -1488,13 +1489,53 @@ export function useQueryTable<Row>(
     queryReady: storageReady && !restoration.loading && !restoration.error,
   });
 
+  // Group Detail reads grouped rows already held, by their group identity; it
+  // never loads a source item by that ID. Rows seen for this population stay
+  // readable across pages and sorts, and a changed population drops them.
+  const groupPopulation = query.grouping ? JSON.stringify([query.grouping, query.where, nonce]) : "";
+  const groupRecords = useRef({ population: "", rows: new Map<RowId, Row>() });
+  if (groupRecords.current.population !== groupPopulation) groupRecords.current = { population: groupPopulation, rows: new Map() };
+  // Only rows committed for the current page context belong to this population.
+  const groupsSettled = groupDetailsEnabled && pageReady && !restoration.loading;
+  if (groupsSettled) for (const row of rows) {
+    const id = rowId(row);
+    if (id != null) groupRecords.current.rows.set(id, row);
+  }
+  const groupDetailOptions = useMemo((): ItemDetailsOptions<Row> | undefined => {
+    if (!groupDetailsEnabled) return undefined;
+    const config = typeof opts.itemDetails === "object" ? opts.itemDetails : undefined;
+    // Page templates address source items, so groups offer the in-place modes.
+    const modes = (config?.modes ?? ["hover", "modal", "expand"]).filter(mode => mode !== "page");
+    return { modes, defaultModes: initialDetailModes(config).filter(mode => (modes as string[]).includes(mode)),
+      objectType: `${config?.objectType ?? sourceSchema.name}:groups`,
+      ...(config?.storage ? { storage: config.storage } : {}) };
+  }, [groupDetailsEnabled, opts.itemDetails, sourceSchema.name]);
+  // Group properties default to every key and summary, links included.
+  const groupDetailSchema = useMemo(() => ({ ...displaySchema,
+    defaultSelect: displaySchema.fields.filter(field => field.name !== displaySchema.idField).map(field => ({ field: field.name })),
+    fields: displaySchema.fields.map(field =>
+      field.name === displaySchema.idField ? { ...field, property: { enabled: false } } : field) }), [displaySchema]);
+  // Property-view writes that land after grouping ends must not reach the source query.
+  const setGroupQuery = useCallback<QueryTableApi<Row>["setQuery"]>((next) => setQuery(current =>
+    current.grouping ? typeof next === "function" ? next(current) : next : current), [setQuery]);
+  const groupDetails = useItemDetails({
+    schema: groupDetailSchema, query, setQuery: setGroupQuery, options: groupDetailOptions, rows, clientRows: undefined,
+    rowId, transport: undefined, refreshKey: nonce, links, queryParameter: parameter,
+    queryReady: storageReady && !restoration.loading && !restoration.error,
+    lookupRow: (id) => {
+      const row = groupRecords.current.rows.get(id);
+      return row ? { row } : groupsSettled || error ? null : undefined;
+    },
+    subject: "group",
+  });
+
   const api: QueryTableApi<Row> = {
     restoration: { status: restoration.error ? "error" : !storageReady || restoration.loading ? "resolving" : "ready",
       ready: active && storageReady && !restoration.loading && !restoration.error, error: restoration.error },
     restoreLocation,
     links,
     schema: columnSchema,
-    ...(itemDetails && detailsEnabled ? { itemDetails } : {}),
+    ...(itemDetails && detailsEnabled ? { itemDetails } : groupDetails ? { itemDetails: groupDetails } : {}),
     query,
     defaults: resultDefaults,
     setQuery,

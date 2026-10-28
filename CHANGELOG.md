@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Added
+
+- Native Detail for grouped results. With `itemDetails` enabled, a grouped
+  table's `api.itemDetails` (`subject: "group"`) opens a group's keys, scalar
+  summaries and link summaries in a popover, modal or expanded row, read from
+  the grouped row rather than loaded by ID. Add `ITEM_DETAILS_COLUMN` to the
+  grouped `select`, after the link columns if you like. The open group is
+  kept by its canonical identity across paging, sorting and URL reloads, and
+  shows an unavailable state once the population no longer has it. Link
+  summaries in Detail resolve to the same exact-match Records query as in the
+  table. Record item Detail is unchanged, including after leaving grouping.
+  `ItemDetailsActions` takes a `label`, and `ObjectProperties` a `query` for
+  its renderers.
+
 ### Changed
 
 - `MetricChart` colours pie, donut, bar, box, histogram and list marks

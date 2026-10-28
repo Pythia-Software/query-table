@@ -138,7 +138,13 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     const id = (row as Record<string, unknown>)[GROUP_ID_FIELD];
     return typeof id === "string" ? id : null;
   }, [Boolean(query.grouping), sourceRowId]);
-  const details = query.grouping ? undefined : props.itemDetails;
+  // Grouped tables take group details, keyed by group identity; item details
+  // configured for source rows never open from a grouped row.
+  const details = query.grouping && props.itemDetails?.subject !== "group" ? undefined : props.itemDetails;
+  const groupKeys = query.grouping?.keys;
+  const detailLabel = (row: Row, id: RowId | null) => groupKeys
+    ? `group ${groupKeys.map((key) => valueToString((row as Record<string, unknown>)[key]) || "NULL").join(" / ")}`
+    : `item ${id ?? ""}`;
   // Link columns route through the host's targets. Read them through a ref so
   // inline host callbacks do not change the registry (and refit) every render.
   const linkOptions = useRef({ linkTargets, onNavigate });
@@ -997,7 +1003,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                     if (!f) return null;
                     if (name === ITEM_DETAILS_COLUMN) return <td key={name} data-qt-field={name}
                       className={cx("qt-cell", "qt-item-detail-column", dragSource === name && "qt-cell--dragging", classNames?.cell)}>
-                      {details && <ItemDetailsActions api={details} query={query} id={id} row={row} renderers={detailRenderers} expandedId={expandedPanelId} />}
+                      {details && <ItemDetailsActions api={details} query={query} id={id} row={row} renderers={detailRenderers} expandedId={expandedPanelId} label={detailLabel(row, id)} />}
                     </td>;
                     const render = resolveRenderer(f, renderers, columnDisplays.get(f.name));
                     const value = readFieldValue(f, row);

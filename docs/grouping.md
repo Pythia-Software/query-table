@@ -35,8 +35,20 @@ For code consuming arbitrary grouped values, use core's `GroupedRow` and the
 explicitly typed `prepareGrouping` result. Inline source-row renderer functions
 are not inherited by projected fields; named renderer registrations can be
 reused if they render the supplied value without assuming a source-row shape.
-Record item-detail controls are hidden on groups and restored when grouping is
-removed. Independent source inspectors can use `table.grouping.source.itemDetails`.
+With `itemDetails` enabled, a grouped table offers group Detail:
+`table.itemDetails.subject` is `"group"`, and its popover, modal and row
+expansion show the group's keys, scalar summaries and link summaries from the
+grouped row. It never loads a source item by the group's ID. Add
+`ITEM_DETAILS_COLUMN` to the grouped `select` to show the column, for example
+after the link summaries. The open group is named by its canonical group
+identity (`table.rowId`) in the grouped query's own `itemDetails`, so it
+survives paging, sorting, Share links and URL reloads; when the population
+changes and no group has those keys any more, Detail says the group is
+unavailable. Group property views follow the summaries and reach the query
+only when a group is opened or shared. Page links address source items, so
+groups offer the in-place modes. Record item Detail returns unchanged when
+grouping is removed, and independent source inspectors can use
+`table.grouping.source.itemDetails`.
 
 ## Query shape and execution order
 

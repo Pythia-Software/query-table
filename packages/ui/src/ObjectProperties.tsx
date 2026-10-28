@@ -11,6 +11,7 @@ import {
   type PropertyFormat,
   type PropertySelection,
   type PropertyViewState,
+  type QueryState,
   type RelationshipAdapter,
 } from "@pythia-software/query-table-core";
 import { useObjectReferences } from "@pythia-software/query-table-react";
@@ -37,6 +38,9 @@ export interface ObjectPropertiesProps<Row> {
   onOpenReference?: (reference: ObjectReference) => void;
   /** Explicit projection coverage distinguishes unloaded fields from NULL values. */
   loadedFields?: readonly string[];
+  /** The collection query the row came from, passed to renderers; group link
+   * summaries resolve their destinations from it. */
+  query?: QueryState;
   locale?: string;
   theme?: MetricTheme;
   now?: number;
@@ -171,7 +175,7 @@ function propertyContent<Row>(
       value,
       row: props.row,
       field,
-      query: EMPTY_QUERY,
+      query: props.query ?? EMPTY_QUERY,
       presentation: "property",
     });
   }
@@ -193,17 +197,17 @@ function propertyContent<Row>(
     return resolveRenderer(
       field,
       registry,
-    )({ value, row: props.row, field, query: EMPTY_QUERY, presentation: "property" });
+    )({ value, row: props.row, field, query: props.query ?? EMPTY_QUERY, presentation: "property" });
   // A single field display supplies the default in both table cells and item
   // properties. A saved appearance or detail-specific renderer/format still wins.
   if (!format && field.display) return renderCellDisplay(
-    { value, row: props.row, field, query: EMPTY_QUERY, presentation: "property" }, field.display,
+    { value, row: props.row, field, query: props.query ?? EMPTY_QUERY, presentation: "property" }, field.display,
   );
   const effective = format ?? defaultFormat(field)!;
   if (value == null) return <span className="qt-muted">—</span>;
   if (effective.kind === "json") return <JsonValueView value={value} label={property.label ?? field.label} display={effective} />;
   if (effective.kind === "chip") return renderCellDisplay(
-    { value, row: props.row, field, query: EMPTY_QUERY, presentation: "property" }, effective,
+    { value, row: props.row, field, query: props.query ?? EMPTY_QUERY, presentation: "property" }, effective,
   );
   if (effective.kind === "chips") {
     const values = Array.isArray(value) ? value : [value];

@@ -36,12 +36,13 @@ function DetailContent<Row>({ api, record, loading, error, onRetry, renderers, m
   renderers: RenderRegistry<Row>; mode: ItemPropertyMode; query: QueryState; id: RowId; onClose: () => void;
 }): ReactNode {
   const compact = mode === "hover";
-  const closeLabel = mode === "hover" ? "Close item preview" : mode === "expand" ? `Collapse item ${id}` : "Close item details";
+  const noun = api.subject === "group" ? "group" : "item";
+  const closeLabel = mode === "hover" ? `Close ${noun} preview` : mode === "expand" ? `Collapse ${noun} ${id}` : `Close ${noun} details`;
   const actions = <>
     <ItemDetailShare api={api} query={query} id={id} mode={mode} compact={compact} />
     {mode !== "modal" && api.modes.includes("modal") && <button type="button" className="qt-link-btn qt-property-icon-button" aria-label="Open in modal" title="Open in modal" onClick={() => { onClose(); api.open(id, "modal"); }}><Icon name="itemModal" size={14} /></button>}
   </>;
-  if (!record) return <section className="qt-object-inspector qt-item-detail-fallback" aria-label="Item details status">
+  if (!record) return <section className="qt-object-inspector qt-item-detail-fallback" aria-label={`${noun === "group" ? "Group" : "Item"} details status`}>
     <div className="qt-property-toolbar">
       <code>{String(id)}</code>
       <div className="qt-property-toolbar-actions">
@@ -49,16 +50,17 @@ function DetailContent<Row>({ api, record, loading, error, onRetry, renderers, m
         <button type="button" className="qt-link-btn qt-property-icon-button" aria-label={closeLabel} title={closeLabel} onClick={onClose}><Icon name="close" size={14} /></button>
       </div>
     </div>
-    <DetailStatus loading={loading} error={error} onRetry={onRetry} />
+    <DetailStatus loading={loading} error={error} onRetry={onRetry} group={noun === "group"} />
   </section>;
-  return <ObjectInspector schema={api.schema} row={record.row} propertyApi={api.propertiesByMode[mode]} viewScope={mode === "hover" ? "Popover" : mode === "expand" ? "Row expand" : "Modal"} renderers={renderers}
+  return <ObjectInspector schema={api.schema} row={record.row} {...(api.subject === "group" ? { query } : {})} propertyApi={api.propertiesByMode[mode]} viewScope={mode === "hover" ? "Popover" : mode === "expand" ? "Row expand" : "Modal"} renderers={renderers}
     shareAction={actions} onClose={onClose} closeLabel={closeLabel} compact={compact}
     {...(record.loadedFields ? { loadedFields: record.loadedFields } : {})}
     {...(api.relationships ? { relationships: api.relationships } : {})} />;
 }
-function DetailStatus({ loading, error, onRetry }: { loading: boolean; error: Error | null; onRetry: () => void }): ReactNode {
+function DetailStatus({ loading, error, onRetry, group = false }: { loading: boolean; error: Error | null; onRetry: () => void; group?: boolean }): ReactNode {
   return <div className="qt-item-detail-status">
-    {loading ? <p role="status">Loading item…</p> : error ? <><p role="alert">{error.message}</p><button type="button" className="qt-btn" onClick={onRetry}><Icon name="refresh" />Retry</button></> : <p role="status">This item is unavailable. It may have been removed or is outside the loaded results.</p>}
+    {loading ? <p role="status">{group ? "Loading group…" : "Loading item…"}</p> : error ? <><p role="alert">{error.message}</p><button type="button" className="qt-btn" onClick={onRetry}><Icon name="refresh" />Retry</button></>
+      : <p role="status">{group ? "This group is unavailable. The grouped results changed, and no group has these key values now." : "This item is unavailable. It may have been removed or is outside the loaded results."}</p>}
   </div>;
 }
 /** Snapshot the item and collection state, even when URL synchronization is off.
@@ -94,15 +96,18 @@ export function ItemDetailsPanel<Row>({ api, query, renderers, outsidePage = fal
   if (!api.active) return null;
   const { id, mode } = api.active;
   const content = <DetailContent api={api} record={api.record} loading={api.loading} error={api.error} onRetry={api.retry} renderers={renderers} mode={mode} query={query} id={id} onClose={api.close} />;
-  if (mode === "modal") return <ModalSurface title="Item details" className="qt-modal qt-item-detail-modal" chrome={false} onClose={api.close}>{content}</ModalSurface>;
-  return <section className="qt-item-expanded" aria-label={`Expanded item ${id}`}>
-    {outsidePage && <p className="qt-item-detail-note">Expanded item is outside the current page.</p>}
+  if (mode === "modal") return <ModalSurface title={api.subject === "group" ? "Group details" : "Item details"} className="qt-modal qt-item-detail-modal" chrome={false} onClose={api.close}>{content}</ModalSurface>;
+  const noun = api.subject === "group" ? "group" : "item";
+  return <section className="qt-item-expanded" aria-label={`Expanded ${noun} ${id}`}>
+    {outsidePage && <p className="qt-item-detail-note">Expanded {noun} is outside the current page.</p>}
     {content}
   </section>;
 }
 
-export function ItemDetailsActions<Row>({ api, query, id, row, renderers, expandedId }: {
+export function ItemDetailsActions<Row>({ api, query, id, row, renderers, expandedId, label = `item ${id ?? ""}` }: {
   api: ItemDetailsApi<Row>; query: QueryState; id: RowId | null; row: Row; renderers: RenderRegistry<Row>; expandedId: string;
+  /** Names the row in button labels, such as "item 42" or "group claude / opus". */
+  label?: string;
 }): ReactNode {
   const [hover, setHover] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
@@ -138,20 +143,20 @@ export function ItemDetailsActions<Row>({ api, query, id, row, renderers, expand
   }
   const pageHref = pageLink.href;
   return <div className="qt-item-detail-actions">
-    {api.modes.includes("hover") && <button ref={button} type="button" className="qt-link-btn qt-item-detail-button" aria-label={`Preview item ${id ?? ""}`} title="Open popover" disabled={id == null}
+    {api.modes.includes("hover") && <button ref={button} type="button" className="qt-link-btn qt-item-detail-button" aria-label={`Preview ${label}`} title="Open popover" disabled={id == null}
       aria-haspopup="dialog" aria-expanded={hover}
       onClick={() => setHover(open => !open)}><Icon name="itemHover" /></button>}
-    {api.modes.includes("modal") && <button type="button" className="qt-link-btn qt-item-detail-button" aria-label={`Open item ${id ?? ""} in modal`} title="Open in modal" disabled={id == null} aria-haspopup="dialog" onClick={() => { setHover(false); if (id != null) api.open(id, "modal"); }}><Icon name="itemModal" /></button>}
-    {api.modes.includes("expand") && <button type="button" className="qt-link-btn qt-item-detail-button" aria-label={`Expand item ${id ?? ""}`} title="Expand row" disabled={id == null}
+    {api.modes.includes("modal") && <button type="button" className="qt-link-btn qt-item-detail-button" aria-label={`Open ${label} in modal`} title="Open in modal" disabled={id == null} aria-haspopup="dialog" onClick={() => { setHover(false); if (id != null) api.open(id, "modal"); }}><Icon name="itemModal" /></button>}
+    {api.modes.includes("expand") && <button type="button" className="qt-link-btn qt-item-detail-button" aria-label={`Expand ${label}`} title="Expand row" disabled={id == null}
       aria-expanded={api.active?.mode === "expand" && api.active.id === id} aria-controls={expandedId}
       onClick={() => { setHover(false); if (id != null) { if (api.active?.mode === "expand" && api.active.id === id) api.close(); else api.open(id, "expand"); } }}><Icon name={api.active?.mode === "expand" && api.active.id === id ? "chevronDown" : "itemExpand"} /></button>}
     {api.modes.includes("page") && (pageHref
       ? <a className="qt-link-btn qt-item-detail-button" href={pageHref} target={api.page.target} rel={api.page.target === "_blank" ? "noopener noreferrer" : undefined}
-        aria-label={`Open item ${id ?? ""} on page`} title={api.page.target === "_blank" ? "Open page in new tab" : "Open page"}><Icon name="externalLink" /></a>
+        aria-label={`Open ${label} on page`} title={api.page.target === "_blank" ? "Open page in new tab" : "Open page"}><Icon name="externalLink" /></a>
       : <button type="button" className="qt-link-btn qt-item-detail-button" disabled={!pageLink.lazy}
         onClick={event => followPage(event.metaKey || event.ctrlKey)}
         onAuxClick={event => { if (event.button === 1) { event.preventDefault(); followPage(true); } }}
-        aria-label={`Open item ${id ?? ""} on page`} title={pageLink.lazy ? "Open page" : pageLink.error ?? "Page URL unavailable. Check the template and row values."}><Icon name="externalLink" /></button>)}
+        aria-label={`Open ${label} on page`} title={pageLink.lazy ? "Open page" : pageLink.error ?? "Page URL unavailable. Check the template and row values."}><Icon name="externalLink" /></button>)}
     {navigationError && <small role="alert">{navigationError}</small>}
     {hover && api.modes.includes("hover") && id != null && <ItemHoverCard api={api} query={query} id={id} renderers={renderers} anchor={button.current}
       onClose={() => { setHover(false); button.current?.focus(); }} />}
