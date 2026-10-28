@@ -4,6 +4,18 @@
 
 ### Added
 
+- Go query links: `EncodeQueryLink`, `DecodeQueryLink` and `LinkQuery` in the
+  Go module write and read the `2j.`/`2d.` tokens of `encodeQuery` and
+  `decodeQueryStrict`, including legacy tokens, packed set filters and pooled
+  item views. They reproduce `normalizeQueryState`, enforce
+  `MAX_QUERY_STATE_BYTES` (`MaxQueryStateBytes`) and `MAX_QUERY_TOKEN_LENGTH`
+  (`MaxQueryTokenLength`) with bounded inflation, and report a
+  `*QueryLinkError` whose `Code` matches `QueryDecodeError.code`. Encoding
+  rejects malformed or over-budget filters and metrics instead of dropping
+  them. `WhereTerm.SetFilter` (`SetFilterMetadata`) carries set-editor
+  metadata. Cross-language fixtures in `schema/fixtures/query-links.json` and
+  `query-links-go.json` check both codecs against each other.
+
 - Public `--qt-touch-target-scale` theme setting for responsive enlargement.
   The default `1` keeps existing sizing; `0.5` halves the added size and `0`
   retains desktop target sizes with responsive layouts and content-safe minima.
