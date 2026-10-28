@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.9.6 — 2026-10-28
+
 ### Added
 
 - Go query links: `EncodeQueryLink`, `DecodeQueryLink` and `LinkQuery` in the
