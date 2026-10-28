@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  groupKeyFields,
   MAX_SUMMARY_COLUMNS,
   normalizeQueryState,
   predicatesOf,
   withGroupingKeys,
   withoutGrouping,
   type FieldSchema,
+  type GroupKey,
   type GroupedRow,
   type GroupingModel,
   queriesEqual,
@@ -42,7 +44,9 @@ export interface GroupingApi<Row> {
   inputs: Row[];
   notice: string;
   setNotice: (notice: string) => void;
-  changeKeys: (keys: string[]) => void;
+  /** Field names, or calendar keys (`{ field, interval, timeZone }`) for
+   * datetime fields. */
+  changeKeys: (keys: GroupKey[]) => void;
   addSummary: (op: SummaryOp, field?: string) => void;
   changeSummary: (id: string, op: SummaryOp) => void;
   changeRepresentative: (rule: RepresentativeRow | null) => void;
@@ -68,7 +72,8 @@ export function useGroupingController<Row>(
   const view: GroupingView = {
     version: 2,
     mode: stage ? "groups" : "rows",
-    keys: stage?.keys ?? [],
+    keys: groupKeyFields(stage?.keys ?? []),
+    groupKeys: stage?.keys ?? [],
     summaries: stage?.summaries ?? [],
     representative: stage?.representative ?? null,
     input: source.query,
@@ -78,7 +83,7 @@ export function useGroupingController<Row>(
     ...api.schema!,
     fields: api.computed.catalogue,
   } as unknown as FieldSchema<GroupedRow>;
-  function changeKeys(keys: string[]) {
+  function changeKeys(keys: GroupKey[]) {
     if (keys.length && !supported) return;
     const cached =
       previous.current?.revision === viewRevision

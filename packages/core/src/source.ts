@@ -1,6 +1,7 @@
 import { predicatesOf, ITEM_DETAILS_COLUMN, type QueryState } from "./query";
 import { metricDependencies, compileMetric } from "./metrics";
 import { createGroupingModel } from "./grouping";
+import { groupKeyFields } from "./groupKeys";
 import type { FieldSchema } from "./schema";
 import type { FormulaPlan } from "./formula";
 
@@ -24,7 +25,7 @@ export function sourceDependencies<Row>(query: QueryState, schema: FieldSchema<R
   if (query.grouping) {
     const model = createGroupingModel(schema);
     model.validate(query.grouping);
-    for (const key of query.grouping.keys) fields.add(key);
+    for (const key of groupKeyFields(query.grouping.keys)) fields.add(key);
     for (const summary of query.grouping.summaries) {
       // Link columns read result fields only; they have no source inputs.
       if (summary.op === "link") continue;

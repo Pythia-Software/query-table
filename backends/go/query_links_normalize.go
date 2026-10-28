@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 )
 
 const (
@@ -1078,6 +1079,9 @@ func asciiLowerEquals(s, want string) bool {
 	return true
 }
 
+// groupKeyIntervals are the calendar intervals a grouping key accepts.
+var groupKeyIntervals = []string{"hour", "day", "week", "month", "year"}
+
 func normalizeLinkGrouping(value *jsValue, links bool) *jsValue {
 	raw := value
 	if !raw.isRecord() {
@@ -1088,10 +1092,30 @@ func normalizeLinkGrouping(value *jsValue, links bool) *jsValue {
 
 	keysValue := raw.get("keys")
 	var keys []string
+	normalizedKeys := jsArr()
 	if keysValue.isArray() {
-		for _, key := range firstN(keysValue.a, MaxGroupByFields) {
+		for index, key := range firstN(keysValue.a, MaxGroupByFields) {
 			if name, ok := boundedJSString(key, linkMaxFieldName); ok {
 				keys = append(keys, name)
+				normalizedKeys.a = append(normalizedKeys.a, jsStr(name))
+				continue
+			}
+			if !key.isRecord() {
+				continue
+			}
+			// A calendar key: the timezone's validity is checked with the schema.
+			field, fieldOK := boundedJSString(key.get("field"), linkMaxFieldName)
+			interval, zone := key.get("interval"), key.get("timeZone")
+			if fieldOK && interval.isString() && includesString(groupKeyIntervals, interval.s) &&
+				(zone == nil || (zone.isString() && zone.s != "" && jsLength(zone.s) <= 80 && !strings.HasPrefix(zone.s, "+") && !strings.HasPrefix(zone.s, "-"))) {
+				keys = append(keys, field)
+				calendar := jsObj().set("field", jsStr(field)).set("interval", jsStr(interval.s))
+				if zone != nil {
+					calendar.set("timeZone", jsStr(zone.s))
+				}
+				normalizedKeys.a = append(normalizedKeys.a, calendar)
+			} else {
+				fail("key " + strconv.Itoa(index+1) + " must be a field name or a calendar key {field, interval, timeZone} with interval hour, day, week, month or year; hour-of-day and day-of-week are metric intervals.")
 			}
 		}
 	}
@@ -1238,7 +1262,7 @@ func normalizeLinkGrouping(value *jsValue, links bool) *jsValue {
 		}
 	}
 	out := jsObj().
-		set("keys", jsStrings(keys)).
+		set("keys", normalizedKeys).
 		set("summaries", summaries).
 		set("representative", representative).
 		set("source", normalizedSource)

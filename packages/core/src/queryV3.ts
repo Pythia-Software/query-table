@@ -7,6 +7,7 @@ import type { ComputedExecution } from "./computed";
 import type { FieldSchema, FieldDef } from "./schema";
 import { evaluationTime } from "./relativeTime";
 import { withoutLinkSummaries } from "./groupLinks";
+import { isCalendarGroupKey } from "./groupKeys";
 
 export interface QueryCapabilitiesV3 {
   version: 3;
@@ -14,6 +15,9 @@ export interface QueryCapabilitiesV3 {
   calendarGrouping: boolean;
   /** Executes the cyclic `hourOfDay` and `dayOfWeek` date intervals. */
   calendarCycles?: boolean;
+  /** Executes calendar grouping keys (`{ field, interval, timeZone }`) in a
+   * grouping stage. Requests using them are refused otherwise. */
+  calendarGroupKeys?: boolean;
   computedSourceFilters: boolean;
   regex: boolean;
   regexSourceFilters?: boolean;
@@ -81,6 +85,8 @@ export function toQueryRequestV3<Row>(query: QueryState, baseSchema: FieldSchema
   let resultSchema = sourceSchema as FieldSchema<any>;
   if (q.grouping) {
     if (!capabilities.groupedRows) diagnostics.push("This server does not support grouped rows.");
+    else if (q.grouping.keys.some(isCalendarGroupKey) && !capabilities.calendarGroupKeys)
+      diagnostics.push("This server does not support grouping keys by calendar interval.");
     try { const model = createGroupingModel(sourceSchema); model.validate(q.grouping); resultSchema = model.resultSchema(q.grouping.keys, q.grouping.summaries); }
     catch (error) { diagnostics.push(error instanceof Error ? error.message : String(error)); }
   }

@@ -266,6 +266,21 @@ export const stateCases: StateCase[] = [
     },
   },
   {
+    name: "grouping with calendar keys",
+    state: {
+      ...EMPTY_QUERY,
+      select: [{ field: "called_at" }, { field: "provider" }, { field: "rows" }],
+      where: [{ field: "called_at", op: ">=", value: "2026-03-01T07:00:00.000Z" }],
+      orderBy: [{ field: "called_at", dir: "asc" }],
+      grouping: {
+        keys: [{ field: "called_at", interval: "day", timeZone: "America/Denver" }, "provider", { field: "ended_at", interval: "hour" }],
+        summaries: [{ id: "rows", op: "count" }],
+        representative: null,
+        source: { ...EMPTY_QUERY },
+      },
+    },
+  },
+  {
     name: "invalid grouping keeps diagnostics",
     state: { ...EMPTY_QUERY, grouping: { keys: [], summaries: [{ id: "m", op: "Median" }], representative: null, source: { ...EMPTY_QUERY } } as never },
   },
@@ -375,6 +390,26 @@ export const tokenCases: TokenCase[] = [
         representative: { orderBy: [{ field: "t", dir: ["asc"] }, { field: "u", dir: "sideways" }] },
         source: { grouping: { keys: ["nested"] }, where: [{ field: "a", op: "=", value: "1" }, { field: "b" }] },
         diagnostics: ["Earlier problem.", "", 5, "Earlier problem."],
+      },
+    }),
+  },
+  {
+    name: "unnormalized calendar group keys",
+    token: plain({
+      b: {
+        keys: [
+          { interval: "week", field: "a", timeZone: "Europe/Berlin" },
+          { field: "b", interval: "hourOfDay", timeZone: "UTC" },
+          { field: "c", interval: "day", timeZone: "+02:00" },
+          { field: "d", interval: "day", timeZone: 7 },
+          { field: "e", interval: "day", timeZone: null },
+          { field: "", interval: "day" },
+          { field: "a", interval: "month" },
+          { field: "f", interval: "year", extra: true },
+          ["g"],
+        ],
+        summaries: [{ id: "a", op: "count" }, { id: "f", op: "count" }],
+        source: {},
       },
     }),
   },

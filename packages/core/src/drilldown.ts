@@ -199,7 +199,8 @@ function cycleSlotTerms(
  *
  * Starts from the grouping source, as leaving the grouping stage does, so its
  * WHERE, columns, order and item details are kept. Each key adds `=` (or
- * `is_null` for a null key) and the offset resets. */
+ * `is_null` for a null key), a calendar key `>= start` and `< end` of its
+ * interval, and the offset resets. */
 export function groupSourceQuery(query: QueryState, group: GroupedRow, schema: FieldSchema): QueryState | null {
   if (!query.grouping) return null;
   const terms = groupKeyTerms(query.grouping.keys, group, schema);

@@ -129,6 +129,28 @@
   filters, and `/query-v3` source and ungrouped filters, never to group
   filters over grouped rows. Without a provider, compiled SQL is unchanged.
   See "Host predicate relations" in `docs/backend-sqlite.md`.
+- Calendar keys in a grouping stage. A key in `grouping.keys` can be
+  `{ field, interval, timeZone }` for a datetime field, giving one grouped row
+  per local hour, day, week, month or year keyed by the interval's start, for
+  example local midnight in `America/Denver`. Intervals use the
+  `dateGrouping` calendar, so DST days and partial hours bucket identically and
+  totals match the equivalent `dateGrouping` metric. The key's column keeps the
+  field's name and `datetime` type, so group filters, ordering, paging and
+  metrics over the groups address it as before; drill-down
+  (`groupSourceQuery`, link columns and group Detail) selects the interval's
+  records with a `>= start` and `< end` pair. Plain string keys are unchanged
+  on the wire. `applyQuery`, `prepareGrouping`, DuckDB and the Go `/query-v3`
+  executor (SQLite and PostgreSQL) run them, checked by the SQLite parity test;
+  servers advertise `calendarGroupKeys`. Hour-of-day and day-of-week remain
+  metric intervals and are rejected as keys. TypeScript adds `GroupKey`,
+  `CalendarGroupKey`, `GROUP_KEY_INTERVALS`, `isCalendarGroupKey`,
+  `groupKeyField`, `groupKeyFields` and `calendarGroupKey`;
+  `GroupingDefinition.keys`, `withGroupingKeys` and `GroupingApi.changeKeys`
+  take `GroupKey[]`, and `GroupingView.groupKeys` lists the keys as defined
+  while `GroupingView.keys` stays the column names. Go adds
+  `GroupingDefinition.KeyIntervals` and `GroupKeyInterval`. The grouping
+  controls offer an interval for datetime keys, and the TypeScript and Go link
+  codecs normalize the new keys alike.
 
 ### Changed
 

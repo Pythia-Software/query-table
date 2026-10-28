@@ -318,3 +318,30 @@ it("clears a summary format when the headless controller switches it to a row va
   await act(async () => api.grouping!.changeSummary("example", "min"));
   expect(api.query.grouping!.summaries[1]).toEqual({ id: "example", op: "min", field: "region" });
 });
+
+it("picks a calendar interval for a datetime group key and shows it on the chip", async () => {
+  const timed: FieldSchema<GroupedRow> = { ...schema, fields: [...schema.fields,
+    { name: "at", label: "At", type: "datetime", source: { kind: "backend" }, aggregate: { groupable: true } }] };
+  await mount(["at", "team"], timed);
+  const interval = container.querySelector<HTMLSelectElement>('select[aria-label="Interval for At"]')!;
+  expect(interval).not.toBeNull();
+  expect(container.querySelector('select[aria-label="Interval for team"]')).toBeNull();
+  expect(interval.value).toBe("");
+  await act(async () => {
+    interval.value = "day";
+    interval.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  const [key] = api.query.grouping!.keys;
+  expect(key).toMatchObject({ field: "at", interval: "day" });
+  expect(typeof (key as { timeZone?: string }).timeZone).toBe("string");
+  expect(api.query.grouping!.keys[1]).toBe("team");
+  expect(container.querySelector(".qt-group-key-interval")?.textContent).toContain("by day");
+  const exact = container.querySelector<HTMLSelectElement>('select[aria-label="Interval for At"]')!;
+  await act(async () => {
+    exact.value = "";
+    exact.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  expect(api.query.grouping!.keys).toEqual(["at", "team"]);
+  await click("Remove At grouping");
+  expect(api.query.grouping!.keys).toEqual(["team"]);
+});

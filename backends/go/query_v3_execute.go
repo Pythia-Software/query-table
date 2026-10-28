@@ -135,7 +135,13 @@ func (d QueryDatasetV3) ExecuteIn(ctx context.Context, tx *sql.Tx, q QueryReques
 		}
 		source := queryTableName()
 		tables = append(tables, source)
-		if _, err = tx.ExecContext(ctx, "CREATE TEMP TABLE "+queryIdent(source)+" AS "+plan.SQL, plan.Args...); err != nil {
+		calendarKeys := q.Grouping != nil && len(q.Grouping.KeyIntervals) > 0
+		create := "CREATE TEMP TABLE " + queryIdent(source) + " AS " + plan.SQL
+		if calendarKeys {
+			// Calendar keys are written back per staged row.
+			create = "CREATE TEMP TABLE " + queryIdent(source) + " AS SELECT *,ROW_NUMBER() OVER () AS qt_calendar_row FROM (" + plan.SQL + ") AS qt_calendar_source"
+		}
+		if _, err = tx.ExecContext(ctx, create, plan.Args...); err != nil {
 			return out, err
 		}
 		// Recheck the materialized values too, including host expressions that may
@@ -194,6 +200,11 @@ func (d QueryDatasetV3) ExecuteIn(ctx context.Context, tx *sql.Tx, q QueryReques
 				return out, diagnostic("invalid_source_value", "source contains invalid typed values")
 			}
 		}
+		if calendarKeys {
+			if err = d.keyCalendarGroups(ctx, tx, source, q.Grouping, plan.Columns, staged); err != nil {
+				return out, err
+			}
+		}
 		stageOptions.SourceSQL = "SELECT * FROM " + queryIdent(source)
 		stageOptions.SourceArgs = nil
 		stageOptions.ComputedFilterable = d.ComputedFilterable
@@ -204,7 +215,16 @@ func (d QueryDatasetV3) ExecuteIn(ctx context.Context, tx *sql.Tx, q QueryReques
 	if q.Grouping != nil {
 		groups := queryTableName()
 		tables = append(tables, groups)
-		result, err = d.stageGroups(ctx, tx, groups, q.Grouping, staged, stageOptions, maxGroups, direct)
+		// A calendar key groups by its staged interval start; its result column
+		// keeps the field's name.
+		grouping := *q.Grouping
+		grouping.Keys = append([]string{}, q.Grouping.Keys...)
+		for i, key := range grouping.Keys {
+			if _, ok := q.Grouping.KeyIntervals[key]; ok {
+				grouping.Keys[i] = calendarGroupField(i)
+			}
+		}
+		result, err = d.stageGroups(ctx, tx, groups, &grouping, q.Grouping.Keys, staged, stageOptions, maxGroups, direct)
 		if err != nil {
 			return out, err
 		}
@@ -358,7 +378,55 @@ func readQueryRows(ctx context.Context, tx *sql.Tx, p SQLPlan, grouped bool, dia
 	return out, rows.Err()
 }
 
-func (d QueryDatasetV3) stageGroups(ctx context.Context, tx *sql.Tx, table string, g *GroupingDefinition, s Schema, o PlanOptions, maxGroups int, prepared *SQLPlan) (result Schema, err error) {
+// calendarGroupField is the staged field holding calendar key i's interval start.
+func calendarGroupField(i int) string { return fmt.Sprintf("__qt_calendar_key%d__", i) }
+
+// keyCalendarGroups writes each calendar key's interval start beside the
+// staged source rows, with the metric calendar, and adds a datetime field for
+// it to the staged schema. The original field stays available to summaries.
+func (d QueryDatasetV3) keyCalendarGroups(ctx context.Context, tx *sql.Tx, table string, g *GroupingDefinition, columns []OutputColumn, staged Schema) error {
+	if _, err := tx.ExecContext(ctx, "CREATE UNIQUE INDEX "+queryIdent(table+"_calendar")+" ON "+queryIdent(table)+" (qt_calendar_row)"); err != nil {
+		return err
+	}
+	for i, key := range g.Keys {
+		interval, ok := g.KeyIntervals[key]
+		if !ok {
+			continue
+		}
+		loc, err := groupKeyLocation(expressionType(staged.Fields[key].Kind), key, interval)
+		if err != nil {
+			return err
+		}
+		alias := ""
+		for _, column := range columns {
+			if column.Field == key {
+				alias = column.ValueAlias
+			}
+		}
+		name := calendarGroupField(i)
+		if alias == "" || staged.Fields[name].Name != "" {
+			return diagnostic("schema", "reserved calendar field collision")
+		}
+		bucket := fmt.Sprintf("qt_calendar_key%d", i)
+		if _, err = tx.ExecContext(ctx, "ALTER TABLE "+queryIdent(table)+" ADD COLUMN "+queryIdent(bucket)+" "+d.valueType("datetime")); err != nil {
+			return err
+		}
+		if err = d.keyCalendarColumn(ctx, tx, table, alias, bucket, d.valueType("datetime"), interval.Interval, loc); err != nil {
+			return err
+		}
+		field := staged.Fields[key]
+		field.Name = name
+		field.Expr = "r." + queryIdent(bucket)
+		field.SortExpr = ""
+		field.SQLiteSortField = ""
+		staged.Fields[name] = field
+	}
+	return nil
+}
+
+// stageGroups reduces the staged population into the group table. g.Keys are
+// the staged fields grouped by; names are the result key columns.
+func (d QueryDatasetV3) stageGroups(ctx context.Context, tx *sql.Tx, table string, g *GroupingDefinition, names []string, s Schema, o PlanOptions, maxGroups int, prepared *SQLPlan) (result Schema, err error) {
 	result = Schema{Name: s.Name + ":groups", IDField: GroupIdentityField, Fields: map[string]FieldSpec{}}
 	// SQLite reduces scalar summaries in the COUNT pass: one scan of the staged
 	// population and one GROUP BY write every value and error sidecar into the
@@ -441,7 +509,8 @@ func (d QueryDatasetV3) stageGroups(ctx context.Context, tx *sql.Tx, table strin
 		original.ValueErrorExpr = fmt.Sprintf("r.group%d_error", i)
 		original.SortExpr = ""
 		original.SQLiteSortField = ""
-		result.Fields[key] = original
+		original.Name = names[i]
+		result.Fields[names[i]] = original
 	}
 	for i, summary := range g.Summaries {
 		typ := ""
@@ -523,7 +592,7 @@ func (d QueryDatasetV3) stageGroups(ctx context.Context, tx *sql.Tx, table strin
 			return result, err
 		}
 	}
-	if err = d.assignGroupIdentities(ctx, tx, table, g.Keys, result); err != nil {
+	if err = d.assignGroupIdentities(ctx, tx, table, names, result); err != nil {
 		return result, err
 	}
 	return result, nil

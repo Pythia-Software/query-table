@@ -48,6 +48,8 @@ import {
   isComputedField,
   computedFieldName,
   toServerQueryV2,
+  groupKeyField,
+  groupKeyFields,
 } from "@pythia-software/query-table-core";
 
 const AUTOCOMPLETE_LIMIT = 50;
@@ -1451,6 +1453,7 @@ export function useQueryTable<Row>(
 
   const filterValues = useCallback(
     async (field: string, search: string): Promise<DistinctValuesResult> => {
+      // A calendar key's values are interval starts, not source values.
       if (!metadataTransport?.fetchDistinctValues || query.grouping && !query.grouping.keys.includes(field)) {
         const f = byName.get(field);
         if (!f || !clientRows) return { values: [], hasMore: false };
@@ -1815,8 +1818,8 @@ export function useQueryTable<Row>(
   return {
     ...api,
     ...(groupingSupported || query.grouping ? { grouping } : {}),
-    select: { ...select, hide: field => query.grouping?.keys.includes(field)
-      ? grouping.changeKeys(query.grouping.keys.filter(key => key !== field)) : select.hide(field) },
+    select: { ...select, hide: field => query.grouping && groupKeyFields(query.grouping.keys).includes(field)
+      ? grouping.changeKeys(query.grouping.keys.filter(key => groupKeyField(key) !== field)) : select.hide(field) },
   };
 }
 

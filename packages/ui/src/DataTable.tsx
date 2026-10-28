@@ -11,7 +11,7 @@ import { Icon } from "./Icon";
 // and emits intents through onQueryChange. Its props mirror a conventional
 // schema-driven table so adoption is mechanical.
 
-import { GROUP_ID_FIELD, GROUP_LINK_RENDER, ITEM_DETAILS_COLUMN, isComputedCellError, isGroupLinkValue, type LinkTargets } from "@pythia-software/query-table-core";
+import { GROUP_ID_FIELD, GROUP_LINK_RENDER, ITEM_DETAILS_COLUMN, groupKeyFields, isComputedCellError, isGroupLinkValue, type LinkTargets } from "@pythia-software/query-table-core";
 import { useId, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type SetStateAction } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { OrderByClause, QueryState, FieldDef, RowId, SelectColumn, WhereClause } from "@pythia-software/query-table-core";
@@ -141,7 +141,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
   // Grouped tables take group details, keyed by group identity; item details
   // configured for source rows never open from a grouped row.
   const details = query.grouping && props.itemDetails?.subject !== "group" ? undefined : props.itemDetails;
-  const groupKeys = query.grouping?.keys;
+  const groupKeys = query.grouping && groupKeyFields(query.grouping.keys);
   const detailLabel = (row: Row, id: RowId | null) => groupKeys
     ? `group ${groupKeys.map((key) => valueToString((row as Record<string, unknown>)[key]) || "NULL").join(" / ")}`
     : `item ${id ?? ""}`;
@@ -918,7 +918,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                     onDragEnd={() => columnDrag.end()}
                   >
                     <span className="qt-th-label">
-                      {props.headerAdornment ? props.headerAdornment(f) : query.grouping ? <ColumnRoleBadge role={columnRole(f.name, { ...query.grouping, mode: "groups" })} /> : null}{f.label}
+                      {props.headerAdornment ? props.headerAdornment(f) : query.grouping ? <ColumnRoleBadge role={columnRole(f.name, { ...query.grouping, keys: groupKeys!, mode: "groups" })} /> : null}{f.label}
                       {info && (
                         <span className="qt-sort-indicator">
                           <Icon name={info.dir === "asc" ? "arrowUp" : "arrowDown"} />

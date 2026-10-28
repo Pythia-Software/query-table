@@ -412,7 +412,7 @@ func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggS
 			dateAlias = column.ValueAlias
 		}
 	}
-	if err = d.keyCalendarRows(ctx, tx, table, dateAlias, config.Interval, loc); err != nil {
+	if err = d.keyCalendarColumn(ctx, tx, table, dateAlias, "qt_calendar_key", "text", config.Interval, loc); err != nil {
 		return SQLiteMetricV2{}, err
 	}
 	bucketName := "__qt_calendar_bucket__"
@@ -740,7 +740,9 @@ func sortCalendarBuckets(buckets []SQLiteMetricV2Bucket, spec AggSpec) {
 
 // Read and write bounded batches with the cursor closed between them. Neither
 // Go memory nor SQLite/PostgreSQL statement count grows by one per source row.
-func (d QueryDatasetV3) keyCalendarRows(ctx context.Context, tx *sql.Tx, table, dateAlias, interval string, loc *time.Location) error {
+// Each row's key (its interval start, or its cyclic slot) is written to the
+// column named key, cast to keyType, by the row's qt_calendar_row ordinal.
+func (d QueryDatasetV3) keyCalendarColumn(ctx context.Context, tx *sql.Tx, table, dateAlias, key, keyType, interval string, loc *time.Location) error {
 	const batchSize = 400 // Two parameters per key fit SQLite's legacy 999 limit.
 	var after int64
 	for {
@@ -778,7 +780,7 @@ func (d QueryDatasetV3) keyCalendarRows(ctx context.Context, tx *sql.Tx, table, 
 				// The slot of the interval the record falls in, as TypeScript keys it.
 				key = strconv.Itoa(calendarSlot(floor, interval, loc))
 			}
-			values = append(values, "(CAST("+d.param(len(args)+1)+" AS bigint),CAST("+d.param(len(args)+2)+" AS text))")
+			values = append(values, "(CAST("+d.param(len(args)+1)+" AS bigint),CAST("+d.param(len(args)+2)+" AS "+keyType+"))")
 			args = append(args, id, key)
 		}
 		err = rows.Err()
@@ -787,7 +789,7 @@ func (d QueryDatasetV3) keyCalendarRows(ctx context.Context, tx *sql.Tx, table, 
 			return err
 		}
 		if len(values) > 0 {
-			update := "WITH qt_calendar_keys(ordinal,bucket) AS (VALUES " + strings.Join(values, ",") + ") UPDATE " + queryIdent(table) + " AS target SET qt_calendar_key=keys.bucket FROM qt_calendar_keys AS keys WHERE target.qt_calendar_row=keys.ordinal"
+			update := "WITH qt_calendar_keys(ordinal,bucket) AS (VALUES " + strings.Join(values, ",") + ") UPDATE " + queryIdent(table) + " AS target SET " + queryIdent(key) + "=keys.bucket FROM qt_calendar_keys AS keys WHERE target.qt_calendar_row=keys.ordinal"
 			if _, err = tx.ExecContext(ctx, update, args...); err != nil {
 				return err
 			}

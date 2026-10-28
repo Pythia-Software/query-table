@@ -1,7 +1,12 @@
 import { useState } from "react";
 import {
+  GROUP_KEY_INTERVALS,
+  groupKeyField,
+  isCalendarGroupKey,
   MAX_GROUP_BY_FIELDS,
   OP_LABEL,
+  type CalendarGroupKey,
+  type GroupKey,
   type GroupedRow,
   type SummaryOp,
 } from "@pythia-software/query-table-core";
@@ -28,6 +33,71 @@ function runGroupingIntent(controller: GroupingApi<GroupedRow>, intent: () => vo
   }
 }
 
+/** The timezone a new calendar key starts in: the viewer's own. */
+function localTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
+/** "by day · America/Denver" for a calendar key, "" for an exact key. */
+function groupKeyIntervalLabel(key: GroupKey): string {
+  return isCalendarGroupKey(key)
+    ? `by ${key.interval} · ${key.timeZone ?? "UTC"}`
+    : "";
+}
+
+/** Pick exact values or a calendar interval for a datetime group key. */
+function KeyIntervalControl({
+  value,
+  label,
+  onChange,
+}: {
+  value: GroupKey;
+  label: string;
+  onChange: (key: GroupKey) => void;
+}) {
+  const field = groupKeyField(value);
+  const interval = isCalendarGroupKey(value) ? value.interval : "";
+  return (
+    <span
+      className="qt-group-op-control qt-group-key-interval"
+      title={isCalendarGroupKey(value) ? `One group per ${value.interval} in ${value.timeZone ?? "UTC"}` : "One group per exact value"}
+    >
+      <span aria-hidden="true">{interval ? `by ${interval}` : "exact"}</span>
+      <Icon name="chevronDown" size={12} />
+      <select
+        className="qt-group-op"
+        aria-label={`Interval for ${label}`}
+        value={interval}
+        onChange={(event) => {
+          const next = event.target.value as CalendarGroupKey["interval"] | "";
+          onChange(
+            next
+              ? {
+                  field,
+                  interval: next,
+                  timeZone: isCalendarGroupKey(value)
+                    ? (value.timeZone ?? "UTC")
+                    : localTimeZone(),
+                }
+              : field,
+          );
+        }}
+      >
+        <option value="">Exact value</option>
+        {GROUP_KEY_INTERVALS.map((option) => (
+          <option key={option} value={option}>
+            By {option}
+          </option>
+        ))}
+      </select>
+    </span>
+  );
+}
+
 function GroupingClauses({
   controller,
 }: {
@@ -35,9 +105,10 @@ function GroupingClauses({
 }) {
   const [adding, setAdding] = useState(false);
   const { view, model } = controller;
+  const groupKeys: GroupKey[] = view.groupKeys ?? view.keys;
   const canAddKey = controller.supported && view.keys.length < MAX_GROUP_BY_FIELDS &&
     model.groupableFields.some(field => !view.keys.includes(field.name));
-  function changeKeys(keys: string[]) {
+  function changeKeys(keys: GroupKey[]) {
     runGroupingIntent(controller, () => controller.changeKeys(keys));
   }
   const picker = adding && canAddKey && (
@@ -47,7 +118,7 @@ function GroupingClauses({
         (field) => !view.keys.includes(field.name),
       )}
       onPick={(field) => {
-        changeKeys([...view.keys, field.name]);
+        changeKeys([...groupKeys, field.name]);
         setAdding(false);
       }}
       onClose={() => setAdding(false)}
@@ -83,28 +154,45 @@ function GroupingClauses({
             group by
           </span>
         </div>
-        {view.keys.map((key) => (
+        {groupKeys.map((groupKey, index) => {
+          const key = groupKeyField(groupKey);
+          const label = model.sourceField(key)?.label ?? key;
+          return (
           <span className="qt-chip" key={key}>
             <span
               className="qt-chip-field qt-column-label"
               data-column-role="key"
             >
-              {model.sourceField(key)?.label ?? key}
+              {label}
             </span>
+            {model.sourceField(key)?.type === "datetime" && controller.supported ? (
+              <KeyIntervalControl
+                value={groupKey}
+                label={label}
+                onChange={(next) =>
+                  changeKeys(
+                    groupKeys.map((other, i) => (i === index ? next : other)),
+                  )
+                }
+              />
+            ) : isCalendarGroupKey(groupKey) ? (
+              <span className="qt-group-key-interval">{groupKeyIntervalLabel(groupKey)}</span>
+            ) : null}
             <button
               type="button"
               className="qt-chip-x"
-              aria-label={`Remove ${model.sourceField(key)?.label ?? key} grouping`}
+              aria-label={`Remove ${label} grouping`}
               onClick={() =>
                 changeKeys(
-                  view.keys.filter((field) => field !== key),
+                  groupKeys.filter((_, i) => i !== index),
                 )
               }
             >
               <Icon name="close" />
             </button>
           </span>
-        ))}
+          );
+        })}
         <PickerAnchor>
           {canAddKey && (
               <button
@@ -153,6 +241,7 @@ export function useGroupingPresentation<Row>(
     : undefined;
   if (!controller) return {};
   const { view, model } = controller;
+  const groupKeys: GroupKey[] = view.groupKeys ?? view.keys;
   const grouped = view.mode === "groups";
   const selectPresentation: SelectPresentation | undefined = grouped
     ? {
@@ -246,8 +335,12 @@ export function useGroupingPresentation<Row>(
           : "all rows"}{" "}
         · GROUP BY{" "}
         <strong>
-          {view.keys
-            .map((key) => model.sourceField(key)?.label ?? key)
+          {groupKeys
+            .map((key) => {
+              const name = groupKeyField(key);
+              const label = model.sourceField(name)?.label ?? name;
+              return isCalendarGroupKey(key) ? `${label} (${key.interval})` : label;
+            })
             .join(" + ")}
         </strong>{" "}
         · HAVING{" "}

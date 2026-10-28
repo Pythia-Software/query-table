@@ -8,6 +8,7 @@
 // docs/query-patches.md for the full contract.
 
 import { exitGrouping, withGroupingKeys, type GroupingState, type SummaryColumn } from "./grouping";
+import type { GroupKey } from "./groupKeys";
 import { NULLARY_OPS } from "./ops";
 import {
   isWhereConjunction,
@@ -114,7 +115,7 @@ function sameTermSet(a: readonly WhereTerm[], b: readonly WhereTerm[]): boolean 
 // ---- patch interpretation ---------------------------------------------------
 
 interface PatchGrouping {
-  keys: string[];
+  keys: GroupKey[];
   summaries: SummaryColumn[];
   representative: GroupingState["representative"];
   having: WhereTerm[];

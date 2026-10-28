@@ -196,6 +196,24 @@ export function metricCustomEndTime(value: string, timeZone = "UTC"): number {
   return value.length === 10 ? metricDateNext(time, "day", timeZone) - 1 : time;
 }
 
+/** An IANA timezone identifier this runtime knows, such as America/Denver or
+ * UTC. Fixed offsets ("+02:00") are refused: they do not follow DST. */
+export function isGroupingTimeZone(value: unknown): value is string {
+  if (
+    typeof value !== "string" ||
+    !value ||
+    value.length > 80 ||
+    /^[+-]/.test(value)
+  )
+    return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function validateDateGrouping(config: MetricDateGrouping): void {
   if (
     typeof config.field !== "string" ||
@@ -208,24 +226,10 @@ export function validateDateGrouping(config: MetricDateGrouping): void {
       !["include", "exclude"].includes(config.partialIntervals))
   )
     throw Error("Invalid date grouping definition.");
-  if (config.timeZone !== undefined) {
-    if (
-      typeof config.timeZone !== "string" ||
-      !config.timeZone ||
-      config.timeZone.length > 80 ||
-      /^[+-]/.test(config.timeZone)
-    )
-      throw Error(
-        "Use a valid IANA grouping timezone, such as America/Denver or UTC.",
-      );
-    try {
-      new Intl.DateTimeFormat("en-US", { timeZone: config.timeZone });
-    } catch {
-      throw Error(
-        "Use a valid IANA grouping timezone, such as America/Denver or UTC.",
-      );
-    }
-  }
+  if (config.timeZone !== undefined && !isGroupingTimeZone(config.timeZone))
+    throw Error(
+      "Use a valid IANA grouping timezone, such as America/Denver or UTC.",
+    );
   if (config.occurrence !== undefined) {
     const o = config.occurrence as unknown as Record<string, unknown>;
     if (

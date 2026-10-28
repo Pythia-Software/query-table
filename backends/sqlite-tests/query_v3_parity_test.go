@@ -203,6 +203,53 @@ func TestV3FrontendParity(t *testing.T) {
 	}}}
 	q.Metrics = []qt.AggSpec{{ID: "groups", Op: "count"}}
 	run("or-of-ands/groups", base, q)
+	// Calendar keys in a grouping stage: one group per local interval, keyed by
+	// its start, with summaries, representatives, group filters, ordering and
+	// metrics over the groups, across DST and partial-hour offsets.
+	calendarKeys := []struct {
+		name, zone, interval string
+		times                []string
+	}{
+		{"denver/day", "America/Denver", "day", []string{"2026-03-08T06:30:00.000Z", "2026-03-08T07:30:00.000Z", "2026-03-08T10:30:00.000Z", "2026-03-09T05:59:00.000Z", "2026-03-09T06:00:00.000Z"}},
+		{"utc/hour", "", "hour", []string{"2026-03-01T23:59:59.000Z", "2026-03-02T00:00:00.000Z", "2026-03-02T00:30:00.000Z", "2026-03-02T01:00:00.000Z"}},
+		{"ny/fall-hour", "America/New_York", "hour", []string{"2026-11-01T05:15:00.000Z", "2026-11-01T05:45:00.000Z", "2026-11-01T06:15:00.000Z", "2026-11-01T07:15:00.000Z"}},
+		{"lord-howe/spring-hour", "Australia/Lord_Howe", "hour", []string{"2026-10-03T14:45:00.000Z", "2026-10-03T15:15:00.000Z", "2026-10-03T15:35:00.000Z", "2026-10-03T16:15:00.000Z"}},
+		{"berlin/week", "Europe/Berlin", "week", []string{"2026-12-27T22:30:00.000Z", "2026-12-28T00:30:00.000Z", "2027-01-04T11:00:00.000Z"}},
+		{"denver/month", "America/Denver", "month", []string{"2026-12-31T23:45:00.000Z", "2027-01-01T07:15:00.000Z", "2027-03-15T12:00:00.000Z"}},
+		{"kathmandu/year", "Asia/Kathmandu", "year", []string{"2026-12-31T18:30:00.000Z", "2027-12-31T18:10:00.000Z"}},
+	}
+	for _, c := range calendarKeys {
+		for _, extra := range []bool{false, true} {
+			rows := []map[string]any{}
+			for i, at := range c.times {
+				key := any("a")
+				if i%2 != 0 {
+					key = "b"
+				}
+				rows = append(rows, map[string]any{"id": fmt.Sprint(i), "k": key, "n": float64(i) + 1, "at": at, "label": fmt.Sprint("row", i), "flag": i%2 == 0})
+			}
+			rows = append(rows, map[string]any{"id": "null", "k": "a", "n": float64(9), "at": nil, "label": nil, "flag": nil})
+			q := groupedRequest()
+			q.Grouping.Keys = []string{"at"}
+			if extra {
+				q.Grouping.Keys = append(q.Grouping.Keys, "k")
+			}
+			q.Grouping.KeyIntervals = map[string]qt.GroupKeyInterval{"at": {Interval: c.interval, TimeZone: c.zone}}
+			q.Grouping.Summaries = []qt.SummaryColumn{{ID: "num", Op: "count"}, {ID: "total", Op: "sum", Field: "n"}, {ID: "first_at", Op: "min", Field: "at"}, {ID: "example", Op: "row", Field: "label"}}
+			q.Result.Select = append(append([]string{}, q.Grouping.Keys...), "num", "total", "first_at", "example")
+			q.Result.OrderBy = qt.OrderBys{{Field: "at", Dir: "asc", Nulls: "last"}}
+			q.Result.Where = []qt.WhereTerm{{Field: "num", Op: ">=", Value: "1"}}
+			if extra {
+				q.Result.OrderBy = append(q.Result.OrderBy, qt.OrderBy{Field: "k", Dir: "desc", Nulls: "last"})
+				// A group filter on the key's interval start.
+				q.Result.Where = append(q.Result.Where, qt.WhereTerm{Any: []qt.WhereClause{{Field: "at", Op: ">=", Value: c.times[1]}, {Field: "at", Op: "is_null"}}})
+			}
+			q.Result.Limit = 10
+			q.Result.Offset = 0
+			q.Metrics = []qt.AggSpec{{ID: "groups", Op: "count"}, {ID: "by_key", Op: "sum", Field: "num", GroupBy: []string{"at"}}}
+			run(fmt.Sprintf("calendar-keys/%s/%t", c.name, extra), rows, q)
+		}
+	}
 	body, err := json.Marshal(fixtures)
 	if err != nil {
 		t.Fatal(err)

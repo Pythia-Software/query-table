@@ -11,7 +11,8 @@ import (
 // repeat an expensive/volatile expression. Every value and budget is still
 // proved within this transaction; no declaration, sample or host cache is used.
 func (d QueryDatasetV3) sqliteDirectGroups(ctx context.Context, tx *sql.Tx, q QueryRequestV3, o PlanOptions, source SourceDependencyPlan, maxPop, maxGroups int, maxBytes int64, tables *[]string) (*SQLPlan, int64, error) {
-	if d.Dialect != "sqlite" || q.Grouping == nil || q.Grouping.Representative != nil {
+	// Calendar keys are computed over the staged population.
+	if d.Dialect != "sqlite" || q.Grouping == nil || q.Grouping.Representative != nil || len(q.Grouping.KeyIntervals) > 0 {
 		return nil, 0, nil
 	}
 	for _, key := range q.Grouping.Keys {

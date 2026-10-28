@@ -20,6 +20,8 @@ import {
   metricDateTime,
   metricDateNext,
   metricDateRange,
+  groupKeyFields,
+  isCalendarGroupKey,
   type AggregationClause,
   type AggregationResult,
   type AggregationResultEntry,
@@ -33,6 +35,7 @@ import {
   type QueryResultV3,
   type ServerQuery,
   type Transport,
+  type MetricDateGrouping,
   type MetricSort,
   type MetricValue,
   type QueryState,
@@ -200,6 +203,7 @@ export class DuckDBBackend {
       groupedRows: true,
       calendarGrouping: true,
       calendarCycles: true,
+      calendarGroupKeys: true,
       computedSourceFilters: definitions.size > 0,
       regex: true,
       regexSourceFilters: true,
@@ -474,8 +478,28 @@ export class DuckDBBackend {
         const grouping = request.grouping,
           model = createGroupingModel(schema),
           builder = this.builder(schema, request.now);
-        const keys = grouping.keys.map((name) => builder.field(name, false)),
-          names = grouping.keys.map(id);
+        // A calendar key reads the interval start mapped from its field.
+        let from = id(source.name);
+        const keys: string[] = [];
+        for (const [index, key] of grouping.keys.entries()) {
+          if (!isCalendarGroupKey(key)) {
+            keys.push(builder.field(key, false));
+            continue;
+          }
+          const mapping = await this.calendarMapping(
+            id(source.name),
+            builder,
+            schema,
+            key,
+            tables,
+            signal,
+          );
+          const value = id(`qt_calendar_value${index}`),
+            bucket = id(`qt_calendar_key${index}`);
+          from += ` LEFT JOIN (SELECT value AS ${value}, bucket AS ${bucket} FROM ${id(mapping)}) AS ${id(`qt_calendar_map${index}`)} ON ${value} = CAST(${builder.field(key.field, false)} AS TIMESTAMPTZ)`;
+          keys.push(bucket);
+        }
+        const names = groupKeyFields(grouping.keys).map(id);
         const representative = builder
           .order(
             grouping.representative?.orderBy ?? [
@@ -501,7 +525,7 @@ export class DuckDBBackend {
         const identity = `CAST(to_json(struct_pack(${keys.map((key, i) => `k${i} := ${key}`).join(", ")})) AS VARCHAR)`;
         await this.run(
           builder.statement(
-            `CREATE TEMP TABLE ${id(relation)} AS SELECT ${identity} AS ${id(GROUP_ID_FIELD)}, ${keys.map((key, i) => `${key} AS ${names[i]}`).join(", ")}${summaries.length ? `, ${summaries.join(", ")}` : ""} FROM ${id(source.name)} GROUP BY ${keys.join(", ")}`,
+            `CREATE TEMP TABLE ${id(relation)} AS SELECT ${identity} AS ${id(GROUP_ID_FIELD)}, ${keys.map((key, i) => `${key} AS ${names[i]}`).join(", ")}${summaries.length ? `, ${summaries.join(", ")}` : ""} FROM ${from} GROUP BY ${keys.join(", ")}`,
           ),
           signal,
         );
@@ -594,6 +618,62 @@ export class DuckDBBackend {
     await this.sql("BEGIN TRANSACTION", [], signal);
     return output;
   }
+  /** A temporary (value, bucket) table mapping each distinct non-null value
+   * of `config.field` in `population` to the start of its calendar interval,
+   * or to its cyclic slot, computed with the core calendar. */
+  private async calendarMapping(
+    population: string,
+    builder: SQLBuilder,
+    schema: FieldSchema,
+    config: Pick<MetricDateGrouping, "field" | "interval" | "timeZone">,
+    tables: string[],
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const source = builder.field(config.field, false),
+      cycle = isMetricCycle(config.interval) ? config.interval : undefined;
+    const dates = await this.run(
+      builder.statement(
+        `SELECT DISTINCT CAST(${source} AS VARCHAR) AS value FROM ${population} r WHERE ${source} IS NOT NULL`,
+      ),
+      signal,
+    );
+    const mapping = this.temp(tables);
+    await this.sql(
+      `CREATE TEMP TABLE ${id(mapping)} (value TIMESTAMPTZ, bucket ${cycle ? "INTEGER" : "TIMESTAMPTZ"})`,
+      [],
+      signal,
+    );
+    for (let i = 0; i < dates.length; i += 250) {
+      const args: unknown[] = [];
+      const values = dates.slice(i, i + 250).map((row) => {
+        const value = /^\d{4}-\d{2}-\d{2}$/.test(String(row.value))
+          ? String(row.value)
+          : (this.formatRow({ [config.field]: row.value }, schema)[
+              config.field
+            ] as string);
+        const floor = metricDateFloor(
+          metricDateTime(value, config.timeZone),
+          config.interval,
+          config.timeZone,
+        );
+        // A cyclic slot is the local hour or weekday of the record's interval.
+        args.push(
+          value,
+          cycle
+            ? metricCycleSlot(floor, cycle, config.timeZone)
+            : new Date(floor).toISOString(),
+        );
+        return `(CAST($${args.length - 1} AS TIMESTAMPTZ), CAST($${args.length} AS ${cycle ? "INTEGER" : "TIMESTAMPTZ"}))`;
+      });
+      if (values.length)
+        await this.sql(
+          `INSERT INTO ${id(mapping)} VALUES ${values.join(", ")}`,
+          args,
+          signal,
+        );
+    }
+    return mapping;
+  }
   private async metric(
     relation: string,
     schema: FieldSchema,
@@ -620,52 +700,16 @@ export class DuckDBBackend {
     // shown-row scope) and never changes the table rows.
     if (clause.where?.length)
       population = `(SELECT * FROM ${population} r WHERE ${builder.where(clause.where)})`;
-    let dateMapping: string | undefined;
     if (clause.dateGrouping) {
-      const config = clause.dateGrouping,
-        source = builder.field(config.field, false),
-        cycle = isMetricCycle(config.interval) ? config.interval : undefined;
-      const dates = await this.run(
-        builder.statement(
-          `SELECT DISTINCT CAST(${source} AS VARCHAR) AS value FROM ${population} r WHERE ${source} IS NOT NULL`,
-        ),
+      const config = clause.dateGrouping;
+      const dateMapping = await this.calendarMapping(
+        population,
+        builder,
+        schema,
+        config,
+        tables,
         signal,
       );
-      dateMapping = this.temp(tables);
-      await this.sql(
-        `CREATE TEMP TABLE ${id(dateMapping)} (value TIMESTAMPTZ, bucket ${cycle ? "INTEGER" : "TIMESTAMPTZ"})`,
-        [],
-        signal,
-      );
-      for (let i = 0; i < dates.length; i += 250) {
-        const args: unknown[] = [];
-        const values = dates.slice(i, i + 250).map((row) => {
-          const value = /^\d{4}-\d{2}-\d{2}$/.test(String(row.value))
-            ? String(row.value)
-            : (this.formatRow({ [config.field]: row.value }, schema)[
-                config.field
-              ] as string);
-          const floor = metricDateFloor(
-            metricDateTime(value, config.timeZone),
-            config.interval,
-            config.timeZone,
-          );
-          // A cyclic slot is the local hour or weekday of the record's interval.
-          args.push(
-            value,
-            cycle
-              ? metricCycleSlot(floor, cycle, config.timeZone)
-              : new Date(floor).toISOString(),
-          );
-          return `(CAST($${args.length - 1} AS TIMESTAMPTZ), CAST($${args.length} AS ${cycle ? "INTEGER" : "TIMESTAMPTZ"}))`;
-        });
-        if (values.length)
-          await this.sql(
-            `INSERT INTO ${id(dateMapping)} VALUES ${values.join(", ")}`,
-            args,
-            signal,
-          );
-      }
       population = `(SELECT r.* EXCLUDE (${id(config.field)}), m.bucket AS ${id(config.field)} FROM ${population} r LEFT JOIN ${id(dateMapping)} m ON CAST(r.${id(config.field)} AS TIMESTAMPTZ) = m.value)`;
     }
     const keys = clause.groupBy.map((name) => builder.field(name, false)),

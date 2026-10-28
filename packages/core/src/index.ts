@@ -130,6 +130,16 @@ export * from "./execution";
 export * from "./properties";
 export * from "./propertyStorage";
 export * from "./grouping";
+export {
+  GROUP_KEY_INTERVALS,
+  isCalendarGroupKey,
+  groupKeyField,
+  groupKeyFields,
+  calendarGroupKey,
+  groupKeyTerms,
+  type CalendarGroupKey,
+  type GroupKey,
+} from "./groupKeys";
 export * from "./source";
 export * from "./queryV3";
 export { inspectBucketQuery, groupSourceQuery } from "./drilldown";
