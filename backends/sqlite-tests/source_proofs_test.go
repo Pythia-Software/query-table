@@ -26,13 +26,15 @@ func proofQuery(grouped bool) qt.MetricQuery {
 	if grouped {
 		by = []string{"k"}
 	}
-	for _, expression := range []string{"AVG([n0])", "MIN([n1])", "MAX([n2])", "COUNT_DISTINCT([n3])", "COUNT([n4])"} {
+	for _, expression := range []string{"AVG([n0])", "MIN([n1])", "MAX([n2])", "COUNT_DISTINCT([n3])"} {
 		q.Metrics = append(q.Metrics, qt.AggSpec{ID: fmt.Sprintf("expr%d", len(q.Metrics)), Expression: expression, GroupBy: by})
 	}
 	if grouped {
 		q.Metrics = append(q.Metrics,
 			qt.AggSpec{ID: "top", Op: "sum", Field: "n5", GroupBy: by, Sort: []qt.MetricSort{{Key: "value", Dir: "asc"}}, GroupLimit: 2},
-			qt.AggSpec{ID: "frequent", Op: "sum", Field: "n6", GroupBy: by, MinCount: qt.MetricMinCount{Min: 7}})
+			qt.AggSpec{ID: "frequent", Op: "sum", Field: "n6", GroupBy: by, MinCount: qt.MetricMinCount{Min: 7}},
+			// A measured minimum adds a reduction the proof must also cover.
+			qt.AggSpec{ID: "summed", Op: "count", GroupBy: by, MinCount: qt.MetricMinCount{Min: 40, Sum: "n4"}})
 	}
 	q.Metrics = append(q.Metrics,
 		qt.AggSpec{ID: "ratio", Expression: "SUM([n0])/COUNT()", GroupBy: by, Where: []qt.WhereTerm{{Field: "n1", Op: ">", Value: "2"}}},
