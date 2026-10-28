@@ -224,22 +224,13 @@ func trigramPaths(t *testing.T, db *sql.DB, relations qt.SQLitePredicateRelation
 			}
 		}
 	}
-	out["v3 group filter"] =v3Query(qt.QueryRequestV3{Rows: true, Grouping: &qt.GroupingDefinition{Keys: []string{"command"}, Summaries: []qt.SummaryColumn{{ID: "num", Op: "count"}}},
+	out["v3 group filter"] = v3Query(qt.QueryRequestV3{Rows: true, Grouping: &qt.GroupingDefinition{Keys: []string{"command"}, Summaries: []qt.SummaryColumn{{ID: "num", Op: "count"}}},
 		Result: qt.WireQuery{Select: []string{"command", "num"}, Where: where, Limit: 1000}})
 	// A plan fingerprint identifies the compiled SQL, which a relation changes.
 	return planFingerprint.ReplaceAllString(mustJSON(t, out), `"fingerprint":""`)
 }
 
 var planFingerprint = regexp.MustCompile(`"fingerprint":"[0-9a-f]*"`)
-
-func mustJSON(t *testing.T, v any) string {
-	t.Helper()
-	b, err := json.Marshal(v)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(b)
-}
 
 func trigramCases() map[string][]qt.WhereTerm {
 	cases := map[string][]qt.WhereTerm{}
