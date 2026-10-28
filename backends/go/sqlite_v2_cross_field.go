@@ -63,7 +63,13 @@ func (c *sqliteReductionCache) addCrossFields(ctx context.Context, batch MetricB
 		for _, member := range members[1:] {
 			extra = append(extra, summaryOutput{ID: member.ID, Expression: MetricExpression(specs[member.ID])})
 		}
-		primary.Sort, primary.GroupLimit, primary.MinCount = nil, 0, 0
+		// Measured minimums are member reductions too, consumed by identity.
+		for _, member := range members {
+			if measure := specs[member.ID].MinCount.Measure(); measure != "" {
+				extra = append(extra, summaryOutput{ID: "__qt_min_count__" + member.ID, Expression: measure})
+			}
+		}
+		primary.Sort, primary.GroupLimit, primary.MinCount = nil, 0, MetricMinCount{}
 		combined, err := compileMetricOutputs(ctx, q, primary, s, o, true, extra)
 		if err != nil || len(combined.SQLiteReductionColumns) > 128 {
 			continue // Combined compiler budgets never invalidate a valid member.

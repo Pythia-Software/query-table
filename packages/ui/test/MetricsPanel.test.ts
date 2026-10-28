@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MetricCard } from "../src/MetricsPanel";
 import { defaultRenderers } from "../src/renderers";
 import type { MetricBucket, RenderingClause } from "../src/metricTypes";
-import { boxSummary, type FieldDef } from "@pythia-software/query-table-core";
+import { boxSummary, type AggregationClause, type FieldDef } from "@pythia-software/query-table-core";
 (
   globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
@@ -943,6 +943,18 @@ describe("metric population notes", () => {
       }),
     );
     expect(none).not.toContain("hidden (fewer");
+    const measured = (minCount: NonNullable<AggregationClause["minCount"]>) =>
+      renderToStaticMarkup(
+        createElement(MetricCard, {
+          clause: { ...clause, minCount },
+          buckets,
+          fields: [...fields, { name: "calls", label: "Calls", type: "number", source: { kind: "backend" } }],
+          renderers: defaultRenderers,
+          result: { buckets, groupCount: 2, hiddenGroups: 1 },
+        }),
+      );
+    expect(measured({ min: 10, sum: "calls" })).toContain("1 group hidden (fewer than 10 total Calls)");
+    expect(measured({ min: 5, distinct: "conversation_id" })).toContain("(fewer than 5 distinct conversation_id values)");
   });
 });
 

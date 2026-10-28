@@ -1,7 +1,9 @@
 import type { AggregationClause } from "./query";
 
-/** How normalizeMetricOptions validates one option: an allowed value list or a type. */
-export type MetricOptionSpec = readonly string[] | "string" | "boolean" | "integer" | "positiveInteger" | "number";
+/** How normalizeMetricOptions validates one option: an allowed value list or a
+ *  type. "minCount" is a positive integer, or an object read with the
+ *  `minCount` table that has `min` and exactly one of `distinct` and `sum`. */
+export type MetricOptionSpec = readonly string[] | "string" | "boolean" | "integer" | "positiveInteger" | "number" | "minCount";
 
 /** The option tables normalizeMetricOptions copies from, in output order. Other
  *  implementations of query links (the Go module) are checked against this
@@ -12,8 +14,13 @@ export const METRIC_OPTION_SPECS = {
     expressionY: "string",
     scope: ["allMatching", "shownRows"],
     groupLimit: "integer",
-    minCount: "positiveInteger",
+    minCount: "minCount",
     share: ["total", "group0"],
+  },
+  minCount: {
+    min: "positiveInteger",
+    distinct: "string",
+    sum: "string",
   },
   window: {
     reduce: ["total", "mean"],
@@ -130,6 +137,25 @@ export function normalizeMetricOptions(
     for (const [key, spec] of Object.entries(specs)) {
       const v = input[key];
       if (v === undefined) continue;
+      if (spec === "minCount") {
+        const m = record(v) ? copy(v, METRIC_OPTION_SPECS.minCount) : v;
+        const named = (x: unknown) =>
+          x === undefined || (typeof x === "string" && !!x && x.length <= 256);
+        if (
+          record(m)
+            ? m.min !== undefined &&
+              (m.distinct === undefined) !== (m.sum === undefined) &&
+              named(m.distinct) &&
+              named(m.sum)
+            : typeof m === "number" &&
+              Number.isSafeInteger(m) &&
+              m >= 1 &&
+              m <= 1000000
+        )
+          result[key] = m;
+        else diagnostics.push(`Invalid metric ${key}.`);
+        continue;
+      }
       if (
         spec === "string"
           ? typeof v === "string" && v.length <= 10000

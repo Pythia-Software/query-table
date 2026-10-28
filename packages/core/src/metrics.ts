@@ -505,18 +505,7 @@ export function validateMetric(
         c.groupLimit > 10000)
     )
       throw new FormulaError("Group limit must be 1–10,000.");
-    if (c.minCount !== undefined) {
-      if (
-        !Number.isInteger(c.minCount) ||
-        c.minCount < 1 ||
-        c.minCount > 1000000
-      )
-        throw new FormulaError("Minimum rows per group must be 1–1,000,000.");
-      if (!c.groupBy.length)
-        throw new FormulaError(
-          "Minimum rows per group requires at least one grouping field.",
-        );
-    }
+    if (c.minCount !== undefined) validateMinCount(c, schema);
     validateMetricWhere(c.where, schema);
     for (const s of c.sort ?? []) {
       if (s.key === "y" && c.display?.kind !== "scatter")
@@ -545,6 +534,126 @@ export function validateMetric(
       },
     ];
   }
+}
+/** The threshold of `AggregationClause.minCount` in either form. */
+export function metricMinCount(
+  c: { minCount?: AggregationClause["minCount"] | undefined },
+): number | undefined {
+  const m = c.minCount;
+  return m === undefined ? undefined : typeof m === "number" ? m : m?.min;
+}
+/** What an object `minCount` measures: the aggregate whose value per group
+ * must reach `min`. Undefined when `minCount` counts rows. */
+export function metricMinCountMeasure(
+  c: { minCount?: AggregationClause["minCount"] | undefined },
+): { op: "count_distinct" | "sum"; field: string } | undefined {
+  const m = c.minCount;
+  if (m === undefined || m === null || typeof m !== "object") return undefined;
+  return m.distinct !== undefined
+    ? { op: "count_distinct", field: m.distinct }
+    : { op: "sum", field: m.sum! };
+}
+/** A minimum in words: "3 rows", "5 distinct Conversation values" or
+ * "10 total Calls". `label` names a field (default: its name). */
+export function metricMinCountText(
+  c: { minCount?: AggregationClause["minCount"] | undefined },
+  label: (field: string) => string = (field) => field,
+): string | undefined {
+  const min = metricMinCount(c),
+    measure = metricMinCountMeasure(c);
+  if (min === undefined) return undefined;
+  const n = min.toLocaleString();
+  if (!measure) return `${n} ${min === 1 ? "row" : "rows"}`;
+  return measure.op === "sum"
+    ? `${n} total ${label(measure.field)}`
+    : `${n} distinct ${label(measure.field)} ${min === 1 ? "value" : "values"}`;
+}
+/** The aggregate plan of an object `minCount`, such as SUM([calls]). */
+export function metricMinCountPlan(
+  c: { minCount?: AggregationClause["minCount"] | undefined },
+  schema: FieldSchema,
+  resolve?: (name: string) => FormulaPlan | undefined,
+): MetricPlan | undefined {
+  const measure = metricMinCountMeasure(c);
+  return measure
+    ? compileMetric(
+        metricExpression({
+          id: "",
+          groupBy: [],
+          op: measure.op,
+          field: resolveFieldName(schema, measure.field) ?? measure.field,
+        }),
+        schema,
+        resolve,
+      )
+    : undefined;
+}
+/** Whether a group survives `minCount`. Calendar fill-ins (no rows) always do.
+ * Otherwise the row count, or for an object `minCount` the group's measure
+ * (null counts as 0), must reach `min`. A measure that is an error keeps its
+ * group, so the error stays visible. */
+export function metricMinCountKeeps(
+  min: number,
+  count: number,
+  measure?: { value: unknown; error?: string | undefined },
+): boolean {
+  if (count === 0) return true;
+  if (!measure) return count >= min;
+  return measure.error !== undefined || Number(measure.value ?? 0) >= min;
+}
+/** A row-count minimum, or exactly one of a distinct or summed schema field. */
+function validateMinCount(c: AggregationClause, schema: FieldSchema): void {
+  const m = c.minCount as unknown;
+  const measured = m !== null && typeof m === "object";
+  const min = measured ? (m as { min?: unknown }).min : m;
+  const label = measured ? "Minimum per group" : "Minimum rows per group";
+  if (
+    typeof min !== "number" ||
+    !Number.isInteger(min) ||
+    min < 1 ||
+    min > 1000000
+  )
+    throw new FormulaError(`${label} must be 1–1,000,000.`);
+  if (measured) {
+    const o = m as Record<string, unknown>;
+    if (
+      Object.keys(o).some((k) => !["min", "distinct", "sum"].includes(k)) ||
+      (o.distinct === undefined) === (o.sum === undefined)
+    )
+      throw new FormulaError(
+        "A minimum per group needs exactly one of distinct and sum.",
+      );
+    const name = o.distinct ?? o.sum;
+    const op = o.distinct !== undefined ? "count_distinct" : "sum";
+    const resolved =
+      typeof name === "string" ? (resolveFieldName(schema, name) ?? name) : "";
+    const field = schema.fields.find((f) => f.name === resolved);
+    if (op === "sum" && field && field.type !== "number")
+      throw new FormulaError(
+        `A summed minimum requires a numeric field, not ${resolved}.`,
+      );
+    if (
+      !field ||
+      isComputedField(resolved) ||
+      !isMeasurable(field) ||
+      !aggOpsForField(field).includes(op)
+    )
+      throw new FormulaError(
+        op === "sum"
+          ? `Field ${String(name)} cannot be summed for a minimum per group.`
+          : `Field ${String(name)} cannot count distinct values for a minimum per group.`,
+      );
+    if (distributionActive(c))
+      throw new FormulaError(
+        "A distinct or summed minimum currently supports scalar metrics, not distributions.",
+      );
+    if (c.window && op === "count_distinct")
+      throw new FormulaError(
+        "A distinct minimum cannot be combined across a window's intervals.",
+      );
+  }
+  if (!c.groupBy.length)
+    throw new FormulaError(`${label} requires at least one grouping field.`);
 }
 /** A metric WHERE follows the table WHERE's allowlist and operators. Regex is
  * refused on every engine; local computed inputs need filter authority. */
@@ -581,6 +690,8 @@ function validateMetricWhere(
 export interface MetricPopulationSupport {
   filters?: boolean | undefined;
   minCount?: boolean | undefined;
+  /** A `minCount` object: distinct values or a sum of a field. */
+  minCountMeasures?: boolean | undefined;
 }
 /** A clause the executor cannot run exactly gets its own error; it is never
  * sent with `where`/`minCount` silently dropped. */
@@ -592,6 +703,8 @@ export function metricPopulationError(
     return "This server does not support metric filters.";
   if (clause.minCount !== undefined && !support.minCount)
     return "This server does not support a minimum rows per group.";
+  if (metricMinCountMeasure(clause) && !support.minCountMeasures)
+    return "This server does not support a minimum of distinct values or a sum per group.";
   return undefined;
 }
 export function metricDependencies(
@@ -603,6 +716,14 @@ export function metricDependencies(
     ...new Set([
       ...c.groupBy.map((name) => resolveFieldName(schema, name) ?? name),
       ...metricPlans(c, schema, resolve).flatMap((p) => p.dependencies),
+      // An invalid minimum fails validation, not dependency discovery.
+      ...((() => {
+        try {
+          return metricMinCountPlan(c, schema, resolve)?.dependencies;
+        } catch {
+          return undefined;
+        }
+      })() ?? []),
     ]),
   ].sort();
 }
@@ -1425,12 +1546,18 @@ export function evaluateMetrics<Row>(
           );
         };
         const populations = new Map<AggregationBucket, number[]>();
+        // An object minCount measures each group with its own aggregate, with
+        // the same semantics as that aggregate in a metric expression.
+        const minPlan = metricMinCountPlan(c, schema, options.resolveComputed);
+        const measures = new Map<AggregationBucket, FormulaResult>();
         let buckets: AggregationBucket[] = [...groups.values()].map((g) => {
           const bucket: AggregationBucket = {
             keys: g.keys,
             count: g.rows.length,
             value: null,
           };
+          if (minPlan && g.rows.length)
+            measures.set(bucket, reduce(minPlan, g.rows, new Set()));
           if (distributionActive(c)) {
             const values: number[] = [];
             bucket.nullCount = 0;
@@ -1500,9 +1627,10 @@ export function evaluateMetrics<Row>(
         // Calendar fill-ins are the only empty groups; they are never hidden.
         // Hidden groups leave the ranking, the result limit and Other.
         let hiddenGroups: number | undefined;
-        if (c.minCount !== undefined) {
-          const kept = buckets.filter(
-            (b) => b.count === 0 || b.count >= c.minCount!,
+        const min = metricMinCount(c);
+        if (min !== undefined) {
+          const kept = buckets.filter((b) =>
+            metricMinCountKeeps(min, b.count, minPlan ? measures.get(b) : undefined),
           );
           hiddenGroups = buckets.length - kept.length;
           buckets = kept;

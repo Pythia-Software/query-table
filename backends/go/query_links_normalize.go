@@ -446,6 +446,9 @@ const (
 	optionInteger
 	optionPositiveInteger
 	optionNumber
+	// optionMinCount is a positive integer, or a metricMinCountOptions object
+	// with min and exactly one of distinct and sum.
+	optionMinCount
 )
 
 type optionSpec struct {
@@ -464,8 +467,13 @@ var (
 		{key: "expressionY", kind: optionString},
 		enumOption("scope", "allMatching", "shownRows"),
 		{key: "groupLimit", kind: optionInteger},
-		{key: "minCount", kind: optionPositiveInteger},
+		{key: "minCount", kind: optionMinCount},
 		enumOption("share", "total", "group0"),
+	}
+	metricMinCountOptions = []optionSpec{
+		{key: "min", kind: optionPositiveInteger},
+		{key: "distinct", kind: optionString},
+		{key: "sum", kind: optionString},
 	}
 	metricWindowOptions = []optionSpec{
 		enumOption("reduce", "total", "mean"),
@@ -548,6 +556,15 @@ func (m *metricNormalizer) copy(input *jsValue, specs []optionSpec) *jsValue {
 		}
 		var ok bool
 		switch spec.kind {
+		case optionMinCount:
+			if v.isRecord() {
+				v = m.copy(v, metricMinCountOptions)
+				distinct, sum := v.get("distinct"), v.get("sum")
+				named := func(x *jsValue) bool { return x == nil || (x.s != "" && jsLength(x.s) <= 256) }
+				ok = v.get("min") != nil && (distinct == nil) != (sum == nil) && named(distinct) && named(sum)
+			} else {
+				ok = jsIsSafeInteger(v) && v.n >= 1 && v.n <= 1000000
+			}
 		case optionString:
 			ok = v.isString() && jsLength(v.s) <= 10000
 		case optionNumber:

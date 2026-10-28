@@ -1112,7 +1112,7 @@ export function useQueryTable<Row>(
     // Unsupported population controls fail their own cards, never the batch.
     const refused = new Map<string, string>();
     for (const clause of metricQuery.aggregations ?? []) {
-      const issue = metricPopulationError(clause, { filters: capabilities.metricFilters, minCount: capabilities.metricMinCount });
+      const issue = metricPopulationError(clause, { filters: capabilities.metricFilters, minCount: capabilities.metricMinCount, minCountMeasures: capabilities.metricMinCountMeasures });
       if (issue) refused.set(clause.id, issue);
     }
     const runnable = (metricQuery.aggregations ?? []).filter(clause => !refused.has(clause.id));

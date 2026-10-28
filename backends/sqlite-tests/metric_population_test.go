@@ -113,22 +113,24 @@ func populationSchema(sqlite bool) qt.Schema {
 		at.SQLiteDatetimeFormat = "utc-millis"
 	}
 	return qt.Schema{Name: "calls", IDField: "id", Fields: map[string]qt.FieldSpec{
-		"id":     {Name: "id", Kind: qt.FieldText, Expr: "r.id", Sortable: true, ServerFilter: true, Groupable: &no},
-		"kind":   {Name: "kind", Kind: qt.FieldText, Expr: "r.kind", Sortable: true, ServerFilter: true},
-		"status": {Name: "status", Kind: qt.FieldText, Expr: "r.status", Sortable: true, ServerFilter: true},
-		"ms":     {Name: "ms", Kind: qt.FieldNumber, Expr: "r.ms", ExpressionNumeric: true, Sortable: true, ServerFilter: true},
-		"at":     at,
+		"id":      {Name: "id", Kind: qt.FieldText, Expr: "r.id", Sortable: true, ServerFilter: true, Groupable: &no},
+		"kind":    {Name: "kind", Kind: qt.FieldText, Expr: "r.kind", Sortable: true, ServerFilter: true},
+		"status":  {Name: "status", Kind: qt.FieldText, Expr: "r.status", Sortable: true, ServerFilter: true},
+		"ms":      {Name: "ms", Kind: qt.FieldNumber, Expr: "r.ms", ExpressionNumeric: true, Sortable: true, ServerFilter: true},
+		"at":      at,
+		"session": {Name: "session", Kind: qt.FieldText, Expr: "r.session", Sortable: true, ServerFilter: true},
+		"calls":   {Name: "calls", Kind: qt.FieldNumber, Expr: "r.calls", ExpressionNumeric: true, Sortable: true, ServerFilter: true},
 	}}
 }
 
 func setupPopulation(t *testing.T) (*sql.DB, populationFixture, time.Time) {
 	db, _ := setup(t)
 	f, now := loadPopulationFixture(t)
-	if _, err := db.Exec(`CREATE TABLE calls(id TEXT,kind TEXT,status TEXT,ms REAL,at TEXT)`); err != nil {
+	if _, err := db.Exec(`CREATE TABLE calls(id TEXT,kind TEXT,status TEXT,ms REAL,at TEXT,session TEXT,calls INTEGER)`); err != nil {
 		t.Fatal(err)
 	}
 	for _, r := range f.Rows {
-		if _, err := db.Exec("INSERT INTO calls VALUES(?,?,?,?,?)", r["id"], r["kind"], r["status"], r["ms"], r["at"]); err != nil {
+		if _, err := db.Exec("INSERT INTO calls VALUES(?,?,?,?,?,?,?)", r["id"], r["kind"], r["status"], r["ms"], r["at"], r["session"], r["calls"]); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -207,7 +209,7 @@ func TestMetricPopulationReductionReuseKeys(t *testing.T) {
 		{ID: "ok", Op: "count", GroupBy: []string{"kind"}, Where: ok},
 		{ID: "error_ms", Op: "sum", Field: "ms", GroupBy: []string{"kind"}, Where: errors},
 		{ID: "errors_again", Op: "count", GroupBy: []string{"kind"}, Where: errors},
-		{ID: "errors_min", Op: "count", GroupBy: []string{"kind"}, Where: errors, MinCount: 2},
+		{ID: "errors_min", Op: "count", GroupBy: []string{"kind"}, Where: errors, MinCount: qt.MetricMinCount{Min: 2}},
 	}}
 	out, err := d.ExecuteV2(context.Background(), db, nil, &q, qt.PlanOptions{Now: now})
 	if err != nil {

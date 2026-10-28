@@ -331,11 +331,11 @@ func TestMetricOptionTablesMatchTypeScript(t *testing.T) {
 		"top": metricTopOptions, "window": metricWindowOptions, "dateGrouping": metricDateOptions, "occurrence": metricOccurrenceOptions,
 		"display": metricDisplayOptions, "scale": metricScaleOptions, "format": metricFormatOptions,
 		"list": metricListOptions, "pivot": metricPivotOptions, "distribution": metricDistributionOptions,
-		"layout": metricLayoutOptions,
+		"layout": metricLayoutOptions, "minCount": metricMinCountOptions,
 	}
 	kinds := map[string]optionKind{
 		"string": optionString, "boolean": optionBoolean, "integer": optionInteger,
-		"positiveInteger": optionPositiveInteger, "number": optionNumber,
+		"positiveInteger": optionPositiveInteger, "number": optionNumber, "minCount": optionMinCount,
 	}
 	names := specs.o.keys()
 	if len(names) != len(tables) {

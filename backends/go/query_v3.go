@@ -87,9 +87,11 @@ type QueryCapabilitiesV3 struct {
 	RegexAggregateExpressions bool `json:"regexAggregateExpressions"`
 	MetricFilters             bool `json:"metricFilters"`
 	MetricMinCount            bool `json:"metricMinCount"`
-	Version                   int  `json:"version"`
-	GroupedRows               bool `json:"groupedRows"`
-	CalendarGrouping          bool `json:"calendarGrouping"`
+	// MetricMinCountMeasures: a minCount of distinct values or of a summed field.
+	MetricMinCountMeasures bool `json:"metricMinCountMeasures"`
+	Version                int  `json:"version"`
+	GroupedRows            bool `json:"groupedRows"`
+	CalendarGrouping       bool `json:"calendarGrouping"`
 	// CalendarCycles executes the hourOfDay and dayOfWeek date intervals.
 	CalendarCycles        bool   `json:"calendarCycles"`
 	ComputedSourceFilters bool   `json:"computedSourceFilters"`
@@ -156,7 +158,7 @@ func (d QueryDatasetV3) Capabilities() QueryCapabilitiesV3 {
 	if d.Dialect == "sqlite" {
 		profile = SQLiteExpressionProfile
 	}
-	return QueryCapabilitiesV3{Version: 3, GroupedRows: true, CalendarGrouping: true, CalendarCycles: true, ComputedSourceFilters: len(d.ComputedFilterable) > 0, Regex: false, RegexSourceFilters: d.Dialect == "sqlite", MetricFilters: true, MetricMinCount: true, MaxRows: rows, MaxGroups: groups, MaxPopulation: pop, Profile: profile}
+	return QueryCapabilitiesV3{Version: 3, GroupedRows: true, CalendarGrouping: true, CalendarCycles: true, ComputedSourceFilters: len(d.ComputedFilterable) > 0, Regex: false, RegexSourceFilters: d.Dialect == "sqlite", MetricFilters: true, MetricMinCount: true, MetricMinCountMeasures: true, MaxRows: rows, MaxGroups: groups, MaxPopulation: pop, Profile: profile}
 }
 func (d QueryDatasetV3) options(ctx context.Context, tx *sql.Tx, q QueryRequestV3, o PlanOptions) (PlanOptions, error) {
 	if err := ctx.Err(); err != nil {
@@ -413,6 +415,9 @@ func (d QueryDatasetV3) SourcePlan(ctx context.Context, q QueryRequestV3, o Plan
 			}
 			for _, n := range append(names, spec.GroupBy...) {
 				fields[n] = true
+			}
+			if name := spec.MinCount.field(); name != "" {
+				fields[name] = true
 			}
 			for _, term := range spec.Where {
 				for _, predicate := range term.Predicates() {

@@ -27,15 +27,17 @@ type SQLiteV2Dataset struct {
 	MaxRows, MaxGroups, MaxPopulation int
 }
 type SQLiteMetricCapabilities struct {
-	Version        int    `json:"version"`
-	Expressions    bool   `json:"expressions"`
-	ShownRows      bool   `json:"shownRows"`
-	Distributions  bool   `json:"distributions"`
-	ComputedFields bool   `json:"computedFields"`
-	Filters        bool   `json:"filters"`
-	MinCount       bool   `json:"minCount"`
-	MaxGroups      int    `json:"maxGroups"`
-	Profile        string `json:"profile"`
+	Version        int  `json:"version"`
+	Expressions    bool `json:"expressions"`
+	ShownRows      bool `json:"shownRows"`
+	Distributions  bool `json:"distributions"`
+	ComputedFields bool `json:"computedFields"`
+	Filters        bool `json:"filters"`
+	MinCount       bool `json:"minCount"`
+	// MinCountMeasures: a minCount of distinct values or of a summed field.
+	MinCountMeasures bool   `json:"minCountMeasures"`
+	MaxGroups        int    `json:"maxGroups"`
+	Profile          string `json:"profile"`
 }
 
 func (d SQLiteV2Dataset) Capabilities() SQLiteMetricCapabilities {
@@ -43,7 +45,7 @@ func (d SQLiteV2Dataset) Capabilities() SQLiteMetricCapabilities {
 	if groups == 0 {
 		groups = 2000
 	}
-	return SQLiteMetricCapabilities{Version: 2, Expressions: true, ShownRows: true, Distributions: true, ComputedFields: true, Filters: true, MinCount: true, MaxGroups: groups, Profile: SQLiteExpressionProfile}
+	return SQLiteMetricCapabilities{Version: 2, Expressions: true, ShownRows: true, Distributions: true, ComputedFields: true, Filters: true, MinCount: true, MinCountMeasures: true, MaxGroups: groups, Profile: SQLiteExpressionProfile}
 }
 
 type SQLiteValueError struct {
@@ -93,6 +95,9 @@ type SQLiteMetricV2Bucket struct {
 	Error           string                   `json:"error,omitempty"`
 	Y               *any                     `json:"y,omitempty"`
 	YError          string                   `json:"yError,omitempty"`
+	// A measured minCount's value for calendar filtering; never serialized.
+	minMeasure      any
+	minMeasureError bool
 }
 type SQLiteMetricV2 struct {
 	ID            string                 `json:"id"`
@@ -464,7 +469,7 @@ func (d SQLiteV2Dataset) readV2Metric(ctx context.Context, tx *sql.Tx, p MetricS
 			v[k] = values[i]
 		}
 		hidden := int64(0)
-		if spec.MinCount > 0 {
+		if spec.MinCount.Active() {
 			var ok bool
 			if hidden, ok = v["hidden_groups"].(int64); !ok {
 				return out, fmt.Errorf("missing hidden group count")
@@ -491,6 +496,11 @@ func (d SQLiteV2Dataset) readV2Metric(ctx context.Context, tx *sql.Tx, p MetricS
 			v[c.ValueAlias] = typedQueryValue(v[c.ValueAlias], c.Type)
 		}
 		b := SQLiteMetricV2Bucket{Keys: []any{}, Value: v["value"], Count: v["count"].(int64), Error: sqliteErrorCode(v["error"])}
+		// Calendar metrics compile a measured minimum without Min and hide
+		// groups themselves, after filling empty intervals.
+		if measure, ok := v["min_measure"]; ok && !spec.MinCount.Active() {
+			b.minMeasure, b.minMeasureError = measure, v["min_measure_error"] != nil
+		}
 		for i := range spec.GroupBy {
 			key := v[fmt.Sprintf("group%d", i)]
 			b.Keys = append(b.Keys, key)

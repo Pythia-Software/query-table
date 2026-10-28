@@ -45,21 +45,23 @@ func setupPopulation(t *testing.T) (*sql.DB, qt.QueryDatasetV3, populationFixtur
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = db.Exec(`CREATE TABLE calls(id text,kind text,status text,ms double precision,at timestamptz)`); err != nil {
+	if _, err = db.Exec(`CREATE TABLE calls(id text,kind text,status text,ms double precision,at timestamptz,session text,calls bigint)`); err != nil {
 		t.Fatal(err)
 	}
 	for _, r := range f.Rows {
-		if _, err = db.Exec("INSERT INTO calls VALUES($1,$2,$3,$4,$5)", r["id"], r["kind"], r["status"], r["ms"], r["at"]); err != nil {
+		if _, err = db.Exec("INSERT INTO calls VALUES($1,$2,$3,$4,$5,$6,$7)", r["id"], r["kind"], r["status"], r["ms"], r["at"], r["session"], r["calls"]); err != nil {
 			t.Fatal(err)
 		}
 	}
 	yes, no := true, false
 	d.Schema = qt.Schema{Name: "calls", IDField: "id", Fields: map[string]qt.FieldSpec{
-		"id":     {Name: "id", Kind: qt.FieldText, Expr: "r.id", Sortable: true, ServerFilter: true, Groupable: &no},
-		"kind":   {Name: "kind", Kind: qt.FieldText, Expr: "r.kind", Sortable: true, ServerFilter: true},
-		"status": {Name: "status", Kind: qt.FieldText, Expr: "r.status", Sortable: true, ServerFilter: true},
-		"ms":     {Name: "ms", Kind: qt.FieldNumber, Expr: "r.ms", ExpressionNumeric: true, Sortable: true, ServerFilter: true},
-		"at":     {Name: "at", Kind: qt.FieldDatetime, Expr: "r.at", Sortable: true, ServerFilter: true, Groupable: &yes},
+		"id":      {Name: "id", Kind: qt.FieldText, Expr: "r.id", Sortable: true, ServerFilter: true, Groupable: &no},
+		"kind":    {Name: "kind", Kind: qt.FieldText, Expr: "r.kind", Sortable: true, ServerFilter: true},
+		"status":  {Name: "status", Kind: qt.FieldText, Expr: "r.status", Sortable: true, ServerFilter: true},
+		"ms":      {Name: "ms", Kind: qt.FieldNumber, Expr: "r.ms", ExpressionNumeric: true, Sortable: true, ServerFilter: true},
+		"at":      {Name: "at", Kind: qt.FieldDatetime, Expr: "r.at", Sortable: true, ServerFilter: true, Groupable: &yes},
+		"session": {Name: "session", Kind: qt.FieldText, Expr: "r.session", Sortable: true, ServerFilter: true},
+		"calls":   {Name: "calls", Kind: qt.FieldNumber, Expr: "r.calls", ExpressionNumeric: true, Sortable: true, ServerFilter: true},
 	}}
 	d.SourceSQL = "SELECT * FROM calls"
 	return db, d, f, now
@@ -183,7 +185,7 @@ func TestPostgresCombinedMetricPopulation(t *testing.T) {
 			t.Fatal(err)
 		}
 		metric := map[string]any{"groupCount": groups, "buckets": []any{}}
-		if c.Metric.MinCount > 0 {
+		if c.Metric.MinCount.Active() {
 			metric["hiddenGroups"] = hidden
 		} else if hidden != 0 {
 			t.Fatalf("%s: hidden_groups without minCount", c.Name)

@@ -135,7 +135,7 @@ func TestV2CrossFieldSemantics(t *testing.T) {
 		q.Metrics[1].Sort = []qt.MetricSort{{Key: "value", Dir: "desc"}}
 		q.Metrics[1].GroupLimit = 1
 		if grouped {
-			q.Metrics[2].MinCount = 9
+			q.Metrics[2].MinCount = qt.MetricMinCount{Min: 9}
 		}
 		crossFieldParity(t, db, d, q, qt.PlanOptions{})
 	}

@@ -872,7 +872,7 @@ it("edits a metric's own filter and minimum rows per group without touching the 
     expect(scoped.querySelectorAll(".qt-chip--where")).toHaveLength(2);
     act(() => scoped.querySelector<HTMLButtonElement>('[aria-label="Remove Kind filter"]')!.click());
     expect(scoped.querySelectorAll(".qt-chip--where")).toHaveLength(1);
-    editInput(host.querySelector('[aria-label="Minimum rows per group"]')!, "3");
+    editInput(host.querySelector('[aria-label="Minimum per group"]')!, "3");
     expect(host.textContent).toContain("at least 3 rows");
     expect(host.textContent).toContain("only rows where 1 filter matches");
     act(() => [...host.querySelectorAll("button")].find((b) => b.textContent === "Apply metrics")!.click());
@@ -881,6 +881,55 @@ it("edits a metric's own filter and minimum rows per group without touching the 
     expect(next.aggregations).toEqual([
       { id: "m", op: "count", groupBy: ["kind"], minCount: 3, where: [{ field: "status", op: "=", value: "error" }] },
     ]);
+  } finally {
+    act(() => root.unmount());
+    host.remove();
+  }
+});
+
+it("counts a minimum over rows, distinct values or a sum, and keeps an unlisted field", async () => {
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const setQuery = vi.fn();
+  const fields: FieldDef<unknown>[] = [
+    { name: "tool", label: "Tool", type: "text", source: { kind: "backend" } },
+    { name: "conversation", label: "Conversation", type: "text", source: { kind: "backend" } },
+    { name: "calls", label: "Calls", type: "number", source: { kind: "backend" } },
+  ];
+  const api = {
+    aggregations: { clauses: [
+      { id: "m", op: "count", groupBy: ["tool"], minCount: { min: 4, distinct: "conversation" } },
+      { id: "n", op: "count", groupBy: ["tool"], minCount: { min: 2, sum: "gone" } },
+    ] satisfies AggregationClause[] },
+    setQuery,
+    rows: [],
+    total: 0,
+    query: { where: [], select: [], orderBy: [], limit: 100, offset: 0 },
+    filterValues: vi.fn(async () => ({ values: [], hasMore: false })),
+  } as unknown as QueryTableApi<unknown>;
+  const choose = (value: string) => {
+    const select = host.querySelector<HTMLSelectElement>('[aria-label="Minimum counts"]')!;
+    act(() => { select.value = value; select.dispatchEvent(new Event("change", { bubbles: true })); });
+  };
+  try {
+    await act(async () => root.render(createElement(MetricsEditor, { api, fields, onClose: vi.fn() })));
+    expect(host.textContent).toContain("at least 4 distinct Conversation values");
+    const select = host.querySelector<HTMLSelectElement>('[aria-label="Minimum counts"]')!;
+    expect([...select.options].map((o) => o.textContent)).toEqual(["Rows", "Distinct Tool", "Distinct Conversation", "Distinct Calls", "Sum of Calls"]);
+    expect(select.value).toBe("distinct:conversation");
+    choose("sum:calls");
+    editInput(host.querySelector('[aria-label="Minimum per group"]')!, "10");
+    expect(host.textContent).toContain("at least 10 total Calls");
+    act(() => [...host.querySelectorAll("button")].find((b) => b.textContent === "Apply metrics")!.click());
+    let saved = setQuery.mock.calls.at(-1)![0]({ where: [] }).aggregations;
+    expect(saved[0].minCount).toEqual({ min: 10, sum: "calls" });
+    // A field the editor does not list stays selected rather than being dropped.
+    expect(saved[1].minCount).toEqual({ min: 2, sum: "gone" });
+    choose("rows");
+    act(() => [...host.querySelectorAll("button")].find((b) => b.textContent === "Apply metrics")!.click());
+    saved = setQuery.mock.calls.at(-1)![0]({ where: [] }).aggregations;
+    expect(saved[0].minCount).toBe(10);
   } finally {
     act(() => root.unmount());
     host.remove();

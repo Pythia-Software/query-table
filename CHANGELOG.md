@@ -77,9 +77,36 @@
   Day of week, and a per-day or per-hour summary for each slot. Link
   normalization in TypeScript and Go accepts the new interval values and
   `occurrence`.
+- Minimums over distinct values and sums. `AggregationClause.minCount` also
+  takes `{ min, distinct: field }`, which keeps groups with at least `min`
+  distinct non-null values of a field, and `{ min, sum: field }`, which keeps
+  groups whose numeric field sums to at least `min`. "Cost by model, hiding
+  models used in fewer than five conversations" and "failure rate by tool,
+  hiding tools with fewer than ten calls" over rollup rows no longer need a
+  grouping stage. The measure follows `COUNT_DISTINCT` and `SUM`: nulls are
+  ignored, a summed text field is a clause diagnostic, and a group whose
+  measure is an error is kept. As with a row minimum, hidden groups leave
+  before sorting, `groupLimit` and Other and are reported in `hiddenGroups`,
+  and kept values are unchanged. The local engine, DuckDB, `/metrics` on Go
+  SQLite and PostgreSQL (including fused and cross-field reductions, which
+  share the measure with an identical aggregate), `/query-v3` and
+  `ExecuteV2Rows` run it natively; windows sum a summed minimum over the window
+  and refuse a distinct one, and distributions accept row minimums only.
+  Servers advertise `minCountMeasures` (v2) or `metricMinCountMeasures` (v3),
+  and `metricPopulationError` refuses the clause on servers that do not. Query
+  links, `normalizeMetricOptions` and the Go link codec carry the object form
+  (a new `minCount` table in `METRIC_OPTION_SPECS`). The metric editor's
+  **Minimum per group** gains a **Counting** choice, and cards name what the
+  minimum counted.
 
 ### Changed
 
+- Go: `AggSpec.MinCount` is now a `MetricMinCount` struct (`Min`, `Distinct`,
+  `Sum`) that reads and writes both JSON forms. Replace `MinCount: 5` with
+  `MinCount: qt.MetricMinCount{Min: 5}` and `spec.MinCount > 0` or
+  `spec.MinCount != 0` with `spec.MinCount.Active()`.
+- The metric editor's minimum input is now labelled "Minimum per group"
+  (formerly "Minimum rows per group").
 - `MetricChart` colours pie, donut, bar, box, histogram and list marks
   grouped by several keys by their whole key, so `claude / opus` and
   `claude / sonnet` no longer share a colour, and the legend lists each key

@@ -66,10 +66,11 @@ beforeAll(async () => {
   const instance = await DuckDBInstance.create(":memory:");
   native = await instance.connect();
   await native.run("SET TimeZone='UTC'");
-  await native.run('CREATE TABLE calls (id VARCHAR, kind VARCHAR, status VARCHAR, ms DOUBLE, "at" TIMESTAMPTZ)');
+  await native.run('CREATE TABLE calls (id VARCHAR, kind VARCHAR, status VARCHAR, ms DOUBLE, "at" TIMESTAMPTZ, session VARCHAR, calls BIGINT)');
   for (const row of fixture.rows)
-    await native.run("INSERT INTO calls VALUES ($1,$2,$3,$4,CAST($5 AS TIMESTAMPTZ))", [
+    await native.run("INSERT INTO calls VALUES ($1,$2,$3,$4,CAST($5 AS TIMESTAMPTZ),$6,$7)", [
       row.id as string, row.kind as string, row.status as string, row.ms as number, row.at as string,
+      row.session as string, row.calls as number,
     ] as any[]);
   backend = new DuckDBBackend({
     relation: "calls",

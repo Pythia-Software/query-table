@@ -3,6 +3,9 @@ import {
   createGroupingModel,
   GROUP_ID_FIELD,
   metricExpression,
+  metricMinCount,
+  metricMinCountKeeps,
+  metricMinCountMeasure,
   validateMetric,
   isSelectable,
   isFilterable,
@@ -203,6 +206,7 @@ export class DuckDBBackend {
       regexAggregateExpressions: false,
       metricFilters: true,
       metricMinCount: true,
+      metricMinCountMeasures: true,
       maxRows: positive(options.maxRows, 10000, 10000),
       maxGroups: positive(options.maxGroups, 10000, 10000),
       maxPopulation: positive(options.maxPopulation, 250000, 10000000),
@@ -687,6 +691,12 @@ export class DuckDBBackend {
       projections.push(
         `${builder.expression(clause.expressionY ?? "COUNT()", true).sql} AS y`,
       );
+    // An object minCount measures each group with its own aggregate.
+    const minMeasure = metricMinCountMeasure(clause);
+    if (minMeasure)
+      projections.push(
+        `${builder.expression(metricExpression({ id: "", groupBy: [], ...minMeasure }), true).sql} AS min_measure`,
+      );
     const rows = await this.run(
       builder.statement(
         `SELECT ${projections.join(", ")} FROM ${population} r ${groups} LIMIT ${this.capabilities.maxGroups + 1}`,
@@ -713,9 +723,10 @@ export class DuckDBBackend {
             distribution.bins ?? 10,
           )
         : [];
+    const measures = new Map<object, { value: unknown }>();
     const buckets: AggregationResultEntry["buckets"] = rows.map((row) => {
       const samples = (row.samples as number[]) ?? [];
-      return {
+      const bucket: AggregationResultEntry["buckets"][number] = {
         keys: clause.groupBy.map((name, index) => {
           const value = row[`g${index}`] ?? null;
           if (index === 0 && isMetricCycle(clause.dateGrouping?.interval))
@@ -746,6 +757,8 @@ export class DuckDBBackend {
             }
           : {}),
       };
+      if (minMeasure) measures.set(bucket, { value: row.min_measure });
+      return bucket;
     });
     if (clause.dateGrouping?.includeEmpty) {
       const config = clause.dateGrouping,
@@ -810,9 +823,10 @@ export class DuckDBBackend {
     // Calendar fill-ins (count 0) are never hidden; hidden groups leave the
     // ranking, the group limit and Other.
     let hiddenGroups: number | undefined;
-    if (clause.minCount !== undefined) {
-      const kept = buckets.filter(
-        (bucket) => bucket.count === 0 || bucket.count >= clause.minCount!,
+    const min = metricMinCount(clause);
+    if (min !== undefined) {
+      const kept = buckets.filter((bucket) =>
+        metricMinCountKeeps(min, bucket.count, measures.get(bucket)),
       );
       hiddenGroups = buckets.length - kept.length;
       buckets.splice(0, buckets.length, ...kept);
@@ -867,6 +881,7 @@ export class DuckDBBackend {
         computedFields: this.computed.size > 0,
         filters: true,
         minCount: true,
+        minCountMeasures: true,
         profile: DUCKDB_PROFILE,
         maxGroups: this.capabilities.maxGroups,
       },

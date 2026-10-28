@@ -431,8 +431,9 @@ func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggS
 	modified.Sort = nil
 	modified.GroupLimit = 0
 	// MinCount is applied below, after empty buckets are filled; the metric
-	// filter runs over the staged rows (the page for shown-row scope).
-	modified.MinCount = 0
+	// filter runs over the staged rows (the page for shown-row scope). Without
+	// Min, a measured minimum only reports each group's measure.
+	modified.MinCount = MetricMinCount{Distinct: spec.MinCount.Distinct, Sum: spec.MinCount.Sum}
 	modified.GroupBy = append([]string{}, spec.GroupBy...)
 	modified.GroupBy[0] = bucketName
 	options := o
@@ -479,13 +480,13 @@ func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggS
 			return result, err
 		}
 	}
-	if spec.MinCount > 0 {
+	if spec.MinCount.Active() {
 		// Filled buckets (count 0) are never hidden. A hidden observed bucket
 		// leaves a gap: it is not replaced by an empty bucket.
 		kept := result.Buckets[:0]
 		hidden := int64(0)
 		for _, bucket := range result.Buckets {
-			if bucket.Count > 0 && bucket.Count < int64(spec.MinCount) {
+			if !spec.MinCount.keeps(bucket.Count, bucket.minMeasure, bucket.minMeasureError) {
 				hidden++
 			} else {
 				kept = append(kept, bucket)

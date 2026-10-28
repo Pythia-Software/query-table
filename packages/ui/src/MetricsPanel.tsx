@@ -16,7 +16,7 @@ import {
 // number. Counts are always plain integers.
 
 import { useState, useMemo, type HTMLAttributes, type ReactNode } from "react";
-import { EMPTY_QUERY } from "@pythia-software/query-table-core";
+import { EMPTY_QUERY, metricMinCountText } from "@pythia-software/query-table-core";
 import type { AggOp, FieldDef } from "@pythia-software/query-table-core";
 import type { AggregationsApi } from "@pythia-software/query-table-react";
 import { MetricsEditor } from "./MetricsEditor";
@@ -400,8 +400,7 @@ export function MetricCard<Row>({
         <p className="qt-metric-note">
           {result.hiddenGroups.toLocaleString()}{" "}
           {result.hiddenGroups === 1 ? "group" : "groups"} hidden (fewer than{" "}
-          {clause.minCount.toLocaleString()}{" "}
-          {clause.minCount === 1 ? "row" : "rows"})
+          {metricMinCountText(clause, (name) => byName.get(name)?.label ?? name)})
         </p>
       )}
       {result?.groupCount !== undefined &&

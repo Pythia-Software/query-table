@@ -164,6 +164,118 @@ describe("metric population semantics", () => {
   });
 });
 
+// Requests 10 and 11 from Pharos: minimums over distinct values and summed fields.
+describe("measured minimums", () => {
+  const usage: FieldSchema<Row> = {
+    name: "usage",
+    idField: "id",
+    fields: [
+      { name: "id", label: "ID", type: "text", source: { kind: "backend" }, aggregate: { groupable: false } },
+      { name: "model_family", label: "Model", type: "text", source: { kind: "backend" } },
+      { name: "conversation_id", label: "Conversation", type: "text", source: { kind: "backend" } },
+      { name: "tool_name", label: "Tool", type: "text", source: { kind: "backend" } },
+      { name: "call_count", label: "Calls", type: "number", source: { kind: "backend" } },
+      { name: "failures", label: "Failures", type: "number", source: { kind: "backend" } },
+      { name: "cost", label: "Cost", type: "number", source: { kind: "backend" } },
+    ],
+  };
+  // 40 records in 3 conversations, and 6 records in 6 conversations.
+  const records: Row[] = [
+    ...Array.from({ length: 40 }, (_, i) => ({ id: `o${i}`, model_family: "opus", conversation_id: `c${i % 3}`, cost: 1 })),
+    ...Array.from({ length: 6 }, (_, i) => ({ id: `h${i}`, model_family: "haiku", conversation_id: `h${i}`, cost: 2 })),
+    { id: "x", model_family: "haiku", conversation_id: null, cost: 1 },
+  ];
+  // One row per tool per day: grep holds 9 calls in 4 rows, read 12 in 3.
+  const tools: Row[] = [
+    { id: "g1", tool_name: "grep", call_count: 3, failures: 1 },
+    { id: "g2", tool_name: "grep", call_count: 3, failures: 0 },
+    { id: "g3", tool_name: "grep", call_count: 3, failures: 1 },
+    { id: "g4", tool_name: "grep", call_count: null, failures: 0 },
+    { id: "r1", tool_name: "read", call_count: 4, failures: 1 },
+    { id: "r2", tool_name: "read", call_count: 4, failures: 0 },
+    { id: "r3", tool_name: "read", call_count: 4, failures: 2 },
+  ];
+  const evaluate = (data: Row[], clause: AggregationClause, s = usage) =>
+    evaluateMetrics(data, { ...EMPTY_QUERY, aggregations: [clause] }, s, { now }).metrics[0]!;
+
+  it("hides a model used in fewer distinct conversations, however many records it has", () => {
+    const clause: AggregationClause = { id: "cost", op: "sum", field: "cost", groupBy: ["model_family"], minCount: { min: 5, distinct: "conversation_id" } };
+    const result = evaluate(records, clause);
+    expect(result).toMatchObject({ groupCount: 1, hiddenGroups: 1 });
+    // The null conversation is not counted, but its record still adds cost.
+    expect(result.buckets.map((b) => [b.keys[0], b.count, b.value])).toEqual([["haiku", 7, 13]]);
+    // A row minimum of 5 keeps both.
+    expect(evaluate(records, { ...clause, minCount: 5 })).toMatchObject({ groupCount: 2, hiddenGroups: 0 });
+    // Seven distinct values would hide haiku (6 conversations plus a null).
+    expect(evaluate(records, { ...clause, minCount: { min: 7, distinct: "conversation_id" } })).toMatchObject({ groupCount: 0, hiddenGroups: 2 });
+  });
+
+  it("hides a tool whose rows sum below the minimum and leaves kept values unchanged", () => {
+    const rate: AggregationClause = { id: "rate", op: "count", expression: "SUM([failures]) / SUM([call_count])", groupBy: ["tool_name"] };
+    const all = evaluate(tools, rate);
+    const result = evaluate(tools, { ...rate, minCount: { min: 10, sum: "call_count" } });
+    expect(result).toMatchObject({ groupCount: 1, hiddenGroups: 1 });
+    expect(result.buckets).toEqual(all.buckets.filter((b) => b.keys[0] === "read"));
+    expect(result.buckets[0]).toMatchObject({ keys: ["read"], count: 3, value: 0.25 });
+    // By rows, grep (4 rows) would be kept and read (3) hidden.
+    expect(evaluate(tools, { ...rate, minCount: 4 }).buckets.map((b) => b.keys[0])).toEqual(["grep"]);
+  });
+
+  it("applies before groupLimit and leaves hidden groups out of Other", () => {
+    const result = evaluate(records, { id: "n", op: "count", groupBy: ["conversation_id"], minCount: { min: 2, sum: "cost" }, groupLimit: 1 });
+    // c0..c2 hold 14, 13, 13; each haiku conversation holds 2 and the null 1.
+    expect(result).toMatchObject({ groupCount: 9, hiddenGroups: 1 });
+    expect(result.buckets.map((b) => b.keys[0])).toEqual(["c0"]);
+    // Other counts the 26 records of c1 and c2 and the six haiku conversations.
+    expect(result.other).toEqual({ keys: [], value: 32, count: 32 });
+  });
+
+  it("validates the shape, the field and the metric kind", () => {
+    const message = (minCount: unknown, clause: Partial<AggregationClause> = {}) =>
+      validateMetric({ id: "m", op: "count", groupBy: ["tool_name"], ...clause, minCount } as AggregationClause, usage)[0]?.message;
+    expect(message({ min: 10, sum: "call_count" })).toBeUndefined();
+    expect(message({ min: 5, distinct: "conversation_id" })).toBeUndefined();
+    expect(message({ min: 0, sum: "call_count" })).toMatch(/1–1,000,000/);
+    expect(message({ sum: "call_count" })).toMatch(/1–1,000,000/);
+    expect(message({ min: 2, sum: "call_count", distinct: "conversation_id" })).toMatch(/exactly one/);
+    expect(message({ min: 2 })).toMatch(/exactly one/);
+    expect(message({ min: 2, sum: "call_count", extra: 1 })).toMatch(/exactly one/);
+    expect(message({ min: 2, sum: "tool_name" })).toMatch(/numeric field/);
+    expect(message({ min: 2, sum: "missing" })).toMatch(/cannot be summed/);
+    expect(message({ min: 2, distinct: "missing" })).toMatch(/cannot count distinct/);
+    expect(message({ min: 2, distinct: "conversation_id" }, { groupBy: [] })).toMatch(/grouping field/);
+    expect(message({ min: 2, sum: "call_count" }, { distribution: { kind: "box", input: "[cost]" } })).toMatch(/distributions/);
+    const restricted: FieldSchema<Row> = {
+      ...usage,
+      fields: usage.fields.map((f) => (f.name === "call_count" ? { ...f, aggregate: { ops: ["count"] } } : f)),
+    };
+    expect(validateMetric({ id: "m", op: "count", groupBy: ["tool_name"], minCount: { min: 2, sum: "call_count" } }, restricted)[0]?.message).toMatch(/cannot be summed/);
+  });
+
+  it("reports hosts and transports without support", () => {
+    const measured = { minCount: { min: 5, distinct: "conversation_id" } };
+    expect(metricPopulationError(measured, { minCount: true })).toMatch(/distinct values or a sum/);
+    expect(metricPopulationError(measured, {})).toMatch(/minimum rows/);
+    expect(metricPopulationError(measured, { minCount: true, minCountMeasures: true })).toBeUndefined();
+    expect(metricPopulationError({ minCount: 5 }, { minCount: true })).toBeUndefined();
+  });
+
+  it("travels to v2 and v3 servers, links and the computation key", () => {
+    const clause: AggregationClause = { id: "rate", op: "count", groupBy: ["tool_name"], minCount: { min: 10, sum: "call_count" } };
+    const q: QueryState = { ...EMPTY_QUERY, aggregations: [clause] };
+    expect(toMetricQuery(q, usage).metrics[0]).toMatchObject({ minCount: { min: 10, sum: "call_count" } });
+    const capabilities: QueryCapabilitiesV3 = {
+      version: 3, groupedRows: true, calendarGrouping: true, computedSourceFilters: false, regex: false,
+      metricFilters: true, metricMinCount: true, metricMinCountMeasures: true, maxRows: 100, maxGroups: 100, maxPopulation: 1000, profile: "p",
+    };
+    const request = toQueryRequestV3(q, usage, capabilities, undefined, { now, rows: false });
+    expect(request.diagnostics).toEqual([]);
+    expect(request.metrics[0]).toMatchObject({ minCount: { min: 10, sum: "call_count" } });
+    expect(decodeQueryStrict(encodeQuery(q)).aggregations).toEqual([clause]);
+    expect(metricComputationKey([clause])).not.toBe(metricComputationKey([{ ...clause, minCount: 10 }]));
+  });
+});
+
 describe("metric population drilldown", () => {
   it("inspects exactly the records a filtered bucket counted", () => {
     const clause: AggregationClause = {

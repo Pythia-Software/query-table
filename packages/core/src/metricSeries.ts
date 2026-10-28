@@ -18,6 +18,9 @@ import {
   evaluateMetricReductions,
   metricExpression,
   occurrenceDistribution,
+  metricMinCount,
+  metricMinCountKeeps,
+  metricMinCountMeasure,
   sortMetricBuckets,
   validateMetric,
   type MetricPlan,
@@ -243,6 +246,8 @@ type Prepared =
       /** Window totals rebuild each aggregate from parts, by position. */
       reductions?: Reduction[];
       size: number;
+      /** The part measuring an object minCount: SUM or COUNT_DISTINCT per group. */
+      minPart?: number;
     };
 
 /** Expand clauses with a window, a share or whole intervals into plain
@@ -260,8 +265,9 @@ type Prepared =
  *   metric per whole occurrence (one calendar hour or day), then summarises
  *   each slot: the mean of its occurrence values, or a box over them.
  *
- * `sort`, `groupLimit` and `minCount` (counting a window's rows) apply to the
- * combined buckets. Windowed and share results have no Other remainder. */
+ * `sort`, `groupLimit` and `minCount` (counting a window's rows, or summing a
+ * field over the window) apply to the combined buckets. Windowed and share
+ * results have no Other remainder. */
 export function planMetricSeries(
   query: QueryState,
   schema: FieldSchema,
@@ -449,20 +455,38 @@ export function planMetricSeries(
           ...scoped(groupBy),
         }),
       );
+    const all = [
+      ...parts(c.groupBy),
+      ...(c.share === "group0"
+        ? parts(c.groupBy.slice(0, 1))
+        : c.share === "total"
+          ? parts([])
+          : []),
+    ];
+    // An object minCount is one more grouped part; a window sums it.
+    const measure = metricMinCountMeasure(c);
+    const minPart = measure ? all.length : undefined;
+    if (measure)
+      all.push({
+        id: id(),
+        op: "count",
+        expression: metricExpression({
+          id: "",
+          groupBy: [],
+          op: measure.op,
+          field: resolveFieldName(schema, measure.field) ?? measure.field,
+        }),
+        groupBy: c.groupBy,
+        ...scoped(c.groupBy),
+      });
     return {
       kind: "series",
       clause: c,
       plan,
-      parts: [
-        ...parts(c.groupBy),
-        ...(c.share === "group0"
-          ? parts(c.groupBy.slice(0, 1))
-          : c.share === "total"
-            ? parts([])
-            : []),
-      ],
+      parts: all,
       ...(reductions ? { reductions } : {}),
       size: texts.length,
+      ...(minPart !== undefined ? { minPart } : {}),
     };
   }
   const queries: QueryState[] = [];
@@ -574,7 +598,9 @@ function combineSeries(
       );
   }
   const numerator = entries.slice(0, item.size),
-    denominator = c.share ? entries.slice(item.size) : [];
+    denominator = c.share ? entries.slice(item.size, item.minPart) : [],
+    threshold =
+      item.minPart !== undefined ? entries[item.minPart] : undefined;
   // Calendar positions: includeEmpty supplies every interval of the range.
   // Rows without a date have a null first key and no calendar position.
   const dateOf = (keys: MetricValue[]) =>
@@ -730,10 +756,36 @@ function combineSeries(
       ...(own.intervals !== undefined ? { intervals: own.intervals } : {}),
     };
   });
+  // A minimum's measure over the same rows as the point: its bucket, or the
+  // sum over the window (distinct minimums are refused with windows).
+  const thresholdTracks = threshold ? tracks(threshold) : undefined,
+    thresholdBuckets = threshold ? exact(threshold) : undefined;
+  const measureOf = (keys: MetricValue[]): FormulaResult => {
+    const at = positionOf(keys);
+    let members: (AggregationBucket | undefined)[];
+    if (!window || at === undefined)
+      members = [thresholdBuckets!.get(JSON.stringify(keys))];
+    else {
+      const from = Math.max(0, at - periods + 1),
+        track = thresholdTracks!.get(JSON.stringify(keys.slice(1)));
+      members = Array.from(
+        { length: at - from + 1 },
+        (_, i) => track?.[from + i],
+      );
+    }
+    const sum = new Accumulator("SUM");
+    for (const bucket of members) sum.add(bucket);
+    return sum.result();
+  };
   let hiddenGroups: number | undefined;
-  if (c.minCount !== undefined) {
-    const kept = buckets.filter(
-      (b) => b.count === 0 || b.count >= c.minCount!,
+  const min = metricMinCount(c);
+  if (min !== undefined) {
+    const kept = buckets.filter((b) =>
+      metricMinCountKeeps(
+        min,
+        b.count,
+        threshold ? measureOf(b.keys) : undefined,
+      ),
     );
     hiddenGroups = buckets.length - kept.length;
     buckets = kept;

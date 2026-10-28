@@ -202,9 +202,10 @@ type AggSpec struct {
 	// Where is this metric's own predicate, ANDed with the table WHERE before
 	// grouping (inside the page for shownRows). It never changes table rows.
 	Where []WhereTerm `json:"where,omitempty"`
-	// MinCount drops groups with fewer rows (after Where) before ordering,
-	// GroupLimit and Other; removed groups are reported as hidden_groups.
-	MinCount int `json:"minCount,omitempty"`
+	// MinCount drops groups with fewer rows (after Where), or fewer distinct
+	// values or a smaller sum of a field, before ordering, GroupLimit and Other;
+	// removed groups are reported as hidden_groups.
+	MinCount MetricMinCount `json:"minCount,omitzero"`
 }
 
 // WireQuery is the server-bound subset of QueryState (the TS ServerQuery / the
@@ -337,8 +338,8 @@ func (q WireQuery) Validate() error {
 		if len(aggregation.GroupBy) > MaxGroupByFields {
 			return fmt.Errorf("aggregation %q has %d group fields; maximum is %d", aggregation.ID, len(aggregation.GroupBy), MaxGroupByFields)
 		}
-		if aggregation.MinCount < 0 || aggregation.MinCount > MaxMetricMinCount {
-			return fmt.Errorf("aggregation %q minCount must be between 1 and %d", aggregation.ID, MaxMetricMinCount)
+		if err := aggregation.MinCount.validate(aggregation.ID); err != nil {
+			return err
 		}
 		metricLiterals := 0
 		for _, term := range aggregation.Where {

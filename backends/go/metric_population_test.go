@@ -13,8 +13,8 @@ func TestMetricPopulationValidation(t *testing.T) {
 		where = append(where, WhereTerm{Field: "g", Op: "=", Value: "a"})
 	}
 	for name, spec := range map[string]AggSpec{
-		"negative minCount": {ID: "m", Op: "count", GroupBy: []string{"g"}, MinCount: -1},
-		"huge minCount":     {ID: "m", Op: "count", GroupBy: []string{"g"}, MinCount: MaxMetricMinCount + 1},
+		"negative minCount": {ID: "m", Op: "count", GroupBy: []string{"g"}, MinCount: MetricMinCount{Min: -1}},
+		"huge minCount":     {ID: "m", Op: "count", GroupBy: []string{"g"}, MinCount: MetricMinCount{Min: MaxMetricMinCount + 1}},
 		"filter budget":     {ID: "m", Op: "count", GroupBy: []string{"g"}, Where: where},
 		"empty OR group":    {ID: "m", Op: "count", GroupBy: []string{"g"}, Where: []WhereTerm{{Any: []WhereClause{}}}},
 		"long field":        {ID: "m", Op: "count", Where: []WhereTerm{{Field: strings.Repeat("f", 257), Op: "=", Value: "a"}}},
@@ -24,7 +24,7 @@ func TestMetricPopulationValidation(t *testing.T) {
 			t.Errorf("%s: accepted", name)
 		}
 	}
-	if err := (WireQuery{Aggregations: []AggSpec{{ID: "m", Op: "count", GroupBy: []string{"g"}, MinCount: MaxMetricMinCount, Where: where[:MaxWhereClauses]}}}).Validate(); err != nil {
+	if err := (WireQuery{Aggregations: []AggSpec{{ID: "m", Op: "count", GroupBy: []string{"g"}, MinCount: MetricMinCount{Min: MaxMetricMinCount}, Where: where[:MaxWhereClauses]}}}).Validate(); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -42,7 +42,7 @@ func TestMetricPopulationRefusals(t *testing.T) {
 		}
 		return ""
 	}
-	if err := compile(AggSpec{Op: "count", MinCount: 2}); code(err) != "min_count_grouping" {
+	if err := compile(AggSpec{Op: "count", MinCount: MetricMinCount{Min: 2}}); code(err) != "min_count_grouping" {
 		t.Fatalf("ungrouped minCount: %v", err)
 	}
 	if err := compile(AggSpec{Op: "count", GroupBy: []string{"g"}, Where: []WhereTerm{{Field: "g", Op: "matches_regex", Value: "a"}}}); code(err) != "unsupported_regex" {
@@ -59,7 +59,7 @@ func TestMetricPopulationRefusals(t *testing.T) {
 		t.Fatal("non-pushdown metric filter accepted")
 	}
 	// The legacy single-aggregate compiler never drops population controls.
-	for _, spec := range []AggSpec{{ID: "m", Op: "count", GroupBy: []string{"g"}, MinCount: 2}, {ID: "m", Op: "count", Where: []WhereTerm{{Field: "g", Op: "=", Value: "a"}}}} {
+	for _, spec := range []AggSpec{{ID: "m", Op: "count", GroupBy: []string{"g"}, MinCount: MetricMinCount{Min: 2}}, {ID: "m", Op: "count", Where: []WhereTerm{{Field: "g", Op: "=", Value: "a"}}}} {
 		if _, err := CompileAggregation(spec, s); err == nil || !strings.Contains(err.Error(), "CompileMetrics") {
 			t.Fatalf("v1 accepted %#v: %v", spec, err)
 		}
@@ -72,18 +72,18 @@ func TestMetricPopulationPlans(t *testing.T) {
 	if plain.Fingerprint == filtered.Fingerprint || len(filtered.Stages) <= len(plain.Stages) {
 		t.Fatal("a metric filter must add a predicate stage and change the fingerprint")
 	}
-	hidden := metricPlan(t, AggSpec{Op: "count", GroupBy: []string{"g"}, MinCount: 2, GroupLimit: 1}, metricOptions())
+	hidden := metricPlan(t, AggSpec{Op: "count", GroupBy: []string{"g"}, MinCount: MetricMinCount{Min: 2}, GroupLimit: 1}, metricOptions())
 	if !strings.Contains(hidden.SQL, "hidden_groups") || !strings.Contains(hidden.SQL, "LEFT JOIN") || plain.Fingerprint == hidden.Fingerprint {
 		t.Fatalf("minCount plan: %s", hidden.SQL)
 	}
 	if strings.Contains(plain.SQL, "hidden_groups") {
 		t.Fatal("plans without minCount keep their result shape")
 	}
-	sqlite, err := CompileSQLiteMetrics(context.Background(), MetricQuery{Version: 2, Limit: 1, Metrics: []AggSpec{{ID: "m", Op: "count", GroupBy: []string{"g"}, MinCount: 2}}}, metricSchema(), metricOptions())
+	sqlite, err := CompileSQLiteMetrics(context.Background(), MetricQuery{Version: 2, Limit: 1, Metrics: []AggSpec{{ID: "m", Op: "count", GroupBy: []string{"g"}, MinCount: MetricMinCount{Min: 2}}}}, metricSchema(), metricOptions())
 	if err != nil || !strings.Contains(sqlite.Metrics[0].SQL, "hidden_groups") {
 		t.Fatalf("sqlite minCount plan: %v", err)
 	}
-	combined, err := CompileCombinedMetrics(context.Background(), MetricQuery{Version: 2, Limit: 1, Metrics: []AggSpec{{ID: "a", Op: "count", GroupBy: []string{"g"}}, {ID: "b", Op: "count", GroupBy: []string{"g"}, MinCount: 2}}}, metricSchema(), metricOptions())
+	combined, err := CompileCombinedMetrics(context.Background(), MetricQuery{Version: 2, Limit: 1, Metrics: []AggSpec{{ID: "a", Op: "count", GroupBy: []string{"g"}}, {ID: "b", Op: "count", GroupBy: []string{"g"}, MinCount: MetricMinCount{Min: 2}}}}, metricSchema(), metricOptions())
 	if err != nil || strings.Count(combined.SQL, "AS hidden_groups FROM (") != 2 || !strings.Contains(combined.SQL, "FILTER (WHERE r.count IS NOT NULL)") {
 		t.Fatalf("combined envelope: %v\n%s", err, combined.SQL)
 	}

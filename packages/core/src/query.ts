@@ -1,5 +1,5 @@
 import { normalizePropertyView, type PropertyViewState } from "./properties";
-import type { MetricDisplay, MetricLayout, MetricDistribution, MetricSort, MetricScope, MetricDateGrouping, MetricWindow, MetricShare } from "./metricTypes";
+import type { MetricDisplay, MetricLayout, MetricDistribution, MetricSort, MetricScope, MetricDateGrouping, MetricWindow, MetricShare, MetricMinCountOf } from "./metricTypes";
 import { normalizeMetricOptions } from "./metricNormalize";
 import type { GroupingState, SummaryColumn, RepresentativeOrder, LinkSpec, LinkDestination } from "./grouping";
 import type { QueryFacet, QueryPatch } from "./queryPatch";
@@ -220,10 +220,12 @@ export interface AggregationClause {
    *  mode it refers to grouped-result fields. Shown-row metrics apply it inside
    *  the shown page. */
   where?: WhereTerm[];
-  /** Drop groups with fewer than this many rows (counted after `where`) before
-   *  sorting, `groupLimit` and Other. Requires at least one grouping field;
-   *  integer 1–1,000,000. Removed groups are reported as `hiddenGroups`. */
-  minCount?: number;
+  /** Drop small groups before sorting, `groupLimit` and Other. A number counts
+   *  rows (after `where`); `{ min, distinct: field }` counts a field's distinct
+   *  non-null values and `{ min, sum: field }` sums a numeric field, ignoring
+   *  nulls. Requires at least one grouping field; `min` is an integer
+   *  1–1,000,000. Removed groups are reported as `hiddenGroups`. */
+  minCount?: number | MetricMinCountOf;
   /** A trailing window or running value over the calendar intervals of
    * `dateGrouping`. Computed from ordinary metrics, so every engine supports it. */
   window?: MetricWindow;

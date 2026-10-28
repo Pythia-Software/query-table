@@ -1,5 +1,5 @@
 {
-  "description": "Per-metric where/minCount conformance. Every engine (local TypeScript, DuckDB, Go SQLite and Go PostgreSQL) executes each case and must return these buckets, groupCount and hiddenGroups. Bucket fields absent here are not compared.",
+  "description": "Per-metric where/minCount conformance, including minimums over distinct values and sums. Every engine (local TypeScript, DuckDB, Go SQLite and Go PostgreSQL) executes each case and must return these buckets, groupCount and hiddenGroups. Bucket fields absent here are not compared.",
   "now": "2026-03-08T00:00:00.000Z",
   "schema": {
     "name": "calls",
@@ -9,24 +9,26 @@
       { "name": "kind", "label": "Kind", "type": "text", "source": { "kind": "backend" } },
       { "name": "status", "label": "Status", "type": "text", "source": { "kind": "backend" } },
       { "name": "ms", "label": "Duration", "type": "number", "source": { "kind": "backend" } },
-      { "name": "at", "label": "At", "type": "datetime", "source": { "kind": "backend" }, "aggregate": { "groupable": true } }
+      { "name": "at", "label": "At", "type": "datetime", "source": { "kind": "backend" }, "aggregate": { "groupable": true } },
+      { "name": "session", "label": "Session", "type": "text", "source": { "kind": "backend" } },
+      { "name": "calls", "label": "Calls", "type": "number", "source": { "kind": "backend" } }
     ]
   },
   "rows": [
-    { "id": "01", "kind": "timeout", "status": "error", "ms": 120, "at": "2026-03-01T10:00:00.000Z" },
-    { "id": "02", "kind": "timeout", "status": "error", "ms": 300, "at": "2026-03-01T11:00:00.000Z" },
-    { "id": "03", "kind": "timeout", "status": "ok", "ms": 80, "at": "2026-03-02T09:00:00.000Z" },
-    { "id": "04", "kind": "timeout", "status": "error", "ms": 410, "at": "2026-03-03T12:00:00.000Z" },
-    { "id": "05", "kind": "timeout", "status": "error", "ms": 90, "at": "2026-03-05T08:00:00.000Z" },
-    { "id": "06", "kind": "auth", "status": "error", "ms": 50, "at": "2026-03-01T12:30:00.000Z" },
-    { "id": "07", "kind": "auth", "status": "ok", "ms": 20, "at": "2026-03-02T13:00:00.000Z" },
-    { "id": "08", "kind": "auth", "status": "error", "ms": 70, "at": "2026-03-05T15:00:00.000Z" },
-    { "id": "09", "kind": "dns", "status": "error", "ms": 999, "at": "2026-03-04T01:00:00.000Z" },
-    { "id": "10", "kind": "disk", "status": "ok", "ms": 15, "at": "2026-03-02T02:00:00.000Z" },
-    { "id": "11", "kind": "disk", "status": "error", "ms": 33, "at": "2026-03-05T03:00:00.000Z" },
-    { "id": "12", "kind": null, "status": "error", "ms": 60, "at": "2026-03-03T04:00:00.000Z" },
-    { "id": "13", "kind": "timeout", "status": null, "ms": null, "at": null },
-    { "id": "14", "kind": "auth", "status": "ok", "ms": 25, "at": "2026-03-04T06:00:00.000Z" }
+    { "id": "01", "kind": "timeout", "status": "error", "ms": 120, "at": "2026-03-01T10:00:00.000Z", "session": "s1", "calls": 1 },
+    { "id": "02", "kind": "timeout", "status": "error", "ms": 300, "at": "2026-03-01T11:00:00.000Z", "session": "s1", "calls": 1 },
+    { "id": "03", "kind": "timeout", "status": "ok", "ms": 80, "at": "2026-03-02T09:00:00.000Z", "session": "s1", "calls": 1 },
+    { "id": "04", "kind": "timeout", "status": "error", "ms": 410, "at": "2026-03-03T12:00:00.000Z", "session": "s2", "calls": 1 },
+    { "id": "05", "kind": "timeout", "status": "error", "ms": 90, "at": "2026-03-05T08:00:00.000Z", "session": "s2", "calls": 1 },
+    { "id": "06", "kind": "auth", "status": "error", "ms": 50, "at": "2026-03-01T12:30:00.000Z", "session": "a1", "calls": 5 },
+    { "id": "07", "kind": "auth", "status": "ok", "ms": 20, "at": "2026-03-02T13:00:00.000Z", "session": "a2", "calls": 4 },
+    { "id": "08", "kind": "auth", "status": "error", "ms": 70, "at": "2026-03-05T15:00:00.000Z", "session": "a3", "calls": 3 },
+    { "id": "09", "kind": "dns", "status": "error", "ms": 999, "at": "2026-03-04T01:00:00.000Z", "session": "d1", "calls": 20 },
+    { "id": "10", "kind": "disk", "status": "ok", "ms": 15, "at": "2026-03-02T02:00:00.000Z", "session": "k1", "calls": 2 },
+    { "id": "11", "kind": "disk", "status": "error", "ms": 33, "at": "2026-03-05T03:00:00.000Z", "session": "k1", "calls": 2 },
+    { "id": "12", "kind": null, "status": "error", "ms": 60, "at": "2026-03-03T04:00:00.000Z", "session": "n1", "calls": 0 },
+    { "id": "13", "kind": "timeout", "status": null, "ms": null, "at": null, "session": null, "calls": null },
+    { "id": "14", "kind": "auth", "status": "ok", "ms": 25, "at": "2026-03-04T06:00:00.000Z", "session": "a4", "calls": null }
   ],
   "cases": [
     {
@@ -216,6 +218,60 @@
       "grouping": { "keys": ["kind"], "summaries": [{ "id": "num", "op": "count" }] },
       "metric": { "id": "m", "op": "count", "groupBy": [], "where": [{ "field": "num", "op": ">=", "value": "2" }] },
       "expected": { "groupCount": 1, "buckets": [{ "keys": [], "count": 3, "value": 3 }] }
+    },
+    {
+      "name": "a distinct minCount counts distinct non-null values, not rows",
+      "metric": { "id": "m", "op": "count", "groupBy": ["kind"], "minCount": { "min": 3, "distinct": "session" } },
+      "expected": {
+        "groupCount": 1,
+        "hiddenGroups": 4,
+        "buckets": [{ "keys": ["auth"], "count": 4, "value": 4 }]
+      }
+    },
+    {
+      "name": "a summed minCount totals a field, ignoring nulls",
+      "metric": { "id": "m", "op": "count", "groupBy": ["kind"], "minCount": { "min": 10, "sum": "calls" } },
+      "expected": {
+        "groupCount": 2,
+        "hiddenGroups": 3,
+        "buckets": [
+          { "keys": ["auth"], "count": 4, "value": 4 },
+          { "keys": ["dns"], "count": 1, "value": 1 }
+        ]
+      }
+    },
+    {
+      "name": "a summed minCount sums after where and applies before groupLimit",
+      "metric": { "id": "m", "op": "sum", "field": "calls", "groupBy": ["kind"], "where": [{ "field": "status", "op": "=", "value": "error" }], "minCount": { "min": 6, "sum": "calls" }, "groupLimit": 1 },
+      "expected": {
+        "groupCount": 2,
+        "hiddenGroups": 3,
+        "buckets": [{ "keys": ["dns"], "count": 1, "value": 20 }]
+      }
+    },
+    {
+      "name": "calendar days below a distinct minCount leave a gap",
+      "metric": {
+        "id": "m",
+        "op": "count",
+        "groupBy": ["at"],
+        "dateGrouping": { "field": "at", "interval": "day", "timeZone": "UTC", "includeEmpty": true, "range": "observed" },
+        "where": [{ "field": "status", "op": "=", "value": "error" }],
+        "minCount": { "min": 3, "distinct": "session" }
+      },
+      "expected": {
+        "groupCount": 2,
+        "hiddenGroups": 3,
+        "buckets": [
+          { "keys": ["2026-03-02T00:00:00.000Z"], "count": 0, "value": 0 },
+          { "keys": ["2026-03-05T00:00:00.000Z"], "count": 3, "value": 3 }
+        ]
+      }
+    },
+    {
+      "name": "a summed minCount requires a numeric field",
+      "metric": { "id": "m", "op": "count", "groupBy": ["kind"], "minCount": { "min": 2, "sum": "status" } },
+      "expected": { "error": true }
     },
     {
       "name": "minCount requires a grouping field",

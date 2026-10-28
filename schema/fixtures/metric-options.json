@@ -7,11 +7,16 @@
       "shownRows"
     ],
     "groupLimit": "integer",
-    "minCount": "positiveInteger",
+    "minCount": "minCount",
     "share": [
       "total",
       "group0"
     ]
+  },
+  "minCount": {
+    "min": "positiveInteger",
+    "distinct": "string",
+    "sum": "string"
   },
   "window": {
     "reduce": [

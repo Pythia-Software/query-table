@@ -569,6 +569,26 @@ describe("metric population capability negotiation", () => {
       ["small", null],
     ]);
   });
+  it("sends a distinct or summed minimum only to servers that advertise it", async () => {
+    const measured = { id: "measured", op: "count" as const, groupBy: ["group"], minCount: { min: 2, distinct: "name" } };
+    const fetchMetrics = vi.fn(async (request: { metrics: { id: string }[] }) => ({
+      metrics: request.metrics.map((m) => ({ id: m.id, buckets: [] })),
+    }));
+    const run = (capabilities: Record<string, unknown>) =>
+      executeMetrics({ ...EMPTY_QUERY, aggregations: [small, measured] }, {
+        schema,
+        transport: { fetchRows: async () => ({ rows: [], total: 0 }), fetchMetrics, metricCapabilities: { version: 2, ...capabilities } } as unknown as Transport<Row>,
+      });
+    const older = await run({ minCount: true });
+    expect(fetchMetrics.mock.calls[0]![0].metrics.map((m) => m.id)).toEqual(["small"]);
+    expect(older.metrics[1]).toEqual({ id: "measured", buckets: [], error: "This server does not support a minimum of distinct values or a sum per group." });
+    const current = await run({ minCount: true, minCountMeasures: true });
+    expect(fetchMetrics.mock.calls[1]![0].metrics).toEqual([
+      expect.objectContaining({ id: "small", minCount: 2 }),
+      expect.objectContaining({ id: "measured", minCount: { min: 2, distinct: "name" } }),
+    ]);
+    expect(current.metrics.every((m) => !m.error)).toBe(true);
+  });
   it("never sends population controls to the version 1 aggregation endpoint", async () => {
     const fetchAggregations = vi.fn(async (request: { aggregations: { id: string }[] }) => ({
       metrics: request.aggregations.map((a) => ({ id: a.id, buckets: [] })),

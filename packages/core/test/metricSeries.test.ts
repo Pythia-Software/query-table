@@ -114,6 +114,24 @@ describe("metric windows", () => {
     expect(sampled.hiddenGroups).toBe(all.buckets.filter((b) => b.count === 1).length);
   });
 
+  it("sums a measured minimum over each window and shares keep hidden groups in the total", () => {
+    const series = (entry: AggregationResultEntry, model: string) =>
+      entry.buckets.filter((b) => b.keys[1] === model).map((b) => [b.keys[0], b.value, b.count]);
+    // Model a's windows hold 100, 110, 10 and 50 input; c's last holds 20.
+    const summed = run({ ...daily, groupBy: ["at", "model"], window: { periods: 2 }, minCount: { min: 100, sum: "input" } });
+    expect(series(summed, "a")).toEqual([[day("01"), null, 1], [day("02"), 110, 2]]);
+    expect(series(summed, "b")).toEqual([[day("01"), null, 1], [day("02"), 100, 1], [day("03"), 0, 0], [day("04"), 0, 0]]);
+    expect(series(summed, "c")).toEqual([[day("01"), null, 0], [day("02"), 0, 0], [day("03"), 0, 0]]);
+    expect(summed.hiddenGroups).toBe(3);
+    // a holds 160 input, b 100 and c 20: c is hidden but still in the total.
+    const share = run({ id: "share", op: "sum", field: "input", groupBy: ["model"], share: "total", minCount: { min: 100, sum: "input" } });
+    expect(share.buckets.map((b) => [b.keys[0], b.value])).toEqual([["a", 160 / 280], ["b", 100 / 280]]);
+    expect(share.hiddenGroups).toBe(1);
+    const users = run({ id: "share", op: "sum", field: "input", groupBy: ["model"], share: "total", minCount: { min: 2, distinct: "user" } });
+    expect(users.buckets.map((b) => b.keys[0])).toEqual(["a"]);
+    expect(validateMetric({ ...daily, window: { periods: 2 }, minCount: { min: 2, distinct: "user" } }, schema)[0]?.message).toMatch(/distinct minimum/);
+  });
+
   it("refuses windows it cannot compute exactly", () => {
     const message = (clause: AggregationClause) => validateMetric(clause, schema)[0]?.message;
     expect(message({ ...daily, expression: "COUNT_DISTINCT([user])", window: { periods: 7 } })).toMatch(/COUNT_DISTINCT.*mean per interval/);

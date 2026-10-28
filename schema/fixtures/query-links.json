@@ -985,6 +985,29 @@
             }
           },
           {
+            "id": "conversations",
+            "op": "sum",
+            "field": "cost",
+            "groupBy": [
+              "model_family"
+            ],
+            "minCount": {
+              "min": 5,
+              "distinct": "conversation_id"
+            }
+          },
+          {
+            "id": "calls",
+            "op": "count",
+            "groupBy": [
+              "tool_name"
+            ],
+            "minCount": {
+              "min": 10,
+              "sum": "call_count"
+            }
+          },
+          {
             "id": "spread",
             "op": "count",
             "groupBy": [],
@@ -1004,7 +1027,7 @@
           }
         ]
       },
-      "token": "2d.lVTbThsxEP0V5KdWSkugD5Ui9QFo1VZFRKIg1CKEZteT3VG89tYXNmmUf--McyVAVJ52bc-cOT5zxjNVqcHtTJFWAxXdGG1QPeVaXoXU8G_lXWpPpxykGqfR3I-gITNVdz01IjSP0gwUaHjjarWRk8-poagGR_2easieuWR5ddxTmkJrgJFnakxWgArw72rn6a-zEQznP4BJeL6LOnK-AcZY59nUFOj5RGNJDZigBv0506GQo0LtulPwvBt9wrmcwNSlfNaRjvUlNmrwgfnVSFUd8_KIGTLdm_X5UV5_24pgoOA8w7B-Y-SLLPgKD_K80hhKNWehuho95rCVZK13D6Qz56z1p9Vl-R9srL1rSXLnvWVrNIjoy-gya7jdGynCWrhO7uRRp1KQGgTLYS16cpqv_5EZa4j4VfLIcuc3jCI1wpxsRM9MckkpKPu_nRW466uzHFGapPFL00auLIr2lAdbScSfhF6SWvCRwHxfgnFphZOcpoTCk8Yb4gI9NflZgmGcWbbach-85EyfHLmKM7gj0gju6VKnUANL_ZKDt2TPZt52cenYLdzRDDBYZPVzL3fZRiiYCt-SHtzCYB1wuYW51kw6xPFCwhd6tpJ8TYrJvKo7w9EN13jco5NAcPjDmTFE-M9mubJM3qMVyzD3XQM8hZAJemZ43WTZ3OipSJEct-bRqWC1MnaKf7uawhhlKFVMMj0b5WqX_D6zL9R4lVoCORx93nX0ScOjUcLhBXb3v5wXLfcp5orAgKj3mHjLia1H0HtHFiccE0JWSp0Nry-u3rwVC5aulXLybtlL18mb94KsLGJ0lQfx-Upcw6rYUm5aEL-Xg-P-htQoxbSZj2dJrUTcwCQbUtvyS4d6KGkNasoPC38qy2NDJZe5VdebuAOoKo8VQxzwXTwI7ffqjh-0fw",
+      "token": "2d.lVTbbhMxEP0V5CeQAr0ghBSJh7YgQFSNVFpVUFXRZD3ZteL1LF47mxDl35nxJtk0aSP6tGt7LsfnnPFC5ap_v1BGq74KNEFXq56iild1LPk39xSr8zkHqZI02uEYSmPn6qGnxgbtozQLI7S8cbPeSMmXpjRB9U-Oe6o07oKi49VpT2lTVxa48kJNjJNCI_BvC_LmL7kAlvOnYCNe7lYdky-Ba2zyXCxH6PlEY2ZKsLXqHy8ZjqlTVF1Qcw6ed4OPuJQTmFNMZ43RobjGUvXfM74CTV6EtDxhhAz3bnN-ktbftiK4UE2eyzB_E-SLtHgFh_G80lhnaslENQV6TGFryipPU6MT5sT1p_Vl-R9cKDxVRnKXvZU0GoT0VXSWONzWRpowF9TInTzqmEmlEsFxWIXekObrf2TEGgJ-lTzjWPkOUTClIDcuoGckqaU0lP3f5KTc7c1Fishs1PilrAJ3FkZ7yoPLJeJPRC9JFfhgwH5fFePWCmcpTQmEPeGt4QY9NfuZgeU6i2S11T54yZnvHVHOGayICMGarniqC2Cqn3PwFu3JzNsuzojdwoqmAv026zhpuYs2wIih8C3NlFqDNcDtWnNtkDSIk5bCZzRbU74BxWBepM5gfMc9Hmt0Vhs4-kF2AgH-UyzKsug9OrEMY981wH4JmaAnhpdmK3GDN6MYDLE0j06lViVjp_i3KUw9QRlKFaJMT8dcQdEfMnvLxovYkpKD8eddR5-VPBoZHF1hM_xFXrg8xBiNai6I-oCJu1tk5KZ8PxAiXv6mrtzYPZhsfPH6h5ZhRik8bvcYctet7mB57A5QSGSHDloe97rIWy1Q2zrDNn9ryCqPoA--RjjjmLpOJlAXg9urm9dvZLoyqoRJeZLdNTUC8RnHsD8C5R6EsLVvLAvuMhFxZJjU_ulxB2ocQ-xG_0lQa3K7MtHVsar4EUc9kLQStUlvJn9yxxqYjNvcq9su7hXkucecS7ziu_jE_Tv1wG_1Pw",
       "normalized": {
         "select": [],
         "where": [],
@@ -1141,6 +1164,29 @@
             }
           },
           {
+            "id": "conversations",
+            "op": "sum",
+            "groupBy": [
+              "model_family"
+            ],
+            "field": "cost",
+            "minCount": {
+              "min": 5,
+              "distinct": "conversation_id"
+            }
+          },
+          {
+            "id": "calls",
+            "op": "count",
+            "groupBy": [
+              "tool_name"
+            ],
+            "minCount": {
+              "min": 10,
+              "sum": "call_count"
+            }
+          },
+          {
             "id": "spread",
             "op": "count",
             "groupBy": [],
@@ -1164,7 +1210,7 @@
           }
         ]
       },
-      "packed": "{\"g\":[{\"id\":\"tokens\",\"op\":\"sum\",\"groupBy\":[\"model_family\"],\"field\":\"tokens\",\"label\":\"Tokens\",\"groupLimit\":10,\"minCount\":2,\"display\":{\"kind\":\"bar-horizontal\",\"valueLabel\":\"Tokens\",\"format\":{\"kind\":\"number\",\"decimals\":0},\"list\":{\"showBars\":true}},\"layout\":{\"widthRem\":30,\"heightRem\":12,\"minWidthRem\":1,\"minHeightRem\":1},\"sort\":[{\"key\":\"value\",\"dir\":\"desc\"}],\"where\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"anthropic\"}]},{\"id\":\"daily\",\"op\":\"count\",\"groupBy\":[],\"window\":{\"reduce\":\"mean\",\"periods\":7},\"dateGrouping\":{\"field\":\"time\",\"interval\":\"day\",\"timeZone\":\"UTC\",\"includeEmpty\":true,\"range\":\"query\",\"partialIntervals\":\"exclude\"},\"display\":{\"kind\":\"line\",\"xScale\":{\"mode\":\"linear\"},\"yScale\":{\"mode\":\"log\",\"min\":1}}},{\"id\":\"share\",\"op\":\"sum\",\"groupBy\":[\"provider\",\"model\"],\"field\":\"cost\",\"share\":\"group0\",\"display\":{\"kind\":\"table\",\"pivot\":{\"swap\":true}}},{\"id\":\"weekday\",\"op\":\"count\",\"groupBy\":[\"time\",\"provider\"],\"dateGrouping\":{\"field\":\"time\",\"interval\":\"dayOfWeek\",\"timeZone\":\"Asia/Kolkata\",\"includeEmpty\":true,\"range\":\"query\",\"occurrence\":{\"interval\":\"day\",\"includeEmpty\":true}},\"display\":{\"kind\":\"box\"},\"distribution\":{\"kind\":\"box\",\"input\":\"\",\"whiskers\":\"tukey\"}},{\"id\":\"hourly\",\"op\":\"count\",\"groupBy\":[\"time\"],\"dateGrouping\":{\"field\":\"time\",\"interval\":\"hourOfDay\",\"timeZone\":\"America/New_York\",\"includeEmpty\":true,\"range\":\"observed\"},\"display\":{\"kind\":\"line\"}},{\"id\":\"spread\",\"op\":\"count\",\"groupBy\":[],\"expression\":\"COUNT()\",\"scope\":\"shownRows\",\"distribution\":{\"kind\":\"histogram\",\"input\":\"latency\",\"bins\":20}},{\"id\":\"future\",\"op\":\"count\",\"groupBy\":[],\"field\":\"latency\",\"diagnostics\":[\"Unsupported aggregate operation.\"],\"unsupportedOp\":\"median\"}]}"
+      "packed": "{\"g\":[{\"id\":\"tokens\",\"op\":\"sum\",\"groupBy\":[\"model_family\"],\"field\":\"tokens\",\"label\":\"Tokens\",\"groupLimit\":10,\"minCount\":2,\"display\":{\"kind\":\"bar-horizontal\",\"valueLabel\":\"Tokens\",\"format\":{\"kind\":\"number\",\"decimals\":0},\"list\":{\"showBars\":true}},\"layout\":{\"widthRem\":30,\"heightRem\":12,\"minWidthRem\":1,\"minHeightRem\":1},\"sort\":[{\"key\":\"value\",\"dir\":\"desc\"}],\"where\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"anthropic\"}]},{\"id\":\"daily\",\"op\":\"count\",\"groupBy\":[],\"window\":{\"reduce\":\"mean\",\"periods\":7},\"dateGrouping\":{\"field\":\"time\",\"interval\":\"day\",\"timeZone\":\"UTC\",\"includeEmpty\":true,\"range\":\"query\",\"partialIntervals\":\"exclude\"},\"display\":{\"kind\":\"line\",\"xScale\":{\"mode\":\"linear\"},\"yScale\":{\"mode\":\"log\",\"min\":1}}},{\"id\":\"share\",\"op\":\"sum\",\"groupBy\":[\"provider\",\"model\"],\"field\":\"cost\",\"share\":\"group0\",\"display\":{\"kind\":\"table\",\"pivot\":{\"swap\":true}}},{\"id\":\"weekday\",\"op\":\"count\",\"groupBy\":[\"time\",\"provider\"],\"dateGrouping\":{\"field\":\"time\",\"interval\":\"dayOfWeek\",\"timeZone\":\"Asia/Kolkata\",\"includeEmpty\":true,\"range\":\"query\",\"occurrence\":{\"interval\":\"day\",\"includeEmpty\":true}},\"display\":{\"kind\":\"box\"},\"distribution\":{\"kind\":\"box\",\"input\":\"\",\"whiskers\":\"tukey\"}},{\"id\":\"hourly\",\"op\":\"count\",\"groupBy\":[\"time\"],\"dateGrouping\":{\"field\":\"time\",\"interval\":\"hourOfDay\",\"timeZone\":\"America/New_York\",\"includeEmpty\":true,\"range\":\"observed\"},\"display\":{\"kind\":\"line\"}},{\"id\":\"conversations\",\"op\":\"sum\",\"groupBy\":[\"model_family\"],\"field\":\"cost\",\"minCount\":{\"min\":5,\"distinct\":\"conversation_id\"}},{\"id\":\"calls\",\"op\":\"count\",\"groupBy\":[\"tool_name\"],\"minCount\":{\"min\":10,\"sum\":\"call_count\"}},{\"id\":\"spread\",\"op\":\"count\",\"groupBy\":[],\"expression\":\"COUNT()\",\"scope\":\"shownRows\",\"distribution\":{\"kind\":\"histogram\",\"input\":\"latency\",\"bins\":20}},{\"id\":\"future\",\"op\":\"count\",\"groupBy\":[],\"field\":\"latency\",\"diagnostics\":[\"Unsupported aggregate operation.\"],\"unsupportedOp\":\"median\"}]}"
     },
     {
       "name": "every metric option",
@@ -6073,6 +6119,103 @@
         "offset": 0
       },
       "packed": "{\"w\":[[\"set\",\"tags\",\"all\",[\"a\",\"b\"],\"dedupe\"],{\"any\":[{\"field\":\"tags\",\"op\":\"is_null\",\"value\":\"\"},{\"field\":\"tags\",\"op\":\"includes\",\"value\":\"z\",\"negated\":true}]},[\"set\",\"tags\",\"empty\",[],\"e\"]]}"
+    },
+    {
+      "name": "measured minimums",
+      "token": "2j.eyJnIjpbeyJpZCI6ImEiLCJvcCI6ImNvdW50IiwiZ3JvdXBCeSI6WyJtIl0sIm1pbkNvdW50Ijp7InN1bSI6ImNhbGxzIiwibWluIjoxMCwiZXh0cmEiOnRydWV9fSx7ImlkIjoiYiIsIm9wIjoiY291bnQiLCJncm91cEJ5IjpbIm0iXSwibWluQ291bnQiOnsibWluIjoyLCJkaXN0aW5jdCI6ImMiLCJzdW0iOiJjYWxscyJ9fSx7ImlkIjoiYyIsIm9wIjoiY291bnQiLCJncm91cEJ5IjpbIm0iXSwibWluQ291bnQiOnsiZGlzdGluY3QiOiJjIn19LHsiaWQiOiJkIiwib3AiOiJjb3VudCIsImdyb3VwQnkiOlsibSJdLCJtaW5Db3VudCI6eyJtaW4iOjAsImRpc3RpbmN0IjoiYyJ9fSx7ImlkIjoiZSIsIm9wIjoiY291bnQiLCJncm91cEJ5IjpbIm0iXSwibWluQ291bnQiOnsibWluIjozLCJkaXN0aW5jdCI6IiJ9fSx7ImlkIjoiZiIsIm9wIjoiY291bnQiLCJncm91cEJ5IjpbIm0iXSwibWluQ291bnQiOnsibWluIjozLCJkaXN0aW5jdCI6N319LHsiaWQiOiJnIiwib3AiOiJjb3VudCIsImdyb3VwQnkiOlsibSJdLCJtaW5Db3VudCI6WzRdfSx7ImlkIjoiaCIsIm9wIjoiY291bnQiLCJncm91cEJ5IjpbIm0iXSwibWluQ291bnQiOjIuNX1dfQ",
+      "normalized": {
+        "select": [],
+        "where": [],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0,
+        "aggregations": [
+          {
+            "id": "a",
+            "op": "count",
+            "groupBy": [
+              "m"
+            ],
+            "minCount": {
+              "min": 10,
+              "sum": "calls"
+            }
+          },
+          {
+            "id": "b",
+            "op": "count",
+            "groupBy": [
+              "m"
+            ],
+            "diagnostics": [
+              "Invalid metric minCount."
+            ]
+          },
+          {
+            "id": "c",
+            "op": "count",
+            "groupBy": [
+              "m"
+            ],
+            "diagnostics": [
+              "Invalid metric minCount."
+            ]
+          },
+          {
+            "id": "d",
+            "op": "count",
+            "groupBy": [
+              "m"
+            ],
+            "diagnostics": [
+              "Invalid metric min.",
+              "Invalid metric minCount."
+            ]
+          },
+          {
+            "id": "e",
+            "op": "count",
+            "groupBy": [
+              "m"
+            ],
+            "diagnostics": [
+              "Invalid metric minCount."
+            ]
+          },
+          {
+            "id": "f",
+            "op": "count",
+            "groupBy": [
+              "m"
+            ],
+            "diagnostics": [
+              "Invalid metric distinct.",
+              "Invalid metric minCount."
+            ]
+          },
+          {
+            "id": "g",
+            "op": "count",
+            "groupBy": [
+              "m"
+            ],
+            "diagnostics": [
+              "Invalid metric minCount."
+            ]
+          },
+          {
+            "id": "h",
+            "op": "count",
+            "groupBy": [
+              "m"
+            ],
+            "diagnostics": [
+              "Invalid metric minCount."
+            ]
+          }
+        ]
+      },
+      "packed": "{\"g\":[{\"id\":\"a\",\"op\":\"count\",\"groupBy\":[\"m\"],\"minCount\":{\"min\":10,\"sum\":\"calls\"}},{\"id\":\"b\",\"op\":\"count\",\"groupBy\":[\"m\"],\"diagnostics\":[\"Invalid metric minCount.\"]},{\"id\":\"c\",\"op\":\"count\",\"groupBy\":[\"m\"],\"diagnostics\":[\"Invalid metric minCount.\"]},{\"id\":\"d\",\"op\":\"count\",\"groupBy\":[\"m\"],\"diagnostics\":[\"Invalid metric min.\",\"Invalid metric minCount.\"]},{\"id\":\"e\",\"op\":\"count\",\"groupBy\":[\"m\"],\"diagnostics\":[\"Invalid metric minCount.\"]},{\"id\":\"f\",\"op\":\"count\",\"groupBy\":[\"m\"],\"diagnostics\":[\"Invalid metric distinct.\",\"Invalid metric minCount.\"]},{\"id\":\"g\",\"op\":\"count\",\"groupBy\":[\"m\"],\"diagnostics\":[\"Invalid metric minCount.\"]},{\"id\":\"h\",\"op\":\"count\",\"groupBy\":[\"m\"],\"diagnostics\":[\"Invalid metric minCount.\"]}]}"
     },
     {
       "name": "duplicate and index keys",

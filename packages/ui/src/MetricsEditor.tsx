@@ -22,6 +22,9 @@ import {
   isMeasurable,
   metricComputationKey,
   metricExpression,
+  metricMinCount,
+  metricMinCountMeasure,
+  metricMinCountText,
   type AggregationBucket,
   type AggregationClause,
   type AggregationResult,
@@ -182,6 +185,8 @@ export function MetricsEditor<Row>({
     JSON.stringify(api.aggregations.clauses) !== initialKey.current;
   const measurable = fields.filter(isMeasurable),
     groupable = fields.filter(isGroupable);
+  const fieldLabel = (name: string) =>
+    fields.find((f) => f.name === name)?.label ?? name;
   const compileRef = useRef(api.aggregations.compile);
   compileRef.current = api.aggregations.compile;
   const requestRef = useRef(api.aggregations.preview);
@@ -1980,7 +1985,7 @@ export function MetricsEditor<Row>({
                       : "Default ordering"
                   }${selected.groupLimit ? ` · first ${selected.groupLimit}` : ""}${
                     selected.minCount !== undefined
-                      ? ` · at least ${selected.minCount} rows`
+                      ? ` · at least ${metricMinCountText(selected, fieldLabel)}`
                       : ""
                   }`}
                 >
@@ -2105,33 +2110,67 @@ export function MetricsEditor<Row>({
                   </label>
                   {(selected.groupBy.length > 0 ||
                     selected.minCount !== undefined) && (
-                    <label>
-                      Minimum rows per group
-                      <input
-                        aria-label="Minimum rows per group"
-                        type="number"
-                        min={1}
-                        max={1000000}
-                        placeholder="Any size"
-                        value={selected.minCount ?? ""}
-                        onChange={(e) => {
-                          const n = e.currentTarget.valueAsNumber;
-                          if (!e.currentTarget.value)
-                            patch(selected.id, { minCount: undefined });
-                          else if (
-                            Number.isInteger(n) &&
-                            n >= 1 &&
-                            n <= 1000000
-                          )
-                            patch(selected.id, { minCount: n });
-                        }}
-                      />
-                    </label>
+                    <>
+                      <label>
+                        Minimum per group
+                        <input
+                          aria-label="Minimum per group"
+                          type="number"
+                          min={1}
+                          max={1000000}
+                          placeholder="Any size"
+                          value={metricMinCount(selected) ?? ""}
+                          onChange={(e) => {
+                            const n = e.currentTarget.valueAsNumber;
+                            if (!e.currentTarget.value)
+                              patch(selected.id, { minCount: undefined });
+                            else if (
+                              Number.isInteger(n) &&
+                              n >= 1 &&
+                              n <= 1000000
+                            )
+                              patch(selected.id, {
+                                minCount: withMinimum(selected.minCount, n),
+                              });
+                          }}
+                        />
+                      </label>
+                      <label>
+                        Counting
+                        <select
+                          aria-label="Minimum counts"
+                          disabled={selected.minCount === undefined}
+                          value={minimumKey(selected.minCount)}
+                          onChange={(e) =>
+                            patch(selected.id, {
+                              minCount: minimumOf(
+                                e.target.value,
+                                metricMinCount(selected) ?? 1,
+                              ),
+                            })
+                          }
+                        >
+                          <option value="rows">Rows</option>
+                          {minimumChoices(
+                            measurable,
+                            selected.minCount,
+                            fieldLabel,
+                          ).map(([key, label]) => (
+                            <option key={key} value={key}>
+                              {label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </>
                   )}
                   {selected.minCount !== undefined && (
                     <p className="qt-metric-help">
-                      Groups with fewer rows are hidden before ordering and the
-                      group limit; they are not added to Other.
+                      Groups below the minimum are hidden before ordering and
+                      the group limit; they are not added to Other.
+                      {metricMinCountMeasure(selected)
+                        ? " Distinct values and sums ignore empty values."
+                        : ""}
                     </p>
                   )}
                 </Settings>
@@ -2878,6 +2917,51 @@ ${item.description}`}
   }
 }
 
+type MinCount = AggregationClause["minCount"];
+/** The "Counting" choice of a minimum: rows, or a distinct or summed field. */
+function minimumKey(m: MinCount): string {
+  const measure = metricMinCountMeasure({ minCount: m });
+  return measure
+    ? `${measure.op === "sum" ? "sum" : "distinct"}:${measure.field}`
+    : "rows";
+}
+function minimumOf(key: string, min: number): MinCount {
+  const split = key.indexOf(":");
+  if (split < 0) return min;
+  const kind = key.slice(0, split),
+    field = key.slice(split + 1);
+  return kind === "sum" ? { min, sum: field } : { min, distinct: field };
+}
+/** A new threshold keeps what the minimum counts. */
+function withMinimum(m: MinCount, min: number): MinCount {
+  return minimumOf(minimumKey(m), min);
+}
+/** Distinct values of any measurable field, sums of numeric ones, plus the
+ * current choice so an unlisted field is never silently dropped. */
+function minimumChoices(
+  measurable: FieldDef[],
+  current: MinCount,
+  label: (name: string) => string,
+): [string, string][] {
+  const plain = measurable.filter((f) => !f.name.startsWith("@computed/"));
+  const choices: [string, string][] = [
+    ...plain
+      .filter((f) => aggOpsForField(f).includes("count_distinct"))
+      .map((f): [string, string] => [`distinct:${f.name}`, `Distinct ${f.label}`]),
+    ...plain
+      .filter((f) => f.type === "number" && aggOpsForField(f).includes("sum"))
+      .map((f): [string, string] => [`sum:${f.name}`, `Sum of ${f.label}`]),
+  ];
+  const key = minimumKey(current);
+  if (key !== "rows" && !choices.some(([k]) => k === key)) {
+    const measure = metricMinCountMeasure({ minCount: current })!;
+    choices.push([
+      key,
+      `${measure.op === "sum" ? "Sum of" : "Distinct"} ${label(measure.field)}`,
+    ]);
+  }
+  return choices;
+}
 function newId(): string {
   return typeof crypto !== "undefined" &&
     typeof crypto.randomUUID === "function"

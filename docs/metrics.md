@@ -100,6 +100,52 @@ exact, so every engine follows this one rule. `minCount` requires at least one
 grouping field; on a grand-total metric it is a clause diagnostic rather than
 being ignored.
 
+### Minimums over distinct values and sums
+
+`minCount` can also measure each group with a field instead of counting its
+rows:
+
+```ts
+// API cost by model, hiding models used in fewer than five conversations.
+const costByModel: AggregationClause = {
+  id: "cost", op: "sum", field: "cost", groupBy: ["model_family"],
+  minCount: { min: 5, distinct: "conversation_id" },
+};
+// Failure rate by tool over daily rollup rows, hiding tools with fewer than
+// ten calls in total.
+const failureRate: AggregationClause = {
+  id: "failures", op: "count", groupBy: ["tool_name"],
+  expression: "SUM([failures]) / SUM([call_count])",
+  minCount: { min: 10, sum: "call_count" },
+};
+```
+
+`{ min, distinct: field }` keeps a group when it has at least `min` distinct
+non-null values of `field`, exactly as `COUNT_DISTINCT([field])` counts them: a
+model with 40 records in 3 conversations is hidden, one with 6 records in 6
+conversations is kept. `{ min, sum: field }` keeps a group when
+`SUM([field])` reaches `min`. Nulls add nothing, so a group whose values are all
+null sums to 0; `field` must be numeric, and summing a text field is a clause
+diagnostic. A plain number keeps its meaning (rows), and an object needs `min`
+and exactly one of `distinct` and `sum`. The field must be a schema field (not
+a computed one) whose aggregate policy allows `count_distinct` or `sum`. It may
+be different from the metric's own measure, and need not be shown anywhere.
+
+Everything else is as for a row minimum: hidden groups leave before sorting,
+`groupLimit` and Other and are reported as `hiddenGroups`, kept groups' values
+are unchanged, the measure is counted after the metric's `where`, and empty
+calendar fill-ins are never hidden. A group whose measure is an error (an
+unsafe sum, or an invalid stored value) is kept so the error stays visible.
+With a `window`, a summed minimum is summed over the point's window; distinct
+values cannot be combined across intervals, so a distinct minimum with a window
+is a clause diagnostic. Shares compare the minimum per bucket. Distributions
+(box and histogram) currently accept only row minimums; a measured minimum on
+a distribution is a clause diagnostic on every engine.
+
+The Go and SQL executors compute the measure in the same grouped pass as the
+metric, sharing an identical aggregate (`SUM([call_count])` in the failure-rate
+example) and fused or cross-field reductions with sibling metrics.
+
 - **Calendar grouping.** `includeEmpty` fills empty buckets after `minCount`
   selects the observed groups, and those empty buckets are never hidden or
   counted. An observed bucket below the threshold is hidden and leaves a gap; it
@@ -115,14 +161,22 @@ being ignored.
 Executors advertise support explicitly: `metricCapabilities.filters` and
 `metricCapabilities.minCount` for v2 transports, and
 `queryCapabilities.metricFilters` and `queryCapabilities.metricMinCount` for the
-v3 executor. A clause that uses an unadvertised control gets its own error
-result; the other metrics in the batch still run, and the control is never
-silently dropped. The v1 `fetchAggregations` endpoint never receives either
-field. The bundled DuckDB, Go SQLite and Go v3 executors advertise both.
+v3 executor. A distinct or summed minimum also needs
+`metricCapabilities.minCountMeasures` or
+`queryCapabilities.metricMinCountMeasures`. A clause that uses an unadvertised
+control gets its own error result (`metricPopulationError` names it); the other
+metrics in the batch still run, and the control is never silently dropped. The
+v1 `fetchAggregations` endpoint never receives either field. The bundled
+DuckDB, Go SQLite, Go PostgreSQL and Go v3 executors advertise all of them, and
+`ExecuteV2Rows` runs them in memory.
 
 The metric editor exposes **Only rows where…** (the table's filter chips scoped
-to the metric) under *Data scope* and **Minimum rows per group** under
-*Ordering & limits*. Cards note "N groups hidden (fewer than M rows)".
+to the metric) under *Data scope*, and **Minimum per group** with a
+**Counting** choice (rows, distinct values of a field, or the sum of a numeric
+field) under *Ordering & limits*. Cards note "N groups hidden (fewer than M
+rows)", or "(fewer than 5 distinct Conversation values)" and "(fewer than 10
+total Calls)". `metricMinCount`, `metricMinCountMeasure` and
+`metricMinCountText` read either form.
 
 ## Population scope
 
@@ -259,7 +313,7 @@ const transport: Transport<Row> = {
   metricCapabilities: {
     version: 2, expressions: true, shownRows: true,
     distributions: true, computedFields: true, profile: "qt-postgres-v1",
-    filters: true, minCount: true, // only if the service executes them
+    filters: true, minCount: true, minCountMeasures: true, // only if the service executes them
   },
   fetchMetrics: (request, signal) => fetchMetricBatch(request, signal),
   fetchRowsV2: (request, signal) => fetchComputedRows(request, signal),
@@ -438,8 +492,9 @@ const modelShare: AggregationClause = {
   `groupLimit` still count. With a window, both are windowed before dividing.
   A share of the total cannot be windowed.
 - **Ordering and limits.** `sort`, `groupLimit` and `minCount` apply to the
-  combined buckets; `minCount` counts the rows in a point's window. Windowed
-  and share results have no Other remainder.
+  combined buckets; `minCount` counts the rows in a point's window, and a
+  summed minimum sums its field over the window. Windowed and share results
+  have no Other remainder.
 - **Drilldown.** `inspectBucketQuery` opens a windowed point's whole window,
   or every interval up to the point for a running value.
 

@@ -58,6 +58,14 @@ export interface MetricWindow {
 /** Divide each bucket by the total of all groups ("total") or of its first
  * grouping key ("group0"), such as one calendar interval. */
 export type MetricShare = "total" | "group0";
+
+/** A per-group minimum measured over something other than rows: the distinct
+ *  non-null values of one field (like COUNT_DISTINCT), or the sum of one
+ *  numeric field (like SUM; nulls add nothing). Exactly one of `distinct` and
+ *  `sum` is set. A group whose measure is an error is kept. */
+export type MetricMinCountOf =
+  | { min: number; distinct: string; sum?: never }
+  | { min: number; sum: string; distinct?: never };
 export interface MetricValueFormat {
   kind: "number" | "percent" | "duration" | "date" | "time" | "datetime";
   decimals?: number;
@@ -194,6 +202,8 @@ export interface MetricCapabilities {
   filters?: boolean;
   /** Executes AggregationClause.minCount and reports hiddenGroups. */
   minCount?: boolean;
+  /** Also executes an object minCount: distinct values or a sum per group. */
+  minCountMeasures?: boolean;
   maxGroups?: number;
   profile?: string;
 }

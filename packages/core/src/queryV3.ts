@@ -22,6 +22,8 @@ export interface QueryCapabilitiesV3 {
   metricFilters?: boolean;
   /** Executes AggregationClause.minCount and reports hiddenGroups. */
   metricMinCount?: boolean;
+  /** Also executes an object minCount: distinct values or a sum per group. */
+  metricMinCountMeasures?: boolean;
   maxRows: number;
   maxGroups: number;
   maxPopulation: number;

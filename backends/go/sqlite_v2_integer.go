@@ -30,8 +30,16 @@ func sqliteIntegerReduction(ctx context.Context, q MetricQuery, specs []AggSpec,
 	}
 	fields := map[string]bool{}
 	nodes := map[string]*exprNode{}
+	expressions := []string{}
 	for _, spec := range specs {
-		n, err := parseExpression(MetricExpression(spec))
+		expressions = append(expressions, MetricExpression(spec))
+		// A measured minCount is one more reduction of the combined plan.
+		if measure := spec.MinCount.Measure(); measure != "" {
+			expressions = append(expressions, measure)
+		}
+	}
+	for _, expression := range expressions {
+		n, err := parseExpression(expression)
 		if err != nil || !aggOpKnown(strings.ToLower(n.op)) || len(n.args) > 1 {
 			return nil
 		}
