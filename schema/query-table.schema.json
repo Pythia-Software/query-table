@@ -225,6 +225,7 @@
             "enabled": { "type": "boolean", "description": "Can it be a visible column? Default true. false ⇒ filter-only." },
             "default": { "type": "boolean", "description": "Shown when the query's select is empty." },
             "width": { "type": "number", "minimum": 1 },
+            "minWidth": { "type": "number", "minimum": 1, "description": "Narrowest usable width (px) when fitting columns to the screen." },
             "align": { "enum": ["left", "right", "center"] }
           }
         },

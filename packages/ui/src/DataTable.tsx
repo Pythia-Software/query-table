@@ -478,6 +478,15 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
       return width > 0 ? width + AUTOFIT_EXTRA_PX : 0;
     });
   }
+  /** Room each column's rendered controls need, so fitting never clips them. */
+  function measureControlMinimums(names: string[]): number[] {
+    const wrap = tableWrapRef.current;
+    return names.map((name) => {
+      const cells = wrap ? Array.from(wrap.querySelectorAll<HTMLElement>(`td[data-qt-field="${cssAttributeValue(name)}"]`)) : [];
+      const measured = measureControlWidth(cells);
+      return Math.max(measured > 0 ? measured + AUTOFIT_EXTRA_PX : 0, fieldByName.get(name)?.select?.minWidth ?? 0);
+    });
+  }
   function autofitColumn(name: string) {
     const [width = 0] = measureContentWidths([name]);
     if (width > 0) setWidth(name, width);
@@ -496,7 +505,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
       ? fitContentWidths(content)
       : preset === "equal"
         ? equalWidths(names.length, available)
-        : fitScreenWidths(content, available);
+        : fitScreenWidths(content, available, undefined, measureControlMinimums(names));
     setWidths(new Map(names.map((name, i) => [name, widths[i]!])), preset === "screen");
   }
   const hasCustomWidths = query.fitToScreen === true || selectionColumnWidth !== DEFAULT_SELECTION_WIDTH || query.select.some((c) => c.width != null);
@@ -606,7 +615,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     const content = measureContentWidths(fieldNames).map((width, i) =>
       width || widthFor(fieldNames[i]!, fields[i]!) || DEFAULT_WIDTH,
     );
-    const widths = fitScreenWidths(content, available);
+    const widths = fitScreenWidths(content, available, undefined, measureControlMinimums(fieldNames));
     setScreenWidths((current) => {
       if (current.size === fieldNames.length && fieldNames.every((name, i) => current.get(name) === widths[i])) return current;
       return new Map(fieldNames.map((name, i) => [name, widths[i]!]));
@@ -1189,6 +1198,40 @@ function measureIntrinsicWidth(cells: HTMLElement[]): number {
     const style = getComputedStyle(cells[i]!);
     const padding = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
     width = Math.max(width, probe.getBoundingClientRect().width + padding);
+  });
+  probes.forEach((probe) => probe.remove());
+  return Math.ceil(width);
+}
+
+// Controls that keep their full size in a fitted column. Links and JSON
+// previews may shorten to an ellipsis, keeping their full accessible name.
+const CONTROL_SELECTOR = "a[href], button, [role=button], input, select, textarea";
+const SHRINKABLE_SELECTOR = "a.qt-link, .qt-json-preview-text";
+/** Shortest a link label is cut to before its column stops narrowing. */
+const SHRINKABLE_LINK_PX = 96;
+
+/** Widest control content (plus padding) among cells that hold controls; 0 when none do. */
+function measureControlWidth(cells: HTMLElement[]): number {
+  const holders = cells.filter((cell) => cell.querySelector(CONTROL_SELECTOR));
+  const probes = holders.map((cell) => {
+    const probe = document.createElement("span");
+    probe.setAttribute("aria-hidden", "true");
+    probe.style.cssText = "position:absolute;left:0;top:0;width:max-content;white-space:nowrap;visibility:hidden;pointer-events:none;";
+    cell.childNodes.forEach((node) => probe.appendChild(node.cloneNode(true)));
+    probe.querySelectorAll<HTMLElement>(SHRINKABLE_SELECTOR).forEach((element) => {
+      element.style.maxWidth = `${SHRINKABLE_LINK_PX}px`;
+      element.style.display = "inline-block";
+      element.style.overflow = "hidden";
+    });
+    cell.appendChild(probe);
+    return probe;
+  });
+  let width = 0;
+  probes.forEach((probe, i) => {
+    const style = getComputedStyle(holders[i]!);
+    const padding = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
+    const border = (parseFloat(style.borderLeftWidth) || 0) + (parseFloat(style.borderRightWidth) || 0);
+    width = Math.max(width, probe.getBoundingClientRect().width + padding + border);
   });
   probes.forEach((probe) => probe.remove());
   return Math.ceil(width);

@@ -20,6 +20,16 @@
 
 ### Fixed
 
+- Screen fitting (`fitToScreen`) no longer narrows a column below what its
+  native controls need. Each column's minimum counts the cell padding and its
+  buttons (Detail modes, JSON previews, including the invalid-JSON "JSON?"
+  badge), and links: group link summaries and template links shorten to an
+  ellipsis no narrower than 96 px, keeping their full accessible name and
+  href. When the minimums exceed the screen, the table scrolls horizontally
+  instead of clipping a control in its cell. Grouped tables with link
+  summaries used to clip "Matching records" at desktop widths, and two Detail
+  buttons were clipped at the 48 px phone floor. `SelectConfig.minWidth` adds
+  room for host-rendered controls the table cannot measure.
 - Box and horizontal-bar charts size their label gutter to the widest drawn
   group label, up to 40% of the chart, and shorten longer labels at their end
   with an ellipsis. Labels used to lose their start ("odel_family-0") past a

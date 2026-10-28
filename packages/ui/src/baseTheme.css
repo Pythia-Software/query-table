@@ -46,6 +46,9 @@
 .qt-line-clamp { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-line; overflow-wrap: anywhere; }
 .qt-link { color: var(--qt-accent); text-decoration: none; }
 .qt-link:hover { text-decoration: underline; }
+/* A link in a fitted or narrow cell shortens to an ellipsis inside the cell;
+   its accessible name stays the full label. */
+.qt-cell a.qt-link { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: top; }
 .qt-pills { display: inline-flex; flex-wrap: wrap; gap: 4px; }
 .qt-pill { background: var(--qt-header-bg); border: 1px solid var(--qt-border); border-radius: 999px; padding: 0 8px; font-size: 11px; }
 
