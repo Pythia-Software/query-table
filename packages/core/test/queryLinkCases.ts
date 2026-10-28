@@ -158,6 +158,33 @@ export const stateCases: StateCase[] = [
     },
   },
   {
+    name: "every metric option",
+    state: {
+      ...EMPTY_QUERY,
+      aggregations: [
+        {
+          id: "all", op: "avg", field: "latency", groupBy: ["provider"], label: "Latency",
+          expression: "AVG([latency])", expressionY: "AVG([cost])", scope: "allMatching", groupLimit: 5, minCount: 3, share: "total",
+          window: { periods: 3, reduce: "total", partial: "include" },
+          dateGrouping: { field: "time", interval: "week", timeZone: "Europe/Paris", includeEmpty: false, range: "custom", start: "2026-01-01", end: "2026-02-01", partialIntervals: "include" },
+          display: {
+            kind: "scatter", valueLabel: "V", xLabel: "X", yLabel: "Y", legendPosition: "bottom", maxGroups: 8, showOther: true, boxMean: false,
+            xScale: { mode: "linear", min: -1.5, max: 10 }, yScale: { mode: "log", min: 0.001, max: 1e6 },
+            format: { kind: "duration", decimals: 1, sourceUnit: "seconds", style: "clock", pattern: "hh:mm", timeZone: "UTC" },
+            xFormat: { kind: "datetime", sourceUnit: "epochMilliseconds", style: "iso", timeZone: "America/New_York" },
+            yFormat: { kind: "percent", decimals: 2 },
+            list: { showBars: false, useGroupColors: true, showValues: true, barPosition: "below", maxLabelLines: 2 },
+            pivot: { swap: false, rowDir: "desc", columnDir: "asc" },
+          },
+          distribution: { kind: "box", input: "latency", whiskers: "tukey", bins: 0 },
+          layout: { widthRem: 20, heightRem: 10, minWidthRem: 12, minHeightRem: 14 },
+          sort: [{ key: "group0", dir: "asc", nulls: "first" }, { key: "count", dir: "desc", nulls: "last" }],
+          diagnostics: ["Carried over."],
+        } as never,
+      ],
+    },
+  },
+  {
     name: "item details with pooled views",
     state: {
       ...EMPTY_QUERY,
@@ -229,6 +256,9 @@ export const stateCases: StateCase[] = [
     state: { ...EMPTY_QUERY, where: Array.from({ length: 100 }, (_, i) => ({ field: "n", op: "!=" as const, value: String(i) })) },
   },
 ];
+
+const emoji = (n: number) => "😀".repeat(n);
+const linkSummary = (id: string, to: Record<string, unknown>) => ({ id, op: "link", link: { label: id, to: { kind: "query", target: "t", ...to } } });
 
 export const tokenCases: TokenCase[] = [
   { name: "legacy names and single order", token: legacy({ c: ["a", "b"], o: { field: "a", dir: "desc" }, l: 20, w: [{ field: "a", op: "=", value: "1" }] }) },
@@ -305,6 +335,40 @@ export const tokenCases: TokenCase[] = [
   { name: "byte order mark in a compressed token", token: deflated("﻿" + JSON.stringify({ l: 9 })) },
   { name: "whitespace in compressed JSON", token: deflated(' { "l" : 9 , "w" : [ ] } \n') },
   { name: "trailing bytes after the compressed stream", token: "2d." + base64url(Buffer.concat([Buffer.from(deflateSync(Buffer.from('{"l":3}'))), Buffer.from([1, 2, 3])])) },
+  {
+    name: "grouping limits and malformed links",
+    token: plain({
+      b: {
+        keys: ["k"],
+        summaries: [
+          linkSummary("nested link", { patch: { id: "p", owns: ["grouping"], query: { grouping: { keys: ["a"], summaries: [linkSummary("inner", {})], source: {} } } } }),
+          linkSummary("bad base", { base: "elsewhere" }),
+          linkSummary("bad key filters", { keyFilters: "yes" }),
+          linkSummary("params list", { params: ["a"] }),
+          linkSummary("numeric param", { params: { a: 1 } }),
+          linkSummary("too many params", { params: Object.fromEntries(Array.from({ length: 51 }, (_, i) => [`p${i}`, "v"])) }),
+          linkSummary("good params", { params: Object.fromEntries(Array.from({ length: 50 }, (_, i) => [`p${i}`, "v"])) }),
+          ...Array.from({ length: 60 }, (_, i) => ({ id: `s${i}`, op: "count" })),
+          { id: "past the limit", op: "count" },
+        ],
+        representative: { orderBy: Array.from({ length: 9 }, (_, i) => ({ field: `r${i}`, dir: "asc" })) },
+        source: {},
+      },
+    }),
+  },
+  {
+    name: "lengths at the limit in UTF-16 units",
+    token: plain({
+      w: [{ field: emoji(128), op: "=", value: emoji(5000) }],
+      g: [
+        { id: emoji(128), op: "count", groupBy: [emoji(128)], label: emoji(500) },
+        { id: "long label", op: "count", groupBy: [], label: emoji(501), field: emoji(129) },
+      ],
+      b: { keys: [emoji(128)], summaries: [{ id: emoji(129), op: "count" }], source: {} },
+    }),
+  },
+  { name: "values with an own toString in caught members", token: plain({ d: { modes: ["modal"], view: { version: 1, properties: [{ id: "a", field: "f", format: { kind: { toString: 1 } } }] } } }) },
+  { name: "values with an own valueOf", token: plain({ b: { keys: ["k"], summaries: [{ id: "x", op: { valueOf: 1 } }], source: {} } }) },
   { name: "deep nesting in ignored members", token: plain('{"z":' + "[".repeat(5000) + "]".repeat(5000) + ',"l":4}') },
 ];
 
@@ -360,6 +424,15 @@ export const invalidCases: InvalidCase[] = [
   { name: "predicate budget exceeded", token: plain({ w: tooManyPredicates }), code: "invalid" },
   { name: "group over the budget", token: plain({ w: [{ any: tooManyPredicates }] }), code: "invalid" },
   { name: "set filters over the budget", token: plain({ w: [["set", "tags", "all", Array.from({ length: 60 }, (_, i) => `a${i}`), "a"], ["set", "tags", "all", Array.from({ length: 41 }, (_, i) => `b${i}`), "b"]] }), code: "invalid" },
+  { name: "own toString in a set mode", token: plain({ w: [{ field: "a", op: "=", value: "x", setFilter: { id: "s", mode: { toString: 1 }, values: [] } }] }), code: "invalid" },
+  { name: "own toString in a summary op", token: plain({ b: { keys: ["k"], summaries: [{ id: "x", op: { toString: 1 } }], source: {} } }), code: "invalid" },
+  { name: "own toString inside an array op", token: plain({ b: { keys: ["k"], summaries: [{ id: "x", op: [1, [{ toString: null }]] }], source: {} } }), code: "invalid" },
+  { name: "own toString in a representative direction", token: plain({ b: { keys: ["k"], summaries: [], representative: { orderBy: [{ field: "t", dir: { toString: "asc" } }] }, source: {} } }), code: "invalid" },
+  { name: "own toString in representative nulls", token: plain({ b: { keys: ["k"], summaries: [], representative: { orderBy: [{ field: "t", dir: "asc", nulls: [{ toString: 1 }] }] }, source: {} } }), code: "invalid" },
+  { name: "own toString in a metric sort direction", token: plain({ g: [{ id: "m", op: "count", groupBy: [], sort: [{ key: "value", dir: { toString: 1 } }] }] }), code: "invalid" },
+  { name: "op nested beyond the stack", token: plain('{"b":{"keys":["k"],"summaries":[{"id":"x","op":' + "[".repeat(20000) + "]".repeat(20000) + '}],"source":{}}}'), code: "invalid" },
+  { name: "field name over the limit in UTF-16 units", token: plain({ w: [{ field: emoji(128) + "x", op: "=", value: "1" }] }), code: "invalid" },
+  { name: "value over the limit in UTF-16 units", token: plain({ w: [{ field: "a", op: "=", value: emoji(5000) + "x" }] }), code: "invalid" },
   { name: "empty metrics", token: plain({ g: [] }), code: "invalid" },
   { name: "metric without an id", token: plain({ g: [{ op: "sum", groupBy: [] }] }), code: "invalid" },
   { name: "metric over the limit", token: plain({ g: Array.from({ length: 21 }, (_, i) => ({ id: `m${i}`, op: "count", groupBy: [] })) }), code: "invalid" },

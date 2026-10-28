@@ -17,6 +17,7 @@ package querytable
 import (
 	"errors"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -42,9 +43,39 @@ type jsValue struct {
 	o    *jsMembers
 }
 
+// jsMembers keeps array-index keys apart from the others, so that inserting
+// many of them stays linear: they are sorted once, when next enumerated.
 type jsMembers struct {
-	keys   []string
-	values map[string]*jsValue
+	index    []string // array-index keys, in numeric order once sorted
+	unsorted bool
+	names    []string // other keys, in insertion order
+	values   map[string]*jsValue
+}
+
+// keys lists the members in JavaScript enumeration order. Callers must not
+// modify the result.
+func (o *jsMembers) keys() []string {
+	if o.unsorted {
+		sort.Slice(o.index, func(i, j int) bool { return indexLess(o.index[i], o.index[j]) })
+		o.unsorted = false
+	}
+	if len(o.index) == 0 {
+		return o.names
+	}
+	if len(o.names) == 0 {
+		return o.index
+	}
+	return append(append(make([]string, 0, len(o.values)), o.index...), o.names...)
+}
+
+func (o *jsMembers) size() int { return len(o.values) }
+
+// indexLess orders canonical array indices, which have no leading zeros.
+func indexLess(a, b string) bool {
+	if len(a) != len(b) {
+		return len(a) < len(b)
+	}
+	return a < b
 }
 
 func jsNullValue() *jsValue       { return &jsValue{kind: jsNull} }
@@ -90,21 +121,14 @@ func (v *jsValue) set(key string, value *jsValue) *jsValue {
 		return v
 	}
 	o.values[key] = value
-	if index, ok := arrayIndex(key); ok {
-		at := 0
-		for at < len(o.keys) {
-			other, isIndex := arrayIndex(o.keys[at])
-			if !isIndex || other > index {
-				break
-			}
-			at++
+	if _, ok := arrayIndex(key); ok {
+		if n := len(o.index); n > 0 && !indexLess(o.index[n-1], key) {
+			o.unsorted = true
 		}
-		o.keys = append(o.keys, "")
-		copy(o.keys[at+1:], o.keys[at:])
-		o.keys[at] = key
+		o.index = append(o.index, key)
 		return v
 	}
-	o.keys = append(o.keys, key)
+	o.names = append(o.names, key)
 	return v
 }
 
@@ -114,19 +138,23 @@ func (v *jsValue) del(key string) {
 		return
 	}
 	delete(o.values, key)
-	for i, k := range o.keys {
-		if k == key {
-			o.keys = append(o.keys[:i], o.keys[i+1:]...)
-			break
+	remove := func(keys []string) []string {
+		for i, k := range keys {
+			if k == key {
+				return append(keys[:i], keys[i+1:]...)
+			}
 		}
+		return keys
 	}
+	o.index = remove(o.index)
+	o.names = remove(o.names)
 }
 
 // spread is `{ ...v }`: a shallow copy of an object's own members.
 func (v *jsValue) spread() *jsValue {
 	out := jsObj()
 	if v.isRecord() {
-		for _, key := range v.o.keys {
+		for _, key := range v.o.keys() {
 			out.set(key, v.o.values[key])
 		}
 	}
@@ -167,33 +195,74 @@ func (v *jsValue) truthy() bool {
 	return true
 }
 
-// jsToString is JavaScript's String(value).
+// jsThrow is a JavaScript exception raised during normalization. It is a
+// panic so that normalization reads like its TypeScript original; catchJS and
+// the codec entry points recover it, as the TypeScript try blocks do.
+type jsThrow struct{ reason string }
+
+func throwJS(reason string) { panic(jsThrow{reason}) }
+
+// catchJS runs fn and reports whether it threw a jsThrow.
+func catchJS(fn func()) (threw bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			if _, ok := r.(jsThrow); !ok {
+				panic(r)
+			}
+			threw = true
+		}
+	}()
+	fn()
+	return false
+}
+
+// maxStringNesting bounds the array nesting String() will join. V8 runs out of
+// stack at about 2,600 levels (a RangeError); stopping earlier keeps Go on the
+// rejecting side of that engine-dependent limit.
+const maxStringNesting = 1000
+
+// jsToString is JavaScript's String(value) on a JSON value. Like JavaScript,
+// it throws for an object with its own "toString" member (which shadows the
+// prototype method with a value that is not callable), including inside an
+// array, and for arrays nested too deeply.
 func jsToString(v *jsValue) string {
+	var b strings.Builder
+	appendJSToString(&b, v, 0)
+	return b.String()
+}
+
+func appendJSToString(b *strings.Builder, v *jsValue, depth int) {
 	if v == nil {
-		return "undefined"
+		b.WriteString("undefined")
+		return
 	}
 	switch v.kind {
 	case jsNull:
-		return "null"
+		b.WriteString("null")
 	case jsBool:
-		if v.b {
-			return "true"
-		}
-		return "false"
+		b.WriteString(strconv.FormatBool(v.b))
 	case jsNumber:
-		return formatJSNumber(v.n)
+		b.WriteString(formatJSNumber(v.n))
 	case jsString:
-		return v.s
+		b.WriteString(v.s)
 	case jsArray:
-		parts := make([]string, len(v.a))
+		if depth >= maxStringNesting {
+			throwJS("Maximum call stack size exceeded")
+		}
 		for i, item := range v.a {
+			if i > 0 {
+				b.WriteByte(',')
+			}
 			if !item.isNullish() {
-				parts[i] = jsToString(item)
+				appendJSToString(b, item, depth+1)
 			}
 		}
-		return strings.Join(parts, ",")
+	default:
+		if _, own := v.o.values["toString"]; own {
+			throwJS("Cannot convert object to primitive value")
+		}
+		b.WriteString("[object Object]")
 	}
-	return "[object Object]"
 }
 
 // formatJSNumber is Number.prototype.toString for a float64.
@@ -681,7 +750,7 @@ func appendJS(b []byte, v *jsValue) []byte {
 	}
 	b = append(b, '{')
 	first := true
-	for _, key := range v.o.keys {
+	for _, key := range v.o.keys() {
 		value := v.o.values[key]
 		if value == nil {
 			continue

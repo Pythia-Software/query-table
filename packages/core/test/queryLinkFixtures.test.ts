@@ -59,6 +59,33 @@ function buildFixture() {
   return { valid, invalid, encodeInvalid };
 }
 
+/** Every option name normalizeMetricOptions reads: the keys of each `copy`
+ * spec, the members it reads from `raw` and the keys of its loops. */
+function metricOptionKeys(): string[] {
+  const source = readFileSync(new URL("../src/metricNormalize.ts", import.meta.url), "utf8");
+  const keys = new Set<string>();
+  for (const [, spec] of source.matchAll(/copy\([^,]+,\s*\{([^}]*)\}/g))
+    for (const [, key] of spec!.matchAll(/(\w+)\s*:/g)) keys.add(key!);
+  for (const [, path, call] of source.matchAll(/\braw((?:\.\w+)+)(\s*\()?/g)) {
+    const members = path!.split(".").filter(Boolean);
+    for (const key of call ? members.slice(0, -1) : members) keys.add(key); // not raw.sort.slice(…)
+  }
+  for (const [, list] of source.matchAll(/for \(const k of \[([^\]]*)\]\)/g))
+    for (const [, key] of list!.matchAll(/"(\w+)"/g)) keys.add(key!);
+  return [...keys].sort();
+}
+
+/** Keys of every metric in a normalized state, including nested queries. */
+function metricKeysIn(value: unknown, inMetric = false, out = new Set<string>()): Set<string> {
+  if (Array.isArray(value)) for (const item of value) metricKeysIn(item, inMetric, out);
+  else if (value && typeof value === "object")
+    for (const [key, item] of Object.entries(value)) {
+      if (inMetric) out.add(key);
+      metricKeysIn(item, inMetric || key === "aggregations", out);
+    }
+  return out;
+}
+
 describe("query link fixtures", () => {
   const fixture = buildFixture();
 
@@ -67,6 +94,15 @@ describe("query link fixtures", () => {
     if (process.env.UPDATE_QUERY_LINK_FIXTURES === "1") writeFileSync(fixturePath, expected);
     const actual = existsSync(fixturePath) ? readFileSync(fixturePath, "utf8") : "";
     expect(actual === expected, "schema/fixtures/query-links.json is stale; rerun with UPDATE_QUERY_LINK_FIXTURES=1").toBe(true);
+  });
+
+  // Go ports normalizeMetricOptions key by key. A new option must reach the
+  // fixtures (normalized, so with a valid value), or Go would drop it unseen.
+  it("cover every metric option", () => {
+    const covered = metricKeysIn(fixture.valid.map((c) => c.normalized));
+    const options = metricOptionKeys();
+    expect(options.length).toBeGreaterThan(50);
+    expect(options.filter((key) => !covered.has(key)), "add these metric options to queryLinkCases.ts").toEqual([]);
   });
 
   it("have unique names", () => {

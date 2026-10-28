@@ -42,6 +42,8 @@ var (
 	linkAggOps      = stringSet("count", "count_distinct", "sum", "avg", "min", "max")
 	linkSetModes    = stringSet("any", "all", "none", "empty")
 	linkQueryFacets = stringSet("filters", "columns", "order", "grouping", "metrics", "limit")
+	sortDirections  = stringSet("asc", "desc")
+	nullPlacements  = stringSet("first", "last")
 	linkPatchKeys   = []string{"select", "where", "orderBy", "limit", "aggregations", "grouping", "fitToScreen"}
 )
 
@@ -339,7 +341,7 @@ func normalizeLinkAggregation(item *jsValue) *jsValue {
 		aggregation.set("label", jsStr(label))
 	}
 	options := normalizeLinkMetricOptions(item)
-	for _, key := range options.o.keys {
+	for _, key := range options.o.keys() {
 		aggregation.set(key, options.o.values[key])
 	}
 	metricWhere, invalidWhere := normalizeLinkMetricWhere(item.get("where"))
@@ -577,7 +579,7 @@ func normalizeLinkMetricOptions(raw *jsValue) *jsValue {
 				d.set("pivot", m.copy(pivot, metricPivotOptions))
 			}
 			withKind := jsObj().set("kind", jsStr("auto"))
-			for _, key := range d.o.keys {
+			for _, key := range d.o.keys() {
 				withKind.set(key, d.o.values[key])
 			}
 			out.set("display", withKind)
@@ -614,7 +616,7 @@ func normalizeLinkMetricOptions(raw *jsValue) *jsValue {
 		for _, s := range firstN(sort.a, 20) {
 			key := s.get("key")
 			if !s.isRecord() || !key.isString() || !metricSortKey.MatchString(key.s) ||
-				!stringSet("asc", "desc")[jsToString(s.get("dir"))] {
+				!sortDirections[jsToString(s.get("dir"))] {
 				m.diagnostics = append(m.diagnostics, "Invalid metric sort.")
 				continue
 			}
@@ -709,7 +711,7 @@ func parseLinkCellDisplay(raw *jsValue, context string) (*jsValue, string) {
 	if !ok {
 		return fail("unsupported kind")
 	}
-	for _, key := range raw.o.keys {
+	for _, key := range raw.o.keys() {
 		if key == "kind" {
 			continue
 		}
@@ -731,7 +733,7 @@ func parseLinkCellDisplay(raw *jsValue, context string) (*jsValue, string) {
 			if !value.isRecord() {
 				return fail("invalid " + key + " map")
 			}
-			for _, entry := range value.o.keys {
+			for _, entry := range value.o.keys() {
 				item := value.o.values[entry]
 				if !item.isString() || (rule.kind == "tones" && !chipTones[item.s]) {
 					return fail("invalid " + key + " map")
@@ -898,6 +900,16 @@ func normalizeLinkPropertyView(input *jsValue) *jsValue {
 	return out
 }
 
+// tryPropertyView is the TypeScript `try { normalizePropertyView(view) }
+// catch {}`: a view that throws, even while coercing a value to text, is
+// ignored.
+func tryPropertyView(view *jsValue) (normalized *jsValue) {
+	if catchJS(func() { normalized = normalizeLinkPropertyView(view) }) {
+		return nil
+	}
+	return normalized
+}
+
 var (
 	itemDetailModes   = []string{"hover", "modal", "expand", "page"}
 	itemPropertyModes = []string{"hover", "modal", "expand"}
@@ -926,7 +938,7 @@ func normalizeLinkItemDetails(raw *jsValue) *jsValue {
 		}
 	}
 	if view := raw.get("view"); view != nil {
-		if normalized := normalizeLinkPropertyView(view); normalized != nil {
+		if normalized := tryPropertyView(view); normalized != nil {
 			details.set("view", normalized)
 		}
 	}
@@ -934,12 +946,12 @@ func normalizeLinkItemDetails(raw *jsValue) *jsValue {
 		out := jsObj()
 		for _, mode := range itemPropertyModes {
 			if view := views.get(mode); view != nil {
-				if normalized := normalizeLinkPropertyView(view); normalized != nil {
+				if normalized := tryPropertyView(view); normalized != nil {
 					out.set(mode, normalized)
 				}
 			}
 		}
-		if len(out.o.keys) > 0 {
+		if out.o.size() > 0 {
 			details.set("views", out)
 		}
 	}
@@ -1098,8 +1110,8 @@ func normalizeLinkGrouping(value *jsValue, links bool) *jsValue {
 			field, fieldOK := boundedJSString(term.get("field"), linkMaxFieldName)
 			dir := term.get("dir")
 			nulls := term.get("nulls")
-			if !term.isRecord() || !fieldOK || !stringSet("asc", "desc")[jsToString(dir)] ||
-				(nulls != nil && !stringSet("first", "last")[jsToString(nulls)]) {
+			if !term.isRecord() || !fieldOK || !sortDirections[jsToString(dir)] ||
+				(nulls != nil && !nullPlacements[jsToString(nulls)]) {
 				fail(`each representative ordering term needs a field, dir "asc" or "desc", and optional nulls "first" or "last".`)
 				continue
 			}
@@ -1193,10 +1205,10 @@ func normalizeLinkSpec(value *jsValue) *jsValue {
 		destination.set("patch", patch)
 	}
 	if params := to.get("params"); params != nil {
-		if !params.isRecord() || len(params.o.keys) > linkMaxLinkParams {
+		if !params.isRecord() || params.o.size() > linkMaxLinkParams {
 			return nil
 		}
-		for _, key := range params.o.keys {
+		for _, key := range params.o.keys() {
 			item := params.o.values[key]
 			if n := jsLength(key); n == 0 || n > linkMaxFieldName || !item.isString() || jsLength(item.s) > linkMaxFilterValue {
 				return nil

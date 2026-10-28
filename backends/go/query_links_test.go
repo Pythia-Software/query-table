@@ -11,8 +11,10 @@ import (
 	"os"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Parity with @pythia-software/query-table-core. The TypeScript test
@@ -126,7 +128,7 @@ func expandGenerators(v *jsValue) *jsValue {
 		return jsStr(string(out))
 	}
 	out := jsObj()
-	for _, key := range v.o.keys {
+	for _, key := range v.o.keys() {
 		out.set(key, expandGenerators(v.o.values[key]))
 	}
 	return out
@@ -274,6 +276,7 @@ func TestEncodeQueryLinkRejectsWhatStrictDecodingRejects(t *testing.T) {
 		"empty field":       {Where: []WhereTerm{{Op: "=", Value: "x"}}},
 		"group member":      {Where: []WhereTerm{{Any: []WhereClause{{Field: "a", Op: "=", Value: "1"}, {Field: "b", Op: "?"}}}}},
 		"predicate budget":  {Where: predicates},
+		"empty OR group":    {Where: []WhereTerm{{Field: "a", Op: "=", Value: "1"}, {Any: []WhereClause{}}}},
 		"metric without id": {Aggregations: []json.RawMessage{json.RawMessage(`{"op":"count","groupBy":[]}`)}},
 		"metric JSON":       {Aggregations: []json.RawMessage{json.RawMessage(`{`)}},
 		"grouping JSON":     {Grouping: json.RawMessage(`[`)},
@@ -356,4 +359,57 @@ func FuzzDecodeQueryLink(f *testing.F) {
 			t.Fatalf("re-encoded token does not decode: %v", err)
 		}
 	})
+}
+
+// Inserting array-index keys used to cost O(n) each. A link near the token
+// limit with hundreds of thousands of them must still decode quickly, both
+// where normalization ignores it and where it keeps and re-encodes it.
+func TestDecodeQueryLinkManyIndexKeysIsLinear(t *testing.T) {
+	const keys = 200_000
+	members := func(descending bool) string {
+		var b strings.Builder
+		b.WriteByte('{')
+		for i := 0; i < keys; i++ {
+			n := i
+			if descending {
+				n = keys - 1 - i
+			}
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			b.WriteString(`"` + strconv.Itoa(n) + `":"v"`)
+		}
+		b.WriteString(`,"name":"v"}`)
+		return b.String()
+	}
+	deflate := func(text string) string {
+		var buf bytes.Buffer
+		w, _ := flate.NewWriter(&buf, flate.BestCompression)
+		w.Write([]byte(text))
+		w.Close()
+		return "2d." + base64.RawURLEncoding.EncodeToString(buf.Bytes())
+	}
+	for name, payload := range map[string]string{
+		"ignored ascending":  `{"z":` + members(false) + `}`,
+		"ignored descending": `{"z":` + members(true) + `}`,
+		"kept chip labels":   `{"s":[["a",null,{"kind":"chip","labels":` + members(true) + `}]]}`,
+	} {
+		token := deflate(payload)
+		if len(token) > MaxQueryTokenLength {
+			t.Fatalf("%s: token too long", name)
+		}
+		start := time.Now()
+		q, err := DecodeQueryLink(token)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if _, err := EncodeQueryLink(q); err != nil && linkErrorCode(err) != string(QueryLinkTooLarge) {
+			t.Fatalf("%s: re-encode: %v", name, err)
+		}
+		elapsed := time.Since(start)
+		t.Logf("%s: %d-byte token decoded and re-encoded in %v", name, len(token), elapsed)
+		if elapsed > 10*time.Second {
+			t.Errorf("%s took %v", name, elapsed)
+		}
+	}
 }

@@ -97,11 +97,20 @@ type LinkQuery struct {
 // byte-identical to the TypeScript encoder's.
 //
 // Unlike encodeQuery, it applies decodeQueryStrict's own checks first, so it
-// never builds a link that drops or widens a filter or metric: a malformed or
-// over-budget predicate, or an aggregation that normalization would discard,
-// is a QueryLinkInvalid error. A state over MaxQueryStateBytes or a token over
+// never builds a link whose top-level filters or metrics are dropped or
+// widened: a malformed or over-budget predicate, an empty OR group (which
+// matches nothing, and which normalization would drop), or an aggregation that
+// normalization would discard is a QueryLinkInvalid error. Filters nested in
+// metrics, grouping and link patches are normalized as in TypeScript, which
+// records a diagnostic or drops the link when it loses a predicate. A state over MaxQueryStateBytes or a token over
 // MaxQueryTokenLength is QueryLinkTooLarge.
-func EncodeQueryLink(q LinkQuery) (string, error) {
+func EncodeQueryLink(q LinkQuery) (token string, err error) {
+	defer recoverJSThrow(&err)
+	for _, term := range q.Where {
+		if term.IsGroup() && len(term.Any) == 0 {
+			return "", linkError(QueryLinkInvalid, "Empty OR group in query predicates.")
+		}
+	}
 	raw, err := q.jsState()
 	if err != nil {
 		return "", err
@@ -127,12 +136,24 @@ func EncodeQueryLink(q LinkQuery) (string, error) {
 // view references, malformed or over-budget predicates and metrics
 // (QueryLinkInvalid), and tokens or states over the size limits, with
 // inflation bounded by MaxQueryStateBytes (QueryLinkTooLarge).
-func DecodeQueryLink(token string) (LinkQuery, error) {
+func DecodeQueryLink(token string) (q LinkQuery, err error) {
+	defer recoverJSThrow(&err)
 	state, err := decodeLinkState(token)
 	if err != nil {
 		return LinkQuery{}, err
 	}
 	return linkQueryFromState(state)
+}
+
+// recoverJSThrow reports a JavaScript exception raised during normalization
+// as decodeToken does: any error that is not a QueryDecodeError is invalid.
+func recoverJSThrow(err *error) {
+	if r := recover(); r != nil {
+		if _, ok := r.(jsThrow); !ok {
+			panic(r)
+		}
+		*err = linkError(QueryLinkInvalid, "Invalid or incomplete query link.")
+	}
 }
 
 // ---- tokens -----------------------------------------------------------------
@@ -411,7 +432,7 @@ func packLinkQuery(c *jsValue) *jsValue {
 		views := details.get("views")
 		pool := jsArr()
 		refs := jsObj()
-		for _, mode := range views.o.keys {
+		for _, mode := range views.o.keys() {
 			view := views.o.values[mode]
 			index := -1
 			for i, existing := range pool.a {
@@ -470,7 +491,7 @@ func unpackLinkQuery(c *jsValue) error {
 		return linkError(QueryLinkInvalid, "Invalid property views in query link.")
 	}
 	resolved := jsObj()
-	for _, mode := range refs.o.keys {
+	for _, mode := range refs.o.keys() {
 		index := refs.o.values[mode]
 		if !linkViewModes[mode] || !jsIsInteger(index) || index.n < 0 || index.n >= float64(len(pool.a)) {
 			return linkError(QueryLinkInvalid, "Invalid property view reference.")
