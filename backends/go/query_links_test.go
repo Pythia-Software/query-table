@@ -369,6 +369,29 @@ func TestMetricOptionTablesMatchTypeScript(t *testing.T) {
 	}
 }
 
+// decodeQueryStrict (fflate) reads each of these malformed DEFLATE streams as
+// {}; Go rejects them, as zlib does. See DecodeQueryLink.
+func TestDecodeQueryLinkRejectsMalformedDeflate(t *testing.T) {
+	for name, token := range map[string]string{
+		"stored block lengths":         "2d.AQIAAAB7fQ",
+		"incomplete code-length code":  "2d.BcABCAAAAIAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgNA",
+		"incomplete literal code":      "2d.BcABCQAAAICg4dH3wAA",
+		"over-subscribed literal code": "2d.BcABCQAAAICg4eL3EA",
+		"too many length symbols":      "2d.9cABCQAAAICg4dL3pmg",
+		"incomplete distance code":     "2d.BcABCQAAAICg4dL30g",
+	} {
+		if _, err := DecodeQueryLink(token); linkErrorCode(err) != string(QueryLinkInvalid) {
+			t.Errorf("%s: got %v", name, err)
+		}
+	}
+	// Well-formed stored and dynamic blocks holding {} still decode.
+	for _, token := range []string{"2d.AQIA_f97fQ", "2d.BcABCQAAAICg4dL30A"} {
+		if _, err := DecodeQueryLink(token); err != nil {
+			t.Errorf("%s: %v", token, err)
+		}
+	}
+}
+
 func TestFormatJSNumber(t *testing.T) {
 	for n, want := range map[float64]string{
 		1e21: "1e+21", 1e-7: "1e-7", 123.456: "123.456", 5e-324: "5e-324", 9007199254740992: "9007199254740992",

@@ -139,6 +139,13 @@ func EncodeQueryLink(q LinkQuery) (token string, err error) {
 // Text decoding follows the TypeScript core on every engine: invalid UTF-8 in
 // a "2j." or legacy token becomes U+FFFD while a "2d." token must be valid
 // UTF-8, and a leading byte order mark is dropped in all three.
+//
+// One difference is deliberate: Go's DEFLATE reader, like zlib, rejects
+// malformed streams that fflate tolerates (a stored block whose NLEN is not
+// the complement of LEN, incomplete or over-subscribed Huffman codes, too many
+// length or distance symbols). Neither encoder writes such streams, so only a
+// corrupted or hand-made "2d." token that the browser would open is invalid
+// here.
 // It rejects other versions (QueryLinkUnsupportedVersion), bad encodings,
 // incomplete or corrupt compression, malformed set-filter tuples or property
 // view references, malformed or over-budget predicates and metrics

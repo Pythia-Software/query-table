@@ -21,8 +21,11 @@
   tables of `metricNormalize.ts`) fails the Go tests when a metric option,
   allowed value or type is added in TypeScript only. The JSON inside a token
   matches `encodeQuery` byte for byte; DEFLATE output does not, so Go may pick
-  the other prefix near a length tie. Compare links by decoded state. The Go
-  module has a `FuzzDecodeQueryLink` fuzz target.
+  the other prefix near a length tie. Compare links by decoded state. Go
+  rejects malformed DEFLATE streams (bad stored-block lengths, incomplete
+  Huffman codes) that fflate tolerates; no encoder writes them. A differential
+  fuzz of 760,000 mutated tokens found no other difference, and the Go module
+  has a `FuzzDecodeQueryLink` fuzz target.
 
 - Public `--qt-touch-target-scale` theme setting for responsive enlargement.
   The default `1` keeps existing sizing; `0.5` halves the added size and `0`

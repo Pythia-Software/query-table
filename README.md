@@ -85,7 +85,8 @@ The JSON inside a token is byte-identical to `encodeQuery`'s, but the DEFLATE
 bytes are not, so a Go `2d.` token can differ from the TypeScript one, and when
 the two forms are close in length either side may pick the other prefix.
 Compare links by decoding them: equal states decode to equal `LinkQuery`
-values (`reflect.DeepEqual`).
+values (`reflect.DeepEqual`). Go also rejects malformed compressed tokens
+that the browser's decoder tolerates; neither encoder writes them.
 
 For schema generation:
 
