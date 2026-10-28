@@ -135,6 +135,29 @@ func TestV3FrontendParity(t *testing.T) {
 	} {
 		run(name, base, qt.QueryRequestV3{Version: 3, Profile: qt.SQLiteExpressionProfile, Result: qt.WireQuery{Select: []string{"id", "label"}, Where: where, OrderBy: []qt.OrderBy{{Field: "id", Dir: "asc"}}, Limit: 10}})
 	}
+	// An OR of AND branches as a record filter, a metric filter, a source
+	// filter and a group filter. The negated literal stays null-exclusive.
+	orOfAnds := qt.WhereTerm{Any: []qt.WhereClause{
+		{All: []qt.WhereClause{{Field: "k", Op: "=", Value: "a"}, {Field: "label", Op: "contains", Value: "o", Negated: true}}},
+		{All: []qt.WhereClause{{Field: "k", Op: "=", Value: "b"}, {Field: "n", Op: ">=", Value: "5"}}},
+		{Field: "label", Op: "=", Value: "empty"},
+	}}
+	run("or-of-ands/records", base, qt.QueryRequestV3{Version: 3, Profile: qt.SQLiteExpressionProfile,
+		Result:  qt.WireQuery{Select: []string{"id"}, Where: []qt.WhereTerm{orOfAnds}, Limit: 10},
+		Metrics: []qt.AggSpec{{ID: "population", Op: "count", GroupBy: []string{"id"}}}})
+	run("or-of-ands/metric-where", base, qt.QueryRequestV3{Version: 3, Profile: qt.SQLiteExpressionProfile,
+		Result:  qt.WireQuery{Select: []string{"id"}, Limit: 10},
+		Metrics: []qt.AggSpec{{ID: "selected", Op: "count", Where: []qt.WhereTerm{orOfAnds}}, {ID: "by_key", Op: "sum", Field: "n", GroupBy: []string{"k"}, Where: []qt.WhereTerm{orOfAnds}}}})
+	q = groupedRequest()
+	q.Source.Where = []qt.WhereTerm{orOfAnds}
+	run("or-of-ands/source", base, q)
+	q = groupedRequest()
+	q.Result.Where = []qt.WhereTerm{{Any: []qt.WhereClause{
+		{All: []qt.WhereClause{{Field: "k", Op: "=", Value: "a"}, {Field: "num", Op: ">=", Value: "2"}}},
+		{All: []qt.WhereClause{{Field: "k", Op: "=", Value: "b"}, {Field: "total", Op: ">", Value: "5"}}},
+	}}}
+	q.Metrics = []qt.AggSpec{{ID: "groups", Op: "count"}}
+	run("or-of-ands/groups", base, q)
 	body, err := json.Marshal(fixtures)
 	if err != nil {
 		t.Fatal(err)

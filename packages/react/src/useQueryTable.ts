@@ -36,7 +36,8 @@ import {
   selectedFields,
   toServerQuery,
   queriesEqual,
-  isOrGroup,
+  isWhereConjunction,
+  isWhereGroup,
   predicatesOf,
   negateClause,
   opsForField,
@@ -53,6 +54,7 @@ const MAX_AUTO_REFRESH_POLLS = 1000;
 import type {
   QueryState,
   WhereClause,
+  WhereBranch,
   WhereTerm,
   OrderByClause,
   AggOp,
@@ -285,7 +287,8 @@ export interface QueryTableApi<Row> {
   /** Remove the whole term at `index`. */
   removeFilter: (index: number) => void;
   clearFilters: () => void;
-  /** Replace one predicate inside a term (predIndex 0 for a literal term). */
+  /** Replace one predicate inside a term (predIndex 0 for a literal term). In
+   *  an OR of conjunctions, predIndex counts literals in `predicatesOf` order. */
   updatePredicate: (
     termIndex: number,
     predIndex: number,
@@ -299,8 +302,8 @@ export interface QueryTableApi<Row> {
    *  dragged term removed, so a drag preview's slot maps straight to the result). */
   reorderFilters: (fromIndex: number, toIndex: number) => void;
   /** OR-merge the term at `sourceIndex` into the term at `targetIndex`: the
-   *  target becomes (or stays) an OR group holding both terms' predicates, and
-   *  the source term is removed. This is the drag-onto-another-filter gesture. */
+   *  target becomes (or stays) an OR group holding both terms' branches (a
+   *  conjunction stays one AND branch), and the source term is removed. This is the drag-onto-another-filter gesture. */
   mergeFilters: (sourceIndex: number, targetIndex: number) => void;
   /** Reset the complete query state back to schema defaults. */
   resetAll: () => void;
@@ -359,8 +362,8 @@ function defaultsFor<Row>(schema: FieldSchema<Row>, details = false): QueryState
 }
 
 function cloneWhereTerm(term: WhereTerm): WhereTerm {
-  const copy = isOrGroup(term)
-    ? { ...term, any: term.any.map((c) => ({ ...c })) }
+  const copy: WhereTerm = isWhereGroup(term)
+    ? { ...term, any: term.any.map((c: WhereBranch) => (isWhereConjunction(c) ? { all: c.all.map((m) => ({ ...m })) } : { ...c })) }
     : { ...term };
   if (term.setFilter)
     copy.setFilter = { ...term.setFilter, values: [...term.setFilter.values] };
@@ -920,7 +923,7 @@ export function useQueryTable<Row>(
         if (transport) {
           if (transport.fetchQueryV3 && transport.queryCapabilities?.version === 3 &&
             (query.grouping || query.select.some(column => isComputedField(column.field)) || query.orderBy.some(term => isComputedField(term.field)) ||
-              query.where.some(term => ("any" in term ? term.any : [term]).some(predicate => isComputedField(predicate.field))) ||
+              query.where.some(term => predicatesOf(term).some(predicate => isComputedField(predicate.field))) ||
               !transport.fetchRows && !(transport.fetchRowsV2 && opts.computedExecution))) {
             const request = toQueryRequestV3({ ...query, aggregations: [], select: [...query.select.filter(column => isComputedField(column.field)),
               ...serverRowQuery.select.map(field => ({ field }))] }, sourceSchema,
@@ -1153,7 +1156,7 @@ export function useQueryTable<Row>(
     {
       ...(metricTransport?.fetchQueryV3 && metricTransport.queryCapabilities?.version === 3 &&
         (query.grouping || query.aggregations?.some(metric => metric.dateGrouping) ||
-          query.where.some(term => ("any" in term ? term.any : [term]).some(predicate => isComputedField(predicate.field))))
+          query.where.some(term => predicatesOf(term).some(predicate => isComputedField(predicate.field))))
         ? { executeV3: executeV3Metrics, queryContextKey: groupKey } : {}),
       ...(groupingNow !== undefined ? { now: groupingNow, strictLocalMetrics: true } : {}),
       shownRows: rows,

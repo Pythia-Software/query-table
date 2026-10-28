@@ -29,7 +29,7 @@ import { assertMetricNumber } from "./metricPrecision";
 import type { MetricDateGrouping, MetricValue } from "./metricTypes";
 import { coerceValue } from "./ops";
 import {
-  isOrGroup,
+  isWhereGroup,
   MAX_AGGREGATIONS,
   type AggregationClause,
   type QueryState,
@@ -156,7 +156,7 @@ export function wholeIntervalSpan(
     upper = Infinity;
   for (const term of [...query.where, ...(c.where ?? [])]) {
     if (
-      isOrGroup(term) ||
+      isWhereGroup(term) ||
       term.negated ||
       canonical(term.field) !== canonical(field) ||
       !["=", ">", ">=", "<", "<="].includes(term.op)

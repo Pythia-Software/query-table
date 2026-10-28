@@ -182,7 +182,7 @@ regression check (`node demo/dnd-test.mjs`).
 interface QueryState {
   select:  SelectColumn[];   // ordered visible columns + per-column width; [] = schema defaults
   fitToScreen?: boolean;    // responsive widths for each viewer; shared in ?q= and saved queries
-  where:   WhereTerm[];      // WHERE in conjunctive normal form: AND of terms (see below)
+  where:   WhereTerm[];      // WHERE: AND of terms, each a predicate or OR group (see below)
   orderBy: OrderByClause[];  // multi-sort, priority = array order
   limit:   number;
   offset:  number;
@@ -190,15 +190,41 @@ interface QueryState {
 }
 ```
 
-The WHERE clause is **conjunctive normal form**: `where` is the AND of its
-terms, where each term is either a single predicate or an `{ any: [...] }` OR
-group. A flat list of predicates (the common case, and the legacy shape) is all
-one-predicate terms, so old `?q=` tokens and saved queries decode unchanged.
+The WHERE clause is an AND of terms. Each term is a single predicate, an
+`{ any: [...] }` OR group, or an OR of conjunctions whose members may be
+`{ all: [...] }` branches. A flat list of predicates (the common case, and the
+legacy shape) is all one-predicate terms, so old `?q=` tokens and saved queries
+decode unchanged.
 
 ```ts
 type WhereClause = { field: string; op: FilterOp; value: string; negated?: boolean };
-type WhereTerm   = WhereClause | { any: WhereClause[] };
+type WhereBranch = WhereClause | { all: WhereClause[] };
+type WhereTerm   = WhereClause | { any: WhereClause[] } | { any: WhereBranch[] };
 ```
+
+An OR of conjunctions selects the union of its branches, such as a legend
+selection of (provider, model) pairs, in one term instead of the AND-of-ORs
+rewrite that grows exponentially with the number of pairs:
+
+```ts
+{ any: [
+  { all: [{ field: "provider", op: "=", value: "claude" }, { field: "model", op: "=", value: "opus" }] },
+  { all: [{ field: "provider", op: "=", value: "codex" }, { field: "model", op: "=", value: "gpt-5" }] },
+] }
+```
+
+Nesting stops at `any` → `all` → predicate. Every predicate in every branch
+counts toward the 100-predicate `where` budget (`MAX_WHERE_CLAUSES`), which also
+bounds the number of branches. Normalization keeps the shape canonical: a
+one-predicate branch becomes that predicate, a group whose branches are all
+single predicates is a plain OR group, a lone branch becomes top-level
+predicates, and a strict decode rejects empty or nested branches. Each
+predicate keeps its own null-exclusive negation. Use `branchesOf(term)` to
+evaluate a term as branches, `predicatesOf(term)` to list every predicate it
+references, and `isOrGroup` / `isOrOfAndsGroup` / `isWhereGroup` to tell the
+shapes apart. The term works in table, source and group (HAVING) filters, metric
+filters and query links, in the local executor, the DuckDB adapter and the Go
+SQLite/PostgreSQL compilers, where `WhereClause.All` holds a branch.
 
 Any predicate can be **negated**. Ops with a complement flip to it
 (`>=`→`<`, `=`→`!=`, `is_null`→`is_not_null`, `matches_regex`→`not_matches_regex`);

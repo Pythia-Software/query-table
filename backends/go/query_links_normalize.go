@@ -93,10 +93,22 @@ func jsUniqueStrings(values []string) []string {
 // isStringIn is `typeof v === "string" && list.includes(v)`.
 func isStringIn(v *jsValue, set map[string]bool) bool { return v.isString() && set[v.s] }
 
-// predicatesOfJS is predicatesOf: a group's members, or the term itself.
+// isConjunctionJS is isWhereConjunction: a member carrying an "all" array.
+func isConjunctionJS(member *jsValue) bool { return member.get("all").isArray() }
+
+// predicatesOfJS is predicatesOf: a group's members (with each conjunction
+// branch's literals in its place), or the term itself.
 func predicatesOfJS(term *jsValue) []*jsValue {
 	if any := term.get("any"); any.isArray() {
-		return any.a
+		out := make([]*jsValue, 0, len(any.a))
+		for _, member := range any.a {
+			if isConjunctionJS(member) {
+				out = append(out, member.get("all").a...)
+			} else {
+				out = append(out, member)
+			}
+		}
+		return out
 	}
 	return []*jsValue{term}
 }
@@ -109,17 +121,25 @@ func predicateCount(terms []*jsValue) int {
 	return n
 }
 
-// suppliedPredicates counts raw terms as normalizeMetricWhere does: a group
-// counts its members, anything else one.
+// suppliedPredicates counts raw terms as suppliedPredicateCount does: a group
+// counts its members, a conjunction branch its literals (an empty one as one),
+// anything else one.
 func suppliedPredicates(terms []*jsValue, emptyGroupCountsOne bool) int {
 	n := 0
 	for _, term := range terms {
 		if any := term.get("any"); any.isArray() {
-			if emptyGroupCountsOne && len(any.a) == 0 {
-				n++
-			} else {
-				n += len(any.a)
+			count := 0
+			for _, member := range any.a {
+				if member.isRecord() && isConjunctionJS(member) {
+					count += max(1, len(member.get("all").a))
+				} else {
+					count++
+				}
 			}
+			if emptyGroupCountsOne && count == 0 {
+				count = 1
+			}
+			n += count
 		} else {
 			n++
 		}
@@ -180,13 +200,37 @@ func normalizeLinkWhereTerms(input []*jsValue) []*jsValue {
 				if budget <= 0 {
 					break
 				}
+				if all := inner.get("all"); inner.isRecord() && all.isArray() {
+					// A conjunction branch: plain literals only, one level deep.
+					var literals []*jsValue
+					for _, literal := range all.a {
+						if budget <= 0 {
+							break
+						}
+						if clause := normalizeLinkClause(literal); clause != nil {
+							literals = append(literals, clause)
+							budget--
+						}
+					}
+					if len(literals) == 1 {
+						members = append(members, literals[0])
+					} else if len(literals) > 1 {
+						members = append(members, jsObj().set("all", jsArr(literals...)))
+					}
+					continue
+				}
 				if clause := normalizeLinkClause(inner); clause != nil {
 					members = append(members, clause)
 					budget--
 				}
 			}
 			if len(members) == 1 {
-				where = append(where, members[0])
+				// One branch is plain AND: a literal, or the conjunction's literals.
+				if isConjunctionJS(members[0]) {
+					where = append(where, members[0].get("all").a...)
+				} else {
+					where = append(where, members[0])
+				}
 			} else if len(members) > 1 {
 				where = append(where, jsObj().set("any", jsArr(members...)))
 			}

@@ -77,7 +77,9 @@ const groupedQuery = normalizeQueryState({
 });
 ```
 
-HAVING predicates use the same operators as WHERE, including their NULL
+HAVING terms have the same shapes as WHERE, including an OR of `{ all: [...] }`
+conjunctions, so a selection of several key combinations filters grouped rows in
+one term. HAVING predicates use the same operators as WHERE, including their NULL
 behavior: `!=` is SQL `<>` on the server backends, so a group whose summary is
 NULL (for example `AVG` over only NULL values) does not match `avg != 0`. Add
 an `is_null` predicate in an OR group to keep such groups, or `is_not_null` to

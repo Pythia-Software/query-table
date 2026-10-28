@@ -44,7 +44,8 @@ import {
   ITEM_DETAILS_COLUMN,
   MAX_WHERE_CLAUSES,
   filterValues as filterValuesFor,
-  isOrGroup,
+  branchesOf,
+  isWhereGroup,
   opPairsForField,
   negateClause,
   predicatesOf,
@@ -252,9 +253,23 @@ function whereTermAsText<Row>(
   term: WhereTerm,
   byName: Map<string, FieldDef<Row>>,
 ): string {
-  if (isOrGroup(term))
-    return `(${term.any.map((c) => predicateAsText(c, byName)).join(" or ")})`;
+  if (isWhereGroup(term))
+    return `(${branchesOf(term)
+      .map((branch) =>
+        branch.length === 1
+          ? predicateAsText(branch[0]!, byName)
+          : `(${branch.map((c) => predicateAsText(c, byName)).join(" and ")})`,
+      )
+      .join(" or ")})`;
   return predicateAsText(term, byName);
+}
+
+/** The connective shown before each literal of a term, in `predicatesOf`
+ *  order: none for the first, AND within a conjunction branch, else OR. */
+function predicateJoiners(term: WhereTerm): ("AND" | "OR" | null)[] {
+  return branchesOf(term).flatMap((branch, b) =>
+    branch.map((_, i) => (i > 0 ? "AND" : b > 0 ? "OR" : null)),
+  );
 }
 
 function orderByAsText<Row>(
@@ -1375,7 +1390,7 @@ function WhereRow<Row>({
   }, [editingSet, whereSignature]);
   // Only make the top-level conjunction explicit ("AND" between terms) once an
   // OR group is present — otherwise a plain AND-list reads fine unadorned.
-  const hasOr = where.some(isOrGroup);
+  const hasOr = where.some(isWhereGroup);
 
   function replaceSet(id: string, terms: WhereTerm[]) {
     api.setQuery((query) => {
@@ -1641,7 +1656,7 @@ function setFilterValueLabel(field: FieldDef, value: string): string {
 }
 
 /** One top-level WHERE term: a single predicate, or a bordered OR group holding
- *  several. Draggable by its grip; a drop onto another chip's center ORs them,
+ *  several (an AND branch of an OR of conjunctions has its own dashed border). Draggable by its grip; a drop onto another chip's center ORs them,
  *  onto its edges reorders. */
 function TermChip<Row>({
   api,
@@ -1675,8 +1690,7 @@ function TermChip<Row>({
   onEditorChange: (open: boolean) => void;
 }) {
   const mobile = useMobileLayout();
-  const group = isOrGroup(term);
-  const predicates = predicatesOf(term);
+  const group = isWhereGroup(term);
 
   if (mobile)
     return (
@@ -1728,22 +1742,38 @@ function TermChip<Row>({
       {grip}
       {group ? (
         <span className="qt-or-group">
-          {predicates.map((clause, predIndex) => (
-            <span className="qt-or-member" key={predIndex}>
-              {predIndex > 0 && (
-                <span className="qt-chip-and qt-chip-or">OR</span>
-              )}
-              <PredicateEditor
-                api={api}
-                field={byName.get(clause.field)}
-                clause={clause}
-                classNames={classNames}
-                disabled={disabled}
-                onChange={(next) => api.updatePredicate(index, predIndex, next)}
-                onRemove={() => api.removePredicate(index, predIndex)}
-              />
-            </span>
-          ))}
+          {(() => {
+            // Literals are addressed in predicatesOf order across branches.
+            let predIndex = 0;
+            return branchesOf(term).map((branch, branchIndex) => (
+              <span className="qt-or-member" key={branchIndex}>
+                {branchIndex > 0 && (
+                  <span className="qt-chip-and qt-chip-or">OR</span>
+                )}
+                <span className={cx("qt-or-member", branch.length > 1 && "qt-and-branch")}>
+                  {branch.map((clause, i) => {
+                    const at = predIndex++;
+                    return (
+                      <Fragment key={i}>
+                        {i > 0 && (
+                          <span className="qt-chip-and qt-chip-or">AND</span>
+                        )}
+                        <PredicateEditor
+                          api={api}
+                          field={byName.get(clause.field)}
+                          clause={clause}
+                          classNames={classNames}
+                          disabled={disabled}
+                          onChange={(next) => api.updatePredicate(index, at, next)}
+                          onRemove={() => api.removePredicate(index, at)}
+                        />
+                      </Fragment>
+                    );
+                  })}
+                </span>
+              </span>
+            ));
+          })()}
         </span>
       ) : (
         <PredicateEditor
@@ -1780,6 +1810,7 @@ function MobileFilter<Row>({
   onOpenChange: (open: boolean) => void;
 }) {
   const predicates = predicatesOf(term);
+  const joiners = predicateJoiners(term);
   return (
     <>
       <MobileClauseSummary
@@ -1811,7 +1842,7 @@ function MobileFilter<Row>({
               (clause.op === "length_eq" || clause.op === "length_gt");
             return (
               <span key={position} className="qt-mobile-filter-summary">
-                {position > 0 && <small>OR</small>}
+                {joiners[position] && <small>{joiners[position]}</small>}
                 <strong>
                   {byName.get(clause.field)?.label ?? clause.field}
                 </strong>
@@ -1846,7 +1877,7 @@ function MobileFilter<Row>({
           <div className="qt-overlay-body qt-filter-editor">
             {predicates.map((clause, position) => (
               <Fragment key={position}>
-                {position > 0 && <p className="qt-muted">OR</p>}
+                {joiners[position] && <p className="qt-muted">{joiners[position]}</p>}
                 <PredicateEditor
                   api={api}
                   clause={clause}

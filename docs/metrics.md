@@ -73,7 +73,8 @@ const errorKinds: AggregationClause = {
 };
 ```
 
-`where` has the table WHERE's shape (CNF terms with optional OR groups), field
+`where` has the table WHERE's shape (terms with optional OR groups and OR of
+`{ all: [...] }` conjunctions), field
 allowlist, operators per type and relative datetime values, and is ANDed with
 the table WHERE before grouping. Relative values resolve against the same
 request clock as the table WHERE. Regex operators are unavailable in metric
@@ -342,7 +343,8 @@ interval) or `range: "custom"` with `start` and `end`:
 dateGrouping: { field: "enqueued_at", interval: "day", includeEmpty: true, range: "observed" }
 ```
 
-Bounds inside an OR group do not count, nor do filters on other fields.
+Bounds inside an OR group, including a branch of an OR of conjunctions, do not
+count, nor do filters on other fields.
 Query filters retain their absolute timestamp semantics, including
 UTC interpretation of date-only filter values; grouping does not rewrite them.
 An exclusive upper bound exactly at a local boundary does not create the next

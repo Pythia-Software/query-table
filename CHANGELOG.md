@@ -24,6 +24,29 @@
   statuses with the error. Restoration stays in `api.restoration`. A slower
   earlier execution never updates a later receipt, and hidden or restoring
   tables publish none.
+- OR of conjunctions in `where`: a term
+  `{ any: [{ all: [a, b] }, { all: [c, d] }] }` matches the union of its
+  branches, so a legend selection of (provider, model) pairs filters in one
+  term instead of an AND of ORs that grows as fields^pairs. A branch may also be
+  a bare predicate. It works in table, grouping-source and group (HAVING)
+  filters and in metric filters: in `applyQuery`, `evaluateMetrics`, the DuckDB
+  adapter, `/metrics`, `/query-v3`, `ExecuteV2Rows` and the Go SQLite and
+  PostgreSQL compilers. Nesting stops at `any` → `all` → predicate, and every
+  predicate in every branch counts toward the 100-predicate budget. TypeScript
+  adds `OrOfAndsGroup`, `WhereConjunction`, `WhereBranch`, `isOrOfAndsGroup`,
+  `isWhereConjunction`, `isWhereGroup` and `branchesOf`; `isOrGroup` is now true
+  only for groups of plain predicates, and `predicatesOf` lists the predicates
+  of every branch. `WhereTerm` gains the new member, so TypeScript code that
+  reads `term.any` members as predicates must check `isOrGroup` first. Go adds `WhereClause.All` (a branch, written `{"all": [...]}`),
+  `WhereTerm.Branches` and `WhereClause.IsConjunction`; `Validate` rejects
+  empty, nested or mixed branches. Normalization collapses one-predicate
+  branches, groups of plain predicates and lone branches, and
+  `decodeQueryStrict`, `encodeQuery` and the Go link codec round-trip the term,
+  with cross-language fixtures. Date-range bounds inside a branch do not count
+  as query bounds. Patches and drill-down compare branches structurally,
+  ignoring order. The query builder shows the term as one chip with AND
+  branches; its predicates can be edited, negated or removed, and merging
+  filters ORs their branches.
 
 ### Changed
 

@@ -454,7 +454,8 @@ transformations changes the reference population and is outside this contract.
 
 The standalone `CompileRowFilter(where, schema, SQLiteOptions{Now: clock})`
 returns an immutable filter. `matches, err := filter.Match(row)` follows
-`CompileSQLiteWhere`, including OR groups, blank no-ops, NULL/empty-string rules,
+`CompileSQLiteWhere`, including OR groups and their `{"all": [...]}` AND
+branches, blank no-ops, NULL/empty-string rules,
 Unicode lower-casing and code-point lengths, RE2 regex, array membership and
 relative/indexed datetime comparisons. Handle `ErrRowsUnsupported` before using
 any selected rows. The zero-value `RowFilter` matches every row.

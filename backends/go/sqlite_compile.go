@@ -121,20 +121,32 @@ func CompileSQLiteWhere(terms []WhereTerm, s Schema, o SQLiteOptions) (SQLiteWhe
 		if term.IsGroup() && (len(term.Any) == 0 || term.Field != "" || term.Op != "" || term.Value != "" || term.Negated) {
 			return SQLiteWhereResult{}, fmt.Errorf("invalid OR group")
 		}
+		// A term is an OR of AND branches. An always-true literal (blank value)
+		// drops out of its branch; a branch with nothing left makes the whole
+		// term a no-op, after every literal has still been validated.
 		var alternatives []string
 		var groupArgs []any
 		noOp := false
-		for _, c := range term.Predicates() {
-			sql, args, err := sqliteLiteral(c, s, now)
-			if err != nil {
-				return SQLiteWhereResult{}, err
+		for _, branch := range term.Branches() {
+			var parts []string
+			for _, c := range branch {
+				sql, args, err := sqliteLiteral(c, s, now)
+				if err != nil {
+					return SQLiteWhereResult{}, err
+				}
+				if sql != "" {
+					parts = append(parts, "("+sql+")")
+				}
+				groupArgs = append(groupArgs, args...)
 			}
-			if sql == "" {
+			switch len(parts) {
+			case 0:
 				noOp = true
-			} else {
-				alternatives = append(alternatives, "("+sql+")")
+			case 1:
+				alternatives = append(alternatives, parts[0])
+			default:
+				alternatives = append(alternatives, "("+strings.Join(parts, " AND ")+")")
 			}
-			groupArgs = append(groupArgs, args...)
 		}
 		if noOp {
 			continue

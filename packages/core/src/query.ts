@@ -71,31 +71,84 @@ export interface SetFilterMetadata {
 }
 
 /** A disjunction of predicates — the inner OR of conjunctive normal form. Every
- *  member is a plain literal; nesting is intentionally not allowed yet (CNF
- *  only), but the object shape leaves room to grow. */
+ *  member is a plain literal. See `OrOfAndsGroup` for an OR whose members may
+ *  themselves be conjunctions. */
 export interface OrGroup {
   any: WhereClause[];
   setFilter?: SetFilterMetadata;
 }
 
-/** One conjunct of the WHERE clause: either a single predicate or an OR group.
- *  `QueryState.where` is the AND of these terms, so the whole WHERE is
- *  conjunctive normal form — `(a) AND (b OR c) AND (d)`. A bare literal is
- *  equivalent to a one-element OR group; normalization flattens singleton groups
- *  back to a literal so equality/encoding stay canonical. */
-export type WhereTerm = WhereClause | OrGroup;
+/** One branch of an `OrOfAndsGroup` that ANDs several literals. Members are
+ *  always plain literals: nesting stops at `any` → `all` → clause. */
+export interface WhereConjunction {
+  all: WhereClause[];
+}
 
-/** Narrow a term to an OR group. A literal always carries `field`; a group never
- *  does and always carries an `any` array. */
+/** One alternative of an `OrOfAndsGroup`: a literal or a conjunction. */
+export type WhereBranch = WhereClause | WhereConjunction;
+
+/** A disjunction of conjunctions — `(a AND b) OR (c AND d)` — written
+ *  `{ any: [{ all: [a, b] }, { all: [c, d] }] }`. A branch may also be a bare
+ *  literal. It selects the union of its branches' rows, such as a legend
+ *  selection of several (provider, model) pairs, without the exponential
+ *  AND-of-ORs rewrite. Normalization keeps the shape canonical: a one-literal
+ *  conjunction becomes that literal, a group whose branches are all literals is
+ *  an `OrGroup`, and a single conjunction becomes top-level literals. Every
+ *  literal counts against `MAX_WHERE_CLAUSES`, which therefore also bounds the
+ *  number of branches. Each literal keeps its own null-exclusive negation; the
+ *  group itself is never negated. */
+export interface OrOfAndsGroup {
+  any: WhereBranch[];
+  setFilter?: SetFilterMetadata;
+}
+
+/** One conjunct of the WHERE clause: a single predicate, an OR group, or an OR
+ *  of conjunctions. `QueryState.where` is the AND of these terms —
+ *  `(a) AND (b OR c) AND ((d AND e) OR f)`. A bare literal is equivalent to a
+ *  one-element OR group; normalization flattens singleton groups back to a
+ *  literal so equality/encoding stay canonical. */
+export type WhereTerm = WhereClause | OrGroup | OrOfAndsGroup;
+
+/** Narrow a branch to a conjunction. */
+export function isWhereConjunction(branch: WhereBranch): branch is WhereConjunction {
+  return branch != null && Array.isArray((branch as WhereConjunction).all);
+}
+
+/** Narrow a term to a plain OR group (every member a literal). A literal
+ *  always carries `field`; a group never does and always carries an `any`
+ *  array. An `OrOfAndsGroup` is not an `OrGroup`. */
 export function isOrGroup(term: WhereTerm): term is OrGroup {
+  const any = (term as OrGroup).any;
+  return Array.isArray(any) && !any.some((member) => isWhereConjunction(member as WhereBranch));
+}
+
+/** Narrow a term to an OR group with at least one conjunction branch. */
+export function isOrOfAndsGroup(term: WhereTerm): term is OrOfAndsGroup {
+  const any = (term as OrOfAndsGroup).any;
+  return Array.isArray(any) && any.some(isWhereConjunction);
+}
+
+/** Narrow a term to either kind of group (anything carrying `any`). */
+export function isWhereGroup(term: WhereTerm): term is OrGroup | OrOfAndsGroup {
   return Array.isArray((term as OrGroup).any);
 }
 
-/** The predicate literals a term contributes, in order: the term itself for a
- *  literal, or its members for a group. Handy for anything that must visit every
- *  predicate regardless of grouping (field allowlisting, SELECT projection). */
+/** The predicate literals a term references, in order: the term itself for a
+ *  literal, a group's members, and the members of each conjunction branch.
+ *  Handy for anything that must visit every predicate regardless of grouping
+ *  (field allowlisting, SELECT projection, budgets); it does not preserve
+ *  meaning — use `branchesOf` to evaluate a term. */
 export function predicatesOf(term: WhereTerm): WhereClause[] {
-  return isOrGroup(term) ? term.any : [term];
+  if (!isWhereGroup(term)) return [term];
+  return term.any.flatMap((member: WhereBranch) => isWhereConjunction(member) ? member.all : [member]);
+}
+
+/** A term as a disjunction of conjunctions: it matches when every literal of
+ *  some branch matches. A literal is `[[literal]]`, an OR group one
+ *  single-literal branch per member. */
+export function branchesOf(term: WhereTerm): WhereClause[][] {
+  if (!isWhereGroup(term)) return [[term]];
+  return term.any.map((member: WhereBranch) => isWhereConjunction(member) ? member.all : [member]);
 }
 
 /** One ORDER BY term. Array order in `QueryState.orderBy` is the sort priority. */
@@ -309,7 +362,9 @@ function normalizeWhereClause(item: unknown): WhereClause | null {
 /** Deep-clone one WHERE term (literal or group) so a normalized/fallback state
  *  never aliases the caller's arrays. */
 function cloneWhereTerm(term: WhereTerm): WhereTerm {
-  const copy = isOrGroup(term) ? { ...term, any: term.any.map((c) => ({ ...c })) } : { ...term };
+  const copy: WhereTerm = isWhereGroup(term)
+    ? { ...term, any: term.any.map((c: WhereBranch) => isWhereConjunction(c) ? { all: c.all.map((m) => ({ ...m })) } : { ...c }) }
+    : { ...term };
   if (term.setFilter) copy.setFilter = { ...term.setFilter, values: [...term.setFilter.values] };
   return copy;
 }
@@ -322,6 +377,18 @@ function normalizeSetFilter(item: unknown): SetFilterMetadata | undefined {
   return { id, mode: item.mode as SetFilterMode, values: [...item.values] as string[] };
 }
 
+/** How many predicates a raw (unnormalized) term supplies, so callers can tell
+ *  whether normalization lost any: a group counts its members, a conjunction
+ *  branch its literals (an empty one counts one: dropping it would narrow the
+ *  group), anything else one. An empty top-level group counts zero. */
+export function suppliedPredicateCount(term: unknown): number {
+  if (!isRecord(term) || !Array.isArray(term.any)) return 1;
+  let count = 0;
+  for (const member of term.any as unknown[])
+    count += isRecord(member) && Array.isArray(member.all) ? Math.max(1, member.all.length) : 1;
+  return count;
+}
+
 function normalizeWhereTerms(input: readonly unknown[]): WhereTerm[] {
   const where: WhereTerm[] = [];
   let literalBudget = MAX_WHERE_CLAUSES;
@@ -329,17 +396,36 @@ function normalizeWhereTerms(input: readonly unknown[]): WhereTerm[] {
     if (literalBudget <= 0) break;
     const start = where.length;
     if (isRecord(item) && Array.isArray((item as { any?: unknown }).any)) {
-      const members: WhereClause[] = [];
+      const members: WhereBranch[] = [];
       for (const inner of (item as { any: unknown[] }).any) {
         if (literalBudget <= 0) break;
+        if (isRecord(inner) && Array.isArray(inner.all)) {
+          // A conjunction branch: plain literals only, one level deep.
+          const all: WhereClause[] = [];
+          for (const literal of inner.all as unknown[]) {
+            if (literalBudget <= 0) break;
+            const clause = normalizeWhereClause(literal);
+            if (clause) {
+              all.push(clause);
+              literalBudget--;
+            }
+          }
+          if (all.length === 1) members.push(all[0]!);
+          else if (all.length > 1) members.push({ all });
+          continue;
+        }
         const clause = normalizeWhereClause(inner);
         if (clause) {
           members.push(clause);
           literalBudget--;
         }
       }
-      if (members.length === 1) where.push(members[0]!);
-      else if (members.length > 1) where.push({ any: members });
+      if (members.length === 1) {
+        // One branch is plain AND: a literal, or the conjunction's literals.
+        const only = members[0]!;
+        if (isWhereConjunction(only)) where.push(...only.all);
+        else where.push(only);
+      } else if (members.length > 1) where.push({ any: members } as OrGroup | OrOfAndsGroup);
       // 0 members → drop the term entirely
     } else {
       const clause = normalizeWhereClause(item);
@@ -362,8 +448,7 @@ function normalizeMetricWhere(value: unknown): { where?: WhereTerm[]; invalid: b
   if (value === undefined) return { invalid: false };
   if (!Array.isArray(value)) return { invalid: true };
   const where = normalizeWhereTerms(value);
-  const supplied = value.reduce((count: number, term: unknown) =>
-    count + (isRecord(term) && Array.isArray(term.any) ? term.any.length : 1), 0);
+  const supplied = value.reduce((count: number, term: unknown) => count + suppliedPredicateCount(term), 0);
   const kept = where.reduce((count, term) => count + predicatesOf(term).length, 0);
   return { ...(where.length ? { where } : {}), invalid: supplied !== kept };
 }
@@ -401,8 +486,9 @@ function normalizeQuery(input: unknown, fallback: QueryState, links: boolean): Q
     select.push(...fallback.select.map((column) => ({ ...column, ...(column.display ? { display: JSON.parse(JSON.stringify(column.display)) as CellDisplay } : {}) })));
   }
 
-  // WHERE is CNF: an array of terms, each a literal or an `{ any: [...] }` OR
-  // group. MAX_WHERE_CLAUSES bounds the TOTAL predicate count across all terms
+  // WHERE is an AND of terms, each a literal, an `{ any: [...] }` OR group, or
+  // an OR of `{ all: [...] }` conjunctions. MAX_WHERE_CLAUSES bounds the TOTAL
+  // predicate count across all terms and branches
   // (legacy flat lists are all literals, so the cap is unchanged for them).
   // Singleton/empty groups are canonicalized (flattened / dropped).
   const where: WhereTerm[] = Array.isArray(raw.where)
@@ -591,7 +677,7 @@ function normalizeGroupingState(value: unknown, links: boolean): GroupingState {
       diagnostics.push(typeof message === "string" && message ? message.slice(0, MAX_LABEL_LENGTH) : "Invalid grouping definition.");
   const normalizedSource = normalizeQueryState(source);
   if (Array.isArray(source.where)) {
-    const supplied = source.where.reduce((count: number, term: unknown) => count + (isRecord(term) && Array.isArray(term.any) ? term.any.length : 1), 0);
+    const supplied = source.where.reduce((count: number, term: unknown) => count + suppliedPredicateCount(term), 0);
     if (supplied !== normalizedSource.where.reduce((count, term) => count + predicatesOf(term).length, 0)) fail("source filters contain malformed predicates or exceed the predicate budget.");
   }
   return { keys, summaries, representative, source: normalizedSource, ...(diagnostics.length ? { diagnostics: [...new Set(diagnostics)] } : {}) };
@@ -640,12 +726,12 @@ function normalizeLinkSpec(value: unknown): LinkSpec | undefined {
 }
 
 /** True when normalization kept every supplied WHERE term. An OR group counts
- * as its members (an empty group as one), so dropping any literal, a whole
- * group or anything past the predicate budget is detected. */
+ * as its members' literals (an empty group or conjunction as one), so dropping
+ * any literal, a whole group or anything past the predicate budget is detected. */
 function keptEveryTerm(supplied: unknown, kept: readonly WhereTerm[]): boolean {
   if (!Array.isArray(supplied)) return false;
   const count = supplied.reduce((total: number, term: unknown) =>
-    total + (isRecord(term) && Array.isArray(term.any) ? Math.max(1, term.any.length) : 1), 0);
+    total + Math.max(1, suppliedPredicateCount(term)), 0);
   return count === kept.reduce((total, term) => total + predicatesOf(term).length, 0);
 }
 

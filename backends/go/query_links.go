@@ -103,7 +103,8 @@ type LinkQuery struct {
 // Unlike encodeQuery, it applies decodeQueryStrict's own checks first, so it
 // never builds a link whose top-level filters or metrics are dropped or
 // widened: a malformed or over-budget predicate, an empty OR group (which
-// matches nothing, and which normalization would drop), or an aggregation that
+// matches nothing, and which normalization would drop), an empty, nested or
+// mixed {"all": [...]} branch (see validateWhereShape), or an aggregation that
 // normalization would discard is a QueryLinkInvalid error. Filters nested in
 // metrics, grouping and link patches are normalized as in TypeScript, which
 // records a diagnostic or drops the link when it loses a predicate. A state
@@ -114,6 +115,9 @@ func EncodeQueryLink(q LinkQuery) (token string, err error) {
 	for _, term := range q.Where {
 		if term.IsGroup() && len(term.Any) == 0 {
 			return "", linkError(QueryLinkInvalid, "Empty OR group in query predicates.")
+		}
+		if err := validateWhereShape(term); err != nil {
+			return "", linkError(QueryLinkInvalid, "Invalid query predicates: "+err.Error()+".")
 		}
 	}
 	raw, err := q.jsState()
@@ -325,7 +329,7 @@ func checkStrictPredicates(where *jsValue) error {
 			return linkError(QueryLinkInvalid, "Invalid query predicates.")
 		}
 	}
-	count := predicateCount(where.a)
+	count := suppliedPredicates(where.a, false)
 	normalized := normalizeLinkQueryState(jsObj().set("where", where)).get("where")
 	invalid := count > MaxWhereClauses || count != predicateCount(normalized.a)
 	for _, term := range where.a {
@@ -585,7 +589,15 @@ func stripLinkSetFilter(term *jsValue) *jsValue {
 	if any := term.get("any"); any.isArray() {
 		members := jsArr()
 		for _, member := range any.a {
-			members.a = append(members.a, strip(member))
+			if isConjunctionJS(member) {
+				literals := jsArr()
+				for _, literal := range member.get("all").a {
+					literals.a = append(literals.a, strip(literal))
+				}
+				members.a = append(members.a, jsObj().set("all", literals))
+			} else {
+				members.a = append(members.a, strip(member))
+			}
 		}
 		return jsObj().set("any", members)
 	}
@@ -695,6 +707,14 @@ func (q LinkQuery) jsState() (*jsValue, error) {
 		if term.IsGroup() {
 			members := jsArr()
 			for _, clause := range term.Any {
+				if clause.IsConjunction() {
+					literals := jsArr()
+					for _, literal := range clause.All {
+						literals.a = append(literals.a, linkClauseJS(literal.Field, literal.Op, literal.Value, literal.Negated))
+					}
+					members.a = append(members.a, jsObj().set("all", literals))
+					continue
+				}
 				members.a = append(members.a, linkClauseJS(clause.Field, clause.Op, clause.Value, clause.Negated))
 			}
 			item = jsObj().set("any", members)
@@ -797,6 +817,14 @@ func linkQueryFromState(state *jsValue) LinkQuery {
 		if any := term.get("any"); any != nil {
 			item.Any = []WhereClause{}
 			for _, member := range any.a {
+				if all := member.get("all"); all != nil {
+					branch := WhereClause{All: []WhereClause{}}
+					for _, literal := range all.a {
+						branch.All = append(branch.All, clause(literal))
+					}
+					item.Any = append(item.Any, branch)
+					continue
+				}
 				item.Any = append(item.Any, clause(member))
 			}
 		} else {

@@ -206,6 +206,27 @@ describe("DuckDB native conformance", () => {
       schema,
     );
   });
+  it("executes an OR of AND branches like the local executor", async () => {
+    const query = normalizeQueryState({
+      select: [{ field: "amount" }, { field: "category" }],
+      where: [
+        {
+          any: [
+            { all: [{ field: "category", op: "=", value: "a" }, { field: "amount", op: ">=", value: "20" }] },
+            { all: [{ field: "category", op: "=", value: "b" }, { field: "amount", op: "<", value: "20" }] },
+            { field: "category", op: "is_null", value: "" },
+          ],
+        },
+      ],
+      orderBy: [{ field: "amount", dir: "desc" }],
+      limit: 100,
+    });
+    const actual = await execute(query),
+      expected = applyQuery(rows, query, schema);
+    expect(expected.total).toBeGreaterThan(0);
+    expect(actual.total).toBe(expected.total);
+    expect(actual.rows.map((row) => row.id)).toEqual(expected.rows.map((row) => row.id));
+  });
   it("implements null-exclusive set negation and empty arrays", async () => {
     for (const where of [
       [{ field: "tags", op: "includes", value: "milk" }],

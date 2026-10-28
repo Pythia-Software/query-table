@@ -1,4 +1,5 @@
 import {
+  predicatesOf,
   isComputedField,
   readFieldValue,
   type ComputedExecution,
@@ -38,7 +39,7 @@ export function validateComputedResponse<Row>(
   const executed = new Set([
     ...request.select.filter(isComputedField),
     ...request.orderBy.map((term) => term.field).filter(isComputedField),
-    ...request.where.flatMap(term => ("any" in term ? term.any : [term]).map(predicate => predicate.field)).filter(isComputedField),
+    ...request.where.flatMap(term => predicatesOf(term).map(predicate => predicate.field)).filter(isComputedField),
   ]);
   for (const [name, revision] of Object.entries(request.expectedRevisions)) {
     const id = name.replace(/^@computed\//, "");

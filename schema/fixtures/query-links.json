@@ -3466,6 +3466,1880 @@
       "packed": "{\"w\":[{\"field\":\"n\",\"op\":\"!=\",\"value\":\"0\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"1\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"2\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"3\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"4\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"5\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"6\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"7\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"8\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"9\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"10\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"11\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"12\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"13\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"14\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"15\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"16\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"17\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"18\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"19\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"20\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"21\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"22\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"23\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"24\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"25\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"26\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"27\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"28\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"29\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"30\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"31\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"32\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"33\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"34\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"35\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"36\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"37\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"38\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"39\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"40\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"41\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"42\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"43\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"44\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"45\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"46\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"47\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"48\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"49\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"50\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"51\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"52\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"53\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"54\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"55\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"56\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"57\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"58\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"59\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"60\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"61\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"62\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"63\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"64\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"65\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"66\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"67\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"68\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"69\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"70\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"71\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"72\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"73\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"74\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"75\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"76\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"77\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"78\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"79\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"80\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"81\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"82\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"83\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"84\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"85\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"86\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"87\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"88\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"89\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"90\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"91\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"92\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"93\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"94\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"95\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"96\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"97\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"98\"},{\"field\":\"n\",\"op\":\"!=\",\"value\":\"99\"}]}"
     },
     {
+      "name": "or of ands",
+      "state": {
+        "select": [],
+        "where": [
+          {
+            "any": [
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "anthropic"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "opus"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "anthropic"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "haiku"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "openai"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "gpt-5"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "openai"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "mini"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "google"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "gemini"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "mistral"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "large"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "meta"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "llama"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "xai"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "grok"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "deepseek"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "r1"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "qwen"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "max"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "any": [
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "openai"
+                  },
+                  {
+                    "field": "model",
+                    "op": "contains",
+                    "value": "mini",
+                    "negated": true
+                  }
+                ]
+              },
+              {
+                "field": "tokens",
+                "op": ">",
+                "value": "5"
+              }
+            ]
+          }
+        ],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0,
+        "aggregations": [
+          {
+            "id": "selected",
+            "op": "count",
+            "groupBy": [
+              "provider",
+              "model"
+            ],
+            "where": [
+              {
+                "any": [
+                  {
+                    "all": [
+                      {
+                        "field": "provider",
+                        "op": "=",
+                        "value": "xai"
+                      },
+                      {
+                        "field": "model",
+                        "op": "is_null",
+                        "value": ""
+                      }
+                    ]
+                  },
+                  {
+                    "all": [
+                      {
+                        "field": "provider",
+                        "op": "=",
+                        "value": "meta"
+                      },
+                      {
+                        "field": "tokens",
+                        "op": ">=",
+                        "value": "-1h"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "token": "2d.tZTPasMwDMbfRef00MMuhe2w1xhliEZzTBzL85-mo_TdJydsDWVsjlnJwTZ8-n5SJPsMI-xezoD2Y16NmdY3TaaFHTjPR92ShwbYyflRNkc0iWSPNnaenT7ApblGDNyS-UnOLgW47LP2jpQOdZ8qMOzIoi5jKBc3D3dmDNqKcjVCMStDhWVQJWTQIXo0ZRSDXklC6yEUsZBgcBDpasKpuN-e-wr_lsgFIgktgfhtBeJ9JFs4T3jK_jOh4rL_NbsHthG1Dbcj3IAlhZEkIPpEcwJfDpF7mkImi6dF7HS99g2oKUGdxYEMHbLRNzHZKAfpTnLPuaJlAXNy4jB25MWx8o37dUZ0eLVJzK7y_5jzm5-y1G623dzE_H0C",
+      "normalized": {
+        "select": [],
+        "where": [
+          {
+            "any": [
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "anthropic"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "opus"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "anthropic"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "haiku"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "openai"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "gpt-5"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "openai"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "mini"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "google"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "gemini"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "mistral"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "large"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "meta"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "llama"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "xai"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "grok"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "deepseek"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "r1"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "qwen"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "max"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "any": [
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "openai"
+                  },
+                  {
+                    "field": "model",
+                    "op": "contains",
+                    "value": "mini",
+                    "negated": true
+                  }
+                ]
+              },
+              {
+                "field": "tokens",
+                "op": ">",
+                "value": "5"
+              }
+            ]
+          }
+        ],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0,
+        "aggregations": [
+          {
+            "id": "selected",
+            "op": "count",
+            "groupBy": [
+              "provider",
+              "model"
+            ],
+            "where": [
+              {
+                "any": [
+                  {
+                    "all": [
+                      {
+                        "field": "provider",
+                        "op": "=",
+                        "value": "xai"
+                      },
+                      {
+                        "field": "model",
+                        "op": "is_null",
+                        "value": ""
+                      }
+                    ]
+                  },
+                  {
+                    "all": [
+                      {
+                        "field": "provider",
+                        "op": "=",
+                        "value": "meta"
+                      },
+                      {
+                        "field": "tokens",
+                        "op": ">=",
+                        "value": "-1h"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "packed": "{\"w\":[{\"any\":[{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"anthropic\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"opus\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"anthropic\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"haiku\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"openai\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"gpt-5\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"openai\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"mini\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"google\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"gemini\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"mistral\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"large\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"meta\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"llama\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"xai\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"grok\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"deepseek\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"r1\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"qwen\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"max\"}]}]},{\"any\":[{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"openai\"},{\"field\":\"model\",\"op\":\"contains\",\"value\":\"mini\",\"negated\":true}]},{\"field\":\"tokens\",\"op\":\">\",\"value\":\"5\"}]}],\"g\":[{\"id\":\"selected\",\"op\":\"count\",\"groupBy\":[\"provider\",\"model\"],\"where\":[{\"any\":[{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"xai\"},{\"field\":\"model\",\"op\":\"is_null\",\"value\":\"\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"meta\"},{\"field\":\"tokens\",\"op\":\">=\",\"value\":\"-1h\"}]}]}]}]}"
+    },
+    {
+      "name": "or of ands at the predicate budget",
+      "state": {
+        "select": [],
+        "where": [
+          {
+            "any": [
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p0"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m0"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p1"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m1"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p2"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m2"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p3"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m3"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p4"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m4"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p5"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m5"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p6"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m6"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p7"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m7"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p8"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m8"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p9"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m9"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p10"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m10"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p11"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m11"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p12"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m12"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p13"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m13"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p14"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m14"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p15"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m15"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p16"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m16"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p17"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m17"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p18"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m18"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p19"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m19"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p20"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m20"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p21"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m21"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p22"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m22"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p23"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m23"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p24"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m24"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p25"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m25"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p26"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m26"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p27"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m27"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p28"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m28"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p29"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m29"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p30"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m30"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p31"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m31"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p32"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m32"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p33"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m33"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p34"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m34"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p35"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m35"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p36"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m36"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p37"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m37"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p38"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m38"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p39"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m39"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p40"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m40"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p41"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m41"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p42"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m42"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p43"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m43"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p44"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m44"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p45"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m45"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p46"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m46"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p47"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m47"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p48"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m48"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p49"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m49"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0
+      },
+      "token": "2d.nZc7agMxGAbvotpF_MjLkJMEF4bdgGGdNYY4BJO75_-cIk2K0aBCEhqmGyRd22fbvl7b_v3rd56m2_x2GKehbdvpPF8Ow3huizafav9Si8t--hhzdte-F3_ocR7G6T_uWNwuZJd8CeXF9ctXUF5cv3wN5cX1yzdQXly__B7Ki-uXP0B5cf3yRygvrl_-BOXF9cufobw4ERFNNKDQ40hVpUuaaUChp6EGFHqaakChp7EGFHqaa0Chp8EGFHqabEChp9EGFLcTrTag0NNqAwo9vlxVtStabUChp9UGFHpabUChp9UGFHpabUChp9UGFHpabUDx7KPVBhR6Wm1AoafVBhR6_ChW1a5ptQGFnlYbUOhptQGFnlYbUOhptQGFnlYbUPynaLUBhZ5WG1DoabUBhZ5WG1Do8WdWVbuh1QYUelptQKGn1QYUelptQKGn1Qbc3cYP",
+      "normalized": {
+        "select": [],
+        "where": [
+          {
+            "any": [
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p0"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m0"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p1"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m1"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p2"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m2"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p3"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m3"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p4"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m4"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p5"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m5"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p6"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m6"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p7"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m7"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p8"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m8"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p9"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m9"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p10"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m10"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p11"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m11"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p12"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m12"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p13"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m13"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p14"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m14"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p15"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m15"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p16"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m16"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p17"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m17"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p18"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m18"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p19"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m19"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p20"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m20"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p21"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m21"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p22"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m22"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p23"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m23"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p24"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m24"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p25"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m25"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p26"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m26"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p27"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m27"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p28"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m28"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p29"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m29"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p30"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m30"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p31"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m31"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p32"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m32"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p33"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m33"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p34"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m34"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p35"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m35"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p36"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m36"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p37"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m37"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p38"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m38"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p39"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m39"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p40"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m40"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p41"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m41"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p42"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m42"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p43"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m43"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p44"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m44"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p45"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m45"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p46"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m46"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p47"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m47"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p48"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m48"
+                  }
+                ]
+              },
+              {
+                "all": [
+                  {
+                    "field": "provider",
+                    "op": "=",
+                    "value": "p49"
+                  },
+                  {
+                    "field": "model",
+                    "op": "=",
+                    "value": "m49"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0
+      },
+      "packed": "{\"w\":[{\"any\":[{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p0\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m0\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p1\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m1\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p2\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m2\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p3\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m3\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p4\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m4\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p5\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m5\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p6\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m6\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p7\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m7\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p8\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m8\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p9\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m9\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p10\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m10\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p11\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m11\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p12\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m12\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p13\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m13\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p14\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m14\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p15\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m15\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p16\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m16\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p17\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m17\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p18\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m18\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p19\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m19\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p20\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m20\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p21\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m21\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p22\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m22\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p23\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m23\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p24\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m24\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p25\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m25\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p26\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m26\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p27\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m27\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p28\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m28\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p29\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m29\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p30\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m30\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p31\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m31\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p32\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m32\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p33\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m33\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p34\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m34\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p35\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m35\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p36\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m36\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p37\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m37\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p38\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m38\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p39\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m39\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p40\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m40\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p41\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m41\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p42\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m42\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p43\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m43\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p44\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m44\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p45\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m45\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p46\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m46\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p47\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m47\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p48\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m48\"}]},{\"all\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"p49\"},{\"field\":\"model\",\"op\":\"=\",\"value\":\"m49\"}]}]}]}"
+    },
+    {
       "name": "legacy names and single order",
       "token": "eyJjIjpbImEiLCJiIl0sIm8iOnsiZmllbGQiOiJhIiwiZGlyIjoiZGVzYyJ9LCJsIjoyMCwidyI6W3siZmllbGQiOiJhIiwib3AiOiI9IiwidmFsdWUiOiIxIn1dfQ",
       "normalized": {
@@ -3619,6 +5493,132 @@
         "offset": 0
       },
       "packed": "{\"s\":[[\"a\",24],[\"b\"],[\"c\"],[\"d\",34,{\"kind\":\"number\",\"decimals\":2}],[\"e\"]],\"w\":[{\"field\":\"a\",\"op\":\"=\",\"value\":\"1\"},{\"field\":\"b\",\"op\":\"=\",\"value\":\"2\",\"setFilter\":{\"id\":\"lonely\",\"mode\":\"any\",\"values\":[\"2\"]}}],\"o\":[{\"field\":\"b\",\"dir\":\"asc\"}],\"l\":13}"
+    },
+    {
+      "name": "unnormalized or of ands",
+      "token": "2j.eyJ3IjpbeyJhbnkiOlt7ImFsbCI6W3siZmllbGQiOiJhIiwib3AiOiI9IiwidmFsdWUiOiIxIn1dfSx7ImFsbCI6W3siZmllbGQiOiJhIiwib3AiOiI9IiwidmFsdWUiOiIyIiwiZXh0cmEiOjF9XX1dfSx7ImFueSI6W3siYWxsIjpbeyJmaWVsZCI6ImIiLCJvcCI6Ij0iLCJ2YWx1ZSI6IjEifSx7ImZpZWxkIjoiYyIsIm9wIjoiPSIsInZhbHVlIjoiMSJ9XX1dLCJzZXRGaWx0ZXIiOnsiaWQiOiJzIiwibW9kZSI6ImFueSIsInZhbHVlcyI6WyIxIl19fSx7ImFueSI6W3siZmllbGQiOiJkIiwib3AiOiI9IiwidmFsdWUiOiIxIn0seyJhbGwiOlt7ImZpZWxkIjoiZSIsIm9wIjoiPCIsInZhbHVlIjoiMiJ9LHsiZmllbGQiOiJmIiwib3AiOiJjb250YWlucyIsInZhbHVlIjoieCIsIm5lZ2F0ZWQiOnRydWV9XX1dfV0sImciOlt7ImlkIjoibSIsIm9wIjoiY291bnQiLCJncm91cEJ5IjpbXSwid2hlcmUiOlt7ImFueSI6W3siYWxsIjpbeyJmaWVsZCI6ImEiLCJvcCI6Ij0iLCJ2YWx1ZSI6IjEifSx7ImZpZWxkIjoiYiIsIm9wIjoibm9wZSIsInZhbHVlIjoiMSJ9XX0seyJhbGwiOltdfV19XX1dLCJiIjp7ImtleXMiOlsiayJdLCJzdW1tYXJpZXMiOltdLCJzb3VyY2UiOnsid2hlcmUiOlt7ImFueSI6W3siYWxsIjpbeyJmaWVsZCI6ImEiLCJvcCI6Ij0iLCJ2YWx1ZSI6IjEifSx7ImZpZWxkIjoiYiIsIm9wIjoiPSIsInZhbHVlIjoiMiJ9XX0seyJhbGwiOlt7ImZpZWxkIjoiYSIsIm9wIjoiPSIsInZhbHVlIjoiMyJ9LHsiYW55IjpbXX1dfV19XX19fQ",
+      "normalized": {
+        "select": [],
+        "where": [
+          {
+            "any": [
+              {
+                "field": "a",
+                "op": "=",
+                "value": "1"
+              },
+              {
+                "field": "a",
+                "op": "=",
+                "value": "2"
+              }
+            ]
+          },
+          {
+            "field": "b",
+            "op": "=",
+            "value": "1",
+            "setFilter": {
+              "id": "s",
+              "mode": "any",
+              "values": [
+                "1"
+              ]
+            }
+          },
+          {
+            "field": "c",
+            "op": "=",
+            "value": "1"
+          },
+          {
+            "any": [
+              {
+                "field": "d",
+                "op": "=",
+                "value": "1"
+              },
+              {
+                "all": [
+                  {
+                    "field": "e",
+                    "op": "<",
+                    "value": "2"
+                  },
+                  {
+                    "field": "f",
+                    "op": "contains",
+                    "value": "x",
+                    "negated": true
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0,
+        "grouping": {
+          "keys": [
+            "k"
+          ],
+          "summaries": [],
+          "representative": null,
+          "source": {
+            "select": [],
+            "where": [
+              {
+                "any": [
+                  {
+                    "all": [
+                      {
+                        "field": "a",
+                        "op": "=",
+                        "value": "1"
+                      },
+                      {
+                        "field": "b",
+                        "op": "=",
+                        "value": "2"
+                      }
+                    ]
+                  },
+                  {
+                    "field": "a",
+                    "op": "=",
+                    "value": "3"
+                  }
+                ]
+              }
+            ],
+            "orderBy": [],
+            "limit": 100,
+            "offset": 0
+          },
+          "diagnostics": [
+            "Invalid grouping: source filters contain malformed predicates or exceed the predicate budget."
+          ]
+        },
+        "aggregations": [
+          {
+            "id": "m",
+            "op": "count",
+            "groupBy": [],
+            "where": [
+              {
+                "field": "a",
+                "op": "=",
+                "value": "1"
+              }
+            ],
+            "diagnostics": [
+              "Invalid metric filter."
+            ]
+          }
+        ]
+      },
+      "packed": "{\"w\":[{\"any\":[{\"field\":\"a\",\"op\":\"=\",\"value\":\"1\"},{\"field\":\"a\",\"op\":\"=\",\"value\":\"2\"}]},{\"field\":\"b\",\"op\":\"=\",\"value\":\"1\",\"setFilter\":{\"id\":\"s\",\"mode\":\"any\",\"values\":[\"1\"]}},{\"field\":\"c\",\"op\":\"=\",\"value\":\"1\"},{\"any\":[{\"field\":\"d\",\"op\":\"=\",\"value\":\"1\"},{\"all\":[{\"field\":\"e\",\"op\":\"<\",\"value\":\"2\"},{\"field\":\"f\",\"op\":\"contains\",\"value\":\"x\",\"negated\":true}]}]}],\"g\":[{\"id\":\"m\",\"op\":\"count\",\"groupBy\":[],\"diagnostics\":[\"Invalid metric filter.\"],\"where\":[{\"field\":\"a\",\"op\":\"=\",\"value\":\"1\"}]}],\"b\":{\"keys\":[\"k\"],\"summaries\":[],\"representative\":null,\"source\":{\"select\":[],\"where\":[{\"any\":[{\"all\":[{\"field\":\"a\",\"op\":\"=\",\"value\":\"1\"},{\"field\":\"b\",\"op\":\"=\",\"value\":\"2\"}]},{\"field\":\"a\",\"op\":\"=\",\"value\":\"3\"}]}],\"orderBy\":[],\"limit\":100,\"offset\":0},\"diagnostics\":[\"Invalid grouping: source filters contain malformed predicates or exceed the predicate budget.\"]}}"
     },
     {
       "name": "limit bounds",
@@ -4866,6 +6866,46 @@
     {
       "name": "group over the budget",
       "token": "2j.eyJ3IjpbeyJhbnkiOlt7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjAifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjEifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjIifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjMifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjQifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjUifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjYifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjcifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjgifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjkifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjEwIn0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiIxMSJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiMTIifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjEzIn0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiIxNCJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiMTUifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjE2In0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiIxNyJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiMTgifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjE5In0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiIyMCJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiMjEifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjIyIn0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiIyMyJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiMjQifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjI1In0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiIyNiJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiMjcifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjI4In0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiIyOSJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiMzAifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjMxIn0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiIzMiJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiMzMifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjM0In0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiIzNSJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiMzYifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjM3In0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiIzOCJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiMzkifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjQwIn0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI0MSJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiNDIifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjQzIn0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI0NCJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiNDUifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjQ2In0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI0NyJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiNDgifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjQ5In0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI1MCJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiNTEifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjUyIn0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI1MyJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiNTQifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjU1In0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI1NiJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiNTcifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjU4In0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI1OSJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiNjAifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjYxIn0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI2MiJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiNjMifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjY0In0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI2NSJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiNjYifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjY3In0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI2OCJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiNjkifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjcwIn0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI3MSJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiNzIifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjczIn0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI3NCJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiNzUifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6Ijc2In0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI3NyJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiNzgifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6Ijc5In0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI4MCJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiODEifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjgyIn0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI4MyJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiODQifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6Ijg1In0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI4NiJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiODcifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6Ijg4In0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI4OSJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiOTAifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjkxIn0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI5MiJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiOTMifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6Ijk0In0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI5NSJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiOTYifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6Ijk3In0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI5OCJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiOTkifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjEwMCJ9XX1dfQ",
+      "code": "invalid"
+    },
+    {
+      "name": "or of ands over the budget",
+      "token": "2j.eyJ3IjpbeyJhbnkiOlt7ImFsbCI6W3siZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiMCJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiMSJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiMiJ9XX0seyJhbGwiOlt7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjMifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjQifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjUifV19LHsiYWxsIjpbeyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI2In0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI3In0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI4In1dfSx7ImFsbCI6W3siZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiOSJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiMTAifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjExIn1dfSx7ImFsbCI6W3siZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiMTIifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjEzIn0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiIxNCJ9XX0seyJhbGwiOlt7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjE1In0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiIxNiJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiMTcifV19LHsiYWxsIjpbeyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiIxOCJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiMTkifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjIwIn1dfSx7ImFsbCI6W3siZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiMjEifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjIyIn0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiIyMyJ9XX0seyJhbGwiOlt7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjI0In0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiIyNSJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiMjYifV19LHsiYWxsIjpbeyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiIyNyJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiMjgifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjI5In1dfSx7ImFsbCI6W3siZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiMzAifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjMxIn0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiIzMiJ9XX0seyJhbGwiOlt7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjMzIn0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiIzNCJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiMzUifV19LHsiYWxsIjpbeyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiIzNiJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiMzcifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjM4In1dfSx7ImFsbCI6W3siZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiMzkifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjQwIn0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI0MSJ9XX0seyJhbGwiOlt7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjQyIn0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI0MyJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiNDQifV19LHsiYWxsIjpbeyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI0NSJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiNDYifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjQ3In1dfSx7ImFsbCI6W3siZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiNDgifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjQ5In0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI1MCJ9XX0seyJhbGwiOlt7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjUxIn0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI1MiJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiNTMifV19LHsiYWxsIjpbeyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI1NCJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiNTUifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjU2In1dfSx7ImFsbCI6W3siZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiNTcifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjU4In0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI1OSJ9XX0seyJhbGwiOlt7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjYwIn0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI2MSJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiNjIifV19LHsiYWxsIjpbeyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI2MyJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiNjQifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjY1In1dfSx7ImFsbCI6W3siZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiNjYifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjY3In0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI2OCJ9XX0seyJhbGwiOlt7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjY5In0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI3MCJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiNzEifV19LHsiYWxsIjpbeyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI3MiJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiNzMifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6Ijc0In1dfSx7ImFsbCI6W3siZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiNzUifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6Ijc2In0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI3NyJ9XX0seyJhbGwiOlt7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6Ijc4In0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI3OSJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiODAifV19LHsiYWxsIjpbeyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI4MSJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiODIifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjgzIn1dfSx7ImFsbCI6W3siZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiODQifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6Ijg1In0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI4NiJ9XX0seyJhbGwiOlt7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6Ijg3In0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI4OCJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiODkifV19LHsiYWxsIjpbeyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI5MCJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiOTEifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6IjkyIn1dfSx7ImFsbCI6W3siZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiOTMifSx7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6Ijk0In0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI5NSJ9XX0seyJhbGwiOlt7ImZpZWxkIjoibiIsIm9wIjoiIT0iLCJ2YWx1ZSI6Ijk2In0seyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI5NyJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiOTgifV19LHsiYWxsIjpbeyJmaWVsZCI6Im4iLCJvcCI6IiE9IiwidmFsdWUiOiI5OSJ9LHsiZmllbGQiOiJuIiwib3AiOiIhPSIsInZhbHVlIjoiMTAwIn1dfV19XX0",
+      "code": "invalid"
+    },
+    {
+      "name": "empty conjunction",
+      "token": "2j.eyJ3IjpbeyJhbnkiOlt7ImZpZWxkIjoiYSIsIm9wIjoiPSIsInZhbHVlIjoiMSJ9LHsiYWxsIjpbXX1dfV19",
+      "code": "invalid"
+    },
+    {
+      "name": "nested conjunction",
+      "token": "2j.eyJ3IjpbeyJhbnkiOlt7ImZpZWxkIjoiYSIsIm9wIjoiPSIsInZhbHVlIjoiMSJ9LHsiYWxsIjpbeyJmaWVsZCI6ImEiLCJvcCI6Ij0iLCJ2YWx1ZSI6IjIifSx7ImFsbCI6W3siZmllbGQiOiJiIiwib3AiOiI9IiwidmFsdWUiOiIxIn1dfV19XX1dfQ",
+      "code": "invalid"
+    },
+    {
+      "name": "group inside a conjunction",
+      "token": "2j.eyJ3IjpbeyJhbnkiOlt7ImZpZWxkIjoiYSIsIm9wIjoiPSIsInZhbHVlIjoiMSJ9LHsiYWxsIjpbeyJmaWVsZCI6ImEiLCJvcCI6Ij0iLCJ2YWx1ZSI6IjIifSx7ImFueSI6W3siZmllbGQiOiJiIiwib3AiOiI9IiwidmFsdWUiOiIxIn1dfV19XX1dfQ",
+      "code": "invalid"
+    },
+    {
+      "name": "malformed literal in a conjunction",
+      "token": "2j.eyJ3IjpbeyJhbnkiOlt7ImZpZWxkIjoiYSIsIm9wIjoiPSIsInZhbHVlIjoiMSJ9LHsiYWxsIjpbeyJmaWVsZCI6ImEiLCJvcCI6Ij0iLCJ2YWx1ZSI6IjIifSx7ImZpZWxkIjoiYiIsIm9wIjoibGlrZSIsInZhbHVlIjoiMSJ9XX1dfV19",
+      "code": "invalid"
+    },
+    {
+      "name": "null literal in a conjunction",
+      "token": "2j.eyJ3IjpbeyJhbnkiOlt7ImZpZWxkIjoiYSIsIm9wIjoiPSIsInZhbHVlIjoiMSJ9LHsiYWxsIjpbeyJmaWVsZCI6ImEiLCJvcCI6Ij0iLCJ2YWx1ZSI6IjIifSxudWxsXX1dfV19",
+      "code": "invalid"
+    },
+    {
+      "name": "string negation in a conjunction",
+      "token": "2j.eyJ3IjpbeyJhbnkiOlt7ImZpZWxkIjoiYSIsIm9wIjoiPSIsInZhbHVlIjoiMSJ9LHsiYWxsIjpbeyJmaWVsZCI6ImEiLCJvcCI6Ij0iLCJ2YWx1ZSI6IjIifSx7ImZpZWxkIjoiYiIsIm9wIjoiY29udGFpbnMiLCJ2YWx1ZSI6IjEiLCJuZWdhdGVkIjoieWVzIn1dfV19XX0",
+      "code": "invalid"
+    },
+    {
+      "name": "top-level conjunction",
+      "token": "2j.eyJ3IjpbeyJhbGwiOlt7ImZpZWxkIjoiYSIsIm9wIjoiPSIsInZhbHVlIjoiMSJ9LHsiZmllbGQiOiJiIiwib3AiOiI9IiwidmFsdWUiOiIxIn1dfV19",
       "code": "invalid"
     },
     {

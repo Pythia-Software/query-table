@@ -5,6 +5,9 @@ export type {
   FilterOp,
   WhereClause,
   OrGroup,
+  OrOfAndsGroup,
+  WhereConjunction,
+  WhereBranch,
   WhereTerm,
   OrderByClause,
   SelectColumn,
@@ -32,7 +35,11 @@ export {
   normalizeQueryState,
   queriesEqual,
   isOrGroup,
+  isOrOfAndsGroup,
+  isWhereConjunction,
+  isWhereGroup,
   predicatesOf,
+  branchesOf,
 } from "./query";
 
 export type {

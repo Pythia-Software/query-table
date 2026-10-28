@@ -1,5 +1,5 @@
 import { coerceValue } from "./ops";
-import { isOrGroup, type QueryState } from "./query";
+import { isWhereGroup, type QueryState } from "./query";
 import type { MetricDateGrouping, MetricValue } from "./metricTypes";
 import { Temporal } from "temporal-polyfill";
 
@@ -218,7 +218,7 @@ export function metricDateRange(
     end = Infinity;
   for (const term of query.where) {
     if (
-      isOrGroup(term) ||
+      isWhereGroup(term) ||
       term.negated ||
       canonical(term.field) !== canonical(config.field)
     )

@@ -228,6 +228,19 @@ describe("calendar metric grouping", () => {
       ],
     };
     expect(result({}, rows, orQuery).error).toContain("bounded date filter");
+    // Nor do bounds inside one branch of an OR of conjunctions.
+    const orOfAndsQuery: QueryState = {
+      ...query(),
+      where: [
+        {
+          any: [
+            { all: [{ field: "at", op: ">=", value: "2026-10-01" }, { field: "at", op: "<", value: "2026-10-05" }] },
+            { field: "at", op: "is_null", value: "" },
+          ],
+        },
+      ],
+    };
+    expect(result({}, rows, orOfAndsQuery).error).toContain("bounded date filter");
     expect(result({}, rows, { ...query(), where: [] }).error).toBe(
       'Include empty dates with range "query" needs a bounded date filter on at: add a lower bound (>= or >) and an upper bound (<= or <) as top-level filters (bounds inside OR groups do not count). Otherwise use range "observed" to fill from the first to the last observed date, or range "custom" with start and end.',
     );

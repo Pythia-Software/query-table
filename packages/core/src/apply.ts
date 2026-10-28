@@ -29,7 +29,7 @@ import type {
 import type { FieldSchema, FieldDef } from "./schema";
 import type { AggregationBucket, AggregationResult } from "./encode";
 import { indexFields, readFieldValue, resolveFieldName } from "./schema";
-import { isOrGroup, predicatesOf, normalizeQueryState } from "./query";
+import { branchesOf, predicatesOf, normalizeQueryState } from "./query";
 import { coerceValue } from "./ops";
 import { prepareGrouping, withoutGrouping } from "./grouping";
 
@@ -135,7 +135,7 @@ export function matchesClause<Row>(
     { ...clause, field },
     evaluationTime(options),
   );
-  prepareDatetimePredicates([{ kind: "lit", predicate: prepared }], byName);
+  prepareDatetimePredicates([{ branches: [[prepared]] }], byName);
   return matchesWith(byName, row, prepared);
 }
 
@@ -351,9 +351,9 @@ interface PreparedWhereClause {
   regex: RegExp | null | undefined;
 }
 
-type PreparedWhereTerm =
-  | { kind: "lit"; predicate: PreparedWhereClause }
-  | { kind: "or"; predicates: PreparedWhereClause[] };
+/** A term as a disjunction of conjunctions (see `branchesOf`). A literal is one
+ *  single-predicate branch; an OR group has one per member. */
+type PreparedWhereTerm = { branches: PreparedWhereClause[][] };
 
 function prepareWhereClause(
   clause: WhereClause,
@@ -373,19 +373,9 @@ function prepareWhereTerm(
   resolveField: (name: string) => string,
   now: number,
 ): PreparedWhereTerm {
-  if (isOrGroup(term)) {
-    return {
-      kind: "or",
-      predicates: term.any.map((c) =>
-        prepareWhereClause({ ...c, field: resolveField(c.field) }, now),
-      ),
-    };
-  }
   return {
-    kind: "lit",
-    predicate: prepareWhereClause(
-      { ...term, field: resolveField(term.field) },
-      now,
+    branches: branchesOf(term).map((branch) =>
+      branch.map((c) => prepareWhereClause({ ...c, field: resolveField(c.field) }, now)),
     ),
   };
 }
@@ -395,7 +385,7 @@ function prepareDatetimePredicates<Row>(
   fields: Map<string, FieldDef<Row>>,
 ): void {
   for (const term of terms)
-    for (const p of term.kind === "lit" ? [term.predicate] : term.predicates) {
+    for (const p of term.branches.flat()) {
       const field = fields.get(p.clause.field);
       if (
         field?.type !== "datetime" ||
@@ -409,16 +399,16 @@ function prepareDatetimePredicates<Row>(
 }
 
 /** A row satisfies the WHERE when every term matches (AND); a term matches when
- *  its sole predicate matches, or — for an OR group — when any member does. */
+ *  every predicate of one of its branches does — its sole predicate, any member
+ *  of an OR group, or every member of one conjunction of an OR of ANDs. */
 function matchesTerm<Row>(
   byName: Map<string, FieldDef<Row>>,
   row: Row,
   term: PreparedWhereTerm,
 ): boolean {
-  if (term.kind === "lit") return matchesWith(byName, row, term.predicate);
-  // Normalization never yields an empty group (0 dropped, 1 flattened), so
-  // `some` over a non-empty list is the OR.
-  return term.predicates.some((p) => matchesWith(byName, row, p));
+  // Normalization never yields an empty group or conjunction, so `some` over
+  // non-empty branches is the OR and `every` within one is the AND.
+  return term.branches.some((branch) => branch.every((p) => matchesWith(byName, row, p)));
 }
 
 function matchesWith<Row>(

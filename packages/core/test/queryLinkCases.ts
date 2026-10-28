@@ -42,6 +42,11 @@ const view = (label: string) => ({
   labelWidth: 40,
 });
 
+const tenPairs = [
+  ["anthropic", "opus"], ["anthropic", "haiku"], ["openai", "gpt-5"], ["openai", "mini"], ["google", "gemini"],
+  ["mistral", "large"], ["meta", "llama"], ["xai", "grok"], ["deepseek", "r1"], ["qwen", "max"],
+] as const;
+
 export const stateCases: StateCase[] = [
   { name: "empty query", state: EMPTY_QUERY },
   {
@@ -255,6 +260,21 @@ export const stateCases: StateCase[] = [
     name: "predicate budget",
     state: { ...EMPTY_QUERY, where: Array.from({ length: 100 }, (_, i) => ({ field: "n", op: "!=" as const, value: String(i) })) },
   },
+  {
+    name: "or of ands",
+    state: {
+      ...EMPTY_QUERY,
+      where: [
+        { any: tenPairs.map(([provider, model]) => ({ all: [{ field: "provider", op: "=" as const, value: provider }, { field: "model", op: "=" as const, value: model }] })) },
+        { any: [{ all: [{ field: "provider", op: "=", value: "openai" }, { field: "model", op: "contains", value: "mini", negated: true }] }, { field: "tokens", op: ">", value: "5" }] },
+      ],
+      aggregations: [{ id: "selected", op: "count", groupBy: ["provider", "model"], where: [{ any: [{ all: [{ field: "provider", op: "=", value: "xai" }, { field: "model", op: "is_null", value: "" }] }, { all: [{ field: "provider", op: "=", value: "meta" }, { field: "tokens", op: ">=", value: "-1h" }] }] }] }],
+    },
+  },
+  {
+    name: "or of ands at the predicate budget",
+    state: { ...EMPTY_QUERY, where: [{ any: Array.from({ length: 50 }, (_, i) => ({ all: [{ field: "provider", op: "=" as const, value: `p${i}` }, { field: "model", op: "=" as const, value: `m${i}` }] })) }] },
+  },
 ];
 
 const emoji = (n: number) => "😀".repeat(n);
@@ -277,6 +297,26 @@ export const tokenCases: TokenCase[] = [
       ],
       o: [{ field: "a", dir: "up" }, { field: "b", dir: "asc", nulls: "middle", extract: { regex: 1 } }, "c"],
       l: 12.5, f: -3, fs: "yes", b: null, z: "ignored",
+    }),
+  },
+  {
+    name: "unnormalized or of ands",
+    token: plain({
+      w: [
+        // Branches of one literal: a plain OR group.
+        { any: [{ all: [{ field: "a", op: "=", value: "1" }] }, { all: [{ field: "a", op: "=", value: "2", extra: 1 }] }] },
+        // A single branch is plain AND: top-level literals.
+        { any: [{ all: [{ field: "b", op: "=", value: "1" }, { field: "c", op: "=", value: "1" }] }], setFilter: { id: "s", mode: "any", values: ["1"] } },
+        // Mixed literal and conjunction members keep their order.
+        { any: [{ field: "d", op: "=", value: "1" }, { all: [{ field: "e", op: "<", value: "2" }, { field: "f", op: "contains", value: "x", negated: true }] }] },
+      ],
+      g: [
+        { id: "m", op: "count", groupBy: [], where: [{ any: [{ all: [{ field: "a", op: "=", value: "1" }, { field: "b", op: "nope", value: "1" }] }, { all: [] }] }] },
+      ],
+      b: {
+        keys: ["k"], summaries: [],
+        source: { where: [{ any: [{ all: [{ field: "a", op: "=", value: "1" }, { field: "b", op: "=", value: "2" }] }, { all: [{ field: "a", op: "=", value: "3" }, { any: [] }] }] }] },
+      },
     }),
   },
   { name: "limit bounds", token: plain({ l: 1e300, f: 2e6 }) },
@@ -430,6 +470,14 @@ export const invalidCases: InvalidCase[] = [
   { name: "long field name", token: plain({ w: [{ field: "f".repeat(257), op: "=", value: "1" }] }), code: "invalid" },
   { name: "predicate budget exceeded", token: plain({ w: tooManyPredicates }), code: "invalid" },
   { name: "group over the budget", token: plain({ w: [{ any: tooManyPredicates }] }), code: "invalid" },
+  { name: "or of ands over the budget", token: plain({ w: [{ any: Array.from({ length: 34 }, (_, i) => ({ all: tooManyPredicates.slice(3 * i, 3 * i + 3) })) }] }), code: "invalid" },
+  { name: "empty conjunction", token: plain({ w: [{ any: [{ field: "a", op: "=", value: "1" }, { all: [] }] }] }), code: "invalid" },
+  { name: "nested conjunction", token: plain({ w: [{ any: [{ field: "a", op: "=", value: "1" }, { all: [{ field: "a", op: "=", value: "2" }, { all: [{ field: "b", op: "=", value: "1" }] }] }] }] }), code: "invalid" },
+  { name: "group inside a conjunction", token: plain({ w: [{ any: [{ field: "a", op: "=", value: "1" }, { all: [{ field: "a", op: "=", value: "2" }, { any: [{ field: "b", op: "=", value: "1" }] }] }] }] }), code: "invalid" },
+  { name: "malformed literal in a conjunction", token: plain({ w: [{ any: [{ field: "a", op: "=", value: "1" }, { all: [{ field: "a", op: "=", value: "2" }, { field: "b", op: "like", value: "1" }] }] }] }), code: "invalid" },
+  { name: "null literal in a conjunction", token: plain({ w: [{ any: [{ field: "a", op: "=", value: "1" }, { all: [{ field: "a", op: "=", value: "2" }, null] }] }] }), code: "invalid" },
+  { name: "string negation in a conjunction", token: plain({ w: [{ any: [{ field: "a", op: "=", value: "1" }, { all: [{ field: "a", op: "=", value: "2" }, { field: "b", op: "contains", value: "1", negated: "yes" }] }] }] }), code: "invalid" },
+  { name: "top-level conjunction", token: plain({ w: [{ all: [{ field: "a", op: "=", value: "1" }, { field: "b", op: "=", value: "1" }] }] }), code: "invalid" },
   { name: "set filters over the budget", token: plain({ w: [["set", "tags", "all", Array.from({ length: 60 }, (_, i) => `a${i}`), "a"], ["set", "tags", "all", Array.from({ length: 41 }, (_, i) => `b${i}`), "b"]] }), code: "invalid" },
   { name: "own toString in a summary op", token: plain({ b: { keys: ["k"], summaries: [{ id: "x", op: { toString: 1 } }], source: {} } }), code: "invalid" },
   { name: "own toString inside an array op", token: plain({ b: { keys: ["k"], summaries: [{ id: "x", op: [1, [{ toString: null }]] }], source: {} } }), code: "invalid" },

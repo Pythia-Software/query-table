@@ -2,6 +2,7 @@ import { executionRevision } from "./computedExecution";
 import { fetchPreviewRows } from "./previewRows";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  predicatesOf,
   isGroupLinkField,
   applyQuery,
   compileFormula,
@@ -473,7 +474,7 @@ export function useComputedColumns<Row>(options: Options<Row>): {
             offset: 0,
           };
           const now = options.now ?? Date.now();
-          const computedFilter = request.where.some(term => ("any" in term ? term.any : [term])
+          const computedFilter = request.where.some(term => predicatesOf(term)
             .some(predicate => isComputedField(predicate.field)));
           const v3 = !(transport.fetchRowsV2 && options.execution && !request.grouping && !computedFilter) &&
             transport.fetchQueryV3 && transport.queryCapabilities?.version === 3;
