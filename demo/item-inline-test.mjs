@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import { chromium } from "playwright";
+import { decodeQuery } from "../packages/core/dist/index.js";
 const base = process.env.QT_DEMO_URL ?? "http://localhost:5179";
 const browser = await chromium.launch({ headless: true });
 const errors = [];
@@ -62,8 +63,8 @@ try {
   const scrollBounds = await properties.boundingBox();
   assert.ok(last.y + last.height <= scrollBounds.y + scrollBounds.height + 1);
   await popup.getByRole("button", { name: "Share", exact: true }).click();
-  const shared = JSON.parse(Buffer.from(new URL(await page.evaluate(() => navigator.clipboard.readText())).searchParams.get("q"), "base64url").toString());
-  assert.equal(shared.d.views.modal.properties.length, 40);
+  const shared = decodeQuery(new URL(await page.evaluate(() => navigator.clipboard.readText())).searchParams.get("q"));
+  assert.equal(shared.itemDetails.views.modal.properties.length, 40);
   await page.screenshot({ path: ".context/item-popover-refined.png" });
   await page.setViewportSize({ width: 390, height: 660 });
   geometry = await assertPopoverFits(page, popup);
