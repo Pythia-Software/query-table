@@ -10,6 +10,14 @@ import (
 type sqliteIntegerPlan struct {
 	SQL, NonnegativeSQL, Input string
 	Args                       []any
+	// TrustedSQL omits the per-row storage and absolute-bound proofs. It is
+	// valid only when a source proof covers every expression in Numeric; see
+	// SQLiteSourceProofs. V3's bounded source proofs never build it.
+	TrustedSQL string
+	Numeric    []string
+	// Population reports that qt_integer_population sums to the request's
+	// matching population (V2 only).
+	Population bool
 }
 
 // V3 also proves the complete narrow source's byte size and identity storage.
@@ -149,8 +157,22 @@ func sqliteIntegerReduction(ctx context.Context, q MetricQuery, specs []AggSpec,
 		columns = append(columns, "SUM(COUNT(*)) OVER () AS qt_source_count", "SUM(COALESCE(SUM("+strings.Join(parts, "+")+"),0)) OVER () AS qt_source_bytes")
 	}
 	plan := &sqliteIntegerPlan{Input: input, Args: args}
+	for _, name := range names {
+		if s.Fields[name].Kind == FieldNumber {
+			plan.Numeric = append(plan.Numeric, s.Fields[name].Expr)
+		}
+	}
+	modes := []string{"signed", "nonnegative"}
+	if len(sourceProof) == 0 {
+		modes = append(modes, "trusted")
+		// Without metric predicates the groups partition the request's
+		// matching population, so their counts also count that population.
+		plan.Population = len(specs[0].Where) == 0
+		columns = append(columns, "COUNT(*) AS qt_integer_population")
+	}
 	baseColumns, baseGuards := columns, guards
-	for _, nonnegative := range []bool{false, true} {
+	for _, mode := range modes {
+		nonnegative, trusted := mode == "nonnegative", mode == "trusted"
 		columns, guards := append([]string{}, baseColumns...), append([]string{}, baseGuards...)
 		for _, col := range combined.SQLiteReductionColumns {
 			identity := combined.reduction.keys[col.Name]
@@ -180,7 +202,13 @@ func sqliteIntegerReduction(ctx context.Context, q MetricQuery, specs []AggSpec,
 			}
 			value := ""
 			sum := ""
-			if raw != "*" {
+			if raw != "*" && trusted {
+				// A source proof established INTEGER/NULL storage and a safe
+				// absolute total over the whole authorized source, hence over
+				// every subset. The free result-type check remains a backstop.
+				sum = "SUM(" + raw + ")"
+				guards = append(guards, "typeof("+sum+") IN ('integer','null')")
+			} else if raw != "*" {
 				// Declined inputs contribute a REAL zero. Thus an INTEGER/NULL
 				// SUM proves every consumed value met this plan's domain; numeric
 				// text must never be accepted through SQLite's SUM coercion.
@@ -232,9 +260,12 @@ func sqliteIntegerReduction(ctx context.Context, q MetricQuery, specs []AggSpec,
 		if len(sourceProof) > 0 {
 			sql += fmt.Sprintf(" LIMIT %d", sourceProof[0].maxGroups+1)
 		}
-		if nonnegative {
+		switch mode {
+		case "trusted":
+			plan.TrustedSQL = sql
+		case "nonnegative":
 			plan.NonnegativeSQL = sql
-		} else {
+		default:
 			plan.SQL = sql
 		}
 	}

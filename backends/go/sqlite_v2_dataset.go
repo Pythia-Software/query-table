@@ -29,6 +29,18 @@ type SQLiteV2Dataset struct {
 	// filter predicates in ExecuteV2In rows, populations and metric filters.
 	// Nil compiles every predicate normally. See SQLitePredicateRelations.
 	PredicateRelations SQLitePredicateRelations
+	// SourceGeneration and SourceProofs optionally let executions reuse
+	// facts proven about the whole authorized source; see SQLiteSourceProofs.
+	// Both must be set. SourceGeneration must identify exactly the data
+	// SourceSQL can read in the transaction passed to ExecuteV2In: read it
+	// inside that transaction, for example from a row every writing
+	// transaction advances, and change it whenever any row, table, view or
+	// schema the source reads may have changed. Do not derive it from time or
+	// from a connection-local counter such as PRAGMA data_version. SourceSQL
+	// must be deterministic for a generation and SourceArgs. Empty disables
+	// caching; every execution then proves its own population, as before.
+	SourceGeneration string
+	SourceProofs     *SQLiteSourceProofs
 }
 type SQLiteMetricCapabilities struct {
 	Version        int  `json:"version"`
@@ -243,12 +255,41 @@ func (d SQLiteV2Dataset) ExecuteV2In(ctx context.Context, tx *sql.Tx, rows *Serv
 	}
 	countSQL := "SELECT COUNT(*) FROM (SELECT 1 FROM (" + d.SourceSQL + ") AS r" + pred + fmt.Sprintf(" LIMIT %d)", maxPopulation+1)
 	args := append(append([]any{}, d.SourceArgs...), filter.Args...)
-	var total int64
-	if e = tx.QueryRowContext(ctx, countSQL, args...).Scan(&total); e != nil {
-		return out, e
+	proofs := d.sourceProofScope(maxPopulation)
+	total, counted := int64(0), false
+	_, bounded := proofs.rows()
+	if filter.SQL == "" {
+		// An unfiltered population is the whole source this generation counted.
+		total, counted = proofs.rows()
+	}
+	// When this generation's whole source is within the budget, so is every
+	// filtered subset. Metrics then count their population only when one
+	// needs it, preferably from a fused integer reduction over it.
+	deferred := !counted && bounded && rows == nil
+	if !counted && !deferred {
+		if e = tx.QueryRowContext(ctx, countSQL, args...).Scan(&total); e != nil {
+			return out, e
+		}
+		counted = true
 	}
 	if total > int64(maxPopulation) {
 		return out, diagnostic("resource_limit", "matching population exceeds host budget")
+	}
+	reduced := int64(-1)
+	population := func() (int64, error) {
+		if !counted && reduced >= 0 {
+			total, counted = reduced, true
+		}
+		if !counted {
+			if err := tx.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
+				return 0, err
+			}
+			counted = true
+		}
+		if total > int64(maxPopulation) {
+			return 0, diagnostic("resource_limit", "matching population exceeds host budget")
+		}
+		return total, nil
 	}
 	// The frontend validates every revision in its handshake, including fields
 	// hidden in this view. Resolve and check the complete requested envelope.
@@ -288,6 +329,10 @@ func (d SQLiteV2Dataset) ExecuteV2In(ctx context.Context, tx *sql.Tx, rows *Serv
 		r := SQLiteMetricsV2Result{Metrics: []SQLiteMetricV2{}}
 		memo := map[string]SQLiteMetricV2{}
 		reductions := newSQLiteReductionCache(batch)
+		reductions.proofs = proofs
+		if !counted {
+			reductions.population = &reduced
+		}
 		reductions.addCrossFields(ctx, batch, *metrics, d.Schema, o)
 		defer func() {
 			if cleanupErr := reductions.close(tx); cleanupErr != nil {
@@ -312,13 +357,24 @@ func (d SQLiteV2Dataset) ExecuteV2In(ctx context.Context, tx *sql.Tx, rows *Serv
 				continue
 			}
 			created := reductions.mark()
+			var populationErr error
 			m, err := isolateMetric(ctx, tx, p.ID, p.Scope, func() (SQLiteMetricV2, error) {
 				p, err := reductions.plan(ctx, tx, p)
 				if err != nil {
 					return SQLiteMetricV2{}, err
 				}
+				total, err := population()
+				if err != nil {
+					populationErr = err
+					return SQLiteMetricV2{}, err
+				}
 				return d.readV2Metric(ctx, tx, p, spec, total, *metrics, maxGroups)
 			})
+			if populationErr != nil {
+				// A deferred population failure fails the request, as the
+				// preflight count would have.
+				return SQLiteV2ExecutionResult{}, populationErr
+			}
 			if err != nil {
 				return SQLiteV2ExecutionResult{}, err
 			}

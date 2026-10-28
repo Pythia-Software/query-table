@@ -151,6 +151,22 @@
   `GroupingDefinition.KeyIntervals` and `GroupKeyInterval`. The grouping
   controls offer an interval for datetime keys, and the TypeScript and Go link
   codecs normalize the new keys alike.
+- Go: per-generation source proofs for V2 integer metric batches. Set
+  `SQLiteV2Dataset.SourceGeneration`, read in the execution transaction from a
+  generation every write advances, and `SourceProofs` (a shared
+  `*SQLiteSourceProofs`). The first execution in a generation proves, in one
+  bounded scan of the whole authorized source, its row count and that each
+  consumed numeric field is INTEGER/NULL with an absolute total within 2^53−1.
+  Later fused COUNT/SUM/AVG/MIN/MAX reductions over those fields then skip the
+  per-row checks. Unfiltered requests reuse the count, and filtered metric
+  batches take their population from the fused reduction. Group keys, budgets,
+  revisions, metric isolation and result types are still checked on every
+  execution. Host functions and sources over `MaxPopulation` are not proven,
+  and without a generation nothing changes. On a 50,000-row COUNT plus nine
+  SUMs (process CPU, warm generation), the adapter went from 46/74/68 ms to
+  21/49/42 ms ungrouped, grouped and filtered, against 16/43/37 ms for bare
+  SQL. The first execution in each generation costs 64/91/99 ms. See
+  `docs/sqlite-performance-handoff.md`.
 
 ### Changed
 
