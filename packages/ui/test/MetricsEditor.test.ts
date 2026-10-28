@@ -887,6 +887,47 @@ it("edits a metric's own filter and minimum rows per group without touching the 
   }
 });
 
+it("disables minimum choices validation would reject for the metric", async () => {
+  const host = document.createElement("div");
+  document.body.append(host);
+  let root = createRoot(host);
+  const fields: FieldDef<unknown>[] = [
+    { name: "at", label: "At", type: "datetime", source: { kind: "backend" } },
+    { name: "tool", label: "Tool", type: "text", source: { kind: "backend" } },
+    { name: "calls", label: "Calls", type: "number", source: { kind: "backend" } },
+  ];
+  const render = async (clause: AggregationClause) => {
+    const api = {
+      aggregations: { clauses: [clause] },
+      setQuery: vi.fn(), rows: [], total: 0,
+      query: { where: [], select: [], orderBy: [], limit: 100, offset: 0 },
+      filterValues: vi.fn(async () => ({ values: [], hasMore: false })),
+    } as unknown as QueryTableApi<unknown>;
+    // A fresh editor per metric, so each opens with that metric selected.
+    act(() => root.unmount());
+    root = createRoot(host);
+    await act(async () => root.render(createElement(MetricsEditor, { api, fields, onClose: vi.fn() })));
+    const select = host.querySelector<HTMLSelectElement>('[aria-label="Minimum counts"]')!;
+    return Object.fromEntries([...select.options].map((o) => [o.value, o.disabled]));
+  };
+  try {
+    // A box counts rows only.
+    expect(await render({ id: "b", op: "sum", field: "calls", groupBy: ["tool"], minCount: 2, distribution: { kind: "box", input: "calls" }, display: { kind: "box" } }))
+      .toEqual({ rows: false, "distinct:at": true, "distinct:tool": true, "distinct:calls": true, "sum:calls": true });
+    // A window cannot combine distinct values, but sums add up.
+    const windowed = await render({ id: "w", op: "sum", field: "calls", groupBy: ["at"], minCount: 2, window: { periods: 7 },
+      dateGrouping: { field: "at", interval: "day", includeEmpty: true, range: "observed" } });
+    expect(windowed["distinct:tool"]).toBe(true);
+    expect(windowed["sum:calls"]).toBe(false);
+    // The current choice stays selectable even where it is no longer valid.
+    expect((await render({ id: "c", op: "sum", field: "calls", groupBy: ["tool"], minCount: { min: 2, sum: "calls" },
+      distribution: { kind: "box", input: "calls" }, display: { kind: "box" } }))["sum:calls"]).toBe(false);
+  } finally {
+    act(() => root.unmount());
+    host.remove();
+  }
+});
+
 it("counts a minimum over rows, distinct values or a sum, and keeps an unlisted field", async () => {
   const host = document.createElement("div");
   document.body.append(host);

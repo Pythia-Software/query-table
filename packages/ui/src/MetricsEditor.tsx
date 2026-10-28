@@ -2156,7 +2156,8 @@ export function MetricsEditor<Row>({
                             selected.minCount,
                             fieldLabel,
                           ).map(([key, label]) => (
-                            <option key={key} value={key}>
+                            <option key={key} value={key}
+                              disabled={key !== minimumKey(selected.minCount) && !minimumAllowed(selected, key)}>
                               {label}
                             </option>
                           ))}
@@ -2931,6 +2932,15 @@ function minimumOf(key: string, min: number): MinCount {
   const kind = key.slice(0, split),
     field = key.slice(split + 1);
   return kind === "sum" ? { min, sum: field } : { min, distinct: field };
+}
+/** Whether validation accepts this kind of minimum for the metric:
+ * distributions and per-occurrence summaries count rows only, and distinct
+ * values cannot be combined across a window's intervals. */
+function minimumAllowed(c: AggregationClause, key: string): boolean {
+  if (key === "rows") return true;
+  const distribution = !!c.distribution && (!c.display || c.display.kind === "box" || c.display.kind === "histogram");
+  if (distribution || c.dateGrouping?.occurrence) return false;
+  return !(key.startsWith("distinct:") && c.window);
 }
 /** A new threshold keeps what the minimum counts. */
 function withMinimum(m: MinCount, min: number): MinCount {

@@ -130,6 +130,29 @@ describe("hostQuery: one definition", () => {
   });
 });
 
+describe("hostQuery: execution receipts", () => {
+  it("starts a new receipt when only the host state changes", async () => {
+    const failing: Transport<Row> = {
+      fetchRows: async (query: ServerQuery & { hostState?: HostQueryState }) => {
+        requests.push(query);
+        if (query.hostState?.params.record_tool_calls?.[1] === "bad") throw Error("HTTP 422: bad keyword");
+        return { rows: [], total: 0 };
+      },
+    };
+    const current = mount({ transport: failing, initialQuery: { ...errors, hostState: keyword("bad") } });
+    await settle();
+    const failed = current.api.execution!;
+    expect(failed).toMatchObject({ status: "failed", rows: "failed" });
+    act(() => current.api.setDefinition!((previous) => ({ ...previous, hostState: keyword("cache") })));
+    // The same table query under new host state is a new execution, never the old failure.
+    expect(current.api.execution!.key).not.toBe(failed.key);
+    expect(current.api.execution!.generation).toBeGreaterThan(failed.generation);
+    expect(current.api.execution!.status).toBe("running");
+    await settle();
+    expect(current.api.execution).toMatchObject({ status: "succeeded", error: null });
+  });
+});
+
 describe("hostQuery: saved definitions", () => {
   it("saves the committed definition and restores all of it before any new request", async () => {
     const storage = memoryStorageAdapter();

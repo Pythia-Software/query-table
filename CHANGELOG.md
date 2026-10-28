@@ -177,7 +177,10 @@
   `MinCount: qt.MetricMinCount{Min: 5}` and `spec.MinCount > 0` or
   `spec.MinCount != 0` with `spec.MinCount.Active()`.
 - The metric editor's minimum input is now labelled "Minimum per group"
-  (formerly "Minimum rows per group").
+  (formerly "Minimum rows per group"). Its **Counting** choice disables
+  distinct and summed minimums where they do not apply: distributions and
+  per-occurrence summaries count rows, and windows cannot combine distinct
+  values.
 - `MetricChart` colours pie, donut, bar, box, histogram and list marks
   grouped by several keys by their whole key, so `claude / opus` and
   `claude / sonnet` no longer share a colour, and the legend lists each key

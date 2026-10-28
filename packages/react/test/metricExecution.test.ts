@@ -46,6 +46,22 @@ const clause = {
   expression: "SUM([x]) / SUM([y])",
 };
 describe("metric execution boundary", () => {
+  it("requires a shown-row minimum's measured field on the page", async () => {
+    const transport: Transport<Row> = {
+      fetchRows: async () => ({ rows, total: 3 }),
+      fetchMetrics: async () => ({ metrics: [] }),
+      metricCapabilities: { version: 2, expressions: true, minCount: true, minCountMeasures: true },
+    };
+    const query = { ...EMPTY_QUERY, aggregations: [
+      { id: "page", op: "count" as const, groupBy: ["group"], scope: "shownRows" as const, minCount: { min: 2, distinct: "name" } },
+    ] };
+    // The page loaded group and id only; name is missing, not NULL.
+    const page = rows.map(({ id, group }) => ({ id, group }) as Row);
+    await expect(executeMetrics(query, { schema, transport, shownRows: page, rowsReady: true, shownFields: ["id", "group"] }))
+      .rejects.toThrow("Shown-page input name is not loaded");
+    const result = await executeMetrics(query, { schema, transport, shownRows: rows, rowsReady: true, shownFields: ["id", "group", "name"] });
+    expect(result.metrics[0]!.buckets.map((b) => b.keys)).toEqual([["a"]]);
+  });
   it.each([false, undefined])("uses committed rows when V2 shownRows is %s, preserving remote revisions and clause order", async (shownRows) => {
     const fetchRows = vi.fn(async () => ({ rows: [{ ...rows[1]!, x: 999 }], total: 100 }));
     const fetchMetrics = vi.fn<NonNullable<Transport<Row>["fetchMetrics"]>>(async request => ({

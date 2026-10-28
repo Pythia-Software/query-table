@@ -40,14 +40,19 @@ const grouped = (overrides: Partial<QueryState> = {}) => normalizeQueryState({
 
 let root: Root | undefined;
 function mount(options: Partial<UseQueryTableOptions<GroupedRow>>) {
-  const current = { api: undefined as unknown as QueryTableApi<GroupedRow> };
+  const current = { api: undefined as unknown as QueryTableApi<GroupedRow>, options };
   function Probe() {
-    current.api = useQueryTable({ schema, clientRows: rows, debounceMs: 0, itemDetails: { modes: ["modal", "expand", "page"], defaultModes: ["modal", "expand"] }, ...options });
+    current.api = useQueryTable({ schema, clientRows: rows, debounceMs: 0, itemDetails: { modes: ["modal", "expand", "page"], defaultModes: ["modal", "expand"] }, ...current.options });
     return null;
   }
   root = createRoot(document.createElement("div"));
   act(() => root!.render(createElement(Probe)));
-  return current;
+  return Object.assign(current, {
+    rerender(next: Partial<UseQueryTableOptions<GroupedRow>>) {
+      current.options = { ...current.options, ...next };
+      act(() => root!.render(createElement(Probe)));
+    },
+  });
 }
 async function settle() {
   await act(async () => {});
@@ -154,5 +159,20 @@ describe("group details", () => {
     await settle();
     expect(current.api.grouping!.source.filterValues).toBe(filterValues);
     expect(current.api.grouping!.source.fieldStats).toBe(fieldStats);
+  });
+
+  it("drops groups seen before the data source changed", async () => {
+    const current = mount({ initialQuery: grouped() });
+    await settle();
+    const beta = idOf(current.api, "beta");
+    act(() => current.api.itemDetails!.open(beta, "modal"));
+    await settle();
+    expect(current.api.itemDetails!.record!.row).toMatchObject({ conversation: "beta", messages: 1 });
+    // New rows without beta: the open group is unavailable, not its old summary.
+    current.rerender({ clientRows: rows.filter((row) => row.conversation !== "beta") });
+    await settle();
+    expect(current.api.itemDetails!.active).toEqual({ id: beta, mode: "modal" });
+    expect(current.api.itemDetails!.loading).toBe(false);
+    expect(current.api.itemDetails!.record).toBeNull();
   });
 });

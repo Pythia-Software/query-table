@@ -1018,7 +1018,9 @@ export function useQueryTable<Row>(
     ],
   );
   const executionKey = JSON.stringify(opts.computedExecution ?? null);
-  const pageContext = `${schema.name}:${rowQueryKey}:${nonce}:${executionKey}`;
+  // Host state is part of what a page shows: a result or failure under one
+  // host state never stands for another.
+  const pageContext = `${schema.name}:${rowQueryKey}:${nonce}:${executionKey}:${hostStateKey}`;
   useEffect(() => {
     if (!active || !storageReady || restoration.loading || restoration.error) {
       setRows(previous => previous.length ? [] : previous); setTotal(null); setCommittedPage(null); setLoading(false);
@@ -1687,9 +1689,13 @@ export function useQueryTable<Row>(
   // Group Detail reads grouped rows already held, by their group identity; it
   // never loads a source item by that ID. Rows seen for this population stay
   // readable across pages and sorts, and a changed population drops them.
-  const groupPopulation = query.grouping ? JSON.stringify([query.grouping, query.where, nonce]) : "";
-  const groupRecords = useRef({ population: "", rows: new Map<RowId, Row>() });
-  if (groupRecords.current.population !== groupPopulation) groupRecords.current = { population: groupPopulation, rows: new Map() };
+  // A population is the grouped query and host state over one data source;
+  // new rows, a new transport or a new schema start it afresh.
+  const groupPopulation = query.grouping ? JSON.stringify([query.grouping, query.where, nonce, hostStateKey]) : "";
+  const groupRecords = useRef({ population: "", source: [] as unknown[], rows: new Map<RowId, Row>() });
+  const groupSource = [clientRows, transport, schema];
+  if (groupRecords.current.population !== groupPopulation || groupSource.some((part, i) => part !== groupRecords.current.source[i]))
+    groupRecords.current = { population: groupPopulation, source: groupSource, rows: new Map() };
   // Only rows committed for the current page context belong to this population.
   const groupsSettled = groupDetailsEnabled && pageReady && !restoration.loading;
   if (groupsSettled) for (const row of rows) {
