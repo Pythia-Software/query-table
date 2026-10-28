@@ -107,7 +107,7 @@ describe("group details", () => {
     act(() => current.api.itemDetails!.open(beta, "modal"));
     await settle();
     expect(current.api.itemDetails!.record).not.toBeNull();
-    act(() => current.api.grouping!.source.addFilter("conversation", { op: "=", value: "alpha" }));
+    act(() => current.api.grouping!.source.addFilter({ field: "conversation", op: "=", value: "alpha" }));
     await settle();
     expect(current.api.itemDetails!.active).toEqual({ id: beta, mode: "modal" });
     expect(current.api.itemDetails!.loading).toBe(false);

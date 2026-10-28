@@ -85,6 +85,24 @@ Update only when `api.saved.canUpdate` is true. Optional last/default storage re
 failures fall back to table defaults; explicit broken URL links still block
 execution. A single empty `?q=` is treated as an absent query.
 
+### Last-used query and execution receipts
+
+By default the last-used query is saved 400 ms after every change, even if it
+never loads. `persistLast: "succeeded"` saves it only once rows and every
+metric of that exact query have loaded, so a bare reload never restores a
+query that failed, timed out or was cancelled; the failed query stays on
+screen to retry or reset. Explicit links, named saves and the default saved
+query are separate choices and are unaffected.
+
+`api.execution` reports the current query's execution apart from
+`api.restoration`: the exact `query`, an execution `key` and increasing
+`generation`, an overall `status` (`running`, `succeeded`, `failed`) and
+separate `rows` and `metrics` statuses with the `error`. An empty result,
+including a page past the end, is a success; a metric that fails while rows
+load is not. A slower earlier execution never updates a later receipt, and
+the receipt is `null` while restoring or inactive. Hosts can use it to build
+their own persistence, retry or reset policies.
+
 Item-detail property views hydrate independently, but synchronize into the
 collection query only after URL/saved-query restoration settles. Detail layouts
 encoded in the restored query take precedence over stored property views.

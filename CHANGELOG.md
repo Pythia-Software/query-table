@@ -15,6 +15,15 @@
   table. Record item Detail is unchanged, including after leaving grouping.
   `ItemDetailsActions` takes a `label`, and `ObjectProperties` a `query` for
   its renderers.
+- `useQueryTable({ persistLast: "succeeded" })` saves the last-used query only
+  after its rows and every metric have loaded. A query that fails, times out
+  or is cancelled no longer replaces the last-used query, so a bare reload
+  restores the last one that worked. The default (`"always"`) is unchanged.
+- `api.execution`, an execution receipt for the current query: the exact
+  query, an execution key and generation, and overall, row and metric
+  statuses with the error. Restoration stays in `api.restoration`. A slower
+  earlier execution never updates a later receipt, and hidden or restoring
+  tables publish none.
 
 ### Changed
 

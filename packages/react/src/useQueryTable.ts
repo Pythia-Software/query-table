@@ -108,6 +108,12 @@ export interface UseQueryTableOptions<Row> {
    * Pass localStorageAdapter() explicitly only when filter values are safe to
    * retain as cleartext JSON on the device. */
   storage?: StorageAdapter;
+  /** When `storage.saveLast` records the last-used query: "always" (default)
+   * 400 ms after every change, or "succeeded" once rows and every metric of
+   * that exact query have loaded. A failure, timeout or cancellation keeps the
+   * previous last-used query; explicit links, named saves and the default are
+   * separate choices and are never touched by it. */
+  persistLast?: "always" | "succeeded";
   /** Shared reusable definitions, independent of saved-query storage. */
   computedColumnStore?: ComputedColumnStore;
   /** Authoritative host handshake for versioned server SELECT, sorts, and metrics. */
@@ -201,9 +207,31 @@ export interface AggregationsApi {
   contextKey?: string;
 }
 
+/** The outcome of executing one exact query; see `QueryTableApi.execution`. */
+export interface QueryExecutionReceipt {
+  /** The query whose rows and metrics this receipt describes. */
+  query: QueryState;
+  /** Execution identity: changes with every row- or metric-affecting edit and
+   * refresh, but not with presentation such as widths. */
+  key: string;
+  /** Increases with every new execution identity of this table. */
+  generation: number;
+  /** "succeeded" only when rows and every metric loaded; an empty result,
+   * including a page past the end, is a success. */
+  status: "running" | "succeeded" | "failed";
+  rows: "running" | "succeeded" | "failed";
+  /** "none" when the query has no metrics. A metric error fails the receipt. */
+  metrics: "none" | "running" | "succeeded" | "failed";
+  /** The row or metric error behind a failure. */
+  error: Error | null;
+}
 export interface QueryTableApi<Row> {
   /** Dependent source fetches can use ready without parsing display errors. */
   restoration: { status: "resolving" | "ready" | "error"; ready: boolean; error: Error | null };
+  /** Execution of the current query, separate from restoration. Null while
+   * restoring, after a restoration error and while the table is inactive, so
+   * a cancelled or hidden table never publishes a stale receipt. */
+  execution: QueryExecutionReceipt | null;
   /** Call after a host pushState/router update, with an absolute URL or a location
    * relative to window.location.href. Supersedes prior resolution;
    * abort or an intervening query edit prevents stale publication. */
@@ -584,6 +612,8 @@ export function useQueryTable<Row>(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [committedPage, setCommittedPage] = useState<string | null>(null);
+  // The page context whose execution set `error`; errors of superseded runs do not describe the current query.
+  const [failedPage, setFailedPage] = useState<string | null>(null);
   const [committedSource, setCommittedSource] = useState<{
     schema: FieldSchema<Row>;
     transport: Transport<Row> | undefined;
@@ -884,6 +914,7 @@ export function useQueryTable<Row>(
     const run = async () => {
       setLoading(true);
       setError(null);
+      setFailedPage(null);
       try {
         validateExecution(query);
         if (transport) {
@@ -967,6 +998,7 @@ export function useQueryTable<Row>(
       } catch (e) {
         if (!cancelled && !ac.signal.aborted) {
           setError(e as Error);
+          setFailedPage(pageContext);
           setRows([]);
           setTotal(null);
           setCommittedPage(null);
@@ -999,12 +1031,14 @@ export function useQueryTable<Row>(
     storageReady,
   ]);
 
-  // Persist last query (debounced).
+  // Persist last query (debounced). The "succeeded" policy waits for the
+  // execution receipt below.
+  const persistLast = opts.persistLast ?? "always";
   useEffect(() => {
-    if (!storageReady || restoration.loading || restoration.error) return;
+    if (persistLast !== "always" || !storageReady || restoration.loading || restoration.error) return;
     const t = setTimeout(() => void storage.saveLast(sourceSchema.name, query), 400);
     return () => clearTimeout(t);
-  }, [queryKey, storage, sourceSchema.name, query, restoration, storageReady]);
+  }, [persistLast, queryKey, storage, sourceSchema.name, query, restoration, storageReady]);
 
   // Resolved id accessor.
   const idField = useMemo(
@@ -1475,6 +1509,36 @@ export function useQueryTable<Row>(
     ],
   );
 
+  // One receipt per execution identity. Rows and metrics are keyed by the
+  // current page context and metric state, so a slower earlier execution can
+  // never mark this one healthy.
+  const executionIdentity = JSON.stringify([pageContext, query.aggregations ?? [], query.where, groupKey, nonce]);
+  const executionGeneration = useRef({ key: "", generation: 0 });
+  if (executionGeneration.current.key !== executionIdentity)
+    executionGeneration.current = { key: executionIdentity, generation: executionGeneration.current.generation + 1 };
+  const execution = useMemo((): QueryExecutionReceipt | null => {
+    if (!active || !storageReady || restoration.loading || restoration.error) return null;
+    const rowsStatus = pageReady ? "succeeded" : error && failedPage === pageContext ? "failed" : "running";
+    const metricError = aggState.error ?? aggState.results?.metrics.find(entry => entry.error)?.error;
+    const metricsStatus = !(query.aggregations?.length) ? "none"
+      : aggState.loading || (!aggState.results && !aggState.error) ? "running"
+      : metricError ? "failed" : "succeeded";
+    const status = rowsStatus === "failed" || metricsStatus === "failed" ? "failed"
+      : rowsStatus === "succeeded" && metricsStatus !== "running" ? "succeeded" : "running";
+    return {
+      query, key: executionIdentity, generation: executionGeneration.current.generation,
+      status, rows: rowsStatus, metrics: metricsStatus,
+      error: rowsStatus === "failed" ? error : metricError ? (metricError instanceof Error ? metricError : Error(String(metricError))) : null,
+    };
+  }, [active, storageReady, restoration.loading, restoration.error, pageReady, error, failedPage, pageContext,
+    aggState.error, aggState.results, aggState.loading, query, executionIdentity]);
+  const succeededQuery = execution?.status === "succeeded" ? execution.query : null;
+  useEffect(() => {
+    if (persistLast !== "succeeded" || !succeededQuery) return;
+    const t = setTimeout(() => void storage.saveLast(sourceSchema.name, succeededQuery), 400);
+    return () => clearTimeout(t);
+  }, [persistLast, succeededQuery, storage, sourceSchema.name]);
+
   const sourceRowId = useCallback((row: Row): RowId | null => {
     const field = sourceSchema.fields.find(f => f.name === sourceSchema.idField);
     const value = field ? readFieldValue(field, row) : (row as Record<string, unknown>)[sourceSchema.idField];
@@ -1532,6 +1596,7 @@ export function useQueryTable<Row>(
   const api: QueryTableApi<Row> = {
     restoration: { status: restoration.error ? "error" : !storageReady || restoration.loading ? "resolving" : "ready",
       ready: active && storageReady && !restoration.loading && !restoration.error, error: restoration.error },
+    execution,
     restoreLocation,
     links,
     schema: columnSchema,
