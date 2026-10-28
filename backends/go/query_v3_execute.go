@@ -209,6 +209,8 @@ func (d QueryDatasetV3) ExecuteIn(ctx context.Context, tx *sql.Tx, q QueryReques
 			return out, err
 		}
 		stageOptions.SourceSQL = "SELECT * FROM " + queryIdent(groups)
+		// Group rows are not source rows: host relations yield source keys.
+		stageOptions.relations = nil
 	}
 	resultQuery := q.Result
 	filtered, err := compileComputedRowsDialect(ctx, WireQuery{Select: []string{result.IDField}, Where: resultQuery.Where}, result, stageOptions, d.Dialect == "sqlite")

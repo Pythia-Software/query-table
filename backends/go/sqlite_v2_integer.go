@@ -100,7 +100,7 @@ func sqliteIntegerReduction(ctx context.Context, q MetricQuery, specs []AggSpec,
 		projections = []string{"1 AS qt_present"}
 	}
 	where := append(append([]WhereTerm{}, q.Where...), specs[0].Where...)
-	filter, err := CompileSQLiteWhere(where, s, SQLiteOptions{Now: o.Now})
+	filter, _, err := compileSQLiteWhere(where, s, SQLiteOptions{Now: o.Now}, o.relations)
 	if err != nil || ctx.Err() != nil {
 		return nil
 	}

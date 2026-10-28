@@ -26,6 +26,10 @@ type SQLiteDataset struct {
 	// are never silently truncated. Counts and metrics cover all matching rows.
 	MaxLimit  int
 	MaxGroups int
+	// PredicateRelations optionally supplies host relations (for example a
+	// maintained text index) for filter predicates in Rows and Aggregations.
+	// Nil compiles every predicate normally. See SQLitePredicateRelations.
+	PredicateRelations SQLitePredicateRelations
 }
 
 type SQLiteRowsResult struct {
@@ -146,7 +150,7 @@ func (d SQLiteDataset) RowsIn(ctx context.Context, tx *sql.Tx, q WireQuery) (SQL
 	if !found {
 		q.Select = append(q.Select, d.Schema.IDField)
 	}
-	compiled, err := CompileSQLite(q, d.Schema, SQLiteOptions{Now: time.Now()})
+	compiled, err := compileSQLite(q, d.Schema, SQLiteOptions{Now: time.Now()}, newSQLiteRelations(ctx, tx, d.PredicateRelations))
 	if err != nil {
 		return SQLiteRowsResult{}, err
 	}
@@ -361,7 +365,7 @@ func (d SQLiteDataset) AggregationsIn(ctx context.Context, tx *sql.Tx, request S
 	if err := (WireQuery{Where: request.Where, Aggregations: request.Aggregations}).Validate(); err != nil {
 		return result, err
 	}
-	plan, err := CompileSQLiteWhere(request.Where, d.Schema, SQLiteOptions{Now: time.Now()})
+	plan, _, err := compileSQLiteWhere(request.Where, d.Schema, SQLiteOptions{Now: time.Now()}, newSQLiteRelations(ctx, tx, d.PredicateRelations))
 	if err != nil {
 		return result, err
 	}

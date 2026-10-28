@@ -153,6 +153,77 @@ executor, the host also owns result validation, group limits, and typed mapping.
 A rollup optimization must enforce the same source and result guards; checking
 only a final rollup sum is insufficient to detect unsafe inputs that cancel.
 
+## Host predicate relations
+
+A host that maintains its own index for a predicate, such as a trigram index
+for substring filters over wide text, can let the executor use it. Set
+`PredicateRelations` on `SQLiteDataset`, `SQLiteV2Dataset` or a SQLite
+`QueryDatasetV3`. Nil (the default) compiles every predicate as before.
+
+```go
+type textIndex struct{}
+
+func (textIndex) PredicateRelation(ctx context.Context, tx *sql.Tx, p querytable.SQLitePredicate) (querytable.SQLitePredicateRelation, bool, error) {
+    if p.Field != "command" || p.Op != "contains" || len(p.Value) < 3 || !isASCII(p.Value) {
+        return querytable.SQLitePredicateRelation{}, false, nil // keep the typed predicate
+    }
+    var ready string // read readiness in the execution's own snapshot
+    if err := tx.QueryRowContext(ctx, "SELECT COALESCE((SELECT value FROM meta WHERE key='command_fts_ready'),'')").Scan(&ready); err != nil {
+        return querytable.SQLitePredicateRelation{}, false, err
+    }
+    if ready != "1" {
+        return querytable.SQLitePredicateRelation{}, false, nil // incomplete backfill
+    }
+    phrase := `"` + strings.ReplaceAll(strings.ToLower(p.Value), `"`, `""`) + `"`
+    return querytable.SQLitePredicateRelation{
+        SQL:   "SELECT rowid FROM command_fts WHERE command_fts MATCH ?",
+        Args:  []any{phrase},
+        Key:   "seq", // a schema field bound to the indexed rowid
+        Exact: true,
+    }, true, nil
+}
+
+dataset := querytable.SQLiteV2Dataset{Schema: schema, SourceSQL: source, PredicateRelations: textIndex{}}
+```
+
+The executor offers each non-blank base-field literal (`Field`, `Op`, `Value`,
+`Negated`) once per execution, with that execution's context and transaction.
+A relation's `SQL` is a SELECT of `Key` values (default: the schema `IDField`)
+for the rows that satisfy the *un-negated* predicate. It is compiled as
+`<key> IN (<SQL>)` inside the query statement itself, so it always reads the
+execution's transaction and data snapshot; nothing is materialized outside
+it. Use anonymous `?` parameters bound to `Args`; numbered or named
+parameters, comments, `;` and `[...]` identifiers are rejected. Do not refer
+to compiler names (CTEs `qt0`, `qt1`, … and row aliases like `f0`). Key values
+must be non-NULL and identify source rows.
+
+- **Exact** (`Exact: true`) asserts the relation is complete and equals the
+  predicate's rows. It replaces the typed check, so the field is not read for
+  that predicate (and per-value function errors such as invalid UTF-8 or
+  oversized text are not raised for it). Report exact only once every row of
+  the snapshot is indexed.
+- **Candidate** (`Exact: false`) is a superset that only narrows: the typed
+  check still runs (`<key> IN (...) AND <typed>`). A candidate for a negated
+  predicate is ignored. During an incomplete backfill, answer a candidate that
+  includes every unindexed row, or decline.
+- **Negation** of an exact relation keeps the compiler's null and empty guard:
+  `NOT (<key> IN (...)) AND NOT (<field> IS NULL OR <field> = '')`, so NULL and
+  empty values match neither a predicate nor its negation.
+- **OR**: within an OR term (plain or OR-of-AND branches), relations are used
+  only when every branch has at least one usable relation (an exact relation,
+  or a positive candidate). Otherwise the whole term keeps its typed
+  predicates. Separate AND terms decide independently.
+
+Relations apply to rows and aggregations on `SQLiteDataset`, V2 rows,
+populations and metric filters on `SQLiteV2Dataset.ExecuteV2In`, and `/query-v3`
+source filters, ungrouped row and metric filters (including calendar metrics).
+They never apply to group filters over grouped results, to computed fields or
+to `ExecuteV2Rows`. A relation whose key field is not part of a staged
+projection is ignored there and the typed predicate applies. A provider error
+fails the whole execution. `QueryDatasetV3` rejects relations for PostgreSQL.
+The compile-only APIs (`CompileSQLite`, `CompileSQLiteWhere`, the V2 compile
+functions) never consult them.
+
 ## Data and semantic conventions
 
 Use STRICT tables or equivalent ingestion validation. Bind numeric fields to

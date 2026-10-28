@@ -25,6 +25,10 @@ type SQLiteV2Dataset struct {
 	// Explicit MaxGroups may be 1..100000.
 	// Limits fail explicitly; no approximate or silently truncated populations.
 	MaxRows, MaxGroups, MaxPopulation int
+	// PredicateRelations optionally supplies host relations for base-field
+	// filter predicates in ExecuteV2In rows, populations and metric filters.
+	// Nil compiles every predicate normally. See SQLitePredicateRelations.
+	PredicateRelations SQLitePredicateRelations
 }
 type SQLiteMetricCapabilities struct {
 	Version        int  `json:"version"`
@@ -193,6 +197,7 @@ func (d SQLiteV2Dataset) ExecuteV2In(ctx context.Context, tx *sql.Tx, rows *Serv
 		}
 	}
 	o = d.options(tx, o)
+	o.relations = newSQLiteRelations(ctx, tx, d.PredicateRelations)
 	var rowPlan SQLPlan
 	var batch MetricBatchPlan
 	var failures []error
@@ -228,7 +233,7 @@ func (d SQLiteV2Dataset) ExecuteV2In(ctx context.Context, tx *sql.Tx, rows *Serv
 	}
 	// Bound the population before expensive formulas, sorting and reductions. The
 	// count itself scans at most budget+1 source rows in the authorized snapshot.
-	filter, e := CompileSQLiteWhere(where, d.Schema, SQLiteOptions{Now: o.Now})
+	filter, _, e := compileSQLiteWhere(where, d.Schema, SQLiteOptions{Now: o.Now}, o.relations)
 	if e != nil {
 		return out, e
 	}

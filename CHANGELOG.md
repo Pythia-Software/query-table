@@ -113,6 +113,22 @@
   (a new `minCount` table in `METRIC_OPTION_SPECS`). The metric editor's
   **Minimum per group** gains a **Counting** choice, and cards name what the
   minimum counted.
+- Host predicate relations for SQLite (Go). Set `PredicateRelations` (a
+  `SQLitePredicateRelations`, or `SQLitePredicateRelationsFunc`) on
+  `SQLiteDataset`, `SQLiteV2Dataset` or a SQLite `QueryDatasetV3` to supply a
+  relation, such as a maintained trigram index, for a filter predicate. The
+  provider receives the predicate's field, operator, value and negation with
+  the execution's context and transaction, and returns
+  `SQLitePredicateRelation{SQL, Args, Key, Exact}`: a SELECT of key values
+  (default the ID field) compiled as `key IN (...)` inside the query, so it
+  reads the execution's own snapshot. An exact relation replaces the typed
+  check; a candidate only narrows it and is ignored when negated. Negation
+  keeps the compiler's null and empty guard. An OR term (including OR-of-AND
+  branches) uses relations only when every branch has one. Relations apply to
+  rows and metrics in `SQLiteDataset`, V2 rows, populations and metric
+  filters, and `/query-v3` source and ungrouped filters, never to group
+  filters over grouped rows. Without a provider, compiled SQL is unchanged.
+  See "Host predicate relations" in `docs/backend-sqlite.md`.
 
 ### Changed
 

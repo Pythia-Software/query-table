@@ -19,6 +19,9 @@ type SQLiteOptions struct{ Now time.Time }
 // Requires SQLite 3.38+ with JSON and the functions from SQLiteFunctions.
 // This is a v1 row/basic-aggregation adapter, not the qt-postgres-v1 v2 profile.
 func CompileSQLite(q WireQuery, s Schema, o SQLiteOptions) (CompileResult, error) {
+	return compileSQLite(q, s, o, nil)
+}
+func compileSQLite(q WireQuery, s Schema, o SQLiteOptions, relations *sqliteRelations) (CompileResult, error) {
 	var res CompileResult
 	if err := q.Validate(); err != nil {
 		return res, err
@@ -34,7 +37,7 @@ func CompileSQLite(q WireQuery, s Schema, o SQLiteOptions) (CompileResult, error
 	if o.Now.IsZero() {
 		o.Now = time.Now()
 	}
-	where, err := CompileSQLiteWhere(q.Where, s, o)
+	where, _, err := compileSQLiteWhere(q.Where, s, o, relations)
 	if err != nil {
 		return res, err
 	}
@@ -108,54 +111,111 @@ type SQLiteWhereResult struct {
 }
 
 func CompileSQLiteWhere(terms []WhereTerm, s Schema, o SQLiteOptions) (SQLiteWhereResult, error) {
+	result, _, err := compileSQLiteWhere(terms, s, o, nil)
+	return result, err
+}
+
+// compileSQLiteWhere also applies an execution's host predicate relations and
+// reports the key fields they read. With nil relations it is CompileSQLiteWhere.
+func compileSQLiteWhere(terms []WhereTerm, s Schema, o SQLiteOptions, relations *sqliteRelations) (SQLiteWhereResult, []string, error) {
 	result := SQLiteWhereResult{}
 	if err := (WireQuery{Where: terms}).Validate(); err != nil {
-		return result, err
+		return result, nil, err
 	}
 	now := o.Now
 	if now.IsZero() {
 		now = time.Now()
 	}
+	var keys []string
 	var parts []string
 	for _, term := range terms {
 		if term.IsGroup() && (len(term.Any) == 0 || term.Field != "" || term.Op != "" || term.Value != "" || term.Negated) {
-			return SQLiteWhereResult{}, fmt.Errorf("invalid OR group")
+			return SQLiteWhereResult{}, nil, fmt.Errorf("invalid OR group")
 		}
 		// A term is an OR of AND branches. An always-true literal (blank value)
 		// drops out of its branch; a branch with nothing left makes the whole
 		// term a no-op, after every literal has still been validated.
-		var alternatives []string
-		var groupArgs []any
+		branches := term.Branches()
+		literals := make([][]WhereClause, len(branches))
+		typed := make([][]sqliteTypedLiteral, len(branches))
 		noOp := false
-		for _, branch := range term.Branches() {
-			var parts []string
+		for i, branch := range branches {
 			for _, c := range branch {
-				sql, args, err := sqliteLiteral(c, s, now)
+				sql, args, err := sqliteBaseLiteral(c, s, now)
 				if err != nil {
-					return SQLiteWhereResult{}, err
+					return SQLiteWhereResult{}, nil, err
 				}
 				if sql != "" {
-					parts = append(parts, "("+sql+")")
+					literals[i] = append(literals[i], c)
+					typed[i] = append(typed[i], sqliteTypedLiteral{sql, args})
 				}
-				groupArgs = append(groupArgs, args...)
 			}
-			switch len(parts) {
-			case 0:
+			if len(literals[i]) == 0 {
 				noOp = true
-			case 1:
-				alternatives = append(alternatives, parts[0])
-			default:
-				alternatives = append(alternatives, "("+strings.Join(parts, " AND ")+")")
 			}
 		}
 		if noOp {
 			continue
 		}
-		result.Args = append(result.Args, groupArgs...)
+		var uses [][]*sqliteRelationUse
+		if relations != nil {
+			var err error
+			if uses, err = relations.choose(literals, s); err != nil {
+				return SQLiteWhereResult{}, nil, err
+			}
+		}
+		var alternatives []string
+		for i, branch := range literals {
+			var conjuncts []string
+			for j, c := range branch {
+				var use *sqliteRelationUse
+				if uses != nil {
+					use = uses[i][j]
+				}
+				sql, args := sqliteApplyLiteral(c, s.Fields[c.Field], typed[i][j], use)
+				if use != nil {
+					keys = append(keys, use.field)
+				}
+				conjuncts = append(conjuncts, "("+sql+")")
+				result.Args = append(result.Args, args...)
+			}
+			if len(conjuncts) == 1 {
+				alternatives = append(alternatives, conjuncts[0])
+			} else {
+				alternatives = append(alternatives, "("+strings.Join(conjuncts, " AND ")+")")
+			}
+		}
 		parts = append(parts, "("+strings.Join(alternatives, " OR ")+")")
 	}
 	result.SQL = strings.Join(parts, " AND ")
-	return result, nil
+	return result, keys, nil
+}
+
+type sqliteTypedLiteral struct {
+	sql  string
+	args []any
+}
+
+// sqliteApplyLiteral emits one non-blank literal. Without a relation it is the
+// ordinary typed predicate. An exact relation replaces the typed check; a
+// candidate (never chosen for a negated literal) only narrows it. Negation
+// always keeps the compiler's null/empty guard, so NULL and empty values
+// satisfy neither a predicate nor its negation.
+func sqliteApplyLiteral(c WhereClause, f FieldSpec, typed sqliteTypedLiteral, use *sqliteRelationUse) (string, []any) {
+	sql, args := typed.sql, typed.args
+	if use != nil {
+		member := use.key + " IN (" + use.relation.SQL + ")"
+		if use.relation.Exact {
+			sql, args = member, use.relation.Args
+		} else {
+			sql = "(" + member + " AND " + sql + ")"
+			args = append(append([]any{}, use.relation.Args...), args...)
+		}
+	}
+	if c.Negated {
+		sql = "(NOT (" + sql + ") AND NOT (" + sqliteNull(f) + "))"
+	}
+	return sql, args
 }
 
 func validateSQLiteSchema(s Schema) error {
@@ -234,6 +294,17 @@ func sqliteDateText(f FieldSpec) string {
 	}
 }
 func sqliteLiteral(c WhereClause, s Schema, now time.Time) (string, []any, error) {
+	sql, args, err := sqliteBaseLiteral(c, s, now)
+	if err != nil || sql == "" {
+		return sql, args, err
+	}
+	sql, args = sqliteApplyLiteral(c, s.Fields[c.Field], sqliteTypedLiteral{sql, args}, nil)
+	return sql, args, nil
+}
+
+// sqliteBaseLiteral validates one literal and emits its un-negated predicate,
+// or "" for a blank no-op value.
+func sqliteBaseLiteral(c WhereClause, s Schema, now time.Time) (string, []any, error) {
 	f, ok := s.Fields[c.Field]
 	if !ok || !f.ServerFilter {
 		return "", nil, fmt.Errorf("unknown or disabled filter field %q", c.Field)
@@ -308,9 +379,6 @@ func sqliteLiteral(c WhereClause, s Schema, now time.Time) (string, []any, error
 		}
 		sql = "EXISTS (SELECT 1 FROM json_each(" + sqliteArray(f) + ") AS _qt_element WHERE " + comparison + ")"
 		args = []any{c.Value}
-	}
-	if c.Negated {
-		sql = "(NOT (" + sql + ") AND NOT (" + sqliteNull(f) + "))"
 	}
 	return sql, args, nil
 }

@@ -124,6 +124,11 @@ type QueryDatasetV3 struct {
 	// Database storage overhead and query scratch space remain host-managed.
 	MaxStagingBytes    int64
 	MaxSamplesPerGroup int
+	// PredicateRelations optionally supplies host relations for base-field
+	// source and row filter predicates (SQLite only). Group filters over
+	// grouped results never use them. Nil compiles every predicate normally.
+	// See SQLitePredicateRelations.
+	PredicateRelations SQLitePredicateRelations
 }
 
 func (d QueryDatasetV3) limits() (int, int, int, int64, error) {
@@ -184,6 +189,10 @@ func (d QueryDatasetV3) options(ctx context.Context, tx *sql.Tx, q QueryRequestV
 	o.SourceArgs = append([]any{}, d.SourceArgs...)
 	o.ComputedGroupable = d.ComputedGroupable
 	o.ComputedFilterable = d.ComputedFilterable
+	if d.PredicateRelations != nil && d.Dialect != "sqlite" {
+		return o, diagnostic("dataset", "predicate relations require the sqlite dialect")
+	}
+	o.relations = newSQLiteRelations(ctx, tx, d.PredicateRelations)
 	if o.Resolver == nil {
 		if d.Dialect == "sqlite" {
 			o.Resolver = SQLiteComputedDefinitionResolver{Tx: tx, Scope: d.Scope, Dataset: d.Dataset}

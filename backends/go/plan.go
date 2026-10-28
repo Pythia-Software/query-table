@@ -44,6 +44,10 @@ type PlanOptions struct {
 	Now               time.Time
 	// Identity binds the fingerprint to actor/dataset/schema and data snapshot.
 	Identity string
+	// relations is an execution's binding of its dataset's SQLite predicate
+	// relations to that execution's transaction. Only executors set it, and
+	// only while compiling over row-level schemas keyed by the source identity.
+	relations *sqliteRelations
 }
 type SQLStage struct {
 	Name, SQL    string
