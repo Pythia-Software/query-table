@@ -8,6 +8,14 @@
 // unknown field is a compile error before any SQL is built. Values reach SQL
 // only as bound placeholders ($N). The validated operator and the schema-defined
 // expression are the only request-influenced tokens in the SQL text.
+//
+// Query links: EncodeQueryLink and DecodeQueryLink write and read the whole
+// QueryState in the "2j."/"2d." URL tokens of encodeQuery and
+// decodeQueryStrict, as a LinkQuery, so a host can build a link to a filtered
+// view or validate a link it receives. They reproduce normalizeQueryState and
+// the TypeScript limits and error codes (QueryLinkError); the shared fixtures
+// in schema/fixtures/query-links.json hold both implementations to the same
+// tokens. DecodeWireQuery remains the reader for legacy server-bound tokens.
 package querytable
 
 import (
@@ -61,6 +69,9 @@ type WhereTerm struct {
 	Value   string        `json:"value,omitempty"`
 	Negated bool          `json:"negated,omitempty"`
 	Any     []WhereClause `json:"any,omitempty"`
+	// SetFilter marks the term as set-editor output (presentation only; the
+	// compilers ignore it). Query links pack intact array set filters.
+	SetFilter *SetFilterMetadata `json:"setFilter,omitempty"`
 }
 
 // IsGroup reports whether the term is an OR group rather than a single predicate.

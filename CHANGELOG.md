@@ -2,7 +2,30 @@
 
 ## Unreleased
 
+## 0.9.6 — 2026-10-28
+
 ### Added
+
+- Go query links: `EncodeQueryLink`, `DecodeQueryLink` and `LinkQuery` in the
+  Go module write and read the `2j.`/`2d.` tokens of `encodeQuery` and
+  `decodeQueryStrict`, including legacy tokens, packed set filters and pooled
+  item views. They reproduce `normalizeQueryState`, enforce
+  `MAX_QUERY_STATE_BYTES` (`MaxQueryStateBytes`) and `MAX_QUERY_TOKEN_LENGTH`
+  (`MaxQueryTokenLength`) with bounded inflation, and report a
+  `*QueryLinkError` whose `Code` matches `QueryDecodeError.code`. Encoding
+  rejects malformed or over-budget filters and metrics instead of dropping
+  them. `WhereTerm.SetFilter` (`SetFilterMetadata`) carries set-editor
+  metadata. Cross-language fixtures in `schema/fixtures/query-links.json` and
+  `query-links-go.json` check both codecs against each other, and
+  `schema/fixtures/metric-options.json` (the exported `METRIC_OPTION_SPECS`
+  tables of `metricNormalize.ts`) fails the Go tests when a metric option,
+  allowed value or type is added in TypeScript only. The JSON inside a token
+  matches `encodeQuery` byte for byte; DEFLATE output does not, so Go may pick
+  the other prefix near a length tie. Compare links by decoded state. Go
+  rejects malformed DEFLATE streams (bad stored-block lengths, incomplete
+  Huffman codes) that fflate tolerates; no encoder writes them. A differential
+  fuzz of 760,000 mutated tokens found no other difference, and the Go module
+  has a `FuzzDecodeQueryLink` fuzz target.
 
 - Public `--qt-touch-target-scale` theme setting for responsive enlargement.
   The default `1` keeps existing sizing; `0.5` halves the added size and `0`
@@ -23,6 +46,19 @@
   metric transports and the v3 executor run them without server changes;
   windowed points drill down to their whole window. The metric editor's **Window & share**
   settings and a **Whole intervals only** option edit them.
+
+### Changed
+
+- Query links drop a leading byte order mark in a `2j.` or legacy token on
+  every engine, as `2d.` tokens already did. Node used to reject such a link
+  while browsers opened it.
+
+### Fixed
+
+- `normalizeQueryState` drops set-filter metadata whose `mode` is not a
+  string, such as `["any"]`, as it drops other malformed metadata; the
+  predicates stay. It used to keep the metadata, after which `encodeQuery`
+  threw on the state.
 
 ## 0.9.5 — 2026-10-21
 

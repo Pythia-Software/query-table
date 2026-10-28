@@ -60,6 +60,34 @@ For the Go SQL compiler:
 go get github.com/Pythia-Software/query-table/backends/go
 ```
 
+The Go module reads and writes the same `?q=` link tokens as `encodeQuery` and
+`decodeQueryStrict`, so a server can link to an exact view or validate a link
+it receives:
+
+```go
+token, err := querytable.EncodeQueryLink(querytable.LinkQuery{Where: []querytable.WhereTerm{
+	{Field: "provider", Op: "=", Value: "anthropic"},
+	{Field: "model_family", Op: "contains", Value: "opus"},
+}})
+query, err := querytable.DecodeQueryLink(token) // the normalized QueryState
+```
+
+`LinkQuery` carries the whole state: columns with widths and displays, filters
+(including set filters), sorts, paging, metrics, item details, fit-to-screen and
+grouping. Both functions normalize as `normalizeQueryState` does, enforce
+`MAX_QUERY_STATE_BYTES` and `MAX_QUERY_TOKEN_LENGTH`, and fail with a
+`*QueryLinkError` whose `Code` is the `QueryDecodeError` code. Encoding also
+rejects filters and metrics that a strict decode would reject, rather than
+dropping them. Shared fixtures in `schema/fixtures/query-links.json` hold the
+TypeScript and Go codecs to the same tokens.
+
+The JSON inside a token is byte-identical to `encodeQuery`'s, but the DEFLATE
+bytes are not, so a Go `2d.` token can differ from the TypeScript one, and when
+the two forms are close in length either side may pick the other prefix.
+Compare links by decoding them: equal states decode to equal `LinkQuery`
+values (`reflect.DeepEqual`). Go also rejects malformed compressed tokens
+that the browser's decoder tolerates; neither encoder writes them.
+
 For schema generation:
 
 ```bash
@@ -132,7 +160,7 @@ your own markup, or just `@pythia-software/query-table-core` for the wire types 
 | `@pythia-software/query-table-core` | Pure TS. `QueryState`, `FieldDef`, encode/decode, client-side `applyQuery`, adapter interfaces. No React, no DOM. | — |
 | `@pythia-software/query-table-react` | Headless hooks that own query state, URL/storage sync, fetch orchestration, selection, columns. No markup. | core, react (peer) |
 | `@pythia-software/query-table-ui` | The opinionated components. Themeable via CSS variables **or** a `classNames` slot map (Tailwind-friendly). | core, React hooks, React + React DOM (peers) |
-| `backends/go` | `querytable` Go module: compiles a `WireQuery` to parameterized SQL against a schema allowlist. | — |
+| `backends/go` | `querytable` Go module: compiles a `WireQuery` to parameterized SQL against a schema allowlist, and reads and writes query link tokens. | — |
 | `@pythia-software/query-table-duckdb` | Driver-independent DuckDB SQL planner and transport for native and Wasm execution, including v3 grouping and metrics. | core |
 | `@pythia-software/query-table-codegen` | CLI and JS API that emit the TS catalog + Go schema from a JSON schema document. | core |
 | `demo` | Runnable Vite playground over an in-memory dataset, for seeing UI changes live and manual testing. | core, react, ui |

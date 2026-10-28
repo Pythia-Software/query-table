@@ -43,7 +43,9 @@ function toBase64Url(json: string): string {
 
 function fromBase64Url(s: string): string {
   const b64 = s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4);
-  if (typeof Buffer !== "undefined") return Buffer.from(b64, "base64").toString("utf8");
+  // TextDecoder drops a leading byte-order mark; Buffer keeps it. Drop it on
+  // every engine so a link opens the same way in browsers and Node.
+  if (typeof Buffer !== "undefined") return Buffer.from(b64, "base64").toString("utf8").replace(/^\uFEFF/, "");
   const bin = atob(b64);
   const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
   return new TextDecoder().decode(bytes);
