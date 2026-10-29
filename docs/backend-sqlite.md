@@ -153,6 +153,77 @@ executor, the host also owns result validation, group limits, and typed mapping.
 A rollup optimization must enforce the same source and result guards; checking
 only a final rollup sum is insufficient to detect unsafe inputs that cancel.
 
+## Host predicate relations
+
+A host that maintains its own index for a predicate, such as a trigram index
+for substring filters over wide text, can let the executor use it. Set
+`PredicateRelations` on `SQLiteDataset`, `SQLiteV2Dataset` or a SQLite
+`QueryDatasetV3`. Nil (the default) compiles every predicate as before.
+
+```go
+type textIndex struct{}
+
+func (textIndex) PredicateRelation(ctx context.Context, tx *sql.Tx, p querytable.SQLitePredicate) (querytable.SQLitePredicateRelation, bool, error) {
+    if p.Field != "command" || p.Op != "contains" || len(p.Value) < 3 || !isASCII(p.Value) {
+        return querytable.SQLitePredicateRelation{}, false, nil // keep the typed predicate
+    }
+    var ready string // read readiness in the execution's own snapshot
+    if err := tx.QueryRowContext(ctx, "SELECT COALESCE((SELECT value FROM meta WHERE key='command_fts_ready'),'')").Scan(&ready); err != nil {
+        return querytable.SQLitePredicateRelation{}, false, err
+    }
+    if ready != "1" {
+        return querytable.SQLitePredicateRelation{}, false, nil // incomplete backfill
+    }
+    phrase := `"` + strings.ReplaceAll(strings.ToLower(p.Value), `"`, `""`) + `"`
+    return querytable.SQLitePredicateRelation{
+        SQL:   "SELECT rowid FROM command_fts WHERE command_fts MATCH ?",
+        Args:  []any{phrase},
+        Key:   "seq", // a schema field bound to the indexed rowid
+        Exact: true,
+    }, true, nil
+}
+
+dataset := querytable.SQLiteV2Dataset{Schema: schema, SourceSQL: source, PredicateRelations: textIndex{}}
+```
+
+The executor offers each non-blank base-field literal (`Field`, `Op`, `Value`,
+`Negated`) once per execution, with that execution's context and transaction.
+A relation's `SQL` is a SELECT of `Key` values (default: the schema `IDField`)
+for the rows that satisfy the *un-negated* predicate. It is compiled as
+`<key> IN (<SQL>)` inside the query statement itself, so it always reads the
+execution's transaction and data snapshot; nothing is materialized outside
+it. Use anonymous `?` parameters bound to `Args`; numbered or named
+parameters, comments, `;` and `[...]` identifiers are rejected. Do not refer
+to compiler names (CTEs `qt0`, `qt1`, … and row aliases like `f0`). Key values
+must be non-NULL and identify source rows.
+
+- **Exact** (`Exact: true`) asserts the relation is complete and equals the
+  predicate's rows. It replaces the typed check, so the field is not read for
+  that predicate (and per-value function errors such as invalid UTF-8 or
+  oversized text are not raised for it). Report exact only once every row of
+  the snapshot is indexed.
+- **Candidate** (`Exact: false`) is a superset that only narrows: the typed
+  check still runs (`<key> IN (...) AND <typed>`). A candidate for a negated
+  predicate is ignored. During an incomplete backfill, answer a candidate that
+  includes every unindexed row, or decline.
+- **Negation** of an exact relation keeps the compiler's null and empty guard:
+  `NOT (<key> IN (...)) AND NOT (<field> IS NULL OR <field> = '')`, so NULL and
+  empty values match neither a predicate nor its negation.
+- **OR**: within an OR term (plain or OR-of-AND branches), relations are used
+  only when every branch has at least one usable relation (an exact relation,
+  or a positive candidate). Otherwise the whole term keeps its typed
+  predicates. Separate AND terms decide independently.
+
+Relations apply to rows and aggregations on `SQLiteDataset`, V2 rows,
+populations and metric filters on `SQLiteV2Dataset.ExecuteV2In`, and `/query-v3`
+source filters, ungrouped row and metric filters (including calendar metrics).
+They never apply to group filters over grouped results, to computed fields or
+to `ExecuteV2Rows`. A relation whose key field is not part of a staged
+projection is ignored there and the typed predicate applies. A provider error
+fails the whole execution. `QueryDatasetV3` rejects relations for PostgreSQL.
+The compile-only APIs (`CompileSQLite`, `CompileSQLiteWhere`, the V2 compile
+functions) never consult them.
+
 ## Data and semantic conventions
 
 Use STRICT tables or equivalent ingestion validation. Bind numeric fields to
@@ -310,7 +381,9 @@ created, so later metrics rebuild them, and a failing fused statement falls back
 to per-metric reductions. Compatible SUM/AVG/MIN and other scalar reductions
 fuse into one grouped SELECT, limited to 128 projected expressions. Final
 formulas, group sorting, and top-N still run per plan. Distributions retain their
-existing exact sampling/streaming paths. No cache crosses requests or snapshots.
+existing exact sampling/streaming paths. No result or reduction crosses requests
+or snapshots; only the opt-in source proofs below are reused, per host data
+generation.
 
 Plain numeric base-field metrics over INTEGER/NULL storage may use a guarded
 SQLite reduction. Every group's storage types and absolute integer totals must
@@ -318,6 +391,31 @@ prove exact arithmetic before the result is used; other domains retain the
 general exact decimal plan. Simple stored-column sources may reduce directly;
 opaque host bindings retain materialization to avoid repeated evaluation. See [the performance and migration notes](sqlite-performance-handoff.md)
 for eligibility, fallback semantics and portable benchmarks.
+
+Those per-row proofs cost most of such a batch. A host with a transactional
+data generation can let executions share them:
+
+```go
+var proofs querytable.SQLiteSourceProofs // one per process, shared by requests
+
+tx, _ := db.BeginTx(ctx, nil)
+var generation int64 // advanced by triggers in every writing transaction
+_ = tx.QueryRowContext(ctx, "SELECT value FROM data_generation").Scan(&generation)
+v2.SourceGeneration, v2.SourceProofs = strconv.FormatInt(generation, 10), &proofs
+result, err := v2.ExecuteV2In(ctx, tx, nil, &metricRequest, options)
+```
+
+The first execution in a generation scans the whole authorized source once
+(at most `MaxPopulation`+1 rows) and records its row count and, per numeric
+field expression, whether every value is INTEGER/NULL with an absolute total
+within 2^53−1. Later fused integer reductions over proven fields use plain SQL
+aggregates, and an unfiltered request reuses the row count. Since the whole
+source then fits the budget, a filtered metric batch takes its population count
+from its fused reduction instead of a separate scan. Only stored projections are
+proven; group keys, budgets, revisions, filters and result types are still
+checked on every execution. The generation must be read in the execution
+transaction and change whenever anything the source reads may have changed;
+see `SQLiteSourceProofs`.
 
 Shared reductions use uniquely named temporary tables in the same transaction.
 The executor drops them before returning, using a separate bounded cleanup
@@ -454,7 +552,8 @@ transformations changes the reference population and is outside this contract.
 
 The standalone `CompileRowFilter(where, schema, SQLiteOptions{Now: clock})`
 returns an immutable filter. `matches, err := filter.Match(row)` follows
-`CompileSQLiteWhere`, including OR groups, blank no-ops, NULL/empty-string rules,
+`CompileSQLiteWhere`, including OR groups and their `{"all": [...]}` AND
+branches, blank no-ops, NULL/empty-string rules,
 Unicode lower-casing and code-point lengths, RE2 regex, array membership and
 relative/indexed datetime comparisons. Handle `ErrRowsUnsupported` before using
 any selected rows. The zero-value `RowFilter` matches every row.

@@ -1,6 +1,6 @@
 import type { MetricAxisScale } from "@pythia-software/query-table-core";
 import type { MetricBucket, MetricValueFormat, RenderingClause } from "./metricTypes";
-import { metricScale } from "./metricChartHelpers";
+import { metricCycleLabel, metricScale } from "./metricChartHelpers";
 import { formatMetricOutput } from "./metricFormat";
 
 const durationUnits: Record<string, number> = {
@@ -98,6 +98,20 @@ export function compactCalendarLabels(points: readonly { bucket: MetricBucket; x
   const labels = new Map<MetricBucket, string>();
   const grouping = clause.dateGrouping;
   if (!grouping || !points.length) return labels;
+  if (grouping.interval === "hourOfDay" || grouping.interval === "dayOfWeek") {
+    // Slots read left to right: every weekday, or every sixth hour.
+    let lastRight = -Infinity;
+    for (const point of points) {
+      const slot = point.bucket.keys[0];
+      if (typeof slot !== "number" || (grouping.interval === "hourOfDay" && slot % 6 !== 0)) continue;
+      const label = metricCycleLabel(slot, grouping.interval, locale) ?? String(slot);
+      const half = label.length * 2.7;
+      if (point.x - half < lastRight + 8) continue;
+      labels.set(point.bucket, label);
+      lastRight = point.x + half;
+    }
+    return labels;
+  }
   const timeZone = grouping.timeZone === "local" ? undefined : grouping.timeZone ?? "UTC";
   const dayFormatter = new Intl.DateTimeFormat(locale, { timeZone, month: "short", day: "numeric" });
   const hourFormatter = new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", hourCycle: "h23" });

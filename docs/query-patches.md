@@ -68,10 +68,12 @@ Facets the patch does not own are untouched.
 ## Structural filter matching
 
 Terms are compared after normalization by field, operator, value (ignored for
-`is_null`/`is_not_null`) and negation. OR-group members are unordered.
+`is_null`/`is_not_null`) and negation. OR-group members, and the predicates of
+an `{ all: [...] }` branch, are unordered.
 Set-filter presentation metadata is ignored.
 
-A patch's filters are split into units. An OR group is one unit, a run of
+A patch's filters are split into units. An OR group (of predicates or of
+conjunctions) is one unit, a run of
 consecutive `!=` terms on one field (an exclusion list) is one unit, and every
 other term is its own unit. A unit is present when all of its terms are present.
 Removal removes only units that are fully present, and then every term

@@ -80,8 +80,9 @@ describe("standard query table grouping", () => {
     await settle();
     expect(current.api.error).toBeNull();
     expect(current.api.query.grouping!.source).toEqual(original);
-    expect(current.api.itemDetails).toBeUndefined();
-    expect(current.api.grouping!.source.itemDetails).toBeDefined();
+    // Grouped rows take group details; source item details stay with the source.
+    expect(current.api.itemDetails?.subject).toBe("group");
+    expect(current.api.grouping!.source.itemDetails?.subject).toBeUndefined();
     expect(current.api.aggregations.clauses).toEqual([]);
     expect(current.api.total).toBe(2);
     expect(current.api.rowId(current.api.rows[0]!)).toBeTypeOf("string");

@@ -7,11 +7,16 @@
       "shownRows"
     ],
     "groupLimit": "integer",
-    "minCount": "positiveInteger",
+    "minCount": "minCount",
     "share": [
       "total",
       "group0"
     ]
+  },
+  "minCount": {
+    "min": "positiveInteger",
+    "distinct": "string",
+    "sum": "string"
   },
   "window": {
     "reduce": [
@@ -30,7 +35,9 @@
       "day",
       "week",
       "month",
-      "year"
+      "year",
+      "hourOfDay",
+      "dayOfWeek"
     ],
     "timeZone": "string",
     "includeEmpty": "boolean",
@@ -45,6 +52,13 @@
       "include",
       "exclude"
     ]
+  },
+  "occurrence": {
+    "interval": [
+      "hour",
+      "day"
+    ],
+    "includeEmpty": "boolean"
   },
   "display": {
     "kind": [

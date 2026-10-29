@@ -1,14 +1,41 @@
 import { useCallback, useMemo } from "react";
 import {
+  branchesOf,
   isOrGroup,
-  predicatesOf,
+  isWhereConjunction,
   negateClause,
   opsForField,
   type FieldSchema,
+  type WhereBranch,
   type WhereClause,
   type WhereTerm,
 } from "@pythia-software/query-table-core";
 import type { QueryTableApi } from "./useQueryTable";
+
+/** Edit the `predIndex`-th literal of an OR of conjunctions, counted in
+ *  `predicatesOf` order; `edit` returning null removes it. Returns the term in
+ *  canonical form: a conjunction of one is its literal, a group of one branch
+ *  its literal(s), and an emptied group nothing. */
+function editBranchPredicate(
+  term: { any: WhereBranch[] },
+  predIndex: number,
+  edit: (clause: WhereClause) => WhereClause | null,
+): WhereTerm[] {
+  let k = 0;
+  const any: WhereBranch[] = [];
+  for (const member of term.any) {
+    const kept: WhereClause[] = [];
+    for (const clause of isWhereConjunction(member) ? member.all : [member]) {
+      const next = k++ === predIndex ? edit(clause) : clause;
+      if (next) kept.push(next);
+    }
+    if (kept.length === 1) any.push(kept[0]!);
+    else if (kept.length > 1) any.push({ all: kept });
+  }
+  if (any.length > 1) return [{ any } as WhereTerm];
+  const only = any[0];
+  return !only ? [] : isWhereConjunction(only) ? only.all : [only];
+}
 
 /** Filter controls for either the result query or grouping's source query. */
 export type QueryFilterApi<Row> = Pick<
@@ -77,8 +104,9 @@ export function useQueryFilters<Row>(
             return {
               any: term.any.map((c, j) => (j === predIndex ? clause : c)),
             };
+          if ("any" in term) return editBranchPredicate(term, predIndex, () => clause);
           return clause;
-        }),
+        }).flat(),
       })),
     [setQuery],
   );
@@ -96,6 +124,10 @@ export function useQueryFilters<Row>(
             if (members.length === 1) where.push(members[0]!);
             else if (members.length > 1) where.push({ any: members });
             return; // 0 members → drop the term
+          }
+          if ("any" in term) {
+            where.push(...editBranchPredicate(term, predIndex, () => null));
+            return;
           }
           // literal term → removing its predicate drops the whole term
         });
@@ -121,8 +153,9 @@ export function useQueryFilters<Row>(
             return {
               any: term.any.map((c, j) => (j === predIndex ? negateOne(c) : c)),
             };
+          if ("any" in term) return editBranchPredicate(term, predIndex, negateOne);
           return negateOne(term);
-        }),
+        }).flat(),
       })),
     [setQuery, negateOne],
   );
@@ -144,9 +177,12 @@ export function useQueryFilters<Row>(
         const source = q.where[sourceIndex];
         const target = q.where[targetIndex];
         if (!source || !target) return q;
-        const merged: WhereTerm = {
-          any: [...predicatesOf(target), ...predicatesOf(source)],
-        };
+        // OR the two terms' branches, so a conjunction stays one branch.
+        const merged = {
+          any: [...branchesOf(target), ...branchesOf(source)].map(
+            (branch): WhereBranch => (branch.length === 1 ? branch[0]! : { all: branch }),
+          ),
+        } as WhereTerm;
         const where: WhereTerm[] = [];
         q.where.forEach((term, i) => {
           if (i === sourceIndex) return; // remove the dragged term

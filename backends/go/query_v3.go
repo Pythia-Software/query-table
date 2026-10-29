@@ -1,8 +1,10 @@
 package querytable
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -22,10 +24,106 @@ type RepresentativeRow struct {
 	OrderBy []OrderBy `json:"orderBy"`
 }
 type GroupingDefinition struct {
-	Keys           []string           `json:"keys"`
+	// Keys names the source field of each key, in order. Each is also the
+	// key's result column.
+	Keys []string `json:"keys"`
+	// KeyIntervals holds the calendar interval of each key that groups a
+	// datetime field by interval, keyed by field name. On the wire such a key
+	// is the object {"field", "interval", "timeZone"} instead of a string.
+	KeyIntervals   map[string]GroupKeyInterval `json:"-"`
+	Summaries      []SummaryColumn             `json:"summaries"`
+	Representative *RepresentativeRow          `json:"representative"`
+	Diagnostics    []string                    `json:"diagnostics,omitempty"`
+}
+
+// GroupKeyInterval buckets a datetime grouping key by calendar interval: one
+// group per hour, day, week (from Monday), month or year in TimeZone (an IANA
+// name; empty means UTC), keyed by the interval's start instant. Intervals
+// follow the metric calendar, including daylight-saving changes.
+type GroupKeyInterval struct {
+	Interval string `json:"interval"`
+	TimeZone string `json:"timeZone,omitempty"`
+}
+
+type groupingDefinitionJSON struct {
+	Keys           []json.RawMessage  `json:"keys"`
 	Summaries      []SummaryColumn    `json:"summaries"`
 	Representative *RepresentativeRow `json:"representative"`
 	Diagnostics    []string           `json:"diagnostics,omitempty"`
+}
+type calendarGroupKeyJSON struct {
+	Field    string `json:"field"`
+	Interval string `json:"interval"`
+	TimeZone string `json:"timeZone,omitempty"`
+}
+
+// MarshalJSON writes a key with an interval as {"field","interval","timeZone"}.
+func (g GroupingDefinition) MarshalJSON() ([]byte, error) {
+	out := groupingDefinitionJSON{Summaries: g.Summaries, Representative: g.Representative, Diagnostics: g.Diagnostics, Keys: []json.RawMessage{}}
+	if g.Keys == nil {
+		out.Keys = nil
+	}
+	for _, key := range g.Keys {
+		var value any = key
+		if interval, ok := g.KeyIntervals[key]; ok {
+			value = calendarGroupKeyJSON{key, interval.Interval, interval.TimeZone}
+		}
+		raw, err := json.Marshal(value)
+		if err != nil {
+			return nil, err
+		}
+		out.Keys = append(out.Keys, raw)
+	}
+	return json.Marshal(out)
+}
+
+// UnmarshalJSON reads keys that are field names or calendar key objects.
+// Calendar key objects accept only field, interval and timeZone.
+func (g *GroupingDefinition) UnmarshalJSON(data []byte) error {
+	var in groupingDefinitionJSON
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&in); err != nil {
+		return err
+	}
+	*g = GroupingDefinition{Summaries: in.Summaries, Representative: in.Representative, Diagnostics: in.Diagnostics}
+	for _, raw := range in.Keys {
+		var name string
+		if err := json.Unmarshal(raw, &name); err == nil {
+			g.Keys = append(g.Keys, name)
+			continue
+		}
+		var key calendarGroupKeyJSON
+		keyDecoder := json.NewDecoder(bytes.NewReader(raw))
+		keyDecoder.DisallowUnknownFields()
+		if err := keyDecoder.Decode(&key); err != nil {
+			return diagnostic("grouping", "a group key is a field name or {field, interval, timeZone}")
+		}
+		if g.KeyIntervals == nil {
+			g.KeyIntervals = map[string]GroupKeyInterval{}
+		}
+		if _, duplicate := g.KeyIntervals[key.Field]; duplicate {
+			return diagnostic("grouping", "invalid or duplicate group key")
+		}
+		g.Keys = append(g.Keys, key.Field)
+		g.KeyIntervals[key.Field] = GroupKeyInterval{key.Interval, key.TimeZone}
+	}
+	if in.Keys != nil && g.Keys == nil {
+		g.Keys = []string{}
+	}
+	return nil
+}
+
+// groupKeyLocation validates a calendar group key over a field of the given
+// value type and loads its zone.
+func groupKeyLocation(typ, field string, interval GroupKeyInterval) (*time.Location, error) {
+	if !containsString([]string{"hour", "day", "week", "month", "year"}, interval.Interval) {
+		return nil, diagnostic("grouping", "a group key interval is hour, day, week, month or year; hour-of-day and day-of-week are metric intervals")
+	}
+	if typ != "datetime" {
+		return nil, diagnostic("grouping", "a calendar group key needs a datetime field")
+	}
+	return calendarLocation(MetricDateGrouping{Field: field, Interval: interval.Interval, TimeZone: interval.TimeZone, Range: "query"})
 }
 
 // QueryRequestV3 separates source WHERE from result HAVING. Source paging never
@@ -44,6 +142,8 @@ type QueryRequestV3 struct {
 	Rows              bool                `json:"rows"`
 	Metrics           []AggSpec           `json:"metrics"`
 	Diagnostics       []string            `json:"diagnostics,omitempty"`
+	// HostState is the table's host-owned query state; see ServerQueryV2.
+	HostState json.RawMessage `json:"hostState,omitempty"`
 }
 
 // Validate classifies malformed wire stages and metrics as request diagnostics,
@@ -83,19 +183,25 @@ type QueryResultV3 struct {
 	Execution   SQLiteComputedExecution `json:"execution"`
 }
 type QueryCapabilitiesV3 struct {
-	RegexSourceFilters        bool   `json:"regexSourceFilters"`
-	RegexAggregateExpressions bool   `json:"regexAggregateExpressions"`
-	MetricFilters             bool   `json:"metricFilters"`
-	MetricMinCount            bool   `json:"metricMinCount"`
-	Version                   int    `json:"version"`
-	GroupedRows               bool   `json:"groupedRows"`
-	CalendarGrouping          bool   `json:"calendarGrouping"`
-	ComputedSourceFilters     bool   `json:"computedSourceFilters"`
-	Regex                     bool   `json:"regex"`
-	MaxRows                   int    `json:"maxRows"`
-	MaxGroups                 int    `json:"maxGroups"`
-	MaxPopulation             int    `json:"maxPopulation"`
-	Profile                   string `json:"profile"`
+	RegexSourceFilters        bool `json:"regexSourceFilters"`
+	RegexAggregateExpressions bool `json:"regexAggregateExpressions"`
+	MetricFilters             bool `json:"metricFilters"`
+	MetricMinCount            bool `json:"metricMinCount"`
+	// MetricMinCountMeasures: a minCount of distinct values or of a summed field.
+	MetricMinCountMeasures bool `json:"metricMinCountMeasures"`
+	Version                int  `json:"version"`
+	GroupedRows            bool `json:"groupedRows"`
+	CalendarGrouping       bool `json:"calendarGrouping"`
+	// CalendarCycles executes the hourOfDay and dayOfWeek date intervals.
+	CalendarCycles bool `json:"calendarCycles"`
+	// CalendarGroupKeys executes grouping keys with a calendar interval.
+	CalendarGroupKeys     bool   `json:"calendarGroupKeys"`
+	ComputedSourceFilters bool   `json:"computedSourceFilters"`
+	Regex                 bool   `json:"regex"`
+	MaxRows               int    `json:"maxRows"`
+	MaxGroups             int    `json:"maxGroups"`
+	MaxPopulation         int    `json:"maxPopulation"`
+	Profile               string `json:"profile"`
 }
 
 // QueryDatasetV3 works with SQLite and PostgreSQL. SQLite hosts register the
@@ -103,13 +209,13 @@ type QueryCapabilitiesV3 struct {
 // reducers. No database driver, arbitrary request SQL or retained snapshot is
 // supplied by this package.
 type QueryDatasetV3 struct {
-	Schema                            Schema
-	SourceSQL                         string
-	SourceArgs                        []any
-	Scope, Dataset                    string
-	Dialect                           string // sqlite or postgres
-	ComputedGroupable                 map[string]bool
-	ComputedFilterable                map[string]bool
+	Schema             Schema
+	SourceSQL          string
+	SourceArgs         []any
+	Scope, Dataset     string
+	Dialect            string // sqlite or postgres
+	ComputedGroupable  map[string]bool
+	ComputedFilterable map[string]bool
 	// Zero defaults to 10000 rows, 2000 groups and 250000 matching source rows.
 	// Explicit MaxGroups may be 1..100000.
 	MaxRows, MaxGroups, MaxPopulation int
@@ -117,6 +223,11 @@ type QueryDatasetV3 struct {
 	// Database storage overhead and query scratch space remain host-managed.
 	MaxStagingBytes    int64
 	MaxSamplesPerGroup int
+	// PredicateRelations optionally supplies host relations for base-field
+	// source and row filter predicates (SQLite only). Group filters over
+	// grouped results never use them. Nil compiles every predicate normally.
+	// See SQLitePredicateRelations.
+	PredicateRelations SQLitePredicateRelations
 }
 
 func (d QueryDatasetV3) limits() (int, int, int, int64, error) {
@@ -154,7 +265,7 @@ func (d QueryDatasetV3) Capabilities() QueryCapabilitiesV3 {
 	if d.Dialect == "sqlite" {
 		profile = SQLiteExpressionProfile
 	}
-	return QueryCapabilitiesV3{Version: 3, GroupedRows: true, CalendarGrouping: true, ComputedSourceFilters: len(d.ComputedFilterable) > 0, Regex: false, RegexSourceFilters: d.Dialect == "sqlite", MetricFilters: true, MetricMinCount: true, MaxRows: rows, MaxGroups: groups, MaxPopulation: pop, Profile: profile}
+	return QueryCapabilitiesV3{Version: 3, GroupedRows: true, CalendarGrouping: true, CalendarCycles: true, CalendarGroupKeys: true, ComputedSourceFilters: len(d.ComputedFilterable) > 0, Regex: false, RegexSourceFilters: d.Dialect == "sqlite", MetricFilters: true, MetricMinCount: true, MetricMinCountMeasures: true, MaxRows: rows, MaxGroups: groups, MaxPopulation: pop, Profile: profile}
 }
 func (d QueryDatasetV3) options(ctx context.Context, tx *sql.Tx, q QueryRequestV3, o PlanOptions) (PlanOptions, error) {
 	if err := ctx.Err(); err != nil {
@@ -177,6 +288,10 @@ func (d QueryDatasetV3) options(ctx context.Context, tx *sql.Tx, q QueryRequestV
 	o.SourceArgs = append([]any{}, d.SourceArgs...)
 	o.ComputedGroupable = d.ComputedGroupable
 	o.ComputedFilterable = d.ComputedFilterable
+	if d.PredicateRelations != nil && d.Dialect != "sqlite" {
+		return o, diagnostic("dataset", "predicate relations require the sqlite dialect")
+	}
+	o.relations = newSQLiteRelations(ctx, tx, d.PredicateRelations)
 	if o.Resolver == nil {
 		if d.Dialect == "sqlite" {
 			o.Resolver = SQLiteComputedDefinitionResolver{Tx: tx, Scope: d.Scope, Dataset: d.Dataset}
@@ -304,9 +419,19 @@ func (d QueryDatasetV3) SourcePlan(ctx context.Context, q QueryRequestV3, o Plan
 		}
 		result = Schema{Name: d.Schema.Name + ":groups", IDField: GroupIdentityField, Fields: map[string]FieldSpec{GroupIdentityField: resultField(GroupIdentityField, "text", "r.identity", false)}}
 		seen := map[string]bool{}
+		for field := range g.KeyIntervals {
+			if !containsString(g.Keys, field) {
+				return out, diagnostic("grouping", "a calendar interval names an unknown group key")
+			}
+		}
 		for i, key := range g.Keys {
 			if seen[key] || key == GroupIdentityField {
 				return out, diagnostic("grouping", "invalid or duplicate group key")
+			}
+			if interval, ok := g.KeyIntervals[key]; ok {
+				if _, e := groupKeyLocation(plan.Columns[i].Type, key, interval); e != nil {
+					return out, e
+				}
 			}
 			seen[key] = true
 			fields[key] = true
@@ -411,6 +536,9 @@ func (d QueryDatasetV3) SourcePlan(ctx context.Context, q QueryRequestV3, o Plan
 			}
 			for _, n := range append(names, spec.GroupBy...) {
 				fields[n] = true
+			}
+			if name := spec.MinCount.field(); name != "" {
+				fields[name] = true
 			}
 			for _, term := range spec.Where {
 				for _, predicate := range term.Predicates() {

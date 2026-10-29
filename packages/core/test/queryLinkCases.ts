@@ -42,7 +42,30 @@ const view = (label: string) => ({
   labelWidth: 40,
 });
 
+const tenPairs = [
+  ["anthropic", "opus"], ["anthropic", "haiku"], ["openai", "gpt-5"], ["openai", "mini"], ["google", "gemini"],
+  ["mistral", "large"], ["meta", "llama"], ["xai", "grok"], ["deepseek", "r1"], ["qwen", "max"],
+] as const;
+
 export const stateCases: StateCase[] = [
+  {
+    name: "host state",
+    state: {
+      ...EMPTY_QUERY,
+      where: [{ field: "status", op: "=", value: "error" }],
+      hostState: { version: 1, params: { record_tool_calls: ["command", "(cache OR buffer) NOT obsolete"], view: ["table"] } },
+    },
+  },
+  {
+    name: "grouped host state",
+    state: {
+      ...EMPTY_QUERY,
+      grouping: { keys: ["tool"], summaries: [{ id: "calls", op: "count" }], representative: null, source: { ...EMPTY_QUERY, where: [{ field: "status", op: "=", value: "error" }] } },
+      select: [{ field: "tool" }, { field: "calls" }],
+      where: [{ field: "calls", op: ">", value: "2" }],
+      hostState: { version: 2, params: { search: ["phrase"], case: [] } },
+    },
+  },
   { name: "empty query", state: EMPTY_QUERY },
   {
     name: "dashboard filter",
@@ -152,6 +175,15 @@ export const stateCases: StateCase[] = [
           display: { kind: "line", xScale: { mode: "linear" }, yScale: { mode: "log", min: 1 } },
         },
         { id: "share", op: "sum", field: "cost", groupBy: ["provider", "model"], share: "group0", display: { kind: "table", pivot: { swap: true } } },
+        {
+          id: "weekday", op: "count", groupBy: ["time", "provider"],
+          dateGrouping: { field: "time", interval: "dayOfWeek", timeZone: "Asia/Kolkata", includeEmpty: true, range: "query", occurrence: { interval: "day", includeEmpty: true } },
+          distribution: { kind: "box", input: "", whiskers: "tukey" },
+          display: { kind: "box" },
+        },
+        { id: "hourly", op: "count", groupBy: ["time"], dateGrouping: { field: "time", interval: "hourOfDay", timeZone: "America/New_York", includeEmpty: true, range: "observed" }, display: { kind: "line" } },
+        { id: "conversations", op: "sum", field: "cost", groupBy: ["model_family"], minCount: { min: 5, distinct: "conversation_id" } },
+        { id: "calls", op: "count", groupBy: ["tool_name"], minCount: { min: 10, sum: "call_count" } },
         { id: "spread", op: "count", groupBy: [], distribution: { kind: "histogram", input: "latency", bins: 20 }, expression: "COUNT()", scope: "shownRows" },
         { id: "future", op: "median" as never, field: "latency", groupBy: [] },
       ],
@@ -234,6 +266,21 @@ export const stateCases: StateCase[] = [
     },
   },
   {
+    name: "grouping with calendar keys",
+    state: {
+      ...EMPTY_QUERY,
+      select: [{ field: "called_at" }, { field: "provider" }, { field: "rows" }],
+      where: [{ field: "called_at", op: ">=", value: "2026-03-01T07:00:00.000Z" }],
+      orderBy: [{ field: "called_at", dir: "asc" }],
+      grouping: {
+        keys: [{ field: "called_at", interval: "day", timeZone: "America/Denver" }, "provider", { field: "ended_at", interval: "hour" }],
+        summaries: [{ id: "rows", op: "count" }],
+        representative: null,
+        source: { ...EMPTY_QUERY },
+      },
+    },
+  },
+  {
     name: "invalid grouping keeps diagnostics",
     state: { ...EMPTY_QUERY, grouping: { keys: [], summaries: [{ id: "m", op: "Median" }], representative: null, source: { ...EMPTY_QUERY } } as never },
   },
@@ -255,12 +302,29 @@ export const stateCases: StateCase[] = [
     name: "predicate budget",
     state: { ...EMPTY_QUERY, where: Array.from({ length: 100 }, (_, i) => ({ field: "n", op: "!=" as const, value: String(i) })) },
   },
+  {
+    name: "or of ands",
+    state: {
+      ...EMPTY_QUERY,
+      where: [
+        { any: tenPairs.map(([provider, model]) => ({ all: [{ field: "provider", op: "=" as const, value: provider }, { field: "model", op: "=" as const, value: model }] })) },
+        { any: [{ all: [{ field: "provider", op: "=", value: "openai" }, { field: "model", op: "contains", value: "mini", negated: true }] }, { field: "tokens", op: ">", value: "5" }] },
+      ],
+      aggregations: [{ id: "selected", op: "count", groupBy: ["provider", "model"], where: [{ any: [{ all: [{ field: "provider", op: "=", value: "xai" }, { field: "model", op: "is_null", value: "" }] }, { all: [{ field: "provider", op: "=", value: "meta" }, { field: "tokens", op: ">=", value: "-1h" }] }] }] }],
+    },
+  },
+  {
+    name: "or of ands at the predicate budget",
+    state: { ...EMPTY_QUERY, where: [{ any: Array.from({ length: 50 }, (_, i) => ({ all: [{ field: "provider", op: "=" as const, value: `p${i}` }, { field: "model", op: "=" as const, value: `m${i}` }] })) }] },
+  },
 ];
 
 const emoji = (n: number) => "😀".repeat(n);
 const linkSummary = (id: string, to: Record<string, unknown>) => ({ id, op: "link", link: { label: id, to: { kind: "query", target: "t", ...to } } });
 
 export const tokenCases: TokenCase[] = [
+  { name: "host state is canonicalized", token: plain({ h: { params: { z: ["2"], a: ["1"] }, version: 1 } }) },
+  { name: "grouping source host state is dropped", token: plain({ b: { keys: ["a"], summaries: [], representative: null, source: { hostState: { version: 1, params: {} } } }, h: { version: 1, params: { a: [] } } }) },
   { name: "legacy names and single order", token: legacy({ c: ["a", "b"], o: { field: "a", dir: "desc" }, l: 20, w: [{ field: "a", op: "=", value: "1" }] }) },
   { name: "legacy string select", token: legacy({ s: ["x", "y"], f: 10 }) },
   { name: "legacy width tuples", token: legacy({ s: [["x", 200], ["y"]] }) },
@@ -279,6 +343,26 @@ export const tokenCases: TokenCase[] = [
       l: 12.5, f: -3, fs: "yes", b: null, z: "ignored",
     }),
   },
+  {
+    name: "unnormalized or of ands",
+    token: plain({
+      w: [
+        // Branches of one literal: a plain OR group.
+        { any: [{ all: [{ field: "a", op: "=", value: "1" }] }, { all: [{ field: "a", op: "=", value: "2", extra: 1 }] }] },
+        // A single branch is plain AND: top-level literals.
+        { any: [{ all: [{ field: "b", op: "=", value: "1" }, { field: "c", op: "=", value: "1" }] }], setFilter: { id: "s", mode: "any", values: ["1"] } },
+        // Mixed literal and conjunction members keep their order.
+        { any: [{ field: "d", op: "=", value: "1" }, { all: [{ field: "e", op: "<", value: "2" }, { field: "f", op: "contains", value: "x", negated: true }] }] },
+      ],
+      g: [
+        { id: "m", op: "count", groupBy: [], where: [{ any: [{ all: [{ field: "a", op: "=", value: "1" }, { field: "b", op: "nope", value: "1" }] }, { all: [] }] }] },
+      ],
+      b: {
+        keys: ["k"], summaries: [],
+        source: { where: [{ any: [{ all: [{ field: "a", op: "=", value: "1" }, { field: "b", op: "=", value: "2" }] }, { all: [{ field: "a", op: "=", value: "3" }, { any: [] }] }] }] },
+      },
+    }),
+  },
   { name: "limit bounds", token: plain({ l: 1e300, f: 2e6 }) },
   { name: "infinite numbers", token: plain('{"s":[["f",1e400]],"l":-1e400,"f":1e400}') },
   { name: "rounding", token: plain({ l: 2.5, f: 0.49999999999999994 }) },
@@ -290,6 +374,8 @@ export const tokenCases: TokenCase[] = [
         { id: "a", op: "sum", field: "", groupBy: "x", scope: "everything", layout: { widthRem: 3, minWidthRem: 9 }, sort: [{ key: "value", dir: "up" }, { key: "group7", dir: ["desc"] }, 3], diagnostics: ["kept", 4, "kept"] },
         { id: "b", op: "avg", groupBy: ["g1", 7], window: "weekly", dateGrouping: { field: "t" }, display: { kind: 3, xScale: 1 }, distribution: [], where: [{ field: "x", op: "nope", value: "1" }] },
         { id: "c", op: "max", unsupportedOp: "p99", groupBy: [], display: { maxGroups: 0, legendPosition: "left", format: { kind: "percent", pattern: "x".repeat(10001) } }, window: { periods: "all", partial: "omit" } },
+        { id: "d", op: "count", groupBy: ["t"], dateGrouping: { field: "t", interval: "dayOfWeek", includeEmpty: false, range: "query", occurrence: { interval: "week", includeEmpty: "yes" } } },
+        { id: "e", op: "count", groupBy: ["t"], dateGrouping: { field: "t", interval: "hourOfDay", includeEmpty: true, range: "query", occurrence: "hourly" } },
       ],
     }),
   },
@@ -304,6 +390,26 @@ export const tokenCases: TokenCase[] = [
         representative: { orderBy: [{ field: "t", dir: ["asc"] }, { field: "u", dir: "sideways" }] },
         source: { grouping: { keys: ["nested"] }, where: [{ field: "a", op: "=", value: "1" }, { field: "b" }] },
         diagnostics: ["Earlier problem.", "", 5, "Earlier problem."],
+      },
+    }),
+  },
+  {
+    name: "unnormalized calendar group keys",
+    token: plain({
+      b: {
+        keys: [
+          { interval: "week", field: "a", timeZone: "Europe/Berlin" },
+          { field: "b", interval: "hourOfDay", timeZone: "UTC" },
+          { field: "c", interval: "day", timeZone: "+02:00" },
+          { field: "d", interval: "day", timeZone: 7 },
+          { field: "e", interval: "day", timeZone: null },
+          { field: "", interval: "day" },
+          { field: "a", interval: "month" },
+          { field: "f", interval: "year", extra: true },
+          ["g"],
+        ],
+        summaries: [{ id: "a", op: "count" }, { id: "f", op: "count" }],
+        source: {},
       },
     }),
   },
@@ -326,6 +432,21 @@ export const tokenCases: TokenCase[] = [
         ["set", "tags", "any", [], "nothing"],
         ["set", "tags", "none", ["z"], "i".repeat(300)],
         ["set", "tags", "empty", ["ignored"], "e"],
+      ],
+    }),
+  },
+  {
+    name: "measured minimums",
+    token: plain({
+      g: [
+        { id: "a", op: "count", groupBy: ["m"], minCount: { sum: "calls", min: 10, extra: true } },
+        { id: "b", op: "count", groupBy: ["m"], minCount: { min: 2, distinct: "c", sum: "calls" } },
+        { id: "c", op: "count", groupBy: ["m"], minCount: { distinct: "c" } },
+        { id: "d", op: "count", groupBy: ["m"], minCount: { min: 0, distinct: "c" } },
+        { id: "e", op: "count", groupBy: ["m"], minCount: { min: 3, distinct: "" } },
+        { id: "f", op: "count", groupBy: ["m"], minCount: { min: 3, distinct: 7 } },
+        { id: "g", op: "count", groupBy: ["m"], minCount: [4] },
+        { id: "h", op: "count", groupBy: ["m"], minCount: 2.5 },
       ],
     }),
   },
@@ -384,6 +505,9 @@ const bomb = deflateSync(new Uint8Array(4 * 1024 * 1024 + 1).fill(0x20));
 const tooManyPredicates = Array.from({ length: 101 }, (_, i) => ({ field: "n", op: "!=", value: String(i) }));
 
 export const invalidCases: InvalidCase[] = [
+  { name: "malformed host state", token: plain({ h: { version: 1, params: { a: "x" } } }), code: "invalid" },
+  { name: "unsupported host state version", token: plain({ h: { version: 0, params: {} } }), code: "invalid" },
+  { name: "oversized host state", token: plain({ h: { version: 1, params: Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`p${i}`, Array.from({ length: 2 }, () => "x".repeat(3999))])) } }), code: "invalid" },
   { name: "unknown version", token: "3j.e30", code: "unsupported_version" },
   { name: "dotted legacy token", token: "e30.e30", code: "unsupported_version" },
   { name: "bare dot", token: ".", code: "unsupported_version" },
@@ -430,6 +554,14 @@ export const invalidCases: InvalidCase[] = [
   { name: "long field name", token: plain({ w: [{ field: "f".repeat(257), op: "=", value: "1" }] }), code: "invalid" },
   { name: "predicate budget exceeded", token: plain({ w: tooManyPredicates }), code: "invalid" },
   { name: "group over the budget", token: plain({ w: [{ any: tooManyPredicates }] }), code: "invalid" },
+  { name: "or of ands over the budget", token: plain({ w: [{ any: Array.from({ length: 34 }, (_, i) => ({ all: tooManyPredicates.slice(3 * i, 3 * i + 3) })) }] }), code: "invalid" },
+  { name: "empty conjunction", token: plain({ w: [{ any: [{ field: "a", op: "=", value: "1" }, { all: [] }] }] }), code: "invalid" },
+  { name: "nested conjunction", token: plain({ w: [{ any: [{ field: "a", op: "=", value: "1" }, { all: [{ field: "a", op: "=", value: "2" }, { all: [{ field: "b", op: "=", value: "1" }] }] }] }] }), code: "invalid" },
+  { name: "group inside a conjunction", token: plain({ w: [{ any: [{ field: "a", op: "=", value: "1" }, { all: [{ field: "a", op: "=", value: "2" }, { any: [{ field: "b", op: "=", value: "1" }] }] }] }] }), code: "invalid" },
+  { name: "malformed literal in a conjunction", token: plain({ w: [{ any: [{ field: "a", op: "=", value: "1" }, { all: [{ field: "a", op: "=", value: "2" }, { field: "b", op: "like", value: "1" }] }] }] }), code: "invalid" },
+  { name: "null literal in a conjunction", token: plain({ w: [{ any: [{ field: "a", op: "=", value: "1" }, { all: [{ field: "a", op: "=", value: "2" }, null] }] }] }), code: "invalid" },
+  { name: "string negation in a conjunction", token: plain({ w: [{ any: [{ field: "a", op: "=", value: "1" }, { all: [{ field: "a", op: "=", value: "2" }, { field: "b", op: "contains", value: "1", negated: "yes" }] }] }] }), code: "invalid" },
+  { name: "top-level conjunction", token: plain({ w: [{ all: [{ field: "a", op: "=", value: "1" }, { field: "b", op: "=", value: "1" }] }] }), code: "invalid" },
   { name: "set filters over the budget", token: plain({ w: [["set", "tags", "all", Array.from({ length: 60 }, (_, i) => `a${i}`), "a"], ["set", "tags", "all", Array.from({ length: 41 }, (_, i) => `b${i}`), "b"]] }), code: "invalid" },
   { name: "own toString in a summary op", token: plain({ b: { keys: ["k"], summaries: [{ id: "x", op: { toString: 1 } }], source: {} } }), code: "invalid" },
   { name: "own toString inside an array op", token: plain({ b: { keys: ["k"], summaries: [{ id: "x", op: [1, [{ toString: null }]] }], source: {} } }), code: "invalid" },

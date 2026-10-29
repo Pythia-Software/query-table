@@ -25,7 +25,8 @@ import (
 //
 // Count, count(field), sum/avg/min/max of numbers, min/max of text/enum/datetime and
 // count_distinct of scalar fields are supported, with text/enum/bool grouping,
-// per-metric Where, MinCount, sorting and GroupLimit. Formulas, computed fields,
+// per-metric Where, MinCount (of rows, distinct values or a sum), sorting and
+// GroupLimit. Formulas, computed fields,
 // distributions, shownRows and other groupings return ErrRowsUnsupported.
 // Runtime fallback also returns an empty result, so hosts can safely stage and
 // retry the complete request. Field storage errors retain V2 bucket diagnostics.
@@ -58,7 +59,7 @@ func executeV2Rows(ctx context.Context, tx *sql.Tx, d SQLiteV2Dataset, rows []ma
 		}
 	}
 	for _, spec := range q.Metrics {
-		names := append([]string{spec.Field}, spec.GroupBy...)
+		names := append([]string{spec.Field, spec.MinCount.field()}, spec.GroupBy...)
 		for _, term := range spec.Where {
 			for _, p := range term.Predicates() {
 				names = append(names, p.Field)
@@ -146,16 +147,21 @@ func executeV2Rows(ctx context.Context, tx *sql.Tx, d SQLiteV2Dataset, rows []ma
 			cohorts = append(cohorts, c)
 			byPopulation[string(key)] = c
 		}
-		m := rowMetricSpec{index: i, spec: spec, op: op, field: field, binding: d.Schema.Fields[field], reduction: -1}
-		for j, r := range c.reducers {
-			if r.op == op && r.field == field {
-				m.reduction = j
-				break
+		m := rowMetricSpec{index: i, spec: spec, op: op, field: field, binding: d.Schema.Fields[field], reduction: -1, threshold: -1}
+		m.reduction = c.reducer(m)
+		// A measured minimum is one more reducer, shared with an identical
+		// metric in this cohort.
+		if name := spec.MinCount.field(); name != "" {
+			f := d.Schema.Fields[name]
+			if !rowFieldSupported(name, f) || f.Kind == FieldTextArray {
+				return out, fmt.Errorf("%w: minCount binding %s", ErrRowsUnsupported, name)
 			}
-		}
-		if m.reduction < 0 {
-			m.reduction = len(c.reducers)
-			c.reducers = append(c.reducers, m)
+			measure := rowMetricSpec{index: i, spec: spec, op: "count_distinct", field: name, binding: f}
+			if spec.MinCount.Sum != "" {
+				measure.op = "sum"
+			}
+			m.threshold = c.reducer(measure)
+			m.measure = &measure
 		}
 		c.metrics = append(c.metrics, m)
 	}
@@ -229,7 +235,16 @@ func executeV2Rows(ctx context.Context, tx *sql.Tx, d SQLiteV2Dataset, rows []ma
 			metric := SQLiteMetricV2{ID: m.spec.ID, Scope: "allMatching", ProcessedRows: total, Coverage: "exact", Buckets: []SQLiteMetricV2Bucket{}}
 			hidden := int64(0)
 			for _, g := range c.groups {
-				if g.count < int64(m.spec.MinCount) {
+				var measure any
+				measureError := false
+				if m.threshold >= 0 {
+					value, code, e := g.reductions[m.threshold].value(m.measure)
+					if e != nil {
+						return out, e
+					}
+					measure, measureError = value, code != ""
+				}
+				if !m.spec.MinCount.keeps(g.count, measure, measureError) {
 					hidden++
 					continue
 				}
@@ -240,7 +255,7 @@ func executeV2Rows(ctx context.Context, tx *sql.Tx, d SQLiteV2Dataset, rows []ma
 				metric.Buckets = append(metric.Buckets, SQLiteMetricV2Bucket{Keys: append([]any{}, g.keys...), Value: value, Error: code, Count: g.count})
 			}
 			metric.GroupCount = int64(len(metric.Buckets))
-			if m.spec.MinCount > 0 {
+			if m.spec.MinCount.Active() {
 				metric.HiddenGroups = &hidden
 			}
 			sortRowMetric(metric.Buckets, m.spec)
@@ -278,6 +293,9 @@ func (d SQLiteV2Dataset) ExecuteV2Rows(ctx context.Context, tx *sql.Tx, rows []m
 type rowMetricSpec struct {
 	index     int
 	reduction int
+	// threshold is the reducer of a measured minCount (or -1), read as measure.
+	threshold int
+	measure   *rowMetricSpec
 	spec      AggSpec
 	op, field string
 	binding   FieldSpec
@@ -300,6 +318,17 @@ type rowMetricGroup struct {
 	keys       []any
 	count      int64
 	reductions []rowMetricReduction
+}
+
+// reducer returns the index of the cohort reducer for m's operation and field.
+func (c *rowMetricCohort) reducer(m rowMetricSpec) int {
+	for j, r := range c.reducers {
+		if r.op == m.op && r.field == m.field {
+			return j
+		}
+	}
+	c.reducers = append(c.reducers, m)
+	return len(c.reducers) - 1
 }
 
 func newRowMetricGroup(keys []any, n int) *rowMetricGroup {

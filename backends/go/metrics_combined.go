@@ -209,7 +209,7 @@ func combinePostgresMetrics(ctx context.Context, batch MetricBatchPlan, q Metric
 		order = strings.TrimPrefix(order, " ORDER BY ")
 		// A minCount result may carry one bucketless row with hidden_groups.
 		buckets, hidden := fmt.Sprintf("jsonb_agg(to_jsonb(r) ORDER BY %s)", order), "0::bigint"
-		if spec.MinCount > 0 {
+		if spec.MinCount.Active() {
 			buckets += " FILTER (WHERE r.count IS NOT NULL)"
 			hidden = "COALESCE(MAX(hidden_groups),0)::bigint"
 		}

@@ -37,4 +37,21 @@ describe("column width presets", () => {
   it("falls back to the minimum width when the screen is too narrow", () => {
     expect(fitScreenWidths([200, 300], 50)).toEqual([48, 48]);
   });
+
+  it("never fits a column below the room its controls need", () => {
+    // A link column needs 120px; the wide text column gives way instead.
+    const widths = fitScreenWidths([60, 400, 60], 300, PRESET_MIN_WIDTH, [0, 0, 120]);
+    expect(widths[2]).toBeGreaterThanOrEqual(120);
+    expect(widths[0]).toBe(60);
+    expect(sum(widths)).toBe(300);
+  });
+
+  it("takes every minimum and overflows rather than clip controls", () => {
+    // Two Detail buttons need 76px; the table scrolls past the 150px screen.
+    expect(fitScreenWidths([200, 300, 40], 150, PRESET_MIN_WIDTH, [0, 0, 76])).toEqual([48, 48, 76]);
+  });
+
+  it("keeps proportional growth when every minimum fits", () => {
+    expect(fitScreenWidths([100, 300], 800, PRESET_MIN_WIDTH, [90, 0])).toEqual([200, 600]);
+  });
 });

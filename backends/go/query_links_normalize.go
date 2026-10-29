@@ -11,7 +11,9 @@ package querytable
 import (
 	"math"
 	"regexp"
+	"sort"
 	"strconv"
+	"strings"
 )
 
 const (
@@ -93,10 +95,22 @@ func jsUniqueStrings(values []string) []string {
 // isStringIn is `typeof v === "string" && list.includes(v)`.
 func isStringIn(v *jsValue, set map[string]bool) bool { return v.isString() && set[v.s] }
 
-// predicatesOfJS is predicatesOf: a group's members, or the term itself.
+// isConjunctionJS is isWhereConjunction: a member carrying an "all" array.
+func isConjunctionJS(member *jsValue) bool { return member.get("all").isArray() }
+
+// predicatesOfJS is predicatesOf: a group's members (with each conjunction
+// branch's literals in its place), or the term itself.
 func predicatesOfJS(term *jsValue) []*jsValue {
 	if any := term.get("any"); any.isArray() {
-		return any.a
+		out := make([]*jsValue, 0, len(any.a))
+		for _, member := range any.a {
+			if isConjunctionJS(member) {
+				out = append(out, member.get("all").a...)
+			} else {
+				out = append(out, member)
+			}
+		}
+		return out
 	}
 	return []*jsValue{term}
 }
@@ -109,17 +123,25 @@ func predicateCount(terms []*jsValue) int {
 	return n
 }
 
-// suppliedPredicates counts raw terms as normalizeMetricWhere does: a group
-// counts its members, anything else one.
+// suppliedPredicates counts raw terms as suppliedPredicateCount does: a group
+// counts its members, a conjunction branch its literals (an empty one as one),
+// anything else one.
 func suppliedPredicates(terms []*jsValue, emptyGroupCountsOne bool) int {
 	n := 0
 	for _, term := range terms {
 		if any := term.get("any"); any.isArray() {
-			if emptyGroupCountsOne && len(any.a) == 0 {
-				n++
-			} else {
-				n += len(any.a)
+			count := 0
+			for _, member := range any.a {
+				if member.isRecord() && isConjunctionJS(member) {
+					count += max(1, len(member.get("all").a))
+				} else {
+					count++
+				}
 			}
+			if emptyGroupCountsOne && count == 0 {
+				count = 1
+			}
+			n += count
 		} else {
 			n++
 		}
@@ -180,13 +202,37 @@ func normalizeLinkWhereTerms(input []*jsValue) []*jsValue {
 				if budget <= 0 {
 					break
 				}
+				if all := inner.get("all"); inner.isRecord() && all.isArray() {
+					// A conjunction branch: plain literals only, one level deep.
+					var literals []*jsValue
+					for _, literal := range all.a {
+						if budget <= 0 {
+							break
+						}
+						if clause := normalizeLinkClause(literal); clause != nil {
+							literals = append(literals, clause)
+							budget--
+						}
+					}
+					if len(literals) == 1 {
+						members = append(members, literals[0])
+					} else if len(literals) > 1 {
+						members = append(members, jsObj().set("all", jsArr(literals...)))
+					}
+					continue
+				}
 				if clause := normalizeLinkClause(inner); clause != nil {
 					members = append(members, clause)
 					budget--
 				}
 			}
 			if len(members) == 1 {
-				where = append(where, members[0])
+				// One branch is plain AND: a literal, or the conjunction's literals.
+				if isConjunctionJS(members[0]) {
+					where = append(where, members[0].get("all").a...)
+				} else {
+					where = append(where, members[0])
+				}
 			} else if len(members) > 1 {
 				where = append(where, jsObj().set("any", jsArr(members...)))
 			}
@@ -274,6 +320,18 @@ func normalizeLinkQuery(input *jsValue, links bool) *jsValue {
 
 	if fit := raw.get("fitToScreen"); fit != nil && fit.kind == jsBool && fit.b {
 		out.set("fitToScreen", jsBoolValue(true))
+	}
+
+	// Unreadable host state is kept as version 0 rather than dropped, so a
+	// restore can reject it instead of running a broadened table-only query.
+	if links {
+		if host := raw.get("hostState"); host != nil {
+			if state, err := normalizeLinkHostState(host); err == nil {
+				out.set("hostState", state)
+			} else {
+				out.set("hostState", jsObj().set("version", jsNum(0)).set("params", jsObj()))
+			}
+		}
 	}
 
 	if grouping := raw.get("grouping"); !grouping.isNullish() {
@@ -402,6 +460,9 @@ const (
 	optionInteger
 	optionPositiveInteger
 	optionNumber
+	// optionMinCount is a positive integer, or a metricMinCountOptions object
+	// with min and exactly one of distinct and sum.
+	optionMinCount
 )
 
 type optionSpec struct {
@@ -420,8 +481,13 @@ var (
 		{key: "expressionY", kind: optionString},
 		enumOption("scope", "allMatching", "shownRows"),
 		{key: "groupLimit", kind: optionInteger},
-		{key: "minCount", kind: optionPositiveInteger},
+		{key: "minCount", kind: optionMinCount},
 		enumOption("share", "total", "group0"),
+	}
+	metricMinCountOptions = []optionSpec{
+		{key: "min", kind: optionPositiveInteger},
+		{key: "distinct", kind: optionString},
+		{key: "sum", kind: optionString},
 	}
 	metricWindowOptions = []optionSpec{
 		enumOption("reduce", "total", "mean"),
@@ -429,13 +495,17 @@ var (
 	}
 	metricDateOptions = []optionSpec{
 		{key: "field", kind: optionString},
-		enumOption("interval", "hour", "day", "week", "month", "year"),
+		enumOption("interval", "hour", "day", "week", "month", "year", "hourOfDay", "dayOfWeek"),
 		{key: "timeZone", kind: optionString},
 		{key: "includeEmpty", kind: optionBoolean},
 		enumOption("range", "query", "observed", "custom"),
 		{key: "start", kind: optionString},
 		{key: "end", kind: optionString},
 		enumOption("partialIntervals", "include", "exclude"),
+	}
+	metricOccurrenceOptions = []optionSpec{
+		enumOption("interval", "hour", "day"),
+		{key: "includeEmpty", kind: optionBoolean},
 	}
 	metricDisplayOptions = []optionSpec{
 		enumOption("kind", "auto", "value", "table", "list", "bar-horizontal", "bar-vertical", "line", "pie", "donut",
@@ -500,6 +570,15 @@ func (m *metricNormalizer) copy(input *jsValue, specs []optionSpec) *jsValue {
 		}
 		var ok bool
 		switch spec.kind {
+		case optionMinCount:
+			if v.isRecord() {
+				v = m.copy(v, metricMinCountOptions)
+				distinct, sum := v.get("distinct"), v.get("sum")
+				named := func(x *jsValue) bool { return x == nil || (x.s != "" && jsLength(x.s) <= 256) }
+				ok = v.get("min") != nil && (distinct == nil) != (sum == nil) && named(distinct) && named(sum)
+			} else {
+				ok = jsIsSafeInteger(v) && v.n >= 1 && v.n <= 1000000
+			}
 		case optionString:
 			ok = v.isString() && jsLength(v.s) <= 10000
 		case optionNumber:
@@ -549,6 +628,16 @@ func normalizeLinkMetricOptions(raw *jsValue) *jsValue {
 			if !field.isString() || field.s == "" || jsLength(field.s) > 256 || !d.get("interval").truthy() ||
 				includeEmpty == nil || includeEmpty.kind != jsBool || !d.get("range").truthy() {
 				m.diagnostics = append(m.diagnostics, "Invalid metric date grouping.")
+			}
+			if occurrence := dateGrouping.get("occurrence"); occurrence.isRecord() {
+				o := m.copy(occurrence, metricOccurrenceOptions)
+				includeEmpty := o.get("includeEmpty")
+				if !o.get("interval").truthy() || includeEmpty == nil || includeEmpty.kind != jsBool {
+					m.diagnostics = append(m.diagnostics, "Invalid metric date grouping occurrence.")
+				}
+				d.set("occurrence", o)
+			} else if occurrence != nil {
+				m.diagnostics = append(m.diagnostics, "Invalid metric date grouping occurrence.")
 			}
 			out.set("dateGrouping", d)
 		} else {
@@ -990,6 +1079,9 @@ func asciiLowerEquals(s, want string) bool {
 	return true
 }
 
+// groupKeyIntervals are the calendar intervals a grouping key accepts.
+var groupKeyIntervals = []string{"hour", "day", "week", "month", "year"}
+
 func normalizeLinkGrouping(value *jsValue, links bool) *jsValue {
 	raw := value
 	if !raw.isRecord() {
@@ -1000,10 +1092,30 @@ func normalizeLinkGrouping(value *jsValue, links bool) *jsValue {
 
 	keysValue := raw.get("keys")
 	var keys []string
+	normalizedKeys := jsArr()
 	if keysValue.isArray() {
-		for _, key := range firstN(keysValue.a, MaxGroupByFields) {
+		for index, key := range firstN(keysValue.a, MaxGroupByFields) {
 			if name, ok := boundedJSString(key, linkMaxFieldName); ok {
 				keys = append(keys, name)
+				normalizedKeys.a = append(normalizedKeys.a, jsStr(name))
+				continue
+			}
+			if !key.isRecord() {
+				continue
+			}
+			// A calendar key: the timezone's validity is checked with the schema.
+			field, fieldOK := boundedJSString(key.get("field"), linkMaxFieldName)
+			interval, zone := key.get("interval"), key.get("timeZone")
+			if fieldOK && interval.isString() && includesString(groupKeyIntervals, interval.s) &&
+				(zone == nil || (zone.isString() && zone.s != "" && jsLength(zone.s) <= 80 && !strings.HasPrefix(zone.s, "+") && !strings.HasPrefix(zone.s, "-"))) {
+				keys = append(keys, field)
+				calendar := jsObj().set("field", jsStr(field)).set("interval", jsStr(interval.s))
+				if zone != nil {
+					calendar.set("timeZone", jsStr(zone.s))
+				}
+				normalizedKeys.a = append(normalizedKeys.a, calendar)
+			} else {
+				fail("key " + strconv.Itoa(index+1) + " must be a field name or a calendar key {field, interval, timeZone} with interval hour, day, week, month or year; hour-of-day and day-of-week are metric intervals.")
 			}
 		}
 	}
@@ -1133,6 +1245,7 @@ func normalizeLinkGrouping(value *jsValue, links bool) *jsValue {
 	}
 	source := rawSource.spread()
 	source.del("grouping")
+	source.del("hostState")
 	if retained := raw.get("diagnostics"); retained.isArray() {
 		for _, message := range firstN(retained.a, 20) {
 			if message.isString() && message.s != "" {
@@ -1149,7 +1262,7 @@ func normalizeLinkGrouping(value *jsValue, links bool) *jsValue {
 		}
 	}
 	out := jsObj().
-		set("keys", jsStrings(keys)).
+		set("keys", normalizedKeys).
 		set("summaries", summaries).
 		set("representative", representative).
 		set("source", normalizedSource)
@@ -1275,4 +1388,67 @@ func normalizeLinkPatch(value *jsValue) *jsValue {
 		}
 	}
 	return jsObj().set("id", jsStr(id)).set("owns", jsStrings(jsUniqueStrings(facets))).set("query", query)
+}
+
+// Host query state limits; see parseHostQueryState in TypeScript.
+const (
+	MaxHostQueryParams      = 64
+	MaxHostQueryValues      = 64
+	MaxHostQueryValueLength = 4000
+	MaxHostQueryStateBytes  = 32 * 1024
+)
+
+var hostQueryParamName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]{0,127}$`)
+
+// normalizeLinkHostState is parseHostQueryState: the canonical host state
+// (parameters sorted by name, values in order) or an error for a malformed or
+// oversized payload.
+func normalizeLinkHostState(input *jsValue) (*jsValue, error) {
+	invalid := func(why string) (*jsValue, error) {
+		return nil, linkError(QueryLinkInvalid, "Invalid host query state: "+why)
+	}
+	if !input.isRecord() {
+		return invalid("expected an object.")
+	}
+	for _, key := range input.o.keys() {
+		if key != "version" && key != "params" {
+			return invalid("unexpected properties.")
+		}
+	}
+	version := input.get("version")
+	if !version.isNumber() || !jsIsSafeInteger(version) || version.n < 1 {
+		return invalid("unsupported version.")
+	}
+	params := input.get("params")
+	if !params.isRecord() {
+		return invalid("params must be an object.")
+	}
+	names := append([]string(nil), params.o.keys()...)
+	sort.Strings(names)
+	if len(names) > MaxHostQueryParams {
+		return invalid("too many parameters.")
+	}
+	out := jsObj()
+	for _, name := range names {
+		values := params.get(name)
+		if !hostQueryParamName.MatchString(name) {
+			return invalid("invalid parameter name.")
+		}
+		if !values.isArray() || len(values.a) > MaxHostQueryValues {
+			return invalid("parameter " + name + " must be a list of strings.")
+		}
+		list := jsArr()
+		for _, value := range values.a {
+			if !value.isString() || jsLength(value.s) > MaxHostQueryValueLength {
+				return invalid("parameter " + name + " must be a list of strings.")
+			}
+			list.a = append(list.a, jsStr(value.s))
+		}
+		out.set(name, list)
+	}
+	state := jsObj().set("version", jsNum(version.n)).set("params", out)
+	if len(stringifyJS(state)) > MaxHostQueryStateBytes {
+		return invalid("payload too large.")
+	}
+	return state, nil
 }

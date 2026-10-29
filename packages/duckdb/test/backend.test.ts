@@ -206,6 +206,27 @@ describe("DuckDB native conformance", () => {
       schema,
     );
   });
+  it("executes an OR of AND branches like the local executor", async () => {
+    const query = normalizeQueryState({
+      select: [{ field: "amount" }, { field: "category" }],
+      where: [
+        {
+          any: [
+            { all: [{ field: "category", op: "=", value: "a" }, { field: "amount", op: ">=", value: "20" }] },
+            { all: [{ field: "category", op: "=", value: "b" }, { field: "amount", op: "<", value: "20" }] },
+            { field: "category", op: "is_null", value: "" },
+          ],
+        },
+      ],
+      orderBy: [{ field: "amount", dir: "desc" }],
+      limit: 100,
+    });
+    const actual = await execute(query),
+      expected = applyQuery(rows, query, schema);
+    expect(expected.total).toBeGreaterThan(0);
+    expect(actual.total).toBe(expected.total);
+    expect(actual.rows.map((row) => row.id)).toEqual(expected.rows.map((row) => row.id));
+  });
   it("implements null-exclusive set negation and empty arrays", async () => {
     for (const where of [
       [{ field: "tags", op: "includes", value: "milk" }],
@@ -653,6 +674,49 @@ describe("DuckDB native conformance", () => {
     expect(timestamp.metrics[0]?.buckets[0]?.keys[0]).toBe(
       "2024-12-31T05:00:00.000Z",
     );
+  });
+  it("groups by calendar keys like the local executor", async () => {
+    for (const key of [
+      { field: "date", interval: "day" as const, timeZone: "America/Denver" },
+      { field: "date", interval: "hour" as const },
+      { field: "date", interval: "week" as const, timeZone: "Asia/Kolkata" },
+    ]) {
+      const query = normalizeQueryState({
+        grouping: {
+          source: normalizeQueryState({}),
+          keys: [key, "category"],
+          summaries: [
+            { id: "n", op: "count" },
+            // Every group has a duration: an all-null SUM is 0 in DuckDB, null locally.
+            { id: "total", op: "sum", field: "duration" },
+            { id: "latest", op: "max", field: "date" },
+            { id: "example", op: "row", field: "id" },
+          ],
+          representative: { orderBy: [{ field: "amount", dir: "desc" }] },
+        },
+        select: [{ field: "date" }, { field: "category" }, { field: "n" }, { field: "total" }, { field: "latest" }, { field: "example" }],
+        where: [{ field: "n", op: ">=", value: "1" }],
+        orderBy: [{ field: "date", dir: "asc", nulls: "last" }, { field: "category", dir: "asc", nulls: "last" }],
+        aggregations: [metric("SUM([n])", { groupBy: ["date"] })],
+      });
+      const result = await execute(query);
+      const now = Date.parse("2025-01-04T00:00:00Z");
+      const local = applyQuery(rows, query, schema, { now });
+      const strip = (row: Record<string, unknown>) => {
+        const { __qt_group_id__: _id, ...rest } = row;
+        return rest;
+      };
+      expect(result.rows.map(strip), key.interval).toEqual(local.rows.map(strip));
+      expect(result.total).toBe(local.total);
+      expect(result.metrics[0]!.buckets).toEqual(
+        evaluateMetrics(rows, query, schema, { now }).metrics[0]!.buckets,
+      );
+      validateQueryResultV3(
+        result,
+        toQueryRequestV3(query, schema, backend.capabilities, undefined, { now: result.now }),
+        createGroupingSchema(query),
+      );
+    }
   });
   it("keeps empty text and null as separate typed groups", async () => {
     await native.run("INSERT INTO runs VALUES ('7', '', 7, 1, [], NULL, TRUE)");

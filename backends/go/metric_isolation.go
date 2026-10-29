@@ -26,6 +26,10 @@ func metricClauseError(ctx context.Context, err error) (string, bool) {
 	if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return "", false
 	}
+	var relationErr *sqliteRelationError
+	if errors.As(err, &relationErr) {
+		return "", false // a host predicate relation failed, not this clause
+	}
 	var issue *PlanDiagnostic
 	if errors.As(err, &issue) {
 		if requestDiagnostics[issue.Code] {

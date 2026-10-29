@@ -57,7 +57,7 @@ func TestRowsGroupEncodingParity(t *testing.T) {
 	d := qt.SQLiteV2Dataset{Schema: s, SourceSQL: "SELECT * FROM memory"}
 	q := qt.MetricQuery{Version: 2, Metrics: []qt.AggSpec{{ID: "groups", Op: "count", GroupBy: []string{"text", "enum", "flag"}}}}
 	compareMemory(t, tx, d, rows, q, qt.PlanOptions{})
-	q.Metrics[0].MinCount = 2
+	q.Metrics[0].MinCount = qt.MetricMinCount{Min: 2}
 	q.Metrics[0].GroupLimit = 13
 	q.Metrics[0].Sort = []qt.MetricSort{{Key: "group0", Dir: "desc", Nulls: "first"}, {Key: "count", Dir: "asc"}}
 	compareMemory(t, tx, d, rows, q, qt.PlanOptions{})

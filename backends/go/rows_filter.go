@@ -19,7 +19,8 @@ var ErrRowsUnsupported = errors.New("in-memory rows unsupported")
 // RowFilter is an immutable, reusable SQLite-compatible predicate. The zero
 // value matches every row. Match can return ErrRowsUnsupported for a Go value
 // or storage representation that cannot be evaluated exactly.
-type RowFilter struct{ terms [][]rowPredicate }
+// terms is an AND of ORs of AND branches (see WhereTerm.Branches).
+type RowFilter struct{ terms [][][]rowPredicate }
 type rowPredicate struct {
 	clause       WhereClause
 	field        FieldSpec
@@ -50,56 +51,76 @@ func CompileRowFilter(terms []WhereTerm, s Schema, o SQLiteOptions) (RowFilter, 
 	}
 	var out RowFilter
 	for _, term := range terms {
-		var group []rowPredicate
+		var group [][]rowPredicate
 		noOp := false
-		for _, c := range term.Predicates() {
-			f := s.Fields[c.Field]
-			sql, _, _ := sqliteLiteral(c, s, o.Now)
-			if sql == "" {
+		for _, branch := range term.Branches() {
+			var preds []rowPredicate
+			for _, c := range branch {
+				p, keep, err := compileRowPredicate(c, s, o)
+				if err != nil {
+					return RowFilter{}, err
+				}
+				if keep {
+					preds = append(preds, p)
+				}
+			}
+			// A branch whose literals are all blank no-ops is always true.
+			if len(preds) == 0 {
 				noOp = true
-				continue
 			}
-			p := rowPredicate{clause: c, field: f, op: c.Op, value: c.Value}
-			switch c.Op {
-			case "=", "!=", ">", ">=", "<", "<=":
-				_, p.value, p.op, p.constant, _ = sqliteComparison(c, f, o.Now)
-				if b, ok := p.value.(bool); ok {
-					if b {
-						p.value = int64(1)
-					} else {
-						p.value = int64(0)
-					}
-				}
-			case "length_gt", "length_lt", "length_eq":
-				// The SQL compiler already checked canonical nonnegative integer syntax.
-				_, args, _ := sqliteLiteral(c, s, o.Now)
-				p.value = args[0]
-			case "matches_regex", "not_matches_regex":
-				if !validRowFunctionText(c.Value) {
-					return RowFilter{}, fmt.Errorf("%w: regex text", ErrRowsUnsupported)
-				}
-				p.re, _ = sqlitePattern(c.Value)
-			case "contains", "starts_with", "ends_with", "includes":
-				if !validRowFunctionText(c.Value) {
-					return RowFilter{}, fmt.Errorf("%w: filter text", ErrRowsUnsupported)
-				}
-				if c.Op != "includes" || !f.ArrayCaseSensitive {
-					p.value = strings.ToLower(c.Value)
-				}
-			}
-			group = append(group, p)
+			group = append(group, preds)
 		}
 		if noOp {
 			continue
 		}
-		for _, p := range group {
-			if !rowFieldSupported(p.clause.Field, p.field) {
-				return RowFilter{}, fmt.Errorf("%w: filter binding %s", ErrRowsUnsupported, p.clause.Field)
+		for _, branch := range group {
+			for _, p := range branch {
+				if !rowFieldSupported(p.clause.Field, p.field) {
+					return RowFilter{}, fmt.Errorf("%w: filter binding %s", ErrRowsUnsupported, p.clause.Field)
+				}
 			}
 		}
 		out.terms = append(out.terms, group)
 	}
 	return out, nil
+}
+
+// compileRowPredicate prepares one literal; keep is false for a blank no-op.
+func compileRowPredicate(c WhereClause, s Schema, o SQLiteOptions) (rowPredicate, bool, error) {
+	f := s.Fields[c.Field]
+	sql, _, _ := sqliteLiteral(c, s, o.Now)
+	if sql == "" {
+		return rowPredicate{}, false, nil
+	}
+	p := rowPredicate{clause: c, field: f, op: c.Op, value: c.Value}
+	switch c.Op {
+	case "=", "!=", ">", ">=", "<", "<=":
+		_, p.value, p.op, p.constant, _ = sqliteComparison(c, f, o.Now)
+		if b, ok := p.value.(bool); ok {
+			if b {
+				p.value = int64(1)
+			} else {
+				p.value = int64(0)
+			}
+		}
+	case "length_gt", "length_lt", "length_eq":
+		// The SQL compiler already checked canonical nonnegative integer syntax.
+		_, args, _ := sqliteLiteral(c, s, o.Now)
+		p.value = args[0]
+	case "matches_regex", "not_matches_regex":
+		if !validRowFunctionText(c.Value) {
+			return rowPredicate{}, false, fmt.Errorf("%w: regex text", ErrRowsUnsupported)
+		}
+		p.re, _ = sqlitePattern(c.Value)
+	case "contains", "starts_with", "ends_with", "includes":
+		if !validRowFunctionText(c.Value) {
+			return rowPredicate{}, false, fmt.Errorf("%w: filter text", ErrRowsUnsupported)
+		}
+		if c.Op != "includes" || !f.ArrayCaseSensitive {
+			p.value = strings.ToLower(c.Value)
+		}
+	}
+	return p, true, nil
 }
 
 var rowIdentifier = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_$]*$`)
@@ -134,13 +155,17 @@ func (f RowFilter) Match(row map[string]any) (bool, error) {
 	match := true
 	for _, term := range f.terms {
 		anyMatch := false
-		for i := range term {
-			p := &term[i]
-			yes, err := p.match(row[p.clause.Field])
-			if err != nil {
-				return false, err
+		for _, branch := range term {
+			all := true
+			for i := range branch {
+				p := &branch[i]
+				yes, err := p.match(row[p.clause.Field])
+				if err != nil {
+					return false, err
+				}
+				all = all && yes
 			}
-			anyMatch = anyMatch || yes
+			anyMatch = anyMatch || all
 		}
 		match = match && anyMatch
 	}

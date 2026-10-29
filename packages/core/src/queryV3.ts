@@ -2,15 +2,22 @@ import { createGroupingModel, withoutGrouping, type GroupingDefinition } from ".
 import { normalizeQueryState, predicatesOf, type QueryState, type AggregationClause } from "./query";
 import { toServerQuery, type ServerQuery, type AggregationResult } from "./encode";
 import { validateMetric, toMetricQuery } from "./metrics";
+import { isMetricCycle } from "./metricDates";
 import type { ComputedExecution } from "./computed";
 import type { FieldSchema, FieldDef } from "./schema";
 import { evaluationTime } from "./relativeTime";
 import { withoutLinkSummaries } from "./groupLinks";
+import { isCalendarGroupKey } from "./groupKeys";
 
 export interface QueryCapabilitiesV3 {
   version: 3;
   groupedRows: boolean;
   calendarGrouping: boolean;
+  /** Executes the cyclic `hourOfDay` and `dayOfWeek` date intervals. */
+  calendarCycles?: boolean;
+  /** Executes calendar grouping keys (`{ field, interval, timeZone }`) in a
+   * grouping stage. Requests using them are refused otherwise. */
+  calendarGroupKeys?: boolean;
   computedSourceFilters: boolean;
   regex: boolean;
   regexSourceFilters?: boolean;
@@ -19,12 +26,16 @@ export interface QueryCapabilitiesV3 {
   metricFilters?: boolean;
   /** Executes AggregationClause.minCount and reports hiddenGroups. */
   metricMinCount?: boolean;
+  /** Also executes an object minCount: distinct values or a sum per group. */
+  metricMinCountMeasures?: boolean;
   maxRows: number;
   maxGroups: number;
   maxPopulation: number;
   profile: string;
 }
 export interface QueryRequestV3 {
+  /** The table's host-owned state when `hostQuery` is configured. */
+  hostState?: import("./query").HostQueryState;
   version: 3;
   profile: string;
   now: number;
@@ -74,6 +85,8 @@ export function toQueryRequestV3<Row>(query: QueryState, baseSchema: FieldSchema
   let resultSchema = sourceSchema as FieldSchema<any>;
   if (q.grouping) {
     if (!capabilities.groupedRows) diagnostics.push("This server does not support grouped rows.");
+    else if (q.grouping.keys.some(isCalendarGroupKey) && !capabilities.calendarGroupKeys)
+      diagnostics.push("This server does not support grouping keys by calendar interval.");
     try { const model = createGroupingModel(sourceSchema); model.validate(q.grouping); resultSchema = model.resultSchema(q.grouping.keys, q.grouping.summaries); }
     catch (error) { diagnostics.push(error instanceof Error ? error.message : String(error)); }
   }
@@ -97,6 +110,8 @@ export function toQueryRequestV3<Row>(query: QueryState, baseSchema: FieldSchema
   for (const metric of metrics) {
     diagnostics.push(...validateMetric(metric, resultSchema).map(issue => issue.message));
     if (metric.dateGrouping && !capabilities.calendarGrouping) diagnostics.push("This server does not support calendar grouping.");
+    else if (isMetricCycle(metric.dateGrouping?.interval) && !capabilities.calendarCycles)
+      diagnostics.push("This server does not support hour-of-day or day-of-week grouping.");
   }
   const revisions: Record<string, string> = Object.create(null);
   for (const [id, revision] of Object.entries(execution?.resolvedRevisions ?? {})) {

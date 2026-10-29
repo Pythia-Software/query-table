@@ -109,7 +109,8 @@ Row output uses `column0`, `column0_error`, etc. `SQLPlan.Columns` maps these al
 | `samples`, `null_count` | Distribution valid sample and excluded NULL counts |
 | `distribution` | JSON matching core distribution result shapes |
 | `group_count` | Reduced groups kept by `minCount` (all groups without it), before the result limit |
-| `hidden_groups` | Only with `minCount`: groups removed for having fewer rows |
+| `hidden_groups` | Only with `minCount`: groups removed for having fewer rows, distinct values or a smaller sum |
+| `min_measure`, `min_measure_error` | Only with a distinct or summed `minCount`: the group's `COUNT_DISTINCT`/`SUM` measure |
 
 Some box-stage statistical columns are also returned for inspection; adapters should select/map the protocol fields above rather than forward arbitrary columns. A group error nulls its scalar output. X/Y errors remain independent. Errors sort after valid groups, then requested value/Y/count/sample/key terms apply; the default is value descending, and complete group tuples break ties. NULL placement is independent of direction. No-group empty input produces one COUNT=0 or nullable scalar/empty-distribution bucket; grouped empty input produces no buckets.
 
@@ -154,11 +155,15 @@ adapter derives.
 
 `SQLiteV2Dataset`, `QueryDatasetV3` (both dialects) and the response decoder
 `readV2Metric` implement both controls and set `hiddenGroups` on the metric
-result. `SQLiteMetricCapabilities` advertises `filters`/`minCount` and
-`QueryCapabilitiesV3` advertises `metricFilters`/`metricMinCount`. Hosts that
-execute `CompileMetrics` plans themselves must decode `hidden_groups` and the
+result. `SQLiteMetricCapabilities` advertises `filters`/`minCount`/`minCountMeasures`
+and `QueryCapabilitiesV3` advertises
+`metricFilters`/`metricMinCount`/`metricMinCountMeasures`. Hosts that execute
+`CompileMetrics` plans themselves must decode `hidden_groups` and the
 bucketless row before advertising `metricCapabilities.filters`/`minCount`; the
-frontend refuses those clauses individually otherwise.
+plans filter on `min_measure` themselves, so such a host can also advertise
+`minCountMeasures`. The frontend refuses those clauses individually otherwise.
+`AggSpec.MinCount` is a `MetricMinCount` (`Min`, plus `Distinct` or `Sum`), read
+from and written as either a number or `{"min":5,"distinct":"conversation_id"}`.
 
 ## Optional combined metric batches
 

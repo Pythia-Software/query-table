@@ -16,7 +16,7 @@ import {
 // number. Counts are always plain integers.
 
 import { useState, useMemo, type HTMLAttributes, type ReactNode } from "react";
-import { EMPTY_QUERY } from "@pythia-software/query-table-core";
+import { EMPTY_QUERY, metricMinCountText } from "@pythia-software/query-table-core";
 import type { AggOp, FieldDef } from "@pythia-software/query-table-core";
 import type { AggregationsApi } from "@pythia-software/query-table-react";
 import { MetricsEditor } from "./MetricsEditor";
@@ -393,15 +393,14 @@ export function MetricCard<Row>({
         : buckets !== allBuckets && allBuckets.length > (clause.display?.maxGroups ?? allBuckets.length) && (
             <p className="qt-metric-note">Showing the first {clause.display?.maxGroups} groups in result order{buckets.length > clause.display!.maxGroups! ? " plus Other" : ""}.</p>
           )}
-      {(clause.window || clause.share) && (
+      {(clause.window || clause.share || clause.dateGrouping?.occurrence) && (
         <p className="qt-metric-note">{seriesNote(clause)}</p>
       )}
       {!!result?.hiddenGroups && clause.minCount !== undefined && (
         <p className="qt-metric-note">
           {result.hiddenGroups.toLocaleString()}{" "}
           {result.hiddenGroups === 1 ? "group" : "groups"} hidden (fewer than{" "}
-          {clause.minCount.toLocaleString()}{" "}
-          {clause.minCount === 1 ? "row" : "rows"})
+          {metricMinCountText(clause, (name) => byName.get(name)?.label ?? name)})
         </p>
       )}
       {result?.groupCount !== undefined &&
@@ -415,11 +414,31 @@ export function MetricCard<Row>({
   );
 }
 
-/** What one point of a windowed or share metric is. */
+/** What one point of a windowed, share or per-occurrence metric is. */
 function seriesNote(clause: AggregationClause): string {
-  const unit = clause.dateGrouping?.interval ?? "interval",
-    window = clause.window;
+  const interval = clause.dateGrouping?.interval,
+    unit =
+      interval === "hourOfDay"
+        ? "hour of the day"
+        : interval === "dayOfWeek"
+          ? "weekday"
+          : (interval ?? "interval"),
+    window = clause.window,
+    occurrence = clause.dateGrouping?.occurrence;
   const parts: string[] = [];
+  if (occurrence) {
+    const each = `each whole ${occurrence.interval}`;
+    parts.push(
+      clause.distribution?.kind === "box"
+        ? `Spread of the value over ${each}`
+        : `Mean of the value over ${each}`,
+    );
+    parts.push(
+      occurrence.includeEmpty
+        ? `${occurrence.interval}s without rows count as 0 for counts and sums`
+        : `${occurrence.interval}s without rows are left out`,
+    );
+  }
   if (window) {
     const span =
       window.periods === "all"
@@ -482,7 +501,8 @@ function BarList({
   onInspect: ((bucket: AggregationBucket) => void) | undefined;
 }) {
   const colors = createMetricColorResolver(theme),
-    options = clause.display?.list;
+    options = clause.display?.list,
+    shade = colors.tupleColors(clause.groupBy, buckets.filter((b) => !isMetricOtherBucket(b)).map((b) => b.keys));
   const below = options?.barPosition === "below", showValues = options?.showValues !== false;
   const requestedLines = options?.maxLabelLines;
   const maxLabelLines = below && typeof requestedLines === "number"
@@ -526,7 +546,7 @@ function BarList({
                   style={{
                     background: isMetricOtherBucket(b)
                       ? colors.token("other")
-                      : colors.color(clause.groupBy[0] ?? "", b.keys[0] ?? null),
+                      : shade(b.keys),
                     marginInlineEnd: ".35rem",
                   }}
                 />
@@ -543,7 +563,7 @@ function BarList({
                       ? {
                           background: isMetricOtherBucket(b)
                             ? colors.token("other")
-                            : colors.color(clause.groupBy[0] ?? "", b.keys[0] ?? null),
+                            : shade(b.keys),
                         }
                       : {}),
                   }}

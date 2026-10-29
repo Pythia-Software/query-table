@@ -122,6 +122,7 @@ export function createPostgresTransport(
       computedFields: true,
       filters: true,
       minCount: true,
+      minCountMeasures: true,
       profile: "qt-postgres-v1",
       maxGroups: 10000,
     },

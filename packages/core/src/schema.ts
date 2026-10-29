@@ -115,6 +115,10 @@ export interface SelectConfig {
   default?: boolean;
   /** Default column width (px); a per-column override rides in QueryState.select. */
   width?: number;
+  /** Narrowest usable width (px) when fitting columns to the screen, such as
+   * the room a host renderer's buttons need. Measured native controls are
+   * always kept whole; this adds room they cannot measure. */
+  minWidth?: number;
   align?: Align;
 }
 

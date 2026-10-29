@@ -32,11 +32,13 @@ import {
   applyQuery,
   memoryStorageAdapter,
   normalizeQueryState,
+  parseHostQueryState,
   readFieldValue,
   selectedFields,
   toServerQuery,
   queriesEqual,
-  isOrGroup,
+  isWhereConjunction,
+  isWhereGroup,
   predicatesOf,
   negateClause,
   opsForField,
@@ -46,13 +48,17 @@ import {
   isComputedField,
   computedFieldName,
   toServerQueryV2,
+  groupKeyField,
+  groupKeyFields,
 } from "@pythia-software/query-table-core";
 
 const AUTOCOMPLETE_LIMIT = 50;
 const MAX_AUTO_REFRESH_POLLS = 1000;
 import type {
   QueryState,
+  HostQueryState,
   WhereClause,
+  WhereBranch,
   WhereTerm,
   OrderByClause,
   AggOp,
@@ -108,6 +114,16 @@ export interface UseQueryTableOptions<Row> {
    * Pass localStorageAdapter() explicitly only when filter values are safe to
    * retain as cleartext JSON on the device. */
   storage?: StorageAdapter;
+  /** When `storage.saveLast` records the last-used query: "always" (default)
+   * 400 ms after every change, or "succeeded" once rows and every metric of
+   * that exact query have loaded. A failure, timeout or cancellation keeps the
+   * previous last-used query; explicit links, named saves and the default are
+   * separate choices and are never touched by it. */
+  persistLast?: "always" | "succeeded";
+  /** Host-owned query state that travels with the table query as one
+   * definition: saved, restored, shared, reset and undone together. The host
+   * keeps rendering and running its own clauses from `api.definition`. */
+  hostQuery?: HostQueryOptions;
   /** Shared reusable definitions, independent of saved-query storage. */
   computedColumnStore?: ComputedColumnStore;
   /** Authoritative host handshake for versioned server SELECT, sorts, and metrics. */
@@ -201,9 +217,56 @@ export interface AggregationsApi {
   contextKey?: string;
 }
 
+/** Registers host-owned query state with `useQueryTable`. */
+export interface HostQueryOptions {
+  /** URL parameters that mirror `hostState.params` when `syncUrl` is on. URL
+   * writes replace exactly these, keeping every other parameter. They may not
+   * include the table's own query parameter. */
+  ownedParameters: readonly string[];
+  /** The state a query without host state takes, including every save made
+   * before the host registered, and the state Reset restores. */
+  defaults: HostQueryState;
+  /** Validate, migrate and canonicalize; throw to reject. A rejected state
+   * rejects the whole restore or edit, leaving the live definition as it was. */
+  normalize?: (state: HostQueryState) => HostQueryState;
+}
+/** The committed table query and host state, as one unit. */
+export interface QueryDefinition {
+  query: QueryState;
+  hostState: HostQueryState;
+}
+
+/** The outcome of executing one exact query; see `QueryTableApi.execution`. */
+export interface QueryExecutionReceipt {
+  /** The query whose rows and metrics this receipt describes. */
+  query: QueryState;
+  /** Execution identity: changes with every row- or metric-affecting edit and
+   * refresh, but not with presentation such as widths. */
+  key: string;
+  /** Increases with every new execution identity of this table. */
+  generation: number;
+  /** "succeeded" only when rows and every metric loaded; an empty result,
+   * including a page past the end, is a success. */
+  status: "running" | "succeeded" | "failed";
+  rows: "running" | "succeeded" | "failed";
+  /** "none" when the query has no metrics. A metric error fails the receipt. */
+  metrics: "none" | "running" | "succeeded" | "failed";
+  /** The row or metric error behind a failure. */
+  error: Error | null;
+}
 export interface QueryTableApi<Row> {
   /** Dependent source fetches can use ready without parsing display errors. */
   restoration: { status: "resolving" | "ready" | "error"; ready: boolean; error: Error | null };
+  /** Execution of the current query, separate from restoration. Null while
+   * restoring, after a restoration error and while the table is inactive, so
+   * a cancelled or hidden table never publishes a stale receipt. */
+  execution: QueryExecutionReceipt | null;
+  /** With `hostQuery`: the committed definition (`query` without its
+   * `hostState`, and the host state). */
+  definition?: QueryDefinition;
+  /** With `hostQuery`: commit a new definition as one history entry and one
+   * execution. Throws, changing nothing, when `hostQuery.normalize` rejects. */
+  setDefinition?: (next: QueryDefinition | ((previous: QueryDefinition) => QueryDefinition)) => void;
   /** Call after a host pushState/router update, with an absolute URL or a location
    * relative to window.location.href. Supersedes prior resolution;
    * abort or an intervening query edit prevents stale publication. */
@@ -257,7 +320,8 @@ export interface QueryTableApi<Row> {
   /** Remove the whole term at `index`. */
   removeFilter: (index: number) => void;
   clearFilters: () => void;
-  /** Replace one predicate inside a term (predIndex 0 for a literal term). */
+  /** Replace one predicate inside a term (predIndex 0 for a literal term). In
+   *  an OR of conjunctions, predIndex counts literals in `predicatesOf` order. */
   updatePredicate: (
     termIndex: number,
     predIndex: number,
@@ -271,8 +335,8 @@ export interface QueryTableApi<Row> {
    *  dragged term removed, so a drag preview's slot maps straight to the result). */
   reorderFilters: (fromIndex: number, toIndex: number) => void;
   /** OR-merge the term at `sourceIndex` into the term at `targetIndex`: the
-   *  target becomes (or stays) an OR group holding both terms' predicates, and
-   *  the source term is removed. This is the drag-onto-another-filter gesture. */
+   *  target becomes (or stays) an OR group holding both terms' branches (a
+   *  conjunction stays one AND branch), and the source term is removed. This is the drag-onto-another-filter gesture. */
   mergeFilters: (sourceIndex: number, targetIndex: number) => void;
   /** Reset the complete query state back to schema defaults. */
   resetAll: () => void;
@@ -331,8 +395,8 @@ function defaultsFor<Row>(schema: FieldSchema<Row>, details = false): QueryState
 }
 
 function cloneWhereTerm(term: WhereTerm): WhereTerm {
-  const copy = isOrGroup(term)
-    ? { ...term, any: term.any.map((c) => ({ ...c })) }
+  const copy: WhereTerm = isWhereGroup(term)
+    ? { ...term, any: term.any.map((c: WhereBranch) => (isWhereConjunction(c) ? { all: c.all.map((m) => ({ ...m })) } : { ...c })) }
     : { ...term };
   if (term.setFilter)
     copy.setFilter = { ...term.setFilter, values: [...term.setFilter.values] };
@@ -350,6 +414,7 @@ function cloneQueryState(q: QueryState): QueryState {
     offset: q.offset,
   };
   if (q.fitToScreen) clone.fitToScreen = true;
+  if (q.hostState) clone.hostState = { version: q.hostState.version, params: Object.fromEntries(Object.entries(q.hostState.params).map(([name, values]) => [name, [...values]])) };
   if (q.aggregations)
     clone.aggregations = JSON.parse(
       JSON.stringify(q.aggregations),
@@ -438,19 +503,74 @@ function queryParameter<Row>(opts: UseQueryTableOptions<Row>): string {
   return opts.queryParameter ?? (typeof opts.itemDetails === "object" ? opts.itemDetails.queryParameter : undefined) ?? "q";
 }
 
+/** The query with the host state it runs with: the host defaults when it has
+ * none, otherwise the host's normalized form. Throws when the state cannot
+ * be accepted, including host state on a table that registers none. */
+function withHostState(query: QueryState, host: HostQueryOptions | undefined): QueryState {
+  if (!host) {
+    if (query.hostState) throw Error("This query includes host state that this table does not support.");
+    return query;
+  }
+  const raw = query.hostState ?? host.defaults;
+  if (raw.version === 0) throw Error("This query's host state could not be read.");
+  const state = parseHostQueryState(host.normalize ? host.normalize(parseHostQueryState(raw)) : raw);
+  return { ...query, hostState: state };
+}
+function withoutHostState(query: QueryState): QueryState {
+  const { hostState: _hostState, ...rest } = query;
+  return rest;
+}
+/** Host state mirrored into a URL's owned parameters, or undefined when it has none. */
+function hostStateFromUrl(location: string, host: HostQueryOptions): HostQueryState | undefined {
+  const url = new URL(location);
+  const params: Record<string, string[]> = {};
+  for (const name of host.ownedParameters) {
+    const values = url.searchParams.getAll(name);
+    if (values.length) params[name] = values;
+  }
+  return Object.keys(params).length ? { version: host.defaults.version, params } : undefined;
+}
+/** Replace exactly the owned parameters of `url` with `state`. */
+function writeHostParameters(url: string, host: HostQueryOptions, state: HostQueryState | undefined): string {
+  const next = new URL(url);
+  for (const name of host.ownedParameters) next.searchParams.delete(name);
+  for (const name of host.ownedParameters)
+    for (const value of state?.params[name] ?? []) next.searchParams.append(name, value);
+  return next.toString();
+}
+const HOST_REQUEST_METHODS = new Set(["fetchRows", "fetchRowsV2", "fetchQueryV3", "fetchMetrics", "fetchAggregations", "fetchDistinctValues"]);
+/** Requests carry the host state of the query they execute. The wrapper is
+ * rebuilt with every host state, alongside the query, so a request never
+ * pairs one definition's table query with another's host state. */
+function withHostTransport<T extends object>(transport: T | undefined, hostStateKey: string): T | undefined {
+  if (!transport || !hostStateKey) return transport;
+  const hostState = JSON.parse(hostStateKey) as HostQueryState;
+  const wrappers = new Map<PropertyKey, unknown>();
+  return new Proxy(Object.create(transport) as T, {
+    get(_target, key) {
+      const method = Reflect.get(transport, key, transport) as unknown;
+      if (!HOST_REQUEST_METHODS.has(String(key)) || typeof method !== "function") return method;
+      if (!wrappers.has(key))
+        wrappers.set(key, (request: object, signal?: AbortSignal) =>
+          (method as (request: object, signal?: AbortSignal) => unknown).call(transport, { ...request, hostState }, signal));
+      return wrappers.get(key);
+    },
+  });
+}
+
 function resolveInitial<Row>(opts: UseQueryTableOptions<Row>): {
   q: QueryState;
   fromUrl: boolean;
 } {
-  const defaults = defaultsFor(opts.schema, Boolean(opts.itemDetails));
+  const defaults = withHostState(defaultsFor(opts.schema, Boolean(opts.itemDetails)), opts.hostQuery);
   if (opts.initialQuery)
     return {
-      q: normalizeQueryState(opts.initialQuery, defaults),
+      q: withHostState(normalizeQueryState(opts.initialQuery, defaults), opts.hostQuery),
       fromUrl: false,
     };
   if (opts.syncUrl === true && opts.active !== false && typeof window !== "undefined") {
     const parameter = queryParameter(opts);
-    if (hasQueryLink(window.location.href, parameter))
+    if (hasQueryLink(window.location.href, parameter) || (opts.hostQuery && hostStateFromUrl(window.location.href, opts.hostQuery)))
       return {
         q: defaults,
         fromUrl: true,
@@ -472,9 +592,14 @@ export function useQueryTable<Row>(
   const active = opts.active !== false;
   const urlSyncEnabled = opts.syncUrl === true;
   const syncUrl = urlSyncEnabled && active;
-  const { transport: metadataTransport, metricTransport, activity: requestActivity } =
+  const { transport: activityTransport, metricTransport: activityMetricTransport, activity: requestActivity } =
     useRequestActivity(sourceTransport, opts.metricTransport);
-  const transport = metadataTransport;
+  const host = opts.hostQuery;
+  const hostRef = useRef(host);
+  hostRef.current = host;
+  const hostDefaultsKey = host ? JSON.stringify(host.defaults) : "";
+  if (host?.ownedParameters.includes(queryParameter(opts)))
+    throw Error(`hostQuery.ownedParameters cannot include the table's own "${queryParameter(opts)}" parameter.`);
   const storage = useMemo(
     () => opts.storage ?? memoryStorageAdapter(),
     [opts.storage],
@@ -485,7 +610,8 @@ export function useQueryTable<Row>(
   const now = opts.now ?? Date.now;
   const nowRef = useRef(now);
   const onRefreshRef = useRef(opts.onRefresh);
-  const defaults = useMemo(() => defaultsFor(sourceSchema, Boolean(opts.itemDetails)), [sourceSchema, Boolean(opts.itemDetails)]);
+  const defaults = useMemo(() => withHostState(defaultsFor(sourceSchema, Boolean(opts.itemDetails)), hostRef.current),
+    [sourceSchema, Boolean(opts.itemDetails), hostDefaultsKey]);
 
   const initRef = useRef(resolveInitial(opts));
   const [restoration, setRestoration] = useState<{ loading: boolean; error: Error | null }>({ loading: initRef.current.fromUrl, error: null });
@@ -530,6 +656,10 @@ export function useQueryTable<Row>(
     () => opts.canonicalizeQuery?.(storedQuery) ?? storedQuery,
     [storedQuery, opts.canonicalizeQuery],
   );
+  const hostStateKey = host && query.hostState ? JSON.stringify(query.hostState) : "";
+  const metadataTransport = useMemo(() => withHostTransport(activityTransport, hostStateKey), [activityTransport, hostStateKey]);
+  const metricTransport = useMemo(() => withHostTransport(activityMetricTransport, hostStateKey), [activityMetricTransport, hostStateKey]);
+  const transport = metadataTransport;
   const sourceCatalogue = useMemo(() => sourceExecutionSchema(sourceSchema, opts.computedExecution), [sourceSchema, opts.computedExecution]);
   const sourceRows = providedRows;
   const groupingModel = useMemo(() => createGroupingModel(sourceCatalogue), [sourceCatalogue]);
@@ -563,6 +693,7 @@ export function useQueryTable<Row>(
   const executionQuery = useMemo(() => withoutGrouping(query), [query]);
   const byName = useMemo(() => new Map(schema.fields.map(field => [field.name, field])), [schema]);
   const detailsEnabled = Boolean(opts.itemDetails) && !query.grouping;
+  const groupDetailsEnabled = Boolean(opts.itemDetails) && Boolean(query.grouping);
   // Normalization clones grouping even for presentation edits. Only a change
   // in its content should invalidate row and metric execution.
   const validateExecution = useCallback((q: QueryState) => {
@@ -583,6 +714,8 @@ export function useQueryTable<Row>(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [committedPage, setCommittedPage] = useState<string | null>(null);
+  // The page context whose execution set `error`; errors of superseded runs do not describe the current query.
+  const [failedPage, setFailedPage] = useState<string | null>(null);
   const [committedSource, setCommittedSource] = useState<{
     schema: FieldSchema<Row>;
     transport: Transport<Row> | undefined;
@@ -615,7 +748,9 @@ export function useQueryTable<Row>(
           typeof next === "function"
             ? (next as (p: QueryState) => QueryState)(prev)
             : next;
-        const nextQuery = normalizeQueryState(candidate, defaults);
+        // An edit that does not mention host state keeps the current one.
+        const normalized = normalizeQueryState(candidate, defaults);
+        const nextQuery = withHostState(normalized.hostState || !prev.hostState ? normalized : { ...normalized, hostState: prev.hostState }, hostRef.current);
         if (queriesEqual(prev, nextQuery)) return history;
         return { query: cloneQueryState(nextQuery), past: [...history.past, cloneQueryState(prev)], future: [] };
       });
@@ -633,14 +768,22 @@ export function useQueryTable<Row>(
   }, [setQuery]);
   const sourceFilters = useQueryFilters(sourceCatalogue, setSourceQuery);
 
-  // Track only this table's URL parameter, including duplicates. Host routes,
-  // anchors and unrelated history.state changes do not restore table state.
+  // Track only this table's URL parameter and the host's owned parameters,
+  // including duplicates. Host routes, anchors and unrelated history.state
+  // changes do not restore table state.
   const observedQueryUrl = useRef<string | null>(null);
+  const tableUrlKey = (url: string) => {
+    const params = new URL(url).searchParams;
+    return JSON.stringify([params.getAll(parameter), ...(hostRef.current?.ownedParameters ?? []).map(name => params.getAll(name))]);
+  };
   const recordQueryUrl = useCallback((url: string) => {
-    observedQueryUrl.current = JSON.stringify(new URL(url).searchParams.getAll(parameter));
+    observedQueryUrl.current = tableUrlKey(url);
   }, [parameter]);
+  const ownedParametersKey = JSON.stringify(host?.ownedParameters ?? null);
+  const decorateLink = useCallback((url: string, q: QueryState) =>
+    hostRef.current ? writeHostParameters(url, hostRef.current, q.hostState) : url, [ownedParametersKey]);
   const links = useQueryLinks(query, linkService, syncUrl, storageReady && !restoration.loading && !restoration.error,
-    parameter, opts.links?.maxUrlBytes ?? 2000, recordQueryUrl);
+    parameter, opts.links?.maxUrlBytes ?? 2000, recordQueryUrl, decorateLink);
   const restoreSources = useRef({ storage, linkService, defaults, initialQuery });
   restoreSources.current = { storage, linkService, defaults, initialQuery };
 
@@ -662,17 +805,27 @@ export function useQueryTable<Row>(
       signal?.addEventListener("abort", abort, { once: true });
       if (signal?.aborted) currentController.abort();
       setStorageReady(false);
-      const explicitLink = !!location && (navigation || urlSyncEnabled) && hasQueryLink(location, parameter);
+      // The host's own URL parameters are part of the link, with or without
+      // the table's query parameter.
+      const host = hostRef.current;
+      const hostFromUrl = host && location && (navigation || urlSyncEnabled) ? hostStateFromUrl(location, host) : undefined;
+      const explicitLink = !!location && (navigation || urlSyncEnabled) && (hasQueryLink(location, parameter) || !!hostFromUrl);
       setRestoration({ loading: true, error: null });
       try {
         if (currentController.signal.aborted) throw new DOMException("Query restoration cancelled.", "AbortError");
         const fromUrl = location && (navigation || urlSyncEnabled) ? await linkService.resolve(location, parameter, currentController.signal) : null;
-        const defaultSaved = fromUrl ? null : await storage.loadDefaultSaved?.(sourceSchema.name);
-        const restored = fromUrl ?? defaultSaved?.query ?? (navigation ? defaults : await storage.loadLast(sourceSchema.name));
+        // Host parameters alone open the default table query with that host state.
+        const linked = fromUrl ?? (hostFromUrl ? defaults : null);
+        const defaultSaved = linked ? null : await storage.loadDefaultSaved?.(sourceSchema.name);
+        let restored = linked ?? defaultSaved?.query ?? (navigation ? defaults : await storage.loadLast(sourceSchema.name));
         if (currentController.signal.aborted) throw new DOMException("Query restoration cancelled.", "AbortError");
+        // A link without host state reads the host's own URL parameters.
+        if (linked && !fromUrl?.hostState && hostFromUrl) restored = { ...linked, hostState: hostFromUrl };
         if (!cancelled && run === generation && epoch === manualQueryEpoch.current) {
           if (restored) {
-            const normalized = normalizeQueryState(restored, defaults);
+            // Host state is resolved before anything commits; a rejected one
+            // fails the whole restore and leaves the live definition alone.
+            const normalized = withHostState(normalizeQueryState(restored, defaults), host);
             savedBaseline.current = defaultSaved || fromUrl?.grouping
               ? { source: sourceSchema.name, query: cloneQueryState(normalized) }
               : null;
@@ -701,7 +854,7 @@ export function useQueryTable<Row>(
     }
     restoreHandler.current = async (location, signal) => {
       location = new URL(location, typeof window !== "undefined" ? window.location.href : undefined).href;
-      const key = JSON.stringify(new URL(location).searchParams.getAll(parameter));
+      const key = tableUrlKey(location);
       const current = restorationCurrent.current;
       if (key === observedQueryUrl.current && current.storageReady && !current.restoration.loading && !current.restoration.error) return;
       recordQueryUrl(location);
@@ -711,7 +864,7 @@ export function useQueryTable<Row>(
     if (typeof window !== "undefined") recordQueryUrl(window.location.href);
     const navigate = () => {
       if (!restorationCurrent.current.active) return;
-      const key = JSON.stringify(new URL(window.location.href).searchParams.getAll(parameter));
+      const key = tableUrlKey(window.location.href);
       if (key === observedQueryUrl.current) return;
       observedQueryUrl.current = key;
       void restore(true).catch(() => { /* Restoration state owns the display error. */ });
@@ -872,7 +1025,9 @@ export function useQueryTable<Row>(
     ],
   );
   const executionKey = JSON.stringify(opts.computedExecution ?? null);
-  const pageContext = `${schema.name}:${rowQueryKey}:${nonce}:${executionKey}`;
+  // Host state is part of what a page shows: a result or failure under one
+  // host state never stands for another.
+  const pageContext = `${schema.name}:${rowQueryKey}:${nonce}:${executionKey}:${hostStateKey}`;
   useEffect(() => {
     if (!active || !storageReady || restoration.loading || restoration.error) {
       setRows(previous => previous.length ? [] : previous); setTotal(null); setCommittedPage(null); setLoading(false);
@@ -883,12 +1038,13 @@ export function useQueryTable<Row>(
     const run = async () => {
       setLoading(true);
       setError(null);
+      setFailedPage(null);
       try {
         validateExecution(query);
         if (transport) {
           if (transport.fetchQueryV3 && transport.queryCapabilities?.version === 3 &&
             (query.grouping || query.select.some(column => isComputedField(column.field)) || query.orderBy.some(term => isComputedField(term.field)) ||
-              query.where.some(term => ("any" in term ? term.any : [term]).some(predicate => isComputedField(predicate.field))) ||
+              query.where.some(term => predicatesOf(term).some(predicate => isComputedField(predicate.field))) ||
               !transport.fetchRows && !(transport.fetchRowsV2 && opts.computedExecution))) {
             const request = toQueryRequestV3({ ...query, aggregations: [], select: [...query.select.filter(column => isComputedField(column.field)),
               ...serverRowQuery.select.map(field => ({ field }))] }, sourceSchema,
@@ -966,6 +1122,7 @@ export function useQueryTable<Row>(
       } catch (e) {
         if (!cancelled && !ac.signal.aborted) {
           setError(e as Error);
+          setFailedPage(pageContext);
           setRows([]);
           setTotal(null);
           setCommittedPage(null);
@@ -998,12 +1155,16 @@ export function useQueryTable<Row>(
     storageReady,
   ]);
 
-  // Persist last query (debounced).
+  // Persist last query (debounced). The "succeeded" policy waits for the
+  // execution receipt below.
+  const persistLast = opts.persistLast ?? "always";
+  // Last-used state through storage that drops host state would restore a table-only query.
+  const hostStorageUnsupported = Boolean(host) && !storage.storesHostState;
   useEffect(() => {
-    if (!storageReady || restoration.loading || restoration.error) return;
+    if (persistLast !== "always" || !storageReady || restoration.loading || restoration.error || hostStorageUnsupported) return;
     const t = setTimeout(() => void storage.saveLast(sourceSchema.name, query), 400);
     return () => clearTimeout(t);
-  }, [queryKey, storage, sourceSchema.name, query, restoration, storageReady]);
+  }, [persistLast, queryKey, storage, sourceSchema.name, query, restoration, storageReady, hostStorageUnsupported]);
 
   // Resolved id accessor.
   const idField = useMemo(
@@ -1027,7 +1188,7 @@ export function useQueryTable<Row>(
   const selection = useSelection(displayedIds);
   const identityScope = JSON.stringify([sourceSchema.name, query.grouping?.keys ?? null]);
   useEffect(() => { selection.clear(); }, [identityScope, selection.clear]);
-  const columnSchema = useMemo(() => detailColumnSchema(displaySchema, detailsEnabled), [displaySchema, detailsEnabled]);
+  const columnSchema = useMemo(() => detailColumnSchema(displaySchema, detailsEnabled || groupDetailsEnabled), [displaySchema, detailsEnabled, groupDetailsEnabled]);
   const resultDefaults = useMemo(() => query.grouping ? defaultsFor(schema) : defaults, [Boolean(query.grouping), schema, defaults]);
   const select = useSelect(query, setQuery, columnSchema);
   const columnDrag = useColumnDrag();
@@ -1035,7 +1196,9 @@ export function useQueryTable<Row>(
     sourceSchema.name,
     query,
     (q) => {
-      const normalized = normalizeQueryState(q, defaults);
+      // A save without host state takes the host defaults rather than keep
+      // the live state; an unacceptable one throws before anything changes.
+      const normalized = withHostState(normalizeQueryState(q, defaults), hostRef.current);
       savedBaseline.current = { source: sourceSchema.name, query: cloneQueryState(normalized) };
       viewRevision.current++;
       setQuery(normalized);
@@ -1044,11 +1207,22 @@ export function useQueryTable<Row>(
     now,
     links.snapshot,
   );
-  const saved: SavedQueriesApi = { ...savedQueries, save: async name => {
+  // With host state, saved items compare as the definitions they load, and
+  // saving refuses storage that would drop the host state.
+  const hostStorageError = host && !storage.storesHostState
+    ? "This storage adapter cannot save host query state (set StorageAdapter.storesHostState once it keeps QueryState.hostState)." : null;
+  const savedItems = useMemo(() => !host ? savedQueries.items : savedQueries.items.map(item => {
+    try { return { ...item, query: withHostState(normalizeQueryState(item.query, defaults), hostRef.current) }; } catch { return item; }
+  }), [savedQueries.items, Boolean(host), defaults]);
+  const saved: SavedQueriesApi = { ...savedQueries, items: savedItems, save: async name => {
+    if (hostStorageError) throw Error(hostStorageError);
     const item = await savedQueries.save(name);
-    savedBaseline.current = { source: sourceSchema.name, query: cloneQueryState(normalizeQueryState(item.query, defaults)) };
+    savedBaseline.current = { source: sourceSchema.name, query: cloneQueryState(withHostState(normalizeQueryState(item.query, defaults), hostRef.current)) };
     viewRevision.current++;
     return item;
+  }, update: async id => {
+    if (hostStorageError) throw Error(hostStorageError);
+    return savedQueries.update(id);
   } };
   const pageReady =
     committedPage === pageContext &&
@@ -1074,7 +1248,7 @@ export function useQueryTable<Row>(
     // Unsupported population controls fail their own cards, never the batch.
     const refused = new Map<string, string>();
     for (const clause of metricQuery.aggregations ?? []) {
-      const issue = metricPopulationError(clause, { filters: capabilities.metricFilters, minCount: capabilities.metricMinCount });
+      const issue = metricPopulationError(clause, { filters: capabilities.metricFilters, minCount: capabilities.metricMinCount, minCountMeasures: capabilities.metricMinCountMeasures });
       if (issue) refused.set(clause.id, issue);
     }
     const runnable = (metricQuery.aggregations ?? []).filter(clause => !refused.has(clause.id));
@@ -1118,7 +1292,7 @@ export function useQueryTable<Row>(
     {
       ...(metricTransport?.fetchQueryV3 && metricTransport.queryCapabilities?.version === 3 &&
         (query.grouping || query.aggregations?.some(metric => metric.dateGrouping) ||
-          query.where.some(term => ("any" in term ? term.any : [term]).some(predicate => isComputedField(predicate.field))))
+          query.where.some(term => predicatesOf(term).some(predicate => isComputedField(predicate.field))))
         ? { executeV3: executeV3Metrics, queryContextKey: groupKey } : {}),
       ...(groupingNow !== undefined ? { now: groupingNow, strictLocalMetrics: true } : {}),
       shownRows: rows,
@@ -1288,6 +1462,7 @@ export function useQueryTable<Row>(
 
   const filterValues = useCallback(
     async (field: string, search: string): Promise<DistinctValuesResult> => {
+      // A calendar key's values are interval starts, not source values.
       if (!metadataTransport?.fetchDistinctValues || query.grouping && !query.grouping.keys.includes(field)) {
         const f = byName.get(field);
         if (!f || !clientRows) return { values: [], hasMore: false };
@@ -1474,6 +1649,53 @@ export function useQueryTable<Row>(
     ],
   );
 
+  // One receipt per execution identity. Rows and metrics are keyed by the
+  // current page context and metric state, so a slower earlier execution can
+  // never mark this one healthy.
+  const executionIdentity = JSON.stringify([pageContext, query.aggregations ?? [], query.where, groupKey, nonce]);
+  const executionGeneration = useRef({ key: "", generation: 0 });
+  if (executionGeneration.current.key !== executionIdentity)
+    executionGeneration.current = { key: executionIdentity, generation: executionGeneration.current.generation + 1 };
+  const execution = useMemo((): QueryExecutionReceipt | null => {
+    if (!active || !storageReady || restoration.loading || restoration.error) return null;
+    const rowsStatus = pageReady ? "succeeded" : error && failedPage === pageContext ? "failed" : "running";
+    const metricError = aggState.error ?? aggState.results?.metrics.find(entry => entry.error)?.error;
+    const metricsStatus = !(query.aggregations?.length) ? "none"
+      : aggState.loading || (!aggState.results && !aggState.error) ? "running"
+      : metricError ? "failed" : "succeeded";
+    const status = rowsStatus === "failed" || metricsStatus === "failed" ? "failed"
+      : rowsStatus === "succeeded" && metricsStatus !== "running" ? "succeeded" : "running";
+    return {
+      query, key: executionIdentity, generation: executionGeneration.current.generation,
+      status, rows: rowsStatus, metrics: metricsStatus,
+      error: rowsStatus === "failed" ? error : metricError ? (metricError instanceof Error ? metricError : Error(String(metricError))) : null,
+    };
+  }, [active, storageReady, restoration.loading, restoration.error, pageReady, error, failedPage, pageContext,
+    aggState.error, aggState.results, aggState.loading, query, executionIdentity]);
+  const succeededQuery = execution?.status === "succeeded" ? execution.query : null;
+  // A success stays pending until saved: a later edit that is still running
+  // or fails does not cancel it, and a refresh of the same query does not
+  // restart the debounce. Only a newer success replaces it.
+  const pendingLast = useRef<{ key: string; save: () => void; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const savedLast = useRef<string | null>(null);
+  useEffect(() => {
+    if (persistLast !== "succeeded" || !succeededQuery || hostStorageUnsupported) return;
+    const key = JSON.stringify([sourceSchema.name, succeededQuery]);
+    if (pendingLast.current?.key === key || (!pendingLast.current && savedLast.current === key)) return;
+    if (pendingLast.current) clearTimeout(pendingLast.current.timer);
+    const save = () => {
+      pendingLast.current = null;
+      savedLast.current = key;
+      void storage.saveLast(sourceSchema.name, succeededQuery);
+    };
+    pendingLast.current = { key, save, timer: setTimeout(save, 400) };
+  }, [persistLast, succeededQuery, storage, sourceSchema.name, hostStorageUnsupported]);
+  // Unmounting writes a pending success rather than dropping it.
+  useEffect(() => () => {
+    const pending = pendingLast.current;
+    if (pending) { clearTimeout(pending.timer); pending.save(); }
+  }, []);
+
   const sourceRowId = useCallback((row: Row): RowId | null => {
     const field = sourceSchema.fields.find(f => f.name === sourceSchema.idField);
     const value = field ? readFieldValue(field, row) : (row as Record<string, unknown>)[sourceSchema.idField];
@@ -1488,13 +1710,69 @@ export function useQueryTable<Row>(
     queryReady: storageReady && !restoration.loading && !restoration.error,
   });
 
+  // Group Detail reads grouped rows already held, by their group identity; it
+  // never loads a source item by that ID. Rows seen for this population stay
+  // readable across pages and sorts, and a changed population drops them.
+  // A population is the grouped query and host state over one data source;
+  // new rows, a new transport or a new schema start it afresh.
+  const groupPopulation = query.grouping ? JSON.stringify([query.grouping, query.where, nonce, hostStateKey]) : "";
+  const groupRecords = useRef({ population: "", source: [] as unknown[], rows: new Map<RowId, Row>() });
+  const groupSource = [clientRows, transport, schema];
+  if (groupRecords.current.population !== groupPopulation || groupSource.some((part, i) => part !== groupRecords.current.source[i]))
+    groupRecords.current = { population: groupPopulation, source: groupSource, rows: new Map() };
+  // Only rows committed for the current page context belong to this population.
+  const groupsSettled = groupDetailsEnabled && pageReady && !restoration.loading;
+  if (groupsSettled) for (const row of rows) {
+    const id = rowId(row);
+    if (id != null) groupRecords.current.rows.set(id, row);
+  }
+  const groupDetailOptions = useMemo((): ItemDetailsOptions<Row> | undefined => {
+    if (!groupDetailsEnabled) return undefined;
+    const config = typeof opts.itemDetails === "object" ? opts.itemDetails : undefined;
+    // Page templates address source items, so groups offer the in-place modes.
+    const modes = (config?.modes ?? ["hover", "modal", "expand"]).filter(mode => mode !== "page");
+    return { modes, defaultModes: initialDetailModes(config).filter(mode => (modes as string[]).includes(mode)),
+      objectType: `${config?.objectType ?? sourceSchema.name}:groups`,
+      ...(config?.storage ? { storage: config.storage } : {}) };
+  }, [groupDetailsEnabled, opts.itemDetails, sourceSchema.name]);
+  // Group properties default to every key and summary, links included.
+  const groupDetailSchema = useMemo(() => ({ ...displaySchema,
+    defaultSelect: displaySchema.fields.filter(field => field.name !== displaySchema.idField).map(field => ({ field: field.name })),
+    fields: displaySchema.fields.map(field =>
+      field.name === displaySchema.idField ? { ...field, property: { enabled: false } } : field) }), [displaySchema]);
+  // Property-view writes that land after grouping ends must not reach the source query.
+  const setGroupQuery = useCallback<QueryTableApi<Row>["setQuery"]>((next) => setQuery(current =>
+    current.grouping ? typeof next === "function" ? next(current) : next : current), [setQuery]);
+  const groupDetails = useItemDetails({
+    schema: groupDetailSchema, query, setQuery: setGroupQuery, options: groupDetailOptions, rows, clientRows: undefined,
+    rowId, transport: undefined, refreshKey: nonce, links, queryParameter: parameter,
+    queryReady: storageReady && !restoration.loading && !restoration.error,
+    lookupRow: (id) => {
+      const row = groupRecords.current.rows.get(id);
+      return row ? { row } : groupsSettled || error ? null : undefined;
+    },
+    subject: "group",
+  });
+
   const api: QueryTableApi<Row> = {
     restoration: { status: restoration.error ? "error" : !storageReady || restoration.loading ? "resolving" : "ready",
       ready: active && storageReady && !restoration.loading && !restoration.error, error: restoration.error },
+    execution,
+    ...(host && query.hostState ? {
+      definition: { query: withoutHostState(query), hostState: query.hostState },
+      setDefinition: (next: QueryDefinition | ((previous: QueryDefinition) => QueryDefinition)) => {
+        const current = queryHistoryRef.current.query;
+        const value = typeof next === "function"
+          ? next({ query: withoutHostState(current), hostState: current.hostState! })
+          : next;
+        // Validate before committing, so a rejected host state changes nothing.
+        setQuery(withHostState({ ...normalizeQueryState(value.query, defaults), hostState: value.hostState }, hostRef.current));
+      },
+    } : {}),
     restoreLocation,
     links,
     schema: columnSchema,
-    ...(itemDetails && detailsEnabled ? { itemDetails } : {}),
+    ...(itemDetails && detailsEnabled ? { itemDetails } : groupDetails ? { itemDetails: groupDetails } : {}),
     query,
     defaults: resultDefaults,
     setQuery,
@@ -1537,37 +1815,41 @@ export function useQueryTable<Row>(
     visibleFields,
     rowId,
   };
+  // Source filter controls key their metadata reads by these identities, so
+  // they must not change on every render of a grouped view.
+  const sourceFilterValues = useCallback<GroupingSourceApi<Row>["filterValues"]>(async (name, search) => {
+    if (metadataTransport?.fetchDistinctValues) return metadataTransport.fetchDistinctValues({ field: name, search });
+    const field = groupingModel.sourceField(name);
+    return field && sourceRows ? { ...distinctValuesFromRows(field, sourceRows, search), hasNull: fieldHasNullInRows(field, sourceRows) } : { values: [], hasMore: false };
+  }, [metadataTransport, groupingModel, sourceRows]);
+  const sourceFieldStats = useCallback<GroupingSourceApi<Row>["fieldStats"]>(async (names, signal) => {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    const requested = [...new Set(names)];
+    if (metadataTransport?.fetchFieldStats) {
+      const backendFields = requested.filter(
+        name => sourceCatalogue.fields.find(field => field.name === name)?.source.kind === "backend",
+      );
+      return backendFields.length ? metadataTransport.fetchFieldStats(backendFields, signal) : {};
+    }
+    return Object.fromEntries(requested.flatMap(name => {
+      const field = groupingModel.sourceField(name);
+      return field && sourceRows ? [[name, { distinct: new Set(sourceRows.map(row => JSON.stringify(readFieldValue(field, row)))).size }]] : [];
+    }));
+  }, [metadataTransport, groupingModel, sourceRows, sourceCatalogue]);
   const sourceApi: GroupingSourceApi<Row> = {
     ...sourceFilters, loading, rowId: sourceRowId, query: sourceQuery, setQuery: setSourceQuery,
     ...(itemDetails ? { itemDetails } : {}),
     schema: sourceCatalogue,
-    filterValues: async (name, search) => {
-      if (metadataTransport?.fetchDistinctValues) return metadataTransport.fetchDistinctValues({ field: name, search });
-      const field = groupingModel.sourceField(name);
-      return field && sourceRows ? { ...distinctValuesFromRows(field, sourceRows, search), hasNull: fieldHasNullInRows(field, sourceRows) } : { values: [], hasMore: false };
-    },
-    fieldStats: async (names, signal) => {
-      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-      const requested = [...new Set(names)];
-      if (metadataTransport?.fetchFieldStats) {
-        const backendFields = requested.filter(
-          name => sourceCatalogue.fields.find(field => field.name === name)?.source.kind === "backend",
-        );
-        return backendFields.length ? metadataTransport.fetchFieldStats(backendFields, signal) : {};
-      }
-      return Object.fromEntries(requested.flatMap(name => {
-        const field = groupingModel.sourceField(name);
-        return field && sourceRows ? [[name, { distinct: new Set(sourceRows.map(row => JSON.stringify(readFieldValue(field, row)))).size }]] : [];
-      }));
-    },
+    filterValues: sourceFilterValues,
+    fieldStats: sourceFieldStats,
   };
   const grouping = useGroupingController(api, sourceApi, groupingModel, prepared?.inputs ?? sourceRows ?? [], groupingSupported, viewRevision.current,
     { inputsReady: !remoteGrouping, ...(remoteGrouping ? { preview: previewGrouping } : {}) });
   return {
     ...api,
     ...(groupingSupported || query.grouping ? { grouping } : {}),
-    select: { ...select, hide: field => query.grouping?.keys.includes(field)
-      ? grouping.changeKeys(query.grouping.keys.filter(key => key !== field)) : select.hide(field) },
+    select: { ...select, hide: field => query.grouping && groupKeyFields(query.grouping.keys).includes(field)
+      ? grouping.changeKeys(query.grouping.keys.filter(key => groupKeyField(key) !== field)) : select.hide(field) },
   };
 }
 

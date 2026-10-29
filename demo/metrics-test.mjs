@@ -243,7 +243,9 @@ try {
     .filter({ hasText: "Throughput × duration" });
   await scatter.scrollIntoViewIfNeeded();
   const mark = scatter.locator(".qt-metric-mark").first();
-  await mark.hover();
+  // Points take the pointer through the chart's nearest-point layer.
+  const point = await mark.locator("circle").boundingBox();
+  await page.mouse.move(point.x + point.width / 2, point.y + point.height / 2);
   assert.match(
     await scatter.getByRole("tooltip").innerText(),
     /worker-.*\n.*\/.*\n.*rows/s,

@@ -173,9 +173,10 @@ export function GroupedColumnsEditor({
     index: number;
     summary?: SummaryColumn;
   } | null>(null);
+  const groupKeys = view.groupKeys ?? view.keys;
   const schema = useMemo(
-    () => (grouping ? resultSchema(view.keys, summaries) : controller.schema),
-    [grouping, view.keys, summaries, controller.schema],
+    () => (grouping ? resultSchema(groupKeys, summaries) : controller.schema),
+    [grouping, groupKeys, summaries, controller.schema],
   );
   const fields = [
     ...schema.fields,
@@ -261,10 +262,10 @@ export function GroupedColumnsEditor({
       const after = summaries.find(summary => summary.id === before.id);
       return !after || before.op !== after.op || before.field !== after.field || before.expression !== after.expression;
     }).map(summary => summary.id));
-    return { ...api.query, ...view.result, grouping: { ...api.query.grouping!, source: view.input, keys: view.keys, summaries, representative },
+    return { ...api.query, ...view.result, grouping: { ...api.query.grouping!, source: view.input, keys: groupKeys, summaries, representative },
       select: columns, where: view.result.where.filter(term => !predicatesOf(term).some(predicate => changedFields.has(predicate.field))),
       orderBy: view.result.orderBy.filter(term => !changedFields.has(term.field)), limit: 8, offset: 0 };
-  }, [view.input, view.keys, view.result, columns, summaries, representative]);
+  }, [view.input, groupKeys, view.result, columns, summaries, representative]);
   const previewKey = JSON.stringify({ ...previewQuery, select: previewQuery.select.map(column => ({ field: column.field })) });
   const [remotePreview, setRemotePreview] = useState<{ key: string; rows: Row[]; sourceTotal?: number; error: string | null; loading: boolean } | null>(null);
   useEffect(() => {
@@ -281,11 +282,11 @@ export function GroupedColumnsEditor({
     if (!grouping) return { rows: [] as Row[], error: null };
     try {
       if (controller.inputsReady === false) throw Error("Wait for the complete source before previewing groups.");
-      model.validate({ ...api.query.grouping, keys: view.keys, summaries, representative });
+      model.validate({ ...api.query.grouping, keys: groupKeys, summaries, representative });
       const rows = groupRows(
         controller.inputs,
         inputSchema,
-        view.keys,
+        groupKeys,
         summaries,
         representative,
       );
@@ -333,7 +334,7 @@ export function GroupedColumnsEditor({
     remotePreview,
     previewKey,
     controller.inputs,
-    view.keys,
+    groupKeys,
     view.result,
     summaries,
     schema,
@@ -764,7 +765,7 @@ export function GroupedColumnsEditor({
               {selected?.op === "link" ? (
                 <LinkDefinition
                   column={selected}
-                  problem={model.linkProblem(selected, view.keys, summaries)}
+                  problem={model.linkProblem(selected, groupKeys, summaries)}
                   fieldLabel={(name) =>
                     fields.find((f) => f.name === name)?.label ?? name
                   }

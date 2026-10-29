@@ -11,7 +11,7 @@ import { Icon } from "./Icon";
 // and emits intents through onQueryChange. Its props mirror a conventional
 // schema-driven table so adoption is mechanical.
 
-import { GROUP_ID_FIELD, GROUP_LINK_RENDER, ITEM_DETAILS_COLUMN, isComputedCellError, isGroupLinkValue, type LinkTargets } from "@pythia-software/query-table-core";
+import { GROUP_ID_FIELD, GROUP_LINK_RENDER, ITEM_DETAILS_COLUMN, groupKeyFields, isComputedCellError, isGroupLinkValue, type LinkTargets } from "@pythia-software/query-table-core";
 import { useId, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type SetStateAction } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { OrderByClause, QueryState, FieldDef, RowId, SelectColumn, WhereClause } from "@pythia-software/query-table-core";
@@ -138,7 +138,13 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     const id = (row as Record<string, unknown>)[GROUP_ID_FIELD];
     return typeof id === "string" ? id : null;
   }, [Boolean(query.grouping), sourceRowId]);
-  const details = query.grouping ? undefined : props.itemDetails;
+  // Grouped tables take group details, keyed by group identity; item details
+  // configured for source rows never open from a grouped row.
+  const details = query.grouping && props.itemDetails?.subject !== "group" ? undefined : props.itemDetails;
+  const groupKeys = query.grouping && groupKeyFields(query.grouping.keys);
+  const detailLabel = (row: Row, id: RowId | null) => groupKeys
+    ? `group ${groupKeys.map((key) => valueToString((row as Record<string, unknown>)[key]) || "NULL").join(" / ")}`
+    : `item ${id ?? ""}`;
   // Link columns route through the host's targets. Read them through a ref so
   // inline host callbacks do not change the registry (and refit) every render.
   const linkOptions = useRef({ linkTargets, onNavigate });
@@ -478,6 +484,15 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
       return width > 0 ? width + AUTOFIT_EXTRA_PX : 0;
     });
   }
+  /** Room each column's rendered controls need, so fitting never clips them. */
+  function measureControlMinimums(names: string[]): number[] {
+    const wrap = tableWrapRef.current;
+    return names.map((name) => {
+      const cells = wrap ? Array.from(wrap.querySelectorAll<HTMLElement>(`td[data-qt-field="${cssAttributeValue(name)}"]`)) : [];
+      const measured = measureControlWidth(cells);
+      return Math.max(measured > 0 ? measured + AUTOFIT_EXTRA_PX : 0, fieldByName.get(name)?.select?.minWidth ?? 0);
+    });
+  }
   function autofitColumn(name: string) {
     const [width = 0] = measureContentWidths([name]);
     if (width > 0) setWidth(name, width);
@@ -496,7 +511,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
       ? fitContentWidths(content)
       : preset === "equal"
         ? equalWidths(names.length, available)
-        : fitScreenWidths(content, available);
+        : fitScreenWidths(content, available, undefined, measureControlMinimums(names));
     setWidths(new Map(names.map((name, i) => [name, widths[i]!])), preset === "screen");
   }
   const hasCustomWidths = query.fitToScreen === true || selectionColumnWidth !== DEFAULT_SELECTION_WIDTH || query.select.some((c) => c.width != null);
@@ -606,7 +621,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     const content = measureContentWidths(fieldNames).map((width, i) =>
       width || widthFor(fieldNames[i]!, fields[i]!) || DEFAULT_WIDTH,
     );
-    const widths = fitScreenWidths(content, available);
+    const widths = fitScreenWidths(content, available, undefined, measureControlMinimums(fieldNames));
     setScreenWidths((current) => {
       if (current.size === fieldNames.length && fieldNames.every((name, i) => current.get(name) === widths[i])) return current;
       return new Map(fieldNames.map((name, i) => [name, widths[i]!]));
@@ -903,7 +918,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                     onDragEnd={() => columnDrag.end()}
                   >
                     <span className="qt-th-label">
-                      {props.headerAdornment ? props.headerAdornment(f) : query.grouping ? <ColumnRoleBadge role={columnRole(f.name, { ...query.grouping, mode: "groups" })} /> : null}{f.label}
+                      {props.headerAdornment ? props.headerAdornment(f) : query.grouping ? <ColumnRoleBadge role={columnRole(f.name, { ...query.grouping, keys: groupKeys!, mode: "groups" })} /> : null}{f.label}
                       {info && (
                         <span className="qt-sort-indicator">
                           <Icon name={info.dir === "asc" ? "arrowUp" : "arrowDown"} />
@@ -988,7 +1003,7 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
                     if (!f) return null;
                     if (name === ITEM_DETAILS_COLUMN) return <td key={name} data-qt-field={name}
                       className={cx("qt-cell", "qt-item-detail-column", dragSource === name && "qt-cell--dragging", classNames?.cell)}>
-                      {details && <ItemDetailsActions api={details} query={query} id={id} row={row} renderers={detailRenderers} expandedId={expandedPanelId} />}
+                      {details && <ItemDetailsActions api={details} query={query} id={id} row={row} renderers={detailRenderers} expandedId={expandedPanelId} label={detailLabel(row, id)} />}
                     </td>;
                     const render = resolveRenderer(f, renderers, columnDisplays.get(f.name));
                     const value = readFieldValue(f, row);
@@ -1189,6 +1204,40 @@ function measureIntrinsicWidth(cells: HTMLElement[]): number {
     const style = getComputedStyle(cells[i]!);
     const padding = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
     width = Math.max(width, probe.getBoundingClientRect().width + padding);
+  });
+  probes.forEach((probe) => probe.remove());
+  return Math.ceil(width);
+}
+
+// Controls that keep their full size in a fitted column. Links and JSON
+// previews may shorten to an ellipsis, keeping their full accessible name.
+const CONTROL_SELECTOR = "a[href], button, [role=button], input, select, textarea";
+const SHRINKABLE_SELECTOR = "a.qt-link, .qt-json-preview-text";
+/** Shortest a link label is cut to before its column stops narrowing. */
+const SHRINKABLE_LINK_PX = 96;
+
+/** Widest control content (plus padding) among cells that hold controls; 0 when none do. */
+function measureControlWidth(cells: HTMLElement[]): number {
+  const holders = cells.filter((cell) => cell.querySelector(CONTROL_SELECTOR));
+  const probes = holders.map((cell) => {
+    const probe = document.createElement("span");
+    probe.setAttribute("aria-hidden", "true");
+    probe.style.cssText = "position:absolute;left:0;top:0;width:max-content;white-space:nowrap;visibility:hidden;pointer-events:none;";
+    cell.childNodes.forEach((node) => probe.appendChild(node.cloneNode(true)));
+    probe.querySelectorAll<HTMLElement>(SHRINKABLE_SELECTOR).forEach((element) => {
+      element.style.maxWidth = `${SHRINKABLE_LINK_PX}px`;
+      element.style.display = "inline-block";
+      element.style.overflow = "hidden";
+    });
+    cell.appendChild(probe);
+    return probe;
+  });
+  let width = 0;
+  probes.forEach((probe, i) => {
+    const style = getComputedStyle(holders[i]!);
+    const padding = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
+    const border = (parseFloat(style.borderLeftWidth) || 0) + (parseFloat(style.borderRightWidth) || 0);
+    width = Math.max(width, probe.getBoundingClientRect().width + padding + border);
   });
   probes.forEach((probe) => probe.remove());
   return Math.ceil(width);

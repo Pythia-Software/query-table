@@ -11,7 +11,17 @@ import {
 import { formulaRuntime, type FormulaNode, type FormulaValue } from "./formula";
 import { isComputedCellError, isComputedField } from "./computed";
 import type { CellDisplay } from "./cellDisplay";
-import { datetimeValue, groupKeyTerms } from "./groupKeys";
+import {
+  calendarKeyReader,
+  datetimeValue,
+  GROUP_KEY_INTERVALS,
+  groupKeyField,
+  groupKeyFields,
+  groupKeyTerms,
+  isCalendarGroupKey,
+  type GroupKey,
+} from "./groupKeys";
+import { isGroupingTimeZone, isMetricCycle } from "./metricDates";
 import { fillUrlTemplate, templateFields, urlTemplateProblem } from "./itemPage";
 import type { QueryPatch } from "./queryPatch";
 import { type QueryEvaluationOptions } from "./relativeTime";
@@ -112,7 +122,10 @@ export function isGroupLinkField(field: Pick<FieldDef, "render"> | undefined): b
 export interface GroupingView {
   version: 2;
   mode: "rows" | "groups";
+  /** Result key columns: the field each key reads, in key order. */
   keys: string[];
+  /** The keys as defined, including calendar intervals; absent means `keys`. */
+  groupKeys?: GroupKey[];
   summaries: SummaryColumn[];
   representative: RepresentativeRow | null;
   input: QueryState;
@@ -123,7 +136,10 @@ export interface GroupingView {
  * HAVING in this mode; source.where is the pre-group WHERE. The source snapshot
  * also restores the record layout, paging, metrics and item details on exit. */
 export interface GroupingDefinition {
-  keys: string[];
+  /** Field names, or calendar keys (`{ field, interval, timeZone }`) that
+   * group a datetime field by interval. Each field appears once; its result
+   * column is named after the field. */
+  keys: GroupKey[];
   summaries: SummaryColumn[];
   representative: RepresentativeRow | null;
   diagnostics?: string[];
@@ -141,42 +157,52 @@ export function withoutGrouping(query: QueryState): QueryState {
 }
 
 /** Leave the grouping stage: the source snapshot restores the record WHERE,
- * layout, ordering, paging, metrics and item details. Ungrouped queries are
- * returned unchanged. */
+ * layout, ordering, paging, metrics and item details, and keeps the host
+ * state of the grouped query. Ungrouped queries are returned unchanged. */
 export function exitGrouping(query: QueryState): QueryState {
-  return query.grouping ? query.grouping.source : query;
+  if (!query.grouping) return query;
+  if (!query.hostState && !query.grouping.source.hostState) return query.grouping.source;
+  const { hostState: _source, ...source } = query.grouping.source;
+  return query.hostState ? { ...source, hostState: query.hostState } : source;
 }
 
 /** The grouping-key transition behind the grouping controls. Empty keys exit
  * the stage; an ungrouped query becomes the source of a new stage that shows
  * only its keys; a grouped query swaps keys, dropping result columns, HAVING
  * terms and sorts on removed keys and clearing group metrics. */
-export function withGroupingKeys(query: QueryState, keys: string[]): QueryState {
+export function withGroupingKeys(query: QueryState, keys: GroupKey[]): QueryState {
   const before = query.grouping;
   if (!keys.length) return exitGrouping(query);
-  if (!before)
+  const names = groupKeyFields(keys);
+  if (!before) {
+    // Host state stays on the grouped query, which owns the whole definition.
+    const { hostState, ...source } = query;
     return {
-      select: keys.map((field) => ({ field })),
+      select: names.map((field) => ({ field })),
       where: [],
       orderBy: [],
       limit: query.limit,
       offset: 0,
-      grouping: { keys, summaries: [], representative: null, source: query },
+      grouping: { keys, summaries: [], representative: null, source },
+      ...(hostState ? { hostState } : {}),
     };
-  const removed = new Set(before.keys.filter((key) => !keys.includes(key)));
+  }
+  // A key keeps its column when only its interval changes.
+  const previous = groupKeyFields(before.keys);
+  const removed = new Set(previous.filter((key) => !names.includes(key)));
   // An empty SELECT shows the existing keys by default. Materialize them
   // before adding keys so introducing an explicit SELECT keeps those columns.
   const columns = query.select.length
     ? query.select
-    : before.keys.map((field) => ({ field }));
+    : previous.map((field) => ({ field }));
   return {
     ...query,
     grouping: { ...before, keys },
     offset: 0,
     aggregations: [],
     select: [
-      ...keys
-        .filter((key) => !before.keys.includes(key))
+      ...names
+        .filter((key) => !previous.includes(key))
         .map((field) => ({ field })),
       ...columns.filter((c) => !removed.has(c.field)),
     ],
@@ -273,7 +299,7 @@ export function createGroupingModel<InputRow>(
   }
 
   /** Group-row fields a link column reads, in a stable order. */
-  function linkReferences(column: SummaryColumn, keys: string[]): string[] {
+  function linkReferences(column: SummaryColumn, keys: GroupKey[]): string[] {
     const link = column.link;
     if (!link) return [];
     const names = new Set<string>();
@@ -281,7 +307,7 @@ export function createGroupingModel<InputRow>(
     if (link.to.kind === "template")
       for (const name of templateFields(link.to.template)) names.add(name);
     else if (link.to.keyFilters !== false)
-      for (const key of keys) names.add(key);
+      for (const key of keys) names.add(groupKeyField(key));
     return [...names];
   }
 
@@ -290,14 +316,15 @@ export function createGroupingModel<InputRow>(
    * table runs. Host target registration is checked when rendering. */
   function linkProblem(
     column: SummaryColumn,
-    keys: string[],
+    keys: GroupKey[],
     summaries: SummaryColumn[],
   ): string | null {
     const link = column.link;
     if (column.op !== "link") return null;
     if (!link) return "Invalid link definition.";
+    const names = groupKeyFields(keys);
     const readable = (name: string) =>
-      keys.includes(name) ||
+      names.includes(name) ||
       summaries.some((other) => other.id === name && other.op !== "link");
     if (typeof link.label === "object" && !readable(link.label.column))
       return `Unknown link label column: ${link.label.column}.`;
@@ -306,7 +333,7 @@ export function createGroupingModel<InputRow>(
       return urlTemplateProblem(link.to.template, [], readable);
     }
     if (link.to.keyFilters !== false)
-      for (const key of keys) {
+      for (const key of names) {
         const field = sourceField(key);
         if (field?.type === "textarray")
           return `Key filters cannot match the textarray key ${field.label}.`;
@@ -327,7 +354,7 @@ export function createGroupingModel<InputRow>(
   function linkValue(
     column: SummaryColumn,
     problem: string | null,
-    keys: string[],
+    keys: GroupKey[],
     schema: FieldSchema<Row>,
     row: Row,
   ): GroupLinkValue {
@@ -357,7 +384,7 @@ export function createGroupingModel<InputRow>(
   }
 
   function resultSchema(
-    keys: string[],
+    keys: GroupKey[],
     summaries: SummaryColumn[],
   ): FieldSchema<Row> {
     const fields: FieldDef<Row>[] = [
@@ -372,13 +399,14 @@ export function createGroupingModel<InputRow>(
         aggregate: { measure: false, groupable: false },
       },
       ...keys.flatMap((key): FieldDef<Row>[] => {
-        const field = sourceField(key);
+        const field = sourceField(groupKeyField(key));
         // Draft/saved views may contain fields removed by the host. Leave
         // them in query state for repair; validate() still rejects execution.
         if (!field) return [];
         return [{
-          name: key,
-          label: field.label,
+          // A calendar key's column holds each interval's start instant.
+          name: field.name,
+          label: isCalendarGroupKey(key) ? `${field.label} (${key.interval})` : field.label,
           type: field.type,
           source: { kind: "backend" },
           ...(field.select ? { select: { ...field.select } } : {}),
@@ -469,7 +497,7 @@ export function createGroupingModel<InputRow>(
       name: `${inputSchema.name}:groups`,
       idField: GROUP_ID_FIELD,
       fields,
-      defaultSelect: keys.filter(key => sourceField(key)).map((field) => ({ field })),
+      defaultSelect: groupKeyFields(keys).filter(key => sourceField(key)).map((field) => ({ field })),
       defaultLimit: 25,
     };
     return schema;
@@ -488,19 +516,10 @@ export function createGroupingModel<InputRow>(
       return value;
     throw new Error("Group keys must be finite scalar values.");
   }
-  function groupId(
-    row: InputRow,
-    keys: string[],
-    schema: FieldSchema<InputRow>,
-  ): string {
-    const tuple = [...keys]
-      .sort()
-      .map((key) => [
-        key,
-        keyValue(
-          readFieldValue(schema.fields.find((f) => f.name === key)!, row),
-        ),
-      ]);
+  function groupId(values: readonly (readonly [string, unknown])[]): string {
+    const tuple = [...values]
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([key, value]) => [key, keyValue(value)]);
     // Bound source strings before JSON escaping can multiply their allocation.
     if (
       tuple.some(
@@ -582,7 +601,7 @@ export function createGroupingModel<InputRow>(
   function groupRows(
     rows: InputRow[],
     schema: FieldSchema<InputRow>,
-    keys: string[],
+    keys: GroupKey[],
     summaries: SummaryColumn[],
     rule: RepresentativeRow | null = null,
   ): Row[] {
@@ -597,11 +616,25 @@ export function createGroupingModel<InputRow>(
       throw new Error("Grouping row budget exceeded.");
     let bytes = rows.length * 16;
     let operations = 0;
-    const groups = new Map<string, InputRow[]>();
+    // A key reads its field's value, or the start of its calendar interval.
+    const readers = keys.map((key) => {
+      const name = groupKeyField(key);
+      const field = schema.fields.find((f) => f.name === name)!;
+      const calendar = isCalendarGroupKey(key) ? calendarKeyReader(key) : null;
+      return [
+        name,
+        (row: InputRow) =>
+          calendar
+            ? calendar(readFieldValue(field, row))
+            : readFieldValue(field, row),
+      ] as const;
+    });
+    const groups = new Map<string, { keys: unknown[]; rows: InputRow[] }>();
     for (const row of rows) {
-      const id = groupId(row, keys, schema);
+      const values = readers.map(([, read]) => read(row));
+      const id = groupId(readers.map(([name], i) => [name, values[i]] as const));
       const bucket = groups.get(id);
-      if (bucket) bucket.push(row);
+      if (bucket) bucket.rows.push(row);
       else {
         if (groups.size >= MAX_RESULT_GROUPS)
           throw new Error(
@@ -610,7 +643,7 @@ export function createGroupingModel<InputRow>(
         bytes += id.length * 2 + 256;
         if (bytes > 16_000_000)
           throw new Error("Grouping retained-memory budget exceeded.");
-        groups.set(id, [row]);
+        groups.set(id, { keys: values, rows: [row] });
       }
     }
     const formulas = new Map<string, { plan?: MetricPlan; error?: string }>(
@@ -643,15 +676,13 @@ export function createGroupingModel<InputRow>(
         compiled.plan?.aggregates.map(nodeCost) ?? [],
       ]),
     );
-    return [...groups].map(([id, members]) => {
+    return [...groups].map(([id, { keys: values, rows: members }]) => {
       const output: Row = Object.assign(Object.create(null), {
         [GROUP_ID_FIELD]: id,
       });
-      for (const key of keys)
-        output[key] = readFieldValue(
-          schema.fields.find((f) => f.name === key)!,
-          members[0]!,
-        );
+      readers.forEach(([name], i) => {
+        output[name] = values[i];
+      });
       const chosen =
         rule && summaries.some((column) => column.op === "row")
           ? representative(members, rule, schema)
@@ -783,17 +814,41 @@ export function createGroupingModel<InputRow>(
   function validate(definition: GroupingDefinition): void {
     if (definition.diagnostics?.length)
       throw new Error(definition.diagnostics.join(" "));
+    const names = definition.keys.map((key) =>
+      typeof key === "string" || isCalendarGroupKey(key) ? groupKeyField(key) : "",
+    );
     if (
       !definition.keys.length ||
       definition.keys.length > MAX_GROUP_BY_FIELDS ||
-      new Set(definition.keys).size !== definition.keys.length ||
-      definition.keys.some(
+      new Set(names).size !== names.length ||
+      names.some(
         (key) =>
+          typeof key !== "string" ||
           key === GROUP_ID_FIELD ||
           !groupableFields.some((f) => f.name === key),
       )
     )
       throw new Error("Choose valid group keys from the source schema.");
+    for (const key of definition.keys) {
+      if (!isCalendarGroupKey(key)) continue;
+      const field = sourceField(key.field)!;
+      if (isMetricCycle(key.interval))
+        throw new Error(
+          `Group key ${field.label}: hour-of-day and day-of-week are metric intervals (dateGrouping); a group key takes hour, day, week, month or year.`,
+        );
+      if (!GROUP_KEY_INTERVALS.includes(key.interval))
+        throw new Error(
+          `Group key ${field.label}: choose an hour, day, week, month or year interval.`,
+        );
+      if (field.type !== "datetime")
+        throw new Error(
+          `Group key ${field.label}: a calendar interval needs a datetime field.`,
+        );
+      if (key.timeZone !== undefined && !isGroupingTimeZone(key.timeZone))
+        throw new Error(
+          `Group key ${field.label}: use a valid IANA timezone, such as America/Denver or UTC.`,
+        );
+    }
     if (definition.summaries.length > MAX_SUMMARY_COLUMNS)
       throw new Error("Too many aggregate columns.");
     const ids = new Set([

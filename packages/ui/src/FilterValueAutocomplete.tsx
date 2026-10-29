@@ -35,9 +35,13 @@ export function FilterValueAutocomplete<Row>({ api, field, value, contextKey, cl
   const activeIndex = active === null ? -1 : values.indexOf(active);
   const activeId = open && activeIndex >= 0 ? `${listId}-${activeIndex}` : undefined;
 
+  useEffect(() => { setActive(null); }, [requestKey]);
+  // Suggestions are read only for an open editor, once per search; closed
+  // controls issue no metadata reads.
+  const loaded = Boolean(current);
   useEffect(() => {
+    if (!open || loaded) return;
     let cancelled = false;
-    setActive(null);
     const timer = setTimeout(() => {
       void Promise.resolve().then(() => fetchValues(field.name, value)).then(
         result => {
@@ -49,7 +53,7 @@ export function FilterValueAutocomplete<Row>({ api, field, value, contextKey, cl
       );
     }, 200);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [fetchValues, requestKey, scopeKey, field.name, value]);
+  }, [open, loaded, fetchValues, requestKey, scopeKey, field.name, value]);
 
   useEffect(() => {
     if (activeId) document.getElementById(activeId)?.scrollIntoView?.({ block: "nearest" });

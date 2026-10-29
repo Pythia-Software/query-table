@@ -8,12 +8,15 @@
 // docs/query-patches.md for the full contract.
 
 import { exitGrouping, withGroupingKeys, type GroupingState, type SummaryColumn } from "./grouping";
+import type { GroupKey } from "./groupKeys";
 import { NULLARY_OPS } from "./ops";
 import {
-  isOrGroup,
+  isWhereConjunction,
+  isWhereGroup,
   normalizeQueryState,
   type AggregationClause,
   type QueryState,
+  type WhereBranch,
   type WhereClause,
   type WhereTerm,
 } from "./query";
@@ -52,11 +55,14 @@ function clauseKey(clause: WhereClause): string {
   ]);
 }
 
-/** Structural identity of one WHERE term. OR-group members are unordered and
- *  presentation metadata (set-filter identity) is ignored. */
+/** Structural identity of one WHERE term. OR-group members and the literals
+ *  of a conjunction branch are unordered, and presentation metadata (set-filter
+ *  identity) is ignored. */
 export function whereTermKey(term: WhereTerm): string {
-  if (!isOrGroup(term)) return clauseKey(term);
-  return `any:${JSON.stringify(term.any.map(clauseKey).sort())}`;
+  if (!isWhereGroup(term)) return clauseKey(term);
+  const branchKey = (member: WhereBranch) =>
+    isWhereConjunction(member) ? `all:${JSON.stringify(member.all.map(clauseKey).sort())}` : clauseKey(member);
+  return `any:${JSON.stringify(term.any.map(branchKey).sort())}`;
 }
 
 /** Append terms that are not already structurally present. */
@@ -72,7 +78,7 @@ export function appendWhereTerms(where: readonly WhereTerm[], terms: readonly Wh
   return out;
 }
 
-/** Owned units: each OR group or literal alone, except that a run of
+/** Owned units: each OR group (of literals or conjunctions) or literal alone, except that a run of
  *  consecutive `!=` literals on one field (an exclusion list) is one unit. */
 function filterUnits(where: readonly WhereTerm[]): WhereTerm[][] {
   const units: WhereTerm[][] = [];
@@ -80,7 +86,7 @@ function filterUnits(where: readonly WhereTerm[]): WhereTerm[][] {
     const last = units[units.length - 1];
     const previous = last?.[last.length - 1];
     if (
-      last && previous && !isOrGroup(term) && !isOrGroup(previous) &&
+      last && previous && !isWhereGroup(term) && !isWhereGroup(previous) &&
       term.op === "!=" && previous.op === "!=" && term.field === previous.field
     )
       last.push(term);
@@ -109,7 +115,7 @@ function sameTermSet(a: readonly WhereTerm[], b: readonly WhereTerm[]): boolean 
 // ---- patch interpretation ---------------------------------------------------
 
 interface PatchGrouping {
-  keys: string[];
+  keys: GroupKey[];
   summaries: SummaryColumn[];
   representative: GroupingState["representative"];
   having: WhereTerm[];

@@ -11,6 +11,12 @@ import (
 	"time"
 )
 
+// MetricDateGrouping mirrors the TypeScript MetricDateGrouping. Calendar
+// intervals (hour, day, week, month, year) key each bucket by its start
+// instant. The cyclic intervals key a slot by number: hourOfDay is the local
+// hour 0–23 and dayOfWeek the ISO weekday, 1 (Monday) to 7, in TimeZone.
+// Whole intervals and per-occurrence statistics are planned by the
+// TypeScript client into plain calendar metrics, so they are not fields here.
 type MetricDateGrouping struct {
 	Field        string `json:"field"`
 	Interval     string `json:"interval"`
@@ -31,7 +37,7 @@ func calendarLocation(config MetricDateGrouping) (*time.Location, error) {
 	if len(zone) > 80 || strings.HasPrefix(zone, "+") || strings.HasPrefix(zone, "-") {
 		return nil, diagnostic("date_grouping", "use an IANA grouping timezone")
 	}
-	if !containsString([]string{"hour", "day", "week", "month", "year"}, config.Interval) || !containsString([]string{"query", "observed", "custom"}, config.Range) || config.Field == "" || len(config.Field) > 256 {
+	if !containsString([]string{"hour", "day", "week", "month", "year", "hourOfDay", "dayOfWeek"}, config.Interval) || !containsString([]string{"query", "observed", "custom"}, config.Range) || config.Field == "" || len(config.Field) > 256 {
 		return nil, diagnostic("date_grouping", "invalid date grouping definition")
 	}
 	location, err := time.LoadLocation(zone)
@@ -39,6 +45,43 @@ func calendarLocation(config MetricDateGrouping) (*time.Location, error) {
 		return nil, diagnostic("date_grouping", "use an IANA grouping timezone")
 	}
 	return location, nil
+}
+
+// calendarCycle reports whether an interval is cyclic: keyed by slot number.
+func calendarCycle(interval string) bool {
+	return interval == "hourOfDay" || interval == "dayOfWeek"
+}
+
+// calendarUnit is the calendar interval one occurrence of a cyclic slot spans.
+func calendarUnit(interval string) string {
+	switch interval {
+	case "hourOfDay":
+		return "hour"
+	case "dayOfWeek":
+		return "day"
+	}
+	return interval
+}
+
+// calendarSlots lists every slot of a cyclic interval in order.
+func calendarSlots(interval string) []float64 {
+	if interval == "hourOfDay" {
+		slots := make([]float64, 24)
+		for i := range slots {
+			slots[i] = float64(i)
+		}
+		return slots
+	}
+	return []float64{1, 2, 3, 4, 5, 6, 7}
+}
+
+// calendarSlot is the local hour or ISO weekday of an instant.
+func calendarSlot(instant time.Time, interval string, loc *time.Location) int {
+	local := instant.In(loc)
+	if interval == "hourOfDay" {
+		return local.Hour()
+	}
+	return (int(local.Weekday())+6)%7 + 1
 }
 
 func calendarLocalWall(instant time.Time, loc *time.Location) time.Time {
@@ -102,6 +145,7 @@ func calendarWall(wall time.Time, loc *time.Location, later bool) (time.Time, er
 	return time.Time{}, diagnostic("date_grouping", "unresolvable calendar boundary")
 }
 func calendarFloor(instant time.Time, interval string, loc *time.Location) (time.Time, error) {
+	interval = calendarUnit(interval)
 	local := instant.In(loc)
 	_, offset := local.Zone()
 	if interval == "hour" {
@@ -127,6 +171,7 @@ func calendarFloor(instant time.Time, interval string, loc *time.Location) (time
 	return calendarWall(wall, loc, false)
 }
 func calendarNext(instant time.Time, interval string, loc *time.Location) (time.Time, error) {
+	interval = calendarUnit(interval)
 	local := instant.In(loc)
 	y, m, day := local.Date()
 	wall := time.Date(y, m, day, 0, 0, 0, 0, time.UTC)
@@ -367,7 +412,7 @@ func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggS
 			dateAlias = column.ValueAlias
 		}
 	}
-	if err = d.keyCalendarRows(ctx, tx, table, dateAlias, config.Interval, loc); err != nil {
+	if err = d.keyCalendarColumn(ctx, tx, table, dateAlias, "qt_calendar_key", "text", config.Interval, loc); err != nil {
 		return SQLiteMetricV2{}, err
 	}
 	bucketName := "__qt_calendar_bucket__"
@@ -386,8 +431,9 @@ func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggS
 	modified.Sort = nil
 	modified.GroupLimit = 0
 	// MinCount is applied below, after empty buckets are filled; the metric
-	// filter runs over the staged rows (the page for shown-row scope).
-	modified.MinCount = 0
+	// filter runs over the staged rows (the page for shown-row scope). Without
+	// Min, a measured minimum only reports each group's measure.
+	modified.MinCount = MetricMinCount{Distinct: spec.MinCount.Distinct, Sum: spec.MinCount.Sum}
 	modified.GroupBy = append([]string{}, spec.GroupBy...)
 	modified.GroupBy[0] = bucketName
 	options := o
@@ -403,6 +449,18 @@ func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggS
 	result, err := (SQLiteV2Dataset{}).readV2Metric(ctx, tx, MetricSQLPlan{spec.ID, metricPlan}, modified, total, q, maxGroups)
 	if err != nil {
 		return result, err
+	}
+	if calendarCycle(config.Interval) {
+		// Slots are staged as text, like calendar keys, and returned as numbers.
+		for i := range result.Buckets {
+			if text, ok := result.Buckets[i].Keys[0].(string); ok {
+				slot, e := strconv.Atoi(text)
+				if e != nil {
+					return result, diagnostic("date_grouping", "invalid calendar slot")
+				}
+				result.Buckets[i].Keys[0] = float64(slot)
+			}
+		}
 	}
 	result.Scope = spec.Scope
 	if result.Scope == "" {
@@ -422,13 +480,13 @@ func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggS
 			return result, err
 		}
 	}
-	if spec.MinCount > 0 {
+	if spec.MinCount.Active() {
 		// Filled buckets (count 0) are never hidden. A hidden observed bucket
 		// leaves a gap: it is not replaced by an empty bucket.
 		kept := result.Buckets[:0]
 		hidden := int64(0)
 		for _, bucket := range result.Buckets {
-			if bucket.Count > 0 && bucket.Count < int64(spec.MinCount) {
+			if !spec.MinCount.keeps(bucket.Count, bucket.minMeasure, bucket.minMeasureError) {
 				hidden++
 			} else {
 				kept = append(kept, bucket)
@@ -448,15 +506,18 @@ func fillCalendarBuckets(ctx context.Context, result *SQLiteMetricV2, config Met
 	observed := []time.Time{}
 	series := map[string][]any{}
 	present := map[string]bool{}
+	cycle := calendarCycle(config.Interval)
 	for _, bucket := range result.Buckets {
 		key, _ := jsonValues(bucket.Keys)
 		present[key] = true
 		if len(bucket.Keys) > 0 && bucket.Keys[0] != nil {
-			date, err := calendarInput(fmt.Sprint(bucket.Keys[0]), time.UTC)
-			if err != nil {
-				return err
+			if !cycle {
+				date, err := calendarInput(fmt.Sprint(bucket.Keys[0]), time.UTC)
+				if err != nil {
+					return err
+				}
+				observed = append(observed, date)
 			}
-			observed = append(observed, date)
 			tuple := bucket.Keys[1:]
 			key, _ = jsonValues(tuple)
 			series[key] = tuple
@@ -464,6 +525,41 @@ func fillCalendarBuckets(ctx context.Context, result *SQLiteMetricV2, config Met
 	}
 	if len(spec.GroupBy) == 1 && len(series) == 0 {
 		series["[]"] = []any{}
+	}
+	empty := func(expression string) any {
+		node, err := parseExpression(expression)
+		if err == nil && containsString([]string{"COUNT", "COUNT_DISTINCT", "SUM"}, strings.ToUpper(node.op)) {
+			return float64(0)
+		}
+		return nil
+	}
+	add := func(keys []any) error {
+		key, _ := jsonValues(keys)
+		if present[key] {
+			return nil
+		}
+		if len(result.Buckets) >= maxGroups {
+			return diagnostic("resource_limit", "calendar group population exceeds host budget")
+		}
+		bucket := SQLiteMetricV2Bucket{Keys: keys, Count: 0, Value: empty(MetricExpression(spec))}
+		if spec.ExpressionY != "" {
+			value := empty(spec.ExpressionY)
+			bucket.Y = &value
+		}
+		result.Buckets = append(result.Buckets, bucket)
+		present[key] = true
+		return nil
+	}
+	if cycle {
+		// Every slot of a cycle exists, whatever the date range.
+		for _, slot := range calendarSlots(config.Interval) {
+			for _, tuple := range series {
+				if err := add(append([]any{slot}, tuple...)); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
 	}
 	start, end, has, err := calendarRange(config, q, observed, now, loc)
 	if err != nil {
@@ -480,31 +576,13 @@ func fillCalendarBuckets(ctx context.Context, result *SQLiteMetricV2, config Met
 	if len(series) == 0 {
 		return nil
 	}
-	empty := func(expression string) any {
-		node, err := parseExpression(expression)
-		if err == nil && containsString([]string{"COUNT", "COUNT_DISTINCT", "SUM"}, strings.ToUpper(node.op)) {
-			return float64(0)
-		}
-		return nil
-	}
 	for at := start; !at.After(end); {
 		if err = ctx.Err(); err != nil {
 			return err
 		}
 		for _, tuple := range series {
-			keys := append([]any{at.UTC().Format("2006-01-02T15:04:05.000Z")}, tuple...)
-			key, _ := jsonValues(keys)
-			if !present[key] {
-				if len(result.Buckets) >= maxGroups {
-					return diagnostic("resource_limit", "calendar group population exceeds host budget")
-				}
-				bucket := SQLiteMetricV2Bucket{Keys: keys, Count: 0, Value: empty(MetricExpression(spec))}
-				if spec.ExpressionY != "" {
-					value := empty(spec.ExpressionY)
-					bucket.Y = &value
-				}
-				result.Buckets = append(result.Buckets, bucket)
-				present[key] = true
+			if err = add(append([]any{at.UTC().Format("2006-01-02T15:04:05.000Z")}, tuple...)); err != nil {
+				return err
 			}
 		}
 		next, e := calendarNext(at, config.Interval, loc)
@@ -662,7 +740,9 @@ func sortCalendarBuckets(buckets []SQLiteMetricV2Bucket, spec AggSpec) {
 
 // Read and write bounded batches with the cursor closed between them. Neither
 // Go memory nor SQLite/PostgreSQL statement count grows by one per source row.
-func (d QueryDatasetV3) keyCalendarRows(ctx context.Context, tx *sql.Tx, table, dateAlias, interval string, loc *time.Location) error {
+// Each row's key (its interval start, or its cyclic slot) is written to the
+// column named key, cast to keyType, by the row's qt_calendar_row ordinal.
+func (d QueryDatasetV3) keyCalendarColumn(ctx context.Context, tx *sql.Tx, table, dateAlias, key, keyType, interval string, loc *time.Location) error {
 	const batchSize = 400 // Two parameters per key fit SQLite's legacy 999 limit.
 	var after int64
 	for {
@@ -695,8 +775,13 @@ func (d QueryDatasetV3) keyCalendarRows(ctx context.Context, tx *sql.Tx, table, 
 				rows.Close()
 				return e
 			}
-			values = append(values, "(CAST("+d.param(len(args)+1)+" AS bigint),CAST("+d.param(len(args)+2)+" AS text))")
-			args = append(args, id, floor.Format("2006-01-02T15:04:05.000Z"))
+			key := floor.Format("2006-01-02T15:04:05.000Z")
+			if calendarCycle(interval) {
+				// The slot of the interval the record falls in, as TypeScript keys it.
+				key = strconv.Itoa(calendarSlot(floor, interval, loc))
+			}
+			values = append(values, "(CAST("+d.param(len(args)+1)+" AS bigint),CAST("+d.param(len(args)+2)+" AS "+keyType+"))")
+			args = append(args, id, key)
 		}
 		err = rows.Err()
 		rows.Close()
@@ -704,7 +789,7 @@ func (d QueryDatasetV3) keyCalendarRows(ctx context.Context, tx *sql.Tx, table, 
 			return err
 		}
 		if len(values) > 0 {
-			update := "WITH qt_calendar_keys(ordinal,bucket) AS (VALUES " + strings.Join(values, ",") + ") UPDATE " + queryIdent(table) + " AS target SET qt_calendar_key=keys.bucket FROM qt_calendar_keys AS keys WHERE target.qt_calendar_row=keys.ordinal"
+			update := "WITH qt_calendar_keys(ordinal,bucket) AS (VALUES " + strings.Join(values, ",") + ") UPDATE " + queryIdent(table) + " AS target SET " + queryIdent(key) + "=keys.bucket FROM qt_calendar_keys AS keys WHERE target.qt_calendar_row=keys.ordinal"
 			if _, err = tx.ExecContext(ctx, update, args...); err != nil {
 				return err
 			}

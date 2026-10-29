@@ -50,19 +50,44 @@ const (
 // the predicate in a null-exclusive NOT; it is set only for ops without a
 // complementary operator (contains/starts_with/ends_with/includes), matching the
 // frontend's negateClause.
+//
+// As a member of WhereTerm.Any, a clause with All set is instead a conjunction
+// branch, {"all": [...]} on the wire (TS WhereConjunction): it matches when
+// every literal in All matches. Such a branch has no Field, Op, Value or
+// Negated, holds at least one literal, and its literals cannot nest further.
+// All is invalid anywhere else.
 type WhereClause struct {
-	Field   string `json:"field"`
-	Op      string `json:"op"`
-	Value   string `json:"value"`
-	Negated bool   `json:"negated,omitempty"`
+	Field   string        `json:"field"`
+	Op      string        `json:"op"`
+	Value   string        `json:"value"`
+	Negated bool          `json:"negated,omitempty"`
+	All     []WhereClause `json:"all,omitempty"`
+}
+
+// IsConjunction reports whether the clause is an {"all": [...]} branch.
+func (c WhereClause) IsConjunction() bool { return c.All != nil }
+
+// MarshalJSON writes a conjunction branch as {"all": [...]} alone and any
+// other clause as its field/op/value(/negated) literal.
+func (c WhereClause) MarshalJSON() ([]byte, error) {
+	if c.IsConjunction() {
+		return json.Marshal(struct {
+			All []WhereClause `json:"all"`
+		}{c.All})
+	}
+	type literal WhereClause
+	return json.Marshal(literal(c))
 }
 
 // WhereTerm is one conjunct of the WHERE (mirrors the TS WhereTerm =
-// WhereClause | OrGroup). It is either a single predicate (Field/Op/Value set,
-// Any nil) or an OR group (Any set). The two shapes are disjoint on the wire — a
-// literal carries "field", a group carries "any" — so the default JSON
-// (un)marshaling distinguishes them with no custom code. WHERE is the AND of
-// these terms, i.e. conjunctive normal form.
+// WhereClause | OrGroup | OrOfAndsGroup). It is either a single predicate
+// (Field/Op/Value set, Any nil) or a group (Any set) whose members are literals
+// or {"all": [...]} conjunction branches: an OR of ANDs such as
+// (provider = a AND model = b) OR (provider = c AND model = d). The shapes are
+// disjoint on the wire (a literal carries "field", a group "any", a branch
+// "all"), so the default JSON (un)marshaling distinguishes them. WHERE is the
+// AND of these terms. Every literal, including those inside branches, counts
+// against MaxWhereClauses, which therefore also bounds the branch count.
 type WhereTerm struct {
 	Field   string        `json:"field,omitempty"`
 	Op      string        `json:"op,omitempty"`
@@ -74,7 +99,8 @@ type WhereTerm struct {
 	SetFilter *SetFilterMetadata `json:"setFilter,omitempty"`
 }
 
-// IsGroup reports whether the term is an OR group rather than a single predicate.
+// IsGroup reports whether the term is a group (an OR of literals or of
+// conjunction branches) rather than a single predicate.
 func (t WhereTerm) IsGroup() bool { return t.Any != nil }
 
 // Literal returns the predicate a non-group term represents.
@@ -82,13 +108,62 @@ func (t WhereTerm) Literal() WhereClause {
 	return WhereClause{Field: t.Field, Op: t.Op, Value: t.Value, Negated: t.Negated}
 }
 
-// Predicates returns the literals the term contributes: itself for a single
-// predicate, or its members for a group.
+// Predicates returns every literal the term references: itself for a single
+// predicate, a group's members, and the literals of each conjunction branch.
+// Use it to visit fields and count predicates; use Branches for meaning.
 func (t WhereTerm) Predicates() []WhereClause {
-	if t.IsGroup() {
-		return t.Any
+	if !t.IsGroup() {
+		return []WhereClause{t.Literal()}
 	}
-	return []WhereClause{t.Literal()}
+	out := make([]WhereClause, 0, len(t.Any))
+	for _, member := range t.Any {
+		if member.IsConjunction() {
+			out = append(out, member.All...)
+		} else {
+			out = append(out, member)
+		}
+	}
+	return out
+}
+
+// Branches returns the term as an OR of ANDs: it matches when every literal of
+// some branch matches. A single predicate is one one-literal branch, and each
+// literal member of a group is its own branch.
+func (t WhereTerm) Branches() [][]WhereClause {
+	if !t.IsGroup() {
+		return [][]WhereClause{{t.Literal()}}
+	}
+	out := make([][]WhereClause, 0, len(t.Any))
+	for _, member := range t.Any {
+		if member.IsConjunction() {
+			out = append(out, member.All)
+		} else {
+			out = append(out, []WhereClause{member})
+		}
+	}
+	return out
+}
+
+// validateWhereShape rejects empty or nested conjunction branches and branches
+// that also carry literal fields.
+func validateWhereShape(t WhereTerm) error {
+	for _, member := range t.Any {
+		if !member.IsConjunction() {
+			continue
+		}
+		if member.Field != "" || member.Op != "" || member.Value != "" || member.Negated {
+			return fmt.Errorf("invalid filter branch: a branch is either a literal or {\"all\": [...]}")
+		}
+		if len(member.All) == 0 {
+			return fmt.Errorf("filter group has an empty AND branch")
+		}
+		for _, literal := range member.All {
+			if literal.IsConjunction() {
+				return fmt.Errorf("filter AND branches cannot nest")
+			}
+		}
+	}
+	return nil
 }
 
 // OrderBy mirrors @pythia-software/query-table-core OrderByClause.
@@ -127,9 +202,10 @@ type AggSpec struct {
 	// Where is this metric's own predicate, ANDed with the table WHERE before
 	// grouping (inside the page for shownRows). It never changes table rows.
 	Where []WhereTerm `json:"where,omitempty"`
-	// MinCount drops groups with fewer rows (after Where) before ordering,
-	// GroupLimit and Other; removed groups are reported as hidden_groups.
-	MinCount int `json:"minCount,omitempty"`
+	// MinCount drops groups with fewer rows (after Where), or fewer distinct
+	// values or a smaller sum of a field, before ordering, GroupLimit and Other;
+	// removed groups are reported as hidden_groups.
+	MinCount MetricMinCount `json:"minCount,omitzero"`
 }
 
 // WireQuery is the server-bound subset of QueryState (the TS ServerQuery / the
@@ -231,6 +307,9 @@ func (q WireQuery) Validate() error {
 	}
 	whereLiterals := 0
 	for _, term := range q.Where {
+		if err := validateWhereShape(term); err != nil {
+			return err
+		}
 		for _, clause := range term.Predicates() {
 			if clause.Field == "" || len(clause.Field) > maxFieldNameLength {
 				return fmt.Errorf("invalid filter field name")
@@ -259,13 +338,16 @@ func (q WireQuery) Validate() error {
 		if len(aggregation.GroupBy) > MaxGroupByFields {
 			return fmt.Errorf("aggregation %q has %d group fields; maximum is %d", aggregation.ID, len(aggregation.GroupBy), MaxGroupByFields)
 		}
-		if aggregation.MinCount < 0 || aggregation.MinCount > MaxMetricMinCount {
-			return fmt.Errorf("aggregation %q minCount must be between 1 and %d", aggregation.ID, MaxMetricMinCount)
+		if err := aggregation.MinCount.validate(aggregation.ID); err != nil {
+			return err
 		}
 		metricLiterals := 0
 		for _, term := range aggregation.Where {
 			if term.IsGroup() && len(term.Any) == 0 {
 				return fmt.Errorf("aggregation %q has an empty filter group", aggregation.ID)
+			}
+			if err := validateWhereShape(term); err != nil {
+				return fmt.Errorf("aggregation %q: %w", aggregation.ID, err)
 			}
 			for _, clause := range term.Predicates() {
 				if clause.Field == "" || len(clause.Field) > maxFieldNameLength {

@@ -651,7 +651,7 @@ func (s *demoServer) metrics(ctx context.Context, tx *sql.Tx, r *http.Request, t
 		buckets := []map[string]any{}
 		groupCount, hidden := int64(0), int64(0)
 		for _, raw := range data {
-			if spec.MinCount > 0 {
+			if spec.MinCount.Active() {
 				hidden = number(raw["hidden_groups"])
 				if raw["count"] == nil {
 					continue // every group was below minCount
@@ -675,7 +675,7 @@ func (s *demoServer) metrics(ctx context.Context, tx *sql.Tx, r *http.Request, t
 		} else {
 			entry["buckets"] = buckets
 			entry["groupCount"] = groupCount
-			if spec.MinCount > 0 {
+			if spec.MinCount.Active() {
 				entry["hiddenGroups"] = hidden
 			}
 		}

@@ -63,7 +63,13 @@ func (c *sqliteReductionCache) addCrossFields(ctx context.Context, batch MetricB
 		for _, member := range members[1:] {
 			extra = append(extra, summaryOutput{ID: member.ID, Expression: MetricExpression(specs[member.ID])})
 		}
-		primary.Sort, primary.GroupLimit, primary.MinCount = nil, 0, 0
+		// Measured minimums are member reductions too, consumed by identity.
+		for _, member := range members {
+			if measure := specs[member.ID].MinCount.Measure(); measure != "" {
+				extra = append(extra, summaryOutput{ID: "__qt_min_count__" + member.ID, Expression: measure})
+			}
+		}
+		primary.Sort, primary.GroupLimit, primary.MinCount = nil, 0, MetricMinCount{}
 		combined, err := compileMetricOutputs(ctx, q, primary, s, o, true, extra)
 		if err != nil || len(combined.SQLiteReductionColumns) > 128 {
 			continue // Combined compiler budgets never invalidate a valid member.
@@ -91,12 +97,24 @@ func (c *sqliteReductionCache) crossFieldPlan(ctx context.Context, tx *sql.Tx, p
 		statement := "CREATE TEMP TABLE " + table + " AS " + sqlStageCTEs(f.plan.Stages[:i+1]) + "\nSELECT * FROM " + f.plan.Stages[i].Name
 		c.tables[f.key] = table
 		if f.integer != nil {
+			trusted := false
+			if f.integer.TrustedSQL != "" {
+				var err error
+				if trusted, err = c.proofs.proven(ctx, tx, f.integer.Numeric); err != nil {
+					return p, err
+				}
+			}
 			direct, err := sqliteStoredProjection(ctx, tx, f.integer.Input, f.integer.Args)
 			if err != nil {
 				return p, err
 			}
 			candidates := []string{f.integer.SQL}
-			if direct {
+			switch {
+			case trusted:
+				// The generation's source proof covers every consumed value. If
+				// the backstop still declines, a guarded plan would too.
+				candidates = []string{f.integer.TrustedSQL}
+			case direct:
 				candidates = []string{f.integer.NonnegativeSQL, f.integer.SQL}
 			}
 			for _, candidate := range candidates {
@@ -105,6 +123,14 @@ func (c *sqliteReductionCache) crossFieldPlan(ctx context.Context, tx *sql.Tx, p
 				}
 				valid, err := sqliteTryIntegerReduction(ctx, tx, table, candidate, f.integer.Args)
 				if valid {
+					if c.population != nil && *c.population < 0 && f.integer.Population {
+						var n int64
+						if err := tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(qt_integer_population),0) FROM "+table).Scan(&n); err == nil {
+							*c.population = n
+						} else if ctx.Err() != nil {
+							return p, ctx.Err()
+						} // Otherwise the executor counts the population itself.
+					}
 					return c.crossFieldPlan(ctx, tx, p, f)
 				}
 				if ctx.Err() != nil {

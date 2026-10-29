@@ -1,7 +1,9 @@
 import type { AggregationClause } from "./query";
 
-/** How normalizeMetricOptions validates one option: an allowed value list or a type. */
-export type MetricOptionSpec = readonly string[] | "string" | "boolean" | "integer" | "positiveInteger" | "number";
+/** How normalizeMetricOptions validates one option: an allowed value list or a
+ *  type. "minCount" is a positive integer, or an object read with the
+ *  `minCount` table that has `min` and exactly one of `distinct` and `sum`. */
+export type MetricOptionSpec = readonly string[] | "string" | "boolean" | "integer" | "positiveInteger" | "number" | "minCount";
 
 /** The option tables normalizeMetricOptions copies from, in output order. Other
  *  implementations of query links (the Go module) are checked against this
@@ -12,8 +14,13 @@ export const METRIC_OPTION_SPECS = {
     expressionY: "string",
     scope: ["allMatching", "shownRows"],
     groupLimit: "integer",
-    minCount: "positiveInteger",
+    minCount: "minCount",
     share: ["total", "group0"],
+  },
+  minCount: {
+    min: "positiveInteger",
+    distinct: "string",
+    sum: "string",
   },
   window: {
     reduce: ["total", "mean"],
@@ -21,13 +28,25 @@ export const METRIC_OPTION_SPECS = {
   },
   dateGrouping: {
     field: "string",
-    interval: ["hour", "day", "week", "month", "year"],
+    interval: [
+      "hour",
+      "day",
+      "week",
+      "month",
+      "year",
+      "hourOfDay",
+      "dayOfWeek",
+    ],
     timeZone: "string",
     includeEmpty: "boolean",
     range: ["query", "observed", "custom"],
     start: "string",
     end: "string",
     partialIntervals: ["include", "exclude"],
+  },
+  occurrence: {
+    interval: ["hour", "day"],
+    includeEmpty: "boolean",
   },
   display: {
     kind: [
@@ -118,6 +137,25 @@ export function normalizeMetricOptions(
     for (const [key, spec] of Object.entries(specs)) {
       const v = input[key];
       if (v === undefined) continue;
+      if (spec === "minCount") {
+        const m = record(v) ? copy(v, METRIC_OPTION_SPECS.minCount) : v;
+        const named = (x: unknown) =>
+          x === undefined || (typeof x === "string" && !!x && x.length <= 256);
+        if (
+          record(m)
+            ? m.min !== undefined &&
+              (m.distinct === undefined) !== (m.sum === undefined) &&
+              named(m.distinct) &&
+              named(m.sum)
+            : typeof m === "number" &&
+              Number.isSafeInteger(m) &&
+              m >= 1 &&
+              m <= 1000000
+        )
+          result[key] = m;
+        else diagnostics.push(`Invalid metric ${key}.`);
+        continue;
+      }
       if (
         spec === "string"
           ? typeof v === "string" && v.length <= 10000
@@ -163,6 +201,14 @@ export function normalizeMetricOptions(
         !d.range
       )
         diagnostics.push("Invalid metric date grouping.");
+      const occurrence = raw.dateGrouping.occurrence;
+      if (record(occurrence)) {
+        const o = copy(occurrence, METRIC_OPTION_SPECS.occurrence);
+        if (!o.interval || typeof o.includeEmpty !== "boolean")
+          diagnostics.push("Invalid metric date grouping occurrence.");
+        d.occurrence = o;
+      } else if (occurrence !== undefined)
+        diagnostics.push("Invalid metric date grouping occurrence.");
       out.dateGrouping = d;
     } else diagnostics.push("Invalid metric date grouping.");
   }

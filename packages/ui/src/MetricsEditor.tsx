@@ -22,6 +22,9 @@ import {
   isMeasurable,
   metricComputationKey,
   metricExpression,
+  metricMinCount,
+  metricMinCountMeasure,
+  metricMinCountText,
   type AggregationBucket,
   type AggregationClause,
   type AggregationResult,
@@ -169,6 +172,11 @@ export function MetricsEditor<Row>({
   const workbench = useMetricWorkbench(view === "editor");
   const selected = drafts.find((c) => c.id === active);
   const chosen = selected?.display ?? { kind: "auto" as const };
+  // A distribution reads a row formula, except a box over a slot's
+  // occurrences, which summarises the metric itself.
+  const rowInput =
+    ["box", "histogram"].includes(chosen.kind) &&
+    !selected?.dateGrouping?.occurrence;
   const dateField = fields.find(
     (f) => f.name === selected?.groupBy[0] && f.type === "datetime",
   );
@@ -177,6 +185,8 @@ export function MetricsEditor<Row>({
     JSON.stringify(api.aggregations.clauses) !== initialKey.current;
   const measurable = fields.filter(isMeasurable),
     groupable = fields.filter(isGroupable);
+  const fieldLabel = (name: string) =>
+    fields.find((f) => f.name === name)?.label ?? name;
   const compileRef = useRef(api.aggregations.compile);
   compileRef.current = api.aggregations.compile;
   const requestRef = useRef(api.aggregations.preview);
@@ -198,6 +208,7 @@ export function MetricsEditor<Row>({
         if (compileRef.current) compileRef.current(c);
         else if (
           c.distribution &&
+          !c.dateGrouping?.occurrence &&
           ["box", "histogram"].includes(c.display?.kind ?? c.distribution.kind)
         )
           compileFormula(c.distribution.input, fields);
@@ -562,6 +573,10 @@ export function MetricsEditor<Row>({
       next.expressionY = "COUNT()";
     if (kind === "scatter" && !selected.expression)
       next.expression = metricExpression(selected);
+    // Distributions count rows for their minimum; a distinct or summed one
+    // would be rejected, so it keeps its threshold over rows.
+    if ((kind === "box" || kind === "histogram") && metricMinCountMeasure(selected))
+      next.minCount = metricMinCount(selected);
     if (kind === "box" || kind === "histogram")
       next.distribution = {
         ...selected.distribution,
@@ -580,7 +595,7 @@ export function MetricsEditor<Row>({
   function changeExpression(source: string, secondary = false) {
     if (!selected) return;
     if (secondary) patch(selected.id, { expressionY: source });
-    else if (["box", "histogram"].includes(chosen.kind))
+    else if (rowInput)
       patch(selected.id, {
         distribution: {
           ...(selected.distribution ?? {
@@ -1440,7 +1455,7 @@ export function MetricsEditor<Row>({
                     <FormulaEditor
                       key={`${selected.id}-x`}
                       value={
-                        ["box", "histogram"].includes(chosen.kind)
+                        rowInput
                           ? (selected.distribution?.input ?? "NULL")
                           : metricExpression(selected)
                       }
@@ -1449,7 +1464,7 @@ export function MetricsEditor<Row>({
                       compile={(source) =>
                         api.aggregations.compile
                           ? api.aggregations.compile(
-                              ["box", "histogram"].includes(chosen.kind)
+                              rowInput
                                 ? {
                                     ...selected,
                                     distribution: {
@@ -1459,7 +1474,7 @@ export function MetricsEditor<Row>({
                                   }
                                 : { ...selected, expression: source },
                             )
-                          : ["box", "histogram"].includes(chosen.kind)
+                          : rowInput
                             ? compileFormula(source, fields)
                             : compileMetric(source, fields)
                       }
@@ -1658,14 +1673,30 @@ export function MetricsEditor<Row>({
                             }
                             const interval = e.target
                               .value as MetricDateGrouping["interval"];
+                            const cyclic =
+                              interval === "hourOfDay" ||
+                              interval === "dayOfWeek";
+                            const { occurrence, ...previous } =
+                              selected.dateGrouping ?? {};
                             patch(selected.id, {
                               dateGrouping: {
                                 field: dateField.name,
                                 includeEmpty: false,
                                 range: "query",
-                                ...selected.dateGrouping,
+                                ...previous,
                                 interval,
+                                // Hour-of-day slots occur hourly.
+                                ...(cyclic && occurrence
+                                  ? {
+                                      occurrence:
+                                        interval === "hourOfDay"
+                                          ? { ...occurrence, interval: "hour" }
+                                          : occurrence,
+                                    }
+                                  : {}),
                               },
+                              // A window spans calendar intervals, not slots.
+                              ...(cyclic ? { window: undefined } : {}),
                             });
                           }}
                         >
@@ -1675,8 +1706,92 @@ export function MetricsEditor<Row>({
                           <option value="week">Week</option>
                           <option value="month">Month</option>
                           <option value="year">Year</option>
+                          <option value="hourOfDay">Hour of day</option>
+                          <option value="dayOfWeek">Day of week</option>
                         </select>
                       </label>
+                      {(selected.dateGrouping?.interval === "hourOfDay" ||
+                        selected.dateGrouping?.interval === "dayOfWeek") && (
+                        <>
+                          <label>
+                            Summarise each slot
+                            <select
+                              aria-label="Summarise each slot"
+                              value={
+                                selected.dateGrouping.occurrence?.interval ??
+                                "rows"
+                              }
+                              onChange={(e) => {
+                                const {
+                                  occurrence,
+                                  partialIntervals: _partial,
+                                  ...rest
+                                } = selected.dateGrouping!;
+                                const value = e.target.value;
+                                const perOccurrence = value === "hour" || value === "day";
+                                patch(selected.id, {
+                                  // Per-occurrence summaries take no window or
+                                  // share, and count rows for their minimum.
+                                  ...(perOccurrence
+                                    ? {
+                                        window: undefined,
+                                        share: undefined,
+                                        ...(metricMinCountMeasure(selected) ? { minCount: metricMinCount(selected) } : {}),
+                                      }
+                                    : {}),
+                                  dateGrouping:
+                                    value === "hour" || value === "day"
+                                      ? {
+                                          ...rest,
+                                          occurrence: {
+                                            includeEmpty:
+                                              occurrence?.includeEmpty ?? true,
+                                            interval: value,
+                                          },
+                                        }
+                                      : rest,
+                                });
+                              }}
+                            >
+                              <option value="rows">Over all its rows</option>
+                              {selected.dateGrouping.interval ===
+                                "dayOfWeek" && (
+                                <option value="day">Per whole day</option>
+                              )}
+                              <option value="hour">Per whole hour</option>
+                            </select>
+                          </label>
+                          {selected.dateGrouping.occurrence && (
+                            <label className="qt-metric-date-toggle">
+                              <input
+                                type="checkbox"
+                                aria-label="Count idle occurrences"
+                                checked={
+                                  selected.dateGrouping.occurrence.includeEmpty
+                                }
+                                onChange={(e) =>
+                                  patch(selected.id, {
+                                    dateGrouping: {
+                                      ...selected.dateGrouping!,
+                                      occurrence: {
+                                        ...selected.dateGrouping!.occurrence!,
+                                        includeEmpty: e.target.checked,
+                                      },
+                                    },
+                                  })
+                                }
+                              />
+                              Count {selected.dateGrouping.occurrence.interval}s
+                              without rows
+                            </label>
+                          )}
+                          <p className="qt-metric-help">
+                            {selected.dateGrouping.occurrence
+                              ? `Each slot shows the mean of its whole ${selected.dateGrouping.occurrence.interval}s inside the date filters, or their spread as a box plot. Counts and sums are 0 for ${selected.dateGrouping.occurrence.interval}s without rows; averages and ratios leave them out.`
+                              : "Each slot pools every row at that local hour or weekday."}
+                          </p>
+                        </>
+                      )}
                       {selected.dateGrouping && (
                         <label>
                           Grouping timezone
@@ -1734,7 +1849,11 @@ export function MetricsEditor<Row>({
                         Add a bucket for every interval, even when no rows
                         match.
                       </p>
-                      {selected.dateGrouping?.includeEmpty && (
+                      {selected.dateGrouping &&
+                        ((selected.dateGrouping.interval === "hourOfDay" ||
+                        selected.dateGrouping.interval === "dayOfWeek")
+                          ? selected.dateGrouping.occurrence?.includeEmpty
+                          : selected.dateGrouping.includeEmpty) && (
                         <>
                           <label>
                             Complete dates across
@@ -1805,7 +1924,10 @@ export function MetricsEditor<Row>({
                         <input
                           type="checkbox"
                           aria-label="Whole intervals only"
-                          disabled={!selected.dateGrouping}
+                          disabled={
+                            !selected.dateGrouping ||
+                            !!selected.dateGrouping.occurrence
+                          }
                           checked={
                             selected.dateGrouping?.partialIntervals ===
                             "exclude"
@@ -1877,7 +1999,7 @@ export function MetricsEditor<Row>({
                       : "Default ordering"
                   }${selected.groupLimit ? ` · first ${selected.groupLimit}` : ""}${
                     selected.minCount !== undefined
-                      ? ` · at least ${selected.minCount} rows`
+                      ? ` · at least ${metricMinCountText(selected, fieldLabel)}`
                       : ""
                   }`}
                 >
@@ -2002,33 +2124,68 @@ export function MetricsEditor<Row>({
                   </label>
                   {(selected.groupBy.length > 0 ||
                     selected.minCount !== undefined) && (
-                    <label>
-                      Minimum rows per group
-                      <input
-                        aria-label="Minimum rows per group"
-                        type="number"
-                        min={1}
-                        max={1000000}
-                        placeholder="Any size"
-                        value={selected.minCount ?? ""}
-                        onChange={(e) => {
-                          const n = e.currentTarget.valueAsNumber;
-                          if (!e.currentTarget.value)
-                            patch(selected.id, { minCount: undefined });
-                          else if (
-                            Number.isInteger(n) &&
-                            n >= 1 &&
-                            n <= 1000000
-                          )
-                            patch(selected.id, { minCount: n });
-                        }}
-                      />
-                    </label>
+                    <>
+                      <label>
+                        Minimum per group
+                        <input
+                          aria-label="Minimum per group"
+                          type="number"
+                          min={1}
+                          max={1000000}
+                          placeholder="Any size"
+                          value={metricMinCount(selected) ?? ""}
+                          onChange={(e) => {
+                            const n = e.currentTarget.valueAsNumber;
+                            if (!e.currentTarget.value)
+                              patch(selected.id, { minCount: undefined });
+                            else if (
+                              Number.isInteger(n) &&
+                              n >= 1 &&
+                              n <= 1000000
+                            )
+                              patch(selected.id, {
+                                minCount: withMinimum(selected.minCount, n),
+                              });
+                          }}
+                        />
+                      </label>
+                      <label>
+                        Counting
+                        <select
+                          aria-label="Minimum counts"
+                          disabled={selected.minCount === undefined}
+                          value={minimumKey(selected.minCount)}
+                          onChange={(e) =>
+                            patch(selected.id, {
+                              minCount: minimumOf(
+                                e.target.value,
+                                metricMinCount(selected) ?? 1,
+                              ),
+                            })
+                          }
+                        >
+                          <option value="rows">Rows</option>
+                          {minimumChoices(
+                            measurable,
+                            selected.minCount,
+                            fieldLabel,
+                          ).map(([key, label]) => (
+                            <option key={key} value={key}
+                              disabled={key !== minimumKey(selected.minCount) && !minimumAllowed(selected, key)}>
+                              {label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </>
                   )}
                   {selected.minCount !== undefined && (
                     <p className="qt-metric-help">
-                      Groups with fewer rows are hidden before ordering and the
-                      group limit; they are not added to Other.
+                      Groups below the minimum are hidden before ordering and
+                      the group limit; they are not added to Other.
+                      {metricMinCountMeasure(selected)
+                        ? " Distinct values and sums ignore empty values."
+                        : ""}
                     </p>
                   )}
                 </Settings>
@@ -2775,6 +2932,60 @@ ${item.description}`}
   }
 }
 
+type MinCount = AggregationClause["minCount"];
+/** The "Counting" choice of a minimum: rows, or a distinct or summed field. */
+function minimumKey(m: MinCount): string {
+  const measure = metricMinCountMeasure({ minCount: m });
+  return measure
+    ? `${measure.op === "sum" ? "sum" : "distinct"}:${measure.field}`
+    : "rows";
+}
+function minimumOf(key: string, min: number): MinCount {
+  const split = key.indexOf(":");
+  if (split < 0) return min;
+  const kind = key.slice(0, split),
+    field = key.slice(split + 1);
+  return kind === "sum" ? { min, sum: field } : { min, distinct: field };
+}
+/** Whether validation accepts this kind of minimum for the metric:
+ * distributions and per-occurrence summaries count rows only, and distinct
+ * values cannot be combined across a window's intervals. */
+function minimumAllowed(c: AggregationClause, key: string): boolean {
+  if (key === "rows") return true;
+  const distribution = !!c.distribution && (!c.display || c.display.kind === "box" || c.display.kind === "histogram");
+  if (distribution || c.dateGrouping?.occurrence) return false;
+  return !(key.startsWith("distinct:") && c.window);
+}
+/** A new threshold keeps what the minimum counts. */
+function withMinimum(m: MinCount, min: number): MinCount {
+  return minimumOf(minimumKey(m), min);
+}
+/** Distinct values of any measurable field, sums of numeric ones, plus the
+ * current choice so an unlisted field is never silently dropped. */
+function minimumChoices(
+  measurable: FieldDef[],
+  current: MinCount,
+  label: (name: string) => string,
+): [string, string][] {
+  const plain = measurable.filter((f) => !f.name.startsWith("@computed/"));
+  const choices: [string, string][] = [
+    ...plain
+      .filter((f) => aggOpsForField(f).includes("count_distinct"))
+      .map((f): [string, string] => [`distinct:${f.name}`, `Distinct ${f.label}`]),
+    ...plain
+      .filter((f) => f.type === "number" && aggOpsForField(f).includes("sum"))
+      .map((f): [string, string] => [`sum:${f.name}`, `Sum of ${f.label}`]),
+  ];
+  const key = minimumKey(current);
+  if (key !== "rows" && !choices.some(([k]) => k === key)) {
+    const measure = metricMinCountMeasure({ minCount: current })!;
+    choices.push([
+      key,
+      `${measure.op === "sum" ? "Sum of" : "Distinct"} ${label(measure.field)}`,
+    ]);
+  }
+  return choices;
+}
 function newId(): string {
   return typeof crypto !== "undefined" &&
     typeof crypto.randomUUID === "function"
@@ -2892,7 +3103,15 @@ function MetricSeriesSettings({
   const first =
     fields.find((f) => f.name === clause.groupBy[0])?.label ??
     clause.groupBy[0];
-  const unit = dateGrouping?.interval ?? "interval";
+  const cyclic =
+    dateGrouping?.interval === "hourOfDay" ||
+    dateGrouping?.interval === "dayOfWeek";
+  const unit =
+    dateGrouping?.interval === "hourOfDay"
+      ? "hour of the day"
+      : dateGrouping?.interval === "dayOfWeek"
+        ? "weekday"
+        : (dateGrouping?.interval ?? "interval");
   const mode = !window ? "none" : window.periods === "all" ? "all" : "trailing";
   const setWindow = (next: MetricWindow | undefined) =>
     onChange({
@@ -2924,7 +3143,7 @@ function MetricSeriesSettings({
       {...settings}
       summary={summary || "Values as computed"}
     >
-      {dateGrouping && (
+      {dateGrouping && !cyclic && (
         <>
           <label>
             Window
@@ -3323,6 +3542,7 @@ function MetricInspection({
     <>
       <code className="qt-metric-inspection-expression">
         {clause.distribution &&
+        !clause.dateGrouping?.occurrence &&
         ["box", "histogram"].includes(clause.display?.kind ?? "")
           ? clause.distribution.input
           : metricExpression(clause)}

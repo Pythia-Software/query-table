@@ -2,6 +2,7 @@ package querytable
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -125,9 +126,16 @@ func (b *planBuilder) sqliteFilter(where []WhereTerm) error {
 	if e != nil {
 		return e
 	}
-	p, e := CompileSQLiteWhere(where, s, SQLiteOptions{Now: b.options.Now})
+	p, keys, e := compileSQLiteWhere(where, s, SQLiteOptions{Now: b.options.Now}, b.options.relations)
 	if e != nil {
+		var relationErr *sqliteRelationError
+		if errors.As(e, &relationErr) {
+			return e
+		}
 		return diagnostic("filter", e.Error())
+	}
+	for _, key := range keys {
+		b.dependencies[key] = true
 	}
 	sql := sqliteNumberParameters(p.SQL, len(b.args))
 	b.args = append(b.args, p.Args...)

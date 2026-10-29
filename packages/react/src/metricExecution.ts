@@ -3,6 +3,7 @@ import {
   normalizeQueryState,
   evaluateMetrics,
   metricPlans,
+  metricDependencies,
   hasRegex,
   metricPopulationError,
   hasMetricSeries,
@@ -276,9 +277,8 @@ export async function executeMetrics<Row>(
         ...(clause.where ?? []).flatMap((term) =>
           predicatesOf(term).map((predicate) => predicate.field),
         ),
-        ...metricPlans(clause, context.schema, context.resolveComputed).flatMap(
-          (p) => p.dependencies,
-        ),
+        // Includes a measured minimum's field, which the page must also hold.
+        ...metricDependencies(clause, context.schema, context.resolveComputed),
       ]),
     );
     for (const name of names) {

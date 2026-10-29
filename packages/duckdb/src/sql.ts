@@ -1,4 +1,5 @@
 import {
+  branchesOf,
   coerceValue,
   compileFormula,
   compileMetric,
@@ -10,6 +11,7 @@ import {
   type FieldSchema,
   type FormulaNode,
   type FormulaPlan,
+  type WhereClause,
   type WhereTerm,
   type OrderByClause,
   type ServerQuery,
@@ -83,59 +85,63 @@ export class SQLBuilder {
     return terms.length
       ? terms
           .map((term) => {
-            const clauses = "any" in term ? term.any : [term];
-            if (!clauses.length || (count += clauses.length) > 100)
+            // A term is an OR of branches, each an AND of literals (a single
+            // literal, an OR group, or an OR of conjunctions).
+            const branches = branchesOf(term);
+            const size = branches.reduce((n, branch) => n + branch.length, 0);
+            if (!branches.length || branches.some((branch) => !branch.length) || (count += size) > 100)
               throw Error("Invalid filter predicate budget.");
-            return `(${clauses
-              .map((clause) => {
-                const field = this.definition(clause.field),
-                  raw = this.field(field.name),
-                  op = clause.op;
-                if (!isFilterable(field) || !opsForField(field).includes(op))
-                  throw Error(`Unsupported filter on ${field.name}: ${op}.`);
-                const value =
-                  field.type === "textarray"
-                    ? `CASE WHEN len(${raw}) > 0 THEN ${raw} END`
-                    : raw;
-                let sql: string;
-                if (op === "is_null" || op === "is_not_null")
-                  sql = `${value} IS ${op === "is_null" ? "" : "NOT "}NULL`;
-                else {
-                  const typed = coerceValue(field.type, clause.value, this.now);
-                  if (typeof typed === "number" && !Number.isFinite(typed))
-                    throw Error("Filter operands must be finite.");
-                  const param = this.bind(
-                    field.type === "datetime"
-                      ? new Date(typed as number).toISOString()
-                      : typed,
-                  );
-                  const rhs =
-                    field.type === "datetime"
-                      ? `CAST(${param} AS TIMESTAMPTZ)`
-                      : param;
-                  if (["=", "!=", ">", ">=", "<", "<="].includes(op))
-                    sql = `${value} ${op} ${rhs}`;
-                  else if (
-                    ["contains", "starts_with", "ends_with"].includes(op)
-                  )
-                    sql = `${op}(lower(${value}), lower(${param}))`;
-                  else if (op === "includes")
-                    sql = field.filter?.arrayCaseSensitive
-                      ? `list_contains(${value}, ${param})`
-                      : `list_contains(list_transform(${value}, x -> lower(x)), lower(${param}))`;
-                  else if (op.startsWith("length_"))
-                    sql = `length(${value}) ${op === "length_gt" ? ">" : op === "length_lt" ? "<" : "="} CAST(${param} AS DOUBLE)`;
-                  else if (
-                    op === "matches_regex" ||
-                    op === "not_matches_regex"
-                  ) {
-                    if (clause.value.length > 2000)
-                      throw Error("Regex exceeds 2,000 characters.");
-                    sql = `${op === "not_matches_regex" ? "NOT " : ""}regexp_matches(${value}, ${param})`;
-                  } else throw Error(`Unsupported DuckDB operator: ${op}.`);
-                }
-                return clause.negated ? `NOT (${sql})` : sql;
-              })
+            const compile = (clause: WhereClause): string => {
+              const field = this.definition(clause.field),
+                raw = this.field(field.name),
+                op = clause.op;
+              if (!isFilterable(field) || !opsForField(field).includes(op))
+                throw Error(`Unsupported filter on ${field.name}: ${op}.`);
+              const value =
+                field.type === "textarray"
+                  ? `CASE WHEN len(${raw}) > 0 THEN ${raw} END`
+                  : raw;
+              let sql: string;
+              if (op === "is_null" || op === "is_not_null")
+                sql = `${value} IS ${op === "is_null" ? "" : "NOT "}NULL`;
+              else {
+                const typed = coerceValue(field.type, clause.value, this.now);
+                if (typeof typed === "number" && !Number.isFinite(typed))
+                  throw Error("Filter operands must be finite.");
+                const param = this.bind(
+                  field.type === "datetime"
+                    ? new Date(typed as number).toISOString()
+                    : typed,
+                );
+                const rhs =
+                  field.type === "datetime"
+                    ? `CAST(${param} AS TIMESTAMPTZ)`
+                    : param;
+                if (["=", "!=", ">", ">=", "<", "<="].includes(op))
+                  sql = `${value} ${op} ${rhs}`;
+                else if (
+                  ["contains", "starts_with", "ends_with"].includes(op)
+                )
+                  sql = `${op}(lower(${value}), lower(${param}))`;
+                else if (op === "includes")
+                  sql = field.filter?.arrayCaseSensitive
+                    ? `list_contains(${value}, ${param})`
+                    : `list_contains(list_transform(${value}, x -> lower(x)), lower(${param}))`;
+                else if (op.startsWith("length_"))
+                  sql = `length(${value}) ${op === "length_gt" ? ">" : op === "length_lt" ? "<" : "="} CAST(${param} AS DOUBLE)`;
+                else if (
+                  op === "matches_regex" ||
+                  op === "not_matches_regex"
+                ) {
+                  if (clause.value.length > 2000)
+                    throw Error("Regex exceeds 2,000 characters.");
+                  sql = `${op === "not_matches_regex" ? "NOT " : ""}regexp_matches(${value}, ${param})`;
+                } else throw Error(`Unsupported DuckDB operator: ${op}.`);
+              }
+              return clause.negated ? `NOT (${sql})` : sql;
+            };
+            return `(${branches
+              .map((branch) => branch.length === 1 ? compile(branch[0]!) : `(${branch.map(compile).join(" AND ")})`)
               .join(" OR ")})`;
           })
           .join(" AND ")

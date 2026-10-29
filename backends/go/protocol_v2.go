@@ -15,6 +15,9 @@ type ServerQueryV2 struct {
 	PlanToken         string            `json:"planToken,omitempty"`
 	Snapshot          string            `json:"snapshot,omitempty"`
 	Diagnostics       []any             `json:"diagnostics,omitempty"`
+	// HostState is the table's host-owned query state, for hosts that run
+	// their own clauses. Query Table does not interpret it.
+	HostState json.RawMessage `json:"hostState,omitempty"`
 }
 
 func (q *ServerQueryV2) UnmarshalJSON(data []byte) error {
@@ -29,11 +32,12 @@ func (q *ServerQueryV2) UnmarshalJSON(data []byte) error {
 		PlanToken         string            `json:"planToken"`
 		Snapshot          string            `json:"snapshot"`
 		Diagnostics       []any             `json:"diagnostics"`
+		HostState         json.RawMessage   `json:"hostState"`
 	}
 	if err := json.Unmarshal(data, &meta); err != nil {
 		return err
 	}
-	*q = ServerQueryV2{base, meta.Version, meta.Profile, meta.ExpectedRevisions, meta.PlanToken, meta.Snapshot, meta.Diagnostics}
+	*q = ServerQueryV2{base, meta.Version, meta.Profile, meta.ExpectedRevisions, meta.PlanToken, meta.Snapshot, meta.Diagnostics, meta.HostState}
 	return nil
 }
 func requestOptions(ctx context.Context, profile, token, snapshot string, revisions map[string]string, o PlanOptions) (PlanOptions, error) {

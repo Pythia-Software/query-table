@@ -46,6 +46,22 @@ const clause = {
   expression: "SUM([x]) / SUM([y])",
 };
 describe("metric execution boundary", () => {
+  it("requires a shown-row minimum's measured field on the page", async () => {
+    const transport: Transport<Row> = {
+      fetchRows: async () => ({ rows, total: 3 }),
+      fetchMetrics: async () => ({ metrics: [] }),
+      metricCapabilities: { version: 2, expressions: true, minCount: true, minCountMeasures: true },
+    };
+    const query = { ...EMPTY_QUERY, aggregations: [
+      { id: "page", op: "count" as const, groupBy: ["group"], scope: "shownRows" as const, minCount: { min: 2, distinct: "name" } },
+    ] };
+    // The page loaded group and id only; name is missing, not NULL.
+    const page = rows.map(({ id, group }) => ({ id, group }) as Row);
+    await expect(executeMetrics(query, { schema, transport, shownRows: page, rowsReady: true, shownFields: ["id", "group"] }))
+      .rejects.toThrow("Shown-page input name is not loaded");
+    const result = await executeMetrics(query, { schema, transport, shownRows: rows, rowsReady: true, shownFields: ["id", "group", "name"] });
+    expect(result.metrics[0]!.buckets.map((b) => b.keys)).toEqual([["a"]]);
+  });
   it.each([false, undefined])("uses committed rows when V2 shownRows is %s, preserving remote revisions and clause order", async (shownRows) => {
     const fetchRows = vi.fn(async () => ({ rows: [{ ...rows[1]!, x: 999 }], total: 100 }));
     const fetchMetrics = vi.fn<NonNullable<Transport<Row>["fetchMetrics"]>>(async request => ({
@@ -568,6 +584,26 @@ describe("metric population capability negotiation", () => {
       ["filtered", "This server does not support metric filters."],
       ["small", null],
     ]);
+  });
+  it("sends a distinct or summed minimum only to servers that advertise it", async () => {
+    const measured = { id: "measured", op: "count" as const, groupBy: ["group"], minCount: { min: 2, distinct: "name" } };
+    const fetchMetrics = vi.fn(async (request: { metrics: { id: string }[] }) => ({
+      metrics: request.metrics.map((m) => ({ id: m.id, buckets: [] })),
+    }));
+    const run = (capabilities: Record<string, unknown>) =>
+      executeMetrics({ ...EMPTY_QUERY, aggregations: [small, measured] }, {
+        schema,
+        transport: { fetchRows: async () => ({ rows: [], total: 0 }), fetchMetrics, metricCapabilities: { version: 2, ...capabilities } } as unknown as Transport<Row>,
+      });
+    const older = await run({ minCount: true });
+    expect(fetchMetrics.mock.calls[0]![0].metrics.map((m) => m.id)).toEqual(["small"]);
+    expect(older.metrics[1]).toEqual({ id: "measured", buckets: [], error: "This server does not support a minimum of distinct values or a sum per group." });
+    const current = await run({ minCount: true, minCountMeasures: true });
+    expect(fetchMetrics.mock.calls[1]![0].metrics).toEqual([
+      expect.objectContaining({ id: "small", minCount: 2 }),
+      expect.objectContaining({ id: "measured", minCount: { min: 2, distinct: "name" } }),
+    ]);
+    expect(current.metrics.every((m) => !m.error)).toBe(true);
   });
   it("never sends population controls to the version 1 aggregation endpoint", async () => {
     const fetchAggregations = vi.fn(async (request: { aggregations: { id: string }[] }) => ({

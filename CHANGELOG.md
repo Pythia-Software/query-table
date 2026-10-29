@@ -2,6 +2,228 @@
 
 ## Unreleased
 
+## 0.9.7 — 2026-10-28
+
+### Added
+
+- Native Detail for grouped results. With `itemDetails` enabled, a grouped
+  table's `api.itemDetails` (`subject: "group"`) opens a group's keys, scalar
+  summaries and link summaries in a popover, modal or expanded row, read from
+  the grouped row rather than loaded by ID. Add `ITEM_DETAILS_COLUMN` to the
+  grouped `select`, after the link columns if you like. The open group is
+  kept by its canonical identity across paging, sorting and URL reloads. After
+  the population changes or refreshes, a group not on the loaded page shows
+  as unavailable rather than with summaries that may be stale. Link
+  summaries in Detail resolve to the same exact-match Records query as in the
+  table. Record item Detail is unchanged, including after leaving grouping.
+  `ItemDetailsActions` takes a `label`, and `ObjectProperties` a `query` for
+  its renderers.
+- Host query state. `useQueryTable({ hostQuery: { ownedParameters, defaults,
+  normalize } })` registers state a host owns, such as a keyword clause it
+  runs itself, as part of the query definition: `QueryState.hostState`
+  (`{ version, params }`). The native Save, Update, Saved, Default, Share,
+  Reset and Undo/Redo controls, query links and durable snapshots carry it
+  with the table query, and every request carries the host state it runs
+  with. `api.definition` and `api.setDefinition` read and commit both as one
+  history entry. Saves without host state restore the host defaults; host
+  state the host rejects fails the whole restore or load instead of running a
+  broader table-only query, and tables without `hostQuery` reject it. URL
+  writes replace exactly the owned parameters, and a URL with only the owned
+  parameters opens the default table query with that host state. `StorageAdapter.storesHostState`
+  marks adapters that keep it; the built-in adapters do, and Save refuses
+  others. The Go link codec (`LinkQuery.HostState`) round-trips it, and
+  `QueryRequestV3`, `ServerQueryV2` and `MetricQuery` accept and expose a
+  `HostState` field.
+- `useQueryTable({ persistLast: "succeeded" })` saves the last-used query only
+  after its rows and every metric have loaded. A query that fails, times out
+  or is cancelled no longer replaces the last-used query, so a bare reload
+  restores the last one that worked. A success is saved even when the next
+  edit starts within the 400 ms debounce, refreshes of the same query do not
+  postpone it, and unmounting writes it. The default (`"always"`) is unchanged.
+- `api.execution`, an execution receipt for the current query: the exact
+  query, an execution key and generation, and overall, row and metric
+  statuses with the error. Restoration stays in `api.restoration`. A slower
+  earlier execution never updates a later receipt, and hidden or restoring
+  tables publish none.
+- OR of conjunctions in `where`: a term
+  `{ any: [{ all: [a, b] }, { all: [c, d] }] }` matches the union of its
+  branches, so a legend selection of (provider, model) pairs filters in one
+  term instead of an AND of ORs that grows as fields^pairs. A branch may also be
+  a bare predicate. It works in table, grouping-source and group (HAVING)
+  filters and in metric filters: in `applyQuery`, `evaluateMetrics`, the DuckDB
+  adapter, `/metrics`, `/query-v3`, `ExecuteV2Rows` and the Go SQLite and
+  PostgreSQL compilers. Nesting stops at `any` → `all` → predicate, and every
+  predicate in every branch counts toward the 100-predicate budget. TypeScript
+  adds `OrOfAndsGroup`, `WhereConjunction`, `WhereBranch`, `isOrOfAndsGroup`,
+  `isWhereConjunction`, `isWhereGroup` and `branchesOf`; `isOrGroup` is now true
+  only for groups of plain predicates, and `predicatesOf` lists the predicates
+  of every branch. `WhereTerm` gains the new member, so TypeScript code that
+  reads `term.any` members as predicates must check `isOrGroup` first. Go adds `WhereClause.All` (a branch, written `{"all": [...]}`),
+  `WhereTerm.Branches` and `WhereClause.IsConjunction`; `Validate` rejects
+  empty, nested or mixed branches. Normalization collapses one-predicate
+  branches, groups of plain predicates and lone branches, and
+  `decodeQueryStrict`, `encodeQuery` and the Go link codec round-trip the term,
+  with cross-language fixtures. Date-range bounds inside a branch do not count
+  as query bounds. Patches and drill-down compare branches structurally,
+  ignoring order. The query builder shows the term as one chip with AND
+  branches; its predicates can be edited, negated or removed, and merging
+  filters ORs their branches.
+- Hour-of-day and day-of-week grouping. `MetricDateGrouping.interval` accepts
+  `"hourOfDay"` (keys 0–23) and `"dayOfWeek"` (ISO keys 1 for Monday to 7). A
+  record falls in the slot of its timestamp in `dateGrouping.timeZone`,
+  including across daylight-saving changes and in fractional-offset zones.
+  Slots combine with other grouping fields; `includeEmpty` lists all 24 or 7
+  slots for each series without needing a date range, and `minCount`,
+  `hiddenGroups`, sorting, limits, shares and `partialIntervals` work as for
+  calendar intervals. The local engine, `applyAggregations`, DuckDB and the Go
+  v3 executor (SQLite and PostgreSQL) return identical buckets, checked by the
+  shared population fixture and the SQLite parity test. Servers advertise
+  `calendarCycles` in `QueryCapabilitiesV3`. The v1/v2 metric protocols still
+  reject date grouping.
+- Per-occurrence statistics for slots. `dateGrouping.occurrence: { interval:
+  "day" | "hour", includeEmpty }` evaluates the metric once per whole day or
+  hour of each slot, then gives the mean of those values, or a box over them
+  with `distribution: { kind: "box" }`. Occurrences the date bounds cut short,
+  and the one in progress, are left out, as with `partialIntervals:
+  "exclude"`. With `includeEmpty`, idle occurrences count as 0 for direct
+  counts, distinct counts and sums and have no value for ratios. Buckets report
+  their sample size as `occurrences`. `planMetricSeries` computes them from a
+  calendar metric, so servers need no changes.
+- `inspectBucketQuery` drills into one slot with existing predicates: the
+  slot's occurrences inside the date bounds, as a range plus one OR group per
+  gap. It returns `null` without a lower and upper date bound or past the
+  100-predicate budget.
+- Charts, lists and tables label slots "09:00" and "Mon" (`metricCycleLabel`),
+  and line charts order them by slot. The metric editor offers Hour of day and
+  Day of week, and a per-day or per-hour summary for each slot. Link
+  normalization in TypeScript and Go accepts the new interval values and
+  `occurrence`.
+- Minimums over distinct values and sums. `AggregationClause.minCount` also
+  takes `{ min, distinct: field }`, which keeps groups with at least `min`
+  distinct non-null values of a field, and `{ min, sum: field }`, which keeps
+  groups whose numeric field sums to at least `min`. "Cost by model, hiding
+  models used in fewer than five conversations" and "failure rate by tool,
+  hiding tools with fewer than ten calls" over rollup rows no longer need a
+  grouping stage. The measure follows `COUNT_DISTINCT` and `SUM`: nulls are
+  ignored, a summed text field is a clause diagnostic, and a group whose
+  measure is an error is kept. As with a row minimum, hidden groups leave
+  before sorting, `groupLimit` and Other and are reported in `hiddenGroups`,
+  and kept values are unchanged. The local engine, DuckDB, `/metrics` on Go
+  SQLite and PostgreSQL (including fused and cross-field reductions, which
+  share the measure with an identical aggregate), `/query-v3` and
+  `ExecuteV2Rows` run it natively; windows sum a summed minimum over the window
+  and refuse a distinct one, and distributions accept row minimums only.
+  Servers advertise `minCountMeasures` (v2) or `metricMinCountMeasures` (v3),
+  and `metricPopulationError` refuses the clause on servers that do not. Query
+  links, `normalizeMetricOptions` and the Go link codec carry the object form
+  (a new `minCount` table in `METRIC_OPTION_SPECS`). The metric editor's
+  **Minimum per group** gains a **Counting** choice, and cards name what the
+  minimum counted.
+- Host predicate relations for SQLite (Go). Set `PredicateRelations` (a
+  `SQLitePredicateRelations`, or `SQLitePredicateRelationsFunc`) on
+  `SQLiteDataset`, `SQLiteV2Dataset` or a SQLite `QueryDatasetV3` to supply a
+  relation, such as a maintained trigram index, for a filter predicate. The
+  provider receives the predicate's field, operator, value and negation with
+  the execution's context and transaction, and returns
+  `SQLitePredicateRelation{SQL, Args, Key, Exact}`: a SELECT of key values
+  (default the ID field) compiled as `key IN (...)` inside the query, so it
+  reads the execution's own snapshot. An exact relation replaces the typed
+  check; a candidate only narrows it and is ignored when negated. Negation
+  keeps the compiler's null and empty guard. An OR term (including OR-of-AND
+  branches) uses relations only when every branch has one. Relations apply to
+  rows and metrics in `SQLiteDataset`, V2 rows, populations and metric
+  filters, and `/query-v3` source and ungrouped filters, never to group
+  filters over grouped rows. Without a provider, compiled SQL is unchanged.
+  See "Host predicate relations" in `docs/backend-sqlite.md`.
+- Calendar keys in a grouping stage. A key in `grouping.keys` can be
+  `{ field, interval, timeZone }` for a datetime field, giving one grouped row
+  per local hour, day, week, month or year keyed by the interval's start, for
+  example local midnight in `America/Denver`. Intervals use the
+  `dateGrouping` calendar, so DST days and partial hours bucket identically and
+  totals match the equivalent `dateGrouping` metric. The key's column keeps the
+  field's name and `datetime` type, so group filters, ordering, paging and
+  metrics over the groups address it as before; drill-down
+  (`groupSourceQuery`, link columns and group Detail) selects the interval's
+  records with a `>= start` and `< end` pair. Plain string keys are unchanged
+  on the wire. `applyQuery`, `prepareGrouping`, DuckDB and the Go `/query-v3`
+  executor (SQLite and PostgreSQL) run them, checked by the SQLite parity test;
+  servers advertise `calendarGroupKeys`. Hour-of-day and day-of-week remain
+  metric intervals and are rejected as keys. TypeScript adds `GroupKey`,
+  `CalendarGroupKey`, `GROUP_KEY_INTERVALS`, `isCalendarGroupKey`,
+  `groupKeyField`, `groupKeyFields` and `calendarGroupKey`;
+  `GroupingDefinition.keys`, `withGroupingKeys` and `GroupingApi.changeKeys`
+  take `GroupKey[]`, and `GroupingView.groupKeys` lists the keys as defined
+  while `GroupingView.keys` stays the column names. Go adds
+  `GroupingDefinition.KeyIntervals` and `GroupKeyInterval`. The grouping
+  controls offer an interval for datetime keys, and the TypeScript and Go link
+  codecs normalize the new keys alike.
+- Go: per-generation source proofs for V2 integer metric batches. Set
+  `SQLiteV2Dataset.SourceGeneration`, read in the execution transaction from a
+  generation every write advances, and `SourceProofs` (a shared
+  `*SQLiteSourceProofs`). The first execution in a generation proves, in one
+  bounded scan of the whole authorized source, its row count and that each
+  consumed numeric field is INTEGER/NULL with an absolute total within 2^53−1.
+  Later fused COUNT/SUM/AVG/MIN/MAX reductions over those fields then skip the
+  per-row checks. Unfiltered requests reuse the count, and filtered metric
+  batches take their population from the fused reduction. Group keys, budgets,
+  revisions, metric isolation and result types are still checked on every
+  execution. Host functions and sources over `MaxPopulation` are not proven,
+  and without a generation nothing changes. On a 50,000-row COUNT plus nine
+  SUMs (process CPU, warm generation), the adapter went from 46/74/68 ms to
+  21/49/42 ms ungrouped, grouped and filtered, against 16/43/37 ms for bare
+  SQL. The first execution in each generation costs 64/91/99 ms. See
+  `docs/sqlite-performance-handoff.md`.
+
+### Changed
+
+- Go: `AggSpec.MinCount` is now a `MetricMinCount` struct (`Min`, `Distinct`,
+  `Sum`) that reads and writes both JSON forms. Replace `MinCount: 5` with
+  `MinCount: qt.MetricMinCount{Min: 5}` and `spec.MinCount > 0` or
+  `spec.MinCount != 0` with `spec.MinCount.Active()`.
+- The metric editor's minimum input is now labelled "Minimum per group"
+  (formerly "Minimum rows per group"). Its **Counting** choice disables
+  distinct and summed minimums where they do not apply: distributions and
+  per-occurrence summaries count rows, and windows cannot combine distinct
+  values.
+- `MetricChart` colours pie, donut, bar, box, histogram and list marks
+  grouped by several keys by their whole key, so `claude / opus` and
+  `claude / sonnet` no longer share a colour, and the legend lists each key
+  once. A key keeps its colour across renders and across charts sharing a
+  `MetricTheme`; two keys drawn together take different colours while the
+  palette has room. Single-key charts are unchanged, and scatter charts still
+  colour by their first (series) key. `createMetricColorResolver` gains
+  `tupleColors(fields, tuples)`.
+- Line and scatter charts pick the nearest drawn point under the pointer, with
+  exact ties going to the point drawn on top, instead of letting the 12 px hit
+  circle of a later series cover an earlier series' visible point. A ring
+  marks the point a click would inspect. Keyboard focus, tooltips and the
+  bucket passed to `onInspect` are unchanged.
+
+### Fixed
+
+- Source filter controls no longer flood metadata requests while a grouped
+  view initialises. The grouping source API's `filterValues` and `fieldStats`
+  keep their identity across renders, and a filter value combobox reads
+  suggestions only while its editor is open, once per search, instead of on
+  every mount and render. Over HTTP/1 the repeated reads used to fill the
+  connection pool and hold back the rows and metrics.
+- Screen fitting (`fitToScreen`) no longer narrows a column below what its
+  native controls need. Each column's minimum counts the cell padding and its
+  buttons (Detail modes, JSON previews, including the invalid-JSON "JSON?"
+  badge), and links: group link summaries and template links shorten to an
+  ellipsis no narrower than 96 px, keeping their full accessible name and
+  href. When the minimums exceed the screen, the table scrolls horizontally
+  instead of clipping a control in its cell. Grouped tables with link
+  summaries used to clip "Matching records" at desktop widths, and two Detail
+  buttons were clipped at the 48 px phone floor. `SelectConfig.minWidth` adds
+  room for host-rendered controls the table cannot measure.
+- Box and horizontal-bar charts size their label gutter to the widest drawn
+  group label, up to 40% of the chart, and shorten longer labels at their end
+  with an ellipsis. Labels used to lose their start ("odel_family-0") past a
+  fixed margin. Vertical-bar labels are shortened to their slot, axis labels
+  stay inside the chart, and the full label stays in a `<title>` and the
+  mark's `aria-label`. Charts with short labels keep their layout.
+
 ## 0.9.6 — 2026-10-28
 
 ### Added

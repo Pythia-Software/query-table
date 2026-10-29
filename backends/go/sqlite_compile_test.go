@@ -67,6 +67,24 @@ func TestSQLiteCompilerComposition(t *testing.T) {
 	if _, e = CompileSQLite(q, s, SQLiteOptions{}); e == nil {
 		t.Fatal("skipped OR validation")
 	}
+	// An OR of AND branches; a blank literal drops out of its branch, and a
+	// branch with nothing left makes the group a no-op.
+	q.Where = []WhereTerm{{Any: []WhereClause{
+		{All: []WhereClause{{Field: "text", Op: "=", Value: "a"}, {Field: "n", Op: ">", Value: "1"}}},
+		{All: []WhereClause{{Field: "text", Op: "=", Value: "b"}, {Field: "text", Op: "contains", Value: ""}}},
+	}}}
+	where, e := CompileSQLiteWhere(q.Where, s, SQLiteOptions{})
+	if e != nil || !strings.HasPrefix(where.SQL, "((") || strings.Count(where.SQL, " AND ") != 1 || strings.Count(where.SQL, " OR ") != 1 || len(where.Args) != 3 {
+		t.Fatalf("OR of ANDs: %#v %v", where, e)
+	}
+	q.Where[0].Any[1].All = []WhereClause{{Field: "text", Op: "contains", Value: ""}}
+	if where, e = CompileSQLiteWhere(q.Where, s, SQLiteOptions{}); e != nil || where.SQL != "" {
+		t.Fatalf("always-true branch: %#v %v", where, e)
+	}
+	q.Where[0].Any[1].All = []WhereClause{{Field: "missing", Op: "=", Value: "x"}}
+	if _, e = CompileSQLiteWhere(q.Where, s, SQLiteOptions{}); e == nil {
+		t.Fatal("skipped branch validation")
+	}
 }
 func TestSQLiteSchemaDialect(t *testing.T) {
 	doc := []byte(`{"name":"s","idField":"id","fields":[{"name":"id","type":"text","bindings":{"postgres":{"expr":"pg.id"},"sqlite":{"expr":"s.id"}}},{"name":"date","type":"datetime","bindings":{"sqlite":{"expr":"s.date","datetimeFormat":"utc-millis"}}}]}`)

@@ -11,6 +11,7 @@ import {
 import { createPortal } from "react-dom";
 import {
   computedFieldName,
+  isOrGroup,
   predicatesOf,
   readFieldValue,
   type QueryState,
@@ -258,7 +259,7 @@ export function useGuidedTour<Row>(
       case "combine":
         done = api.query.where.some(
           (term) =>
-            "any" in term &&
+            isOrGroup(term) &&
             config.either.every((value) =>
               term.any.some(
                 (p) =>

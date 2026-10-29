@@ -32,7 +32,7 @@ export const { sourceField, groupableFields, summaryFields, representativeFields
 export function queryFromView(view: View): QueryState {
   return normalizeQueryState(view.mode === "rows" ? view.input : {
     ...view.result,
-    grouping: { keys: view.keys, summaries: view.summaries, representative: view.representative, source: view.input },
+    grouping: { keys: view.groupKeys ?? view.keys, summaries: view.summaries, representative: view.representative, source: view.input },
   });
 }
 

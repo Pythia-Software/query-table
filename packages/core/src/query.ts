@@ -1,7 +1,8 @@
 import { normalizePropertyView, type PropertyViewState } from "./properties";
-import type { MetricDisplay, MetricLayout, MetricDistribution, MetricSort, MetricScope, MetricDateGrouping, MetricWindow, MetricShare } from "./metricTypes";
+import type { MetricDisplay, MetricLayout, MetricDistribution, MetricSort, MetricScope, MetricDateGrouping, MetricWindow, MetricShare, MetricMinCountOf } from "./metricTypes";
 import { normalizeMetricOptions } from "./metricNormalize";
 import type { GroupingState, SummaryColumn, RepresentativeOrder, LinkSpec, LinkDestination } from "./grouping";
+import { GROUP_KEY_INTERVALS, groupKeyFields, type CalendarGroupKey, type GroupKey } from "./groupKeys";
 import type { QueryFacet, QueryPatch } from "./queryPatch";
 import { parseCellDisplay, type CellDisplay } from "./cellDisplay";
 // query.ts — the canonical query state shape.
@@ -71,31 +72,84 @@ export interface SetFilterMetadata {
 }
 
 /** A disjunction of predicates — the inner OR of conjunctive normal form. Every
- *  member is a plain literal; nesting is intentionally not allowed yet (CNF
- *  only), but the object shape leaves room to grow. */
+ *  member is a plain literal. See `OrOfAndsGroup` for an OR whose members may
+ *  themselves be conjunctions. */
 export interface OrGroup {
   any: WhereClause[];
   setFilter?: SetFilterMetadata;
 }
 
-/** One conjunct of the WHERE clause: either a single predicate or an OR group.
- *  `QueryState.where` is the AND of these terms, so the whole WHERE is
- *  conjunctive normal form — `(a) AND (b OR c) AND (d)`. A bare literal is
- *  equivalent to a one-element OR group; normalization flattens singleton groups
- *  back to a literal so equality/encoding stay canonical. */
-export type WhereTerm = WhereClause | OrGroup;
+/** One branch of an `OrOfAndsGroup` that ANDs several literals. Members are
+ *  always plain literals: nesting stops at `any` → `all` → clause. */
+export interface WhereConjunction {
+  all: WhereClause[];
+}
 
-/** Narrow a term to an OR group. A literal always carries `field`; a group never
- *  does and always carries an `any` array. */
+/** One alternative of an `OrOfAndsGroup`: a literal or a conjunction. */
+export type WhereBranch = WhereClause | WhereConjunction;
+
+/** A disjunction of conjunctions — `(a AND b) OR (c AND d)` — written
+ *  `{ any: [{ all: [a, b] }, { all: [c, d] }] }`. A branch may also be a bare
+ *  literal. It selects the union of its branches' rows, such as a legend
+ *  selection of several (provider, model) pairs, without the exponential
+ *  AND-of-ORs rewrite. Normalization keeps the shape canonical: a one-literal
+ *  conjunction becomes that literal, a group whose branches are all literals is
+ *  an `OrGroup`, and a single conjunction becomes top-level literals. Every
+ *  literal counts against `MAX_WHERE_CLAUSES`, which therefore also bounds the
+ *  number of branches. Each literal keeps its own null-exclusive negation; the
+ *  group itself is never negated. */
+export interface OrOfAndsGroup {
+  any: WhereBranch[];
+  setFilter?: SetFilterMetadata;
+}
+
+/** One conjunct of the WHERE clause: a single predicate, an OR group, or an OR
+ *  of conjunctions. `QueryState.where` is the AND of these terms —
+ *  `(a) AND (b OR c) AND ((d AND e) OR f)`. A bare literal is equivalent to a
+ *  one-element OR group; normalization flattens singleton groups back to a
+ *  literal so equality/encoding stay canonical. */
+export type WhereTerm = WhereClause | OrGroup | OrOfAndsGroup;
+
+/** Narrow a branch to a conjunction. */
+export function isWhereConjunction(branch: WhereBranch): branch is WhereConjunction {
+  return branch != null && Array.isArray((branch as WhereConjunction).all);
+}
+
+/** Narrow a term to a plain OR group (every member a literal). A literal
+ *  always carries `field`; a group never does and always carries an `any`
+ *  array. An `OrOfAndsGroup` is not an `OrGroup`. */
 export function isOrGroup(term: WhereTerm): term is OrGroup {
+  const any = (term as OrGroup).any;
+  return Array.isArray(any) && !any.some((member) => isWhereConjunction(member as WhereBranch));
+}
+
+/** Narrow a term to an OR group with at least one conjunction branch. */
+export function isOrOfAndsGroup(term: WhereTerm): term is OrOfAndsGroup {
+  const any = (term as OrOfAndsGroup).any;
+  return Array.isArray(any) && any.some(isWhereConjunction);
+}
+
+/** Narrow a term to either kind of group (anything carrying `any`). */
+export function isWhereGroup(term: WhereTerm): term is OrGroup | OrOfAndsGroup {
   return Array.isArray((term as OrGroup).any);
 }
 
-/** The predicate literals a term contributes, in order: the term itself for a
- *  literal, or its members for a group. Handy for anything that must visit every
- *  predicate regardless of grouping (field allowlisting, SELECT projection). */
+/** The predicate literals a term references, in order: the term itself for a
+ *  literal, a group's members, and the members of each conjunction branch.
+ *  Handy for anything that must visit every predicate regardless of grouping
+ *  (field allowlisting, SELECT projection, budgets); it does not preserve
+ *  meaning — use `branchesOf` to evaluate a term. */
 export function predicatesOf(term: WhereTerm): WhereClause[] {
-  return isOrGroup(term) ? term.any : [term];
+  if (!isWhereGroup(term)) return [term];
+  return term.any.flatMap((member: WhereBranch) => isWhereConjunction(member) ? member.all : [member]);
+}
+
+/** A term as a disjunction of conjunctions: it matches when every literal of
+ *  some branch matches. A literal is `[[literal]]`, an OR group one
+ *  single-literal branch per member. */
+export function branchesOf(term: WhereTerm): WhereClause[][] {
+  if (!isWhereGroup(term)) return [[term]];
+  return term.any.map((member: WhereBranch) => isWhereConjunction(member) ? member.all : [member]);
 }
 
 /** One ORDER BY term. Array order in `QueryState.orderBy` is the sort priority. */
@@ -167,10 +221,12 @@ export interface AggregationClause {
    *  mode it refers to grouped-result fields. Shown-row metrics apply it inside
    *  the shown page. */
   where?: WhereTerm[];
-  /** Drop groups with fewer than this many rows (counted after `where`) before
-   *  sorting, `groupLimit` and Other. Requires at least one grouping field;
-   *  integer 1–1,000,000. Removed groups are reported as `hiddenGroups`. */
-  minCount?: number;
+  /** Drop small groups before sorting, `groupLimit` and Other. A number counts
+   *  rows (after `where`); `{ min, distinct: field }` counts a field's distinct
+   *  non-null values and `{ min, sum: field }` sums a numeric field, ignoring
+   *  nulls. Requires at least one grouping field; `min` is an integer
+   *  1–1,000,000. Removed groups are reported as `hiddenGroups`. */
+  minCount?: number | MetricMinCountOf;
   /** A trailing window or running value over the calendar intervals of
    * `dateGrouping`. Computed from ordinary metrics, so every engine supports it. */
   window?: MetricWindow;
@@ -198,7 +254,54 @@ export interface ItemDetailsState {
   active?: { id: RowId; mode: "modal" | "expand" };
 }
 
+/**
+ * Query state a host owns and registers with `useQueryTable({ hostQuery })`,
+ * such as a keyword clause it runs itself. It travels with the table query
+ * through saves, links, history and resets as one definition. `params` are
+ * named lists of strings, like URL search parameters; the host's own
+ * `normalize` interprets them. Version 0 marks a payload that could not be
+ * read, and is always rejected on restore.
+ */
+export interface HostQueryState {
+  version: number;
+  params: Record<string, string[]>;
+}
+export const MAX_HOST_QUERY_PARAMS = 64;
+export const MAX_HOST_QUERY_VALUES = 64;
+export const MAX_HOST_QUERY_VALUE_LENGTH = 4000;
+export const MAX_HOST_QUERY_STATE_BYTES = 32 * 1024;
+/** URL-style names; ASCII keeps the sorted order identical in every codec. */
+const HOST_QUERY_PARAM_NAME = /^[A-Za-z_][A-Za-z0-9_.-]{0,127}$/;
+
+/** Validates host state and returns its canonical form (parameters sorted by
+ * name, values in order). Throws on a malformed or oversized payload. */
+export function parseHostQueryState(input: unknown): HostQueryState {
+  const fail = (why: string): never => { throw Error(`Invalid host query state: ${why}`); };
+  if (!isRecord(input)) return fail("expected an object.");
+  if (Object.keys(input).some((key) => key !== "version" && key !== "params")) fail("unexpected properties.");
+  const version = input.version;
+  if (typeof version !== "number" || !Number.isSafeInteger(version) || version < 1) return fail("unsupported version.");
+  if (!isRecord(input.params)) return fail("params must be an object.");
+  const names = Object.keys(input.params).sort();
+  if (names.length > MAX_HOST_QUERY_PARAMS) fail("too many parameters.");
+  const params: Record<string, string[]> = {};
+  for (const name of names) {
+    const values = input.params[name];
+    if (!HOST_QUERY_PARAM_NAME.test(name)) fail("invalid parameter name.");
+    if (!Array.isArray(values) || values.length > MAX_HOST_QUERY_VALUES ||
+      values.some((value) => typeof value !== "string" || value.length > MAX_HOST_QUERY_VALUE_LENGTH))
+      fail(`parameter ${name} must be a list of strings.`);
+    params[name] = [...values as string[]];
+  }
+  const state = { version, params };
+  if (new TextEncoder().encode(JSON.stringify(state)).length > MAX_HOST_QUERY_STATE_BYTES) fail("payload too large.");
+  return state;
+}
+
 export interface QueryState {
+  /** Host-owned state registered through `useQueryTable({ hostQuery })`.
+   * Only the top-level query carries it; a grouping source never does. */
+  hostState?: HostQueryState;
   /** Optional row-producing stage. `grouping.source` is the original record
    * query (its WHERE runs first). This query selects/filters/sorts the groups;
    * its `where` therefore represents HAVING. Only one stage is supported. */
@@ -309,7 +412,9 @@ function normalizeWhereClause(item: unknown): WhereClause | null {
 /** Deep-clone one WHERE term (literal or group) so a normalized/fallback state
  *  never aliases the caller's arrays. */
 function cloneWhereTerm(term: WhereTerm): WhereTerm {
-  const copy = isOrGroup(term) ? { ...term, any: term.any.map((c) => ({ ...c })) } : { ...term };
+  const copy: WhereTerm = isWhereGroup(term)
+    ? { ...term, any: term.any.map((c: WhereBranch) => isWhereConjunction(c) ? { all: c.all.map((m) => ({ ...m })) } : { ...c }) }
+    : { ...term };
   if (term.setFilter) copy.setFilter = { ...term.setFilter, values: [...term.setFilter.values] };
   return copy;
 }
@@ -322,6 +427,18 @@ function normalizeSetFilter(item: unknown): SetFilterMetadata | undefined {
   return { id, mode: item.mode as SetFilterMode, values: [...item.values] as string[] };
 }
 
+/** How many predicates a raw (unnormalized) term supplies, so callers can tell
+ *  whether normalization lost any: a group counts its members, a conjunction
+ *  branch its literals (an empty one counts one: dropping it would narrow the
+ *  group), anything else one. An empty top-level group counts zero. */
+export function suppliedPredicateCount(term: unknown): number {
+  if (!isRecord(term) || !Array.isArray(term.any)) return 1;
+  let count = 0;
+  for (const member of term.any as unknown[])
+    count += isRecord(member) && Array.isArray(member.all) ? Math.max(1, member.all.length) : 1;
+  return count;
+}
+
 function normalizeWhereTerms(input: readonly unknown[]): WhereTerm[] {
   const where: WhereTerm[] = [];
   let literalBudget = MAX_WHERE_CLAUSES;
@@ -329,17 +446,36 @@ function normalizeWhereTerms(input: readonly unknown[]): WhereTerm[] {
     if (literalBudget <= 0) break;
     const start = where.length;
     if (isRecord(item) && Array.isArray((item as { any?: unknown }).any)) {
-      const members: WhereClause[] = [];
+      const members: WhereBranch[] = [];
       for (const inner of (item as { any: unknown[] }).any) {
         if (literalBudget <= 0) break;
+        if (isRecord(inner) && Array.isArray(inner.all)) {
+          // A conjunction branch: plain literals only, one level deep.
+          const all: WhereClause[] = [];
+          for (const literal of inner.all as unknown[]) {
+            if (literalBudget <= 0) break;
+            const clause = normalizeWhereClause(literal);
+            if (clause) {
+              all.push(clause);
+              literalBudget--;
+            }
+          }
+          if (all.length === 1) members.push(all[0]!);
+          else if (all.length > 1) members.push({ all });
+          continue;
+        }
         const clause = normalizeWhereClause(inner);
         if (clause) {
           members.push(clause);
           literalBudget--;
         }
       }
-      if (members.length === 1) where.push(members[0]!);
-      else if (members.length > 1) where.push({ any: members });
+      if (members.length === 1) {
+        // One branch is plain AND: a literal, or the conjunction's literals.
+        const only = members[0]!;
+        if (isWhereConjunction(only)) where.push(...only.all);
+        else where.push(only);
+      } else if (members.length > 1) where.push({ any: members } as OrGroup | OrOfAndsGroup);
       // 0 members → drop the term entirely
     } else {
       const clause = normalizeWhereClause(item);
@@ -362,8 +498,7 @@ function normalizeMetricWhere(value: unknown): { where?: WhereTerm[]; invalid: b
   if (value === undefined) return { invalid: false };
   if (!Array.isArray(value)) return { invalid: true };
   const where = normalizeWhereTerms(value);
-  const supplied = value.reduce((count: number, term: unknown) =>
-    count + (isRecord(term) && Array.isArray(term.any) ? term.any.length : 1), 0);
+  const supplied = value.reduce((count: number, term: unknown) => count + suppliedPredicateCount(term), 0);
   const kept = where.reduce((count, term) => count + predicatesOf(term).length, 0);
   return { ...(where.length ? { where } : {}), invalid: supplied !== kept };
 }
@@ -401,8 +536,9 @@ function normalizeQuery(input: unknown, fallback: QueryState, links: boolean): Q
     select.push(...fallback.select.map((column) => ({ ...column, ...(column.display ? { display: JSON.parse(JSON.stringify(column.display)) as CellDisplay } : {}) })));
   }
 
-  // WHERE is CNF: an array of terms, each a literal or an `{ any: [...] }` OR
-  // group. MAX_WHERE_CLAUSES bounds the TOTAL predicate count across all terms
+  // WHERE is an AND of terms, each a literal, an `{ any: [...] }` OR group, or
+  // an OR of `{ all: [...] }` conjunctions. MAX_WHERE_CLAUSES bounds the TOTAL
+  // predicate count across all terms and branches
   // (legacy flat lists are all literals, so the cap is unchanged for them).
   // Singleton/empty groups are canonicalized (flattened / dropped).
   const where: WhereTerm[] = Array.isArray(raw.where)
@@ -441,6 +577,12 @@ function normalizeQuery(input: unknown, fallback: QueryState, links: boolean): Q
   };
 
   if (raw.fitToScreen === true) out.fitToScreen = true;
+
+  // Unreadable host state is kept as version 0 rather than dropped, so a
+  // restore can reject it instead of running a broadened table-only query.
+  if (links && raw.hostState !== undefined) {
+    try { out.hostState = parseHostQueryState(raw.hostState); } catch { out.hostState = { version: 0, params: {} }; }
+  }
 
   if (raw.grouping != null) out.grouping = normalizeGroupingState(raw.grouping, links);
 
@@ -518,8 +660,19 @@ function normalizeGroupingState(value: unknown, links: boolean): GroupingState {
   const diagnostics: string[] = [];
   // Each problem gets its own message; the stage still refuses to execute.
   const fail = (message: string) => { diagnostics.push(`Invalid grouping: ${message}`); };
-  const keys = Array.isArray(raw.keys) ? raw.keys.slice(0, MAX_GROUP_BY_FIELDS).filter((key): key is string => !!boundedString(key, MAX_FIELD_NAME_LENGTH)) : [];
-  if (!Array.isArray(raw.keys) || !keys.length || keys.length !== raw.keys.length || new Set(keys).size !== keys.length)
+  const keys: GroupKey[] = [];
+  for (const [index, key] of (Array.isArray(raw.keys) ? raw.keys.slice(0, MAX_GROUP_BY_FIELDS) : []).entries()) {
+    if (boundedString(key, MAX_FIELD_NAME_LENGTH)) { keys.push(key as string); continue; }
+    if (!isRecord(key)) continue;
+    // A calendar key: the timezone's validity is checked with the schema.
+    const field = boundedString(key.field, MAX_FIELD_NAME_LENGTH), zone = key.timeZone;
+    if (field && GROUP_KEY_INTERVALS.includes(key.interval as never) &&
+      (zone === undefined || (typeof zone === "string" && zone.length > 0 && zone.length <= 80 && !/^[+-]/.test(zone))))
+      keys.push({ field, interval: key.interval as CalendarGroupKey["interval"], ...(zone !== undefined ? { timeZone: zone as string } : {}) });
+    else fail(`key ${index + 1} must be a field name or a calendar key {field, interval, timeZone} with interval hour, day, week, month or year; hour-of-day and day-of-week are metric intervals.`);
+  }
+  const keyNames = groupKeyFields(keys);
+  if (!Array.isArray(raw.keys) || !keys.length || keys.length !== raw.keys.length || new Set(keyNames).size !== keys.length)
     fail(`keys must list 1–${MAX_GROUP_BY_FIELDS} distinct field names.`);
   const summaries: SummaryColumn[] = [];
   if (!Array.isArray(raw.summaries) || raw.summaries.length > 64) fail("summaries must be a list of at most 64 columns.");
@@ -537,7 +690,7 @@ function normalizeGroupingState(value: unknown, links: boolean): GroupingState {
     // Collisions with source fields need the schema and are reported by
     // createGroupingModel().validate(); keys and duplicates are visible here.
     if (summaryIds.has(column.id)) fail(`${name} uses the same id as another summary column.`);
-    else if (keys.includes(column.id)) fail(`${name} uses the same id as group key "${column.id}"; summary ids must differ from source field names.`);
+    else if (keyNames.includes(column.id)) fail(`${name} uses the same id as group key "${column.id}"; summary ids must differ from source field names.`);
     summaryIds.add(column.id);
     if (item.op === "link") {
       // A malformed spec is isolated to its column (see linkDiagnostics).
@@ -584,14 +737,14 @@ function normalizeGroupingState(value: unknown, links: boolean): GroupingState {
   }
   if (!isRecord(raw.source)) fail("source must be the record query that is grouped.");
   else if (raw.source.grouping != null) fail("only one grouping stage is supported; the source query cannot itself be grouped.");
-  const { grouping: _nested, ...source } = isRecord(raw.source) ? raw.source : {};
+  const { grouping: _nested, hostState: _host, ...source } = isRecord(raw.source) ? raw.source : {};
   // Retain earlier diagnostics (bounded) instead of collapsing them.
   if (Array.isArray(raw.diagnostics))
     for (const message of raw.diagnostics.slice(0, 20))
       diagnostics.push(typeof message === "string" && message ? message.slice(0, MAX_LABEL_LENGTH) : "Invalid grouping definition.");
   const normalizedSource = normalizeQueryState(source);
   if (Array.isArray(source.where)) {
-    const supplied = source.where.reduce((count: number, term: unknown) => count + (isRecord(term) && Array.isArray(term.any) ? term.any.length : 1), 0);
+    const supplied = source.where.reduce((count: number, term: unknown) => count + suppliedPredicateCount(term), 0);
     if (supplied !== normalizedSource.where.reduce((count, term) => count + predicatesOf(term).length, 0)) fail("source filters contain malformed predicates or exceed the predicate budget.");
   }
   return { keys, summaries, representative, source: normalizedSource, ...(diagnostics.length ? { diagnostics: [...new Set(diagnostics)] } : {}) };
@@ -640,12 +793,12 @@ function normalizeLinkSpec(value: unknown): LinkSpec | undefined {
 }
 
 /** True when normalization kept every supplied WHERE term. An OR group counts
- * as its members (an empty group as one), so dropping any literal, a whole
- * group or anything past the predicate budget is detected. */
+ * as its members' literals (an empty group or conjunction as one), so dropping
+ * any literal, a whole group or anything past the predicate budget is detected. */
 function keptEveryTerm(supplied: unknown, kept: readonly WhereTerm[]): boolean {
   if (!Array.isArray(supplied)) return false;
   const count = supplied.reduce((total: number, term: unknown) =>
-    total + (isRecord(term) && Array.isArray(term.any) ? Math.max(1, term.any.length) : 1), 0);
+    total + Math.max(1, suppliedPredicateCount(term)), 0);
   return count === kept.reduce((total, term) => total + predicatesOf(term).length, 0);
 }
 
@@ -681,6 +834,7 @@ export function queriesEqual(a: QueryState, b: QueryState): boolean {
   if (!sameArray(a.aggregations ?? [], b.aggregations ?? [])) return false;
   if (JSON.stringify(a.itemDetails) !== JSON.stringify(b.itemDetails)) return false;
   if (JSON.stringify(a.grouping) !== JSON.stringify(b.grouping)) return false;
+  if (JSON.stringify(a.hostState) !== JSON.stringify(b.hostState)) return false;
   return true;
 }
 

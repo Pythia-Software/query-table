@@ -29,7 +29,9 @@ try {
     7,
   );
   assert.equal(await chart.locator(".qt-metric-mark").count(), 14);
-  await chart.locator(".qt-metric-mark").first().click();
+  // Points take the pointer through the chart's nearest-point layer.
+  const point = await chart.locator(".qt-metric-mark circle").first().boundingBox();
+  await page.mouse.click(point.x + point.width / 2, point.y + point.height / 2);
   assert.match(
     await page.locator(".date-prototype-inspected").innerText(),
     /Oct 1 · 0 matching orders · Empty date bucket/,

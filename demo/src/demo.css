@@ -117,3 +117,7 @@ select {
 @media (max-width: 760px) {
   .qt-property-editor:has(.qt-demo-feedback) .qt-property-editor-footer { padding-inline-end: 76px; }
 }
+
+/* /chart-layout fixture */
+.qt-demo-chart-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); gap: 16px; }
+.qt-demo-chart-card { min-width: 0; border: 1px solid var(--qt-border, #d8dee4); border-radius: 8px; padding: 12px; height: 300px; display: flex; flex-direction: column; }

@@ -19,9 +19,9 @@ import { createSetFilter, readSetFilter } from "./setFilter";
 // Back-compat: decodeQuery accepts legacy compact shapes: `o` as a single
 // object (pre-multi-sort) and `c`/`s` as a string[] (pre-width).
 
-import { EMPTY_QUERY, MAX_QUERY_TOKEN_LENGTH, normalizeQueryState, predicatesOf } from "./query";
+import { EMPTY_QUERY, MAX_QUERY_TOKEN_LENGTH, normalizeQueryState, parseHostQueryState, predicatesOf, suppliedPredicateCount } from "./query";
 import { stripSetFilter } from "./setFilter";
-import type { QueryState, WhereTerm, OrderByClause, SelectColumn, AggregationClause, SetFilterMode } from "./query";
+import type { QueryState, WhereTerm, OrderByClause, SelectColumn, AggregationClause, SetFilterMode, HostQueryState } from "./query";
 import type { FieldSchema, FieldDef } from "./schema";
 import type { CellDisplay } from "./cellDisplay";
 import { indexFields, isFilterable, isPushdownFilter, isSortable, resolveFieldName, selectedFields } from "./schema";
@@ -71,6 +71,7 @@ interface CompactQuery {
   c?: string[]; // legacy alias for select column names
   fs?: boolean;
   b?: QueryState["grouping"];
+  h?: QueryState["hostState"];
 }
 
 /** Canonical query projected into the URL wire form. */
@@ -89,6 +90,7 @@ function compactQuery(q: QueryState): CompactQuery {
   if (q.itemDetails) c.d = q.itemDetails;
   if (q.fitToScreen) c.fs = true;
   if (q.grouping) c.b = q.grouping;
+  if (q.hostState) c.h = q.hostState;
   return c;
 }
 
@@ -221,7 +223,7 @@ function decodeToken(token: string, strict: boolean): QueryState {
     const c = versioned ? unpackQuery(raw) : raw as CompactQuery;
     if (strict && c.w) {
       if (c.w.some((term: WhereTerm) => !term || typeof term !== "object")) throw new QueryDecodeError("invalid", "Invalid query predicates.");
-      const count = c.w.reduce((n: number, term: WhereTerm) => n + predicatesOf(term).length, 0);
+      const count = c.w.reduce((n: number, term: WhereTerm) => n + suppliedPredicateCount(term), 0);
       const normalized = normalizeQueryState({ where: c.w });
       const normalizedCount = normalized.where.reduce((n, term) => n + predicatesOf(term).length, 0);
       if (count > 100 || count !== normalizedCount || c.w.some((term: WhereTerm) => predicatesOf(term).some(clause =>
@@ -238,7 +240,11 @@ function decodeToken(token: string, strict: boolean): QueryState {
       itemDetails: c.d,
       fitToScreen: c.fs,
       grouping: c.b,
+      hostState: c.h,
     });
+    if (strict && c.h !== undefined) {
+      try { parseHostQueryState(c.h); } catch { throw new QueryDecodeError("invalid", "Invalid host state in query link."); }
+    }
     if (strict && c.g && out.aggregations?.length !== c.g.length) throw new QueryDecodeError("invalid", "Invalid query metrics.");
     return out;
   } catch (error) {
@@ -284,6 +290,9 @@ export interface ServerQuery {
   orderBy: OrderByClause[];
   limit: number;
   offset: number;
+  /** The table's host-owned state when `hostQuery` is configured; hosts run
+   *  their own clauses from it. Query Table does not interpret it. */
+  hostState?: HostQueryState;
 }
 
 /** Project a QueryState into the server request, dropping client-only filters,
@@ -355,6 +364,8 @@ function termIsPushdown<Row>(
  *  metrics describe every matching row, not the visible page. Mirrors the Go
  *  AggSpec list. */
 export interface AggregationRequest {
+  /** The table's host-owned state when `hostQuery` is configured. */
+  hostState?: HostQueryState;
   diagnostics?: MetricDiagnostic[];
   where: WhereTerm[];
   aggregations: AggregationClause[];
@@ -378,6 +389,9 @@ export interface AggregationBucket {
   /** Calendar intervals combined into a windowed point (`AggregationClause.window`);
    *  fewer than its periods where the window starts before the first interval. */
   intervals?: number;
+  /** Occurrences summarised by a cyclic slot (`dateGrouping.occurrence`):
+   *  those with a value, the samples of its mean and box. */
+  occurrences?: number;
   /** The metric: a number for count/sum/avg, or the column's value for min/max
    *  (which may be a string for text/datetime). null when undefined (e.g. avg of
    *  an all-null column). */
@@ -414,7 +428,7 @@ export interface AggregationResult {
  *  unknown field are dropped — the server has no SQL for them. */
 export function toAggregationQuery<Row>(q: QueryState, schema: FieldSchema<Row>): AggregationRequest {
   if (q.grouping) throw new Error("Metrics over grouped rows require grouped-query execution.");
-  const suppliedPredicateCount = q.where.reduce((n,t)=>n+predicatesOf(t).length,0);
+  const suppliedCount = q.where.reduce((n,t)=>n+predicatesOf(t).length,0);
   q = normalizeQueryState(q);
   if (q.aggregations?.some(a => a.dateGrouping)) throw new Error("Date grouping currently requires local metric execution.");
   if (q.aggregations?.some(a => a.diagnostics?.length || a.expression !== undefined || a.expressionY !== undefined || a.distribution || a.scope === "shownRows" || a.sort?.length || a.groupLimit || a.where?.length || a.minCount !== undefined)) throw new Error("Metric definition requires the version 2 metric transport.");
@@ -436,6 +450,6 @@ export function toAggregationQuery<Row>(q: QueryState, schema: FieldSchema<Row>)
 
   const diagnostics: MetricDiagnostic[] = [];
   for (const c of q.aggregations ?? []) if (!aggregations.includes(c)) diagnostics.push({ metricId: c.id, code: "unsupported_metric", message: "Metric requires unavailable backend fields.", from: 0, to: 1 });
-  if (where.length !== q.where.length || suppliedPredicateCount !== q.where.reduce((n,t)=>n+predicatesOf(t).length,0)) diagnostics.push({ code: "residual_filter", message: "All-matching metrics are unavailable with residual client-only filters.", from: 0, to: 1 });
+  if (where.length !== q.where.length || suppliedCount !== q.where.reduce((n,t)=>n+predicatesOf(t).length,0)) diagnostics.push({ code: "residual_filter", message: "All-matching metrics are unavailable with residual client-only filters.", from: 0, to: 1 });
   return { where, aggregations, ...(diagnostics.length ? { diagnostics } : {}) };
 }

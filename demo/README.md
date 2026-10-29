@@ -48,6 +48,24 @@ With the dev server running, `npm run test:cells` checks desktop/mobile search,
 copying, detail surfaces, property editing, and shared-link restoration, and
 writes screenshots to `.context/`.
 
+## Chart layout
+
+Open http://localhost:5179/chart-layout for box, bar, pie and line charts with
+long group labels, two-key colors and crossing series. With the dev server
+running, `npm run test:charts` checks in Chromium and WebKit that labels stay
+inside their charts, two-key slices differ in color and clicks inspect the
+nearest point.
+
+## Fitted controls
+
+Open http://localhost:5179/fit-controls for item and grouped tables that fit to
+the screen while their cells hold Detail buttons, JSON previews and group
+links. `npm run test:fit-controls` checks at 1440–320 px in Chromium and WebKit
+that every control stays inside its cell, the table scrolls when controls need
+more than the screen, and Detail focus returns after reload. The grouped table
+also carries group Detail; `npm run test:group-detail` opens, pages, reloads and
+dismisses it and checks an unavailable group.
+
 ## Date metric prototype
 
 Open http://localhost:5179/date-metrics for an isolated metric-definition prototype.

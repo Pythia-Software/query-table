@@ -25,17 +25,35 @@ type SQLiteV2Dataset struct {
 	// Explicit MaxGroups may be 1..100000.
 	// Limits fail explicitly; no approximate or silently truncated populations.
 	MaxRows, MaxGroups, MaxPopulation int
+	// PredicateRelations optionally supplies host relations for base-field
+	// filter predicates in ExecuteV2In rows, populations and metric filters.
+	// Nil compiles every predicate normally. See SQLitePredicateRelations.
+	PredicateRelations SQLitePredicateRelations
+	// SourceGeneration and SourceProofs optionally let executions reuse
+	// facts proven about the whole authorized source; see SQLiteSourceProofs.
+	// Both must be set. SourceGeneration must identify exactly the data
+	// SourceSQL can read in the transaction passed to ExecuteV2In: read it
+	// inside that transaction, for example from a row every writing
+	// transaction advances, and change it whenever any row, table, view or
+	// schema the source reads may have changed. Do not derive it from time or
+	// from a connection-local counter such as PRAGMA data_version. SourceSQL
+	// must be deterministic for a generation and SourceArgs. Empty disables
+	// caching; every execution then proves its own population, as before.
+	SourceGeneration string
+	SourceProofs     *SQLiteSourceProofs
 }
 type SQLiteMetricCapabilities struct {
-	Version        int    `json:"version"`
-	Expressions    bool   `json:"expressions"`
-	ShownRows      bool   `json:"shownRows"`
-	Distributions  bool   `json:"distributions"`
-	ComputedFields bool   `json:"computedFields"`
-	Filters        bool   `json:"filters"`
-	MinCount       bool   `json:"minCount"`
-	MaxGroups      int    `json:"maxGroups"`
-	Profile        string `json:"profile"`
+	Version        int  `json:"version"`
+	Expressions    bool `json:"expressions"`
+	ShownRows      bool `json:"shownRows"`
+	Distributions  bool `json:"distributions"`
+	ComputedFields bool `json:"computedFields"`
+	Filters        bool `json:"filters"`
+	MinCount       bool `json:"minCount"`
+	// MinCountMeasures: a minCount of distinct values or of a summed field.
+	MinCountMeasures bool   `json:"minCountMeasures"`
+	MaxGroups        int    `json:"maxGroups"`
+	Profile          string `json:"profile"`
 }
 
 func (d SQLiteV2Dataset) Capabilities() SQLiteMetricCapabilities {
@@ -43,7 +61,7 @@ func (d SQLiteV2Dataset) Capabilities() SQLiteMetricCapabilities {
 	if groups == 0 {
 		groups = 2000
 	}
-	return SQLiteMetricCapabilities{Version: 2, Expressions: true, ShownRows: true, Distributions: true, ComputedFields: true, Filters: true, MinCount: true, MaxGroups: groups, Profile: SQLiteExpressionProfile}
+	return SQLiteMetricCapabilities{Version: 2, Expressions: true, ShownRows: true, Distributions: true, ComputedFields: true, Filters: true, MinCount: true, MinCountMeasures: true, MaxGroups: groups, Profile: SQLiteExpressionProfile}
 }
 
 type SQLiteValueError struct {
@@ -93,6 +111,9 @@ type SQLiteMetricV2Bucket struct {
 	Error           string                   `json:"error,omitempty"`
 	Y               *any                     `json:"y,omitempty"`
 	YError          string                   `json:"yError,omitempty"`
+	// A measured minCount's value for calendar filtering; never serialized.
+	minMeasure      any
+	minMeasureError bool
 }
 type SQLiteMetricV2 struct {
 	ID            string                 `json:"id"`
@@ -188,6 +209,7 @@ func (d SQLiteV2Dataset) ExecuteV2In(ctx context.Context, tx *sql.Tx, rows *Serv
 		}
 	}
 	o = d.options(tx, o)
+	o.relations = newSQLiteRelations(ctx, tx, d.PredicateRelations)
 	var rowPlan SQLPlan
 	var batch MetricBatchPlan
 	var failures []error
@@ -223,7 +245,7 @@ func (d SQLiteV2Dataset) ExecuteV2In(ctx context.Context, tx *sql.Tx, rows *Serv
 	}
 	// Bound the population before expensive formulas, sorting and reductions. The
 	// count itself scans at most budget+1 source rows in the authorized snapshot.
-	filter, e := CompileSQLiteWhere(where, d.Schema, SQLiteOptions{Now: o.Now})
+	filter, _, e := compileSQLiteWhere(where, d.Schema, SQLiteOptions{Now: o.Now}, o.relations)
 	if e != nil {
 		return out, e
 	}
@@ -233,12 +255,41 @@ func (d SQLiteV2Dataset) ExecuteV2In(ctx context.Context, tx *sql.Tx, rows *Serv
 	}
 	countSQL := "SELECT COUNT(*) FROM (SELECT 1 FROM (" + d.SourceSQL + ") AS r" + pred + fmt.Sprintf(" LIMIT %d)", maxPopulation+1)
 	args := append(append([]any{}, d.SourceArgs...), filter.Args...)
-	var total int64
-	if e = tx.QueryRowContext(ctx, countSQL, args...).Scan(&total); e != nil {
-		return out, e
+	proofs := d.sourceProofScope(maxPopulation)
+	total, counted := int64(0), false
+	_, bounded := proofs.rows()
+	if filter.SQL == "" {
+		// An unfiltered population is the whole source this generation counted.
+		total, counted = proofs.rows()
+	}
+	// When this generation's whole source is within the budget, so is every
+	// filtered subset. Metrics then count their population only when one
+	// needs it, preferably from a fused integer reduction over it.
+	deferred := !counted && bounded && rows == nil
+	if !counted && !deferred {
+		if e = tx.QueryRowContext(ctx, countSQL, args...).Scan(&total); e != nil {
+			return out, e
+		}
+		counted = true
 	}
 	if total > int64(maxPopulation) {
 		return out, diagnostic("resource_limit", "matching population exceeds host budget")
+	}
+	reduced := int64(-1)
+	population := func() (int64, error) {
+		if !counted && reduced >= 0 {
+			total, counted = reduced, true
+		}
+		if !counted {
+			if err := tx.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
+				return 0, err
+			}
+			counted = true
+		}
+		if total > int64(maxPopulation) {
+			return 0, diagnostic("resource_limit", "matching population exceeds host budget")
+		}
+		return total, nil
 	}
 	// The frontend validates every revision in its handshake, including fields
 	// hidden in this view. Resolve and check the complete requested envelope.
@@ -278,6 +329,10 @@ func (d SQLiteV2Dataset) ExecuteV2In(ctx context.Context, tx *sql.Tx, rows *Serv
 		r := SQLiteMetricsV2Result{Metrics: []SQLiteMetricV2{}}
 		memo := map[string]SQLiteMetricV2{}
 		reductions := newSQLiteReductionCache(batch)
+		reductions.proofs = proofs
+		if !counted {
+			reductions.population = &reduced
+		}
 		reductions.addCrossFields(ctx, batch, *metrics, d.Schema, o)
 		defer func() {
 			if cleanupErr := reductions.close(tx); cleanupErr != nil {
@@ -302,13 +357,24 @@ func (d SQLiteV2Dataset) ExecuteV2In(ctx context.Context, tx *sql.Tx, rows *Serv
 				continue
 			}
 			created := reductions.mark()
+			var populationErr error
 			m, err := isolateMetric(ctx, tx, p.ID, p.Scope, func() (SQLiteMetricV2, error) {
 				p, err := reductions.plan(ctx, tx, p)
 				if err != nil {
 					return SQLiteMetricV2{}, err
 				}
+				total, err := population()
+				if err != nil {
+					populationErr = err
+					return SQLiteMetricV2{}, err
+				}
 				return d.readV2Metric(ctx, tx, p, spec, total, *metrics, maxGroups)
 			})
+			if populationErr != nil {
+				// A deferred population failure fails the request, as the
+				// preflight count would have.
+				return SQLiteV2ExecutionResult{}, populationErr
+			}
 			if err != nil {
 				return SQLiteV2ExecutionResult{}, err
 			}
@@ -464,7 +530,7 @@ func (d SQLiteV2Dataset) readV2Metric(ctx context.Context, tx *sql.Tx, p MetricS
 			v[k] = values[i]
 		}
 		hidden := int64(0)
-		if spec.MinCount > 0 {
+		if spec.MinCount.Active() {
 			var ok bool
 			if hidden, ok = v["hidden_groups"].(int64); !ok {
 				return out, fmt.Errorf("missing hidden group count")
@@ -491,6 +557,11 @@ func (d SQLiteV2Dataset) readV2Metric(ctx context.Context, tx *sql.Tx, p MetricS
 			v[c.ValueAlias] = typedQueryValue(v[c.ValueAlias], c.Type)
 		}
 		b := SQLiteMetricV2Bucket{Keys: []any{}, Value: v["value"], Count: v["count"].(int64), Error: sqliteErrorCode(v["error"])}
+		// Calendar metrics compile a measured minimum without Min and hide
+		// groups themselves, after filling empty intervals.
+		if measure, ok := v["min_measure"]; ok && !spec.MinCount.Active() {
+			b.minMeasure, b.minMeasureError = measure, v["min_measure_error"] != nil
+		}
 		for i := range spec.GroupBy {
 			key := v[fmt.Sprintf("group%d", i)]
 			b.Keys = append(b.Keys, key)

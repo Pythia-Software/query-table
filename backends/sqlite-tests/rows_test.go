@@ -228,8 +228,11 @@ func TestRowsMetricsDifferential(t *testing.T) {
 			if i%5 == 0 {
 				spec.Where = []qt.WhereTerm{{Field: "n2", Op: "!=", Value: "0"}}
 			}
+			if len(spec.GroupBy) > 0 && i%6 == 3 {
+				spec.MinCount = []qt.MetricMinCount{{Min: 2, Distinct: "text"}, {Min: 2, Sum: "n"}, {Min: 1, Distinct: "stamp"}}[j%3]
+			}
 			if len(spec.GroupBy) > 0 && i%6 == 0 {
-				spec.MinCount = 3
+				spec.MinCount = qt.MetricMinCount{Min: 3}
 			}
 			if i%7 == 0 {
 				spec.GroupLimit = 2
@@ -265,7 +268,11 @@ func TestRowsErrorsAndBudgets(t *testing.T) {
 			d.MaxPopulation = 0
 			d.MaxGroups = 1
 			compareMemory(t, tx, d, rows, q, qt.PlanOptions{})
-			q.Metrics[6].MinCount = 2
+			q.Metrics[6].MinCount = qt.MetricMinCount{Min: 2}
+			compareMemory(t, tx, d, rows, q, qt.PlanOptions{})
+			q.Metrics[6].MinCount = qt.MetricMinCount{Min: 2, Sum: "n"}
+			compareMemory(t, tx, d, rows, q, qt.PlanOptions{})
+			q.Metrics[6].MinCount = qt.MetricMinCount{Min: 1, Distinct: "n"}
 			compareMemory(t, tx, d, rows, q, qt.PlanOptions{})
 		})
 	}
@@ -355,7 +362,7 @@ func TestRowsValidationAndRevisions(t *testing.T) {
 	}
 	// Invalid clauses retain the adapter's per-metric failure envelopes.
 	q := base
-	q.Metrics = []qt.AggSpec{{ID: "good", Op: "count"}, {ID: "bad", Op: "sum", Field: "text"}, {ID: "sort", Op: "count", Sort: []qt.MetricSort{{Key: "wrong", Dir: "asc"}}}, {ID: "min", Op: "count", MinCount: 2}, {ID: "regex", Op: "count", Where: []qt.WhereTerm{{Field: "text", Op: "matches_regex", Value: "x"}}}}
+	q.Metrics = []qt.AggSpec{{ID: "good", Op: "count"}, {ID: "bad", Op: "sum", Field: "text"}, {ID: "sort", Op: "count", Sort: []qt.MetricSort{{Key: "wrong", Dir: "asc"}}}, {ID: "min", Op: "count", MinCount: qt.MetricMinCount{Min: 2}}, {ID: "regex", Op: "count", Where: []qt.WhereTerm{{Field: "text", Op: "matches_regex", Value: "x"}}}}
 	compareMemory(t, tx, d, rows, q, qt.PlanOptions{})
 	calls := 0
 	resolver := qt.DefinitionResolverFunc(func(_ context.Context, id string) (qt.ComputedColumn, error) {

@@ -2,6 +2,7 @@ package querytable
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -38,6 +39,8 @@ type MetricQuery struct {
 	Offset            int               `json:"offset"`
 	Metrics           []AggSpec         `json:"metrics"`
 	Diagnostics       []any             `json:"diagnostics,omitempty"`
+	// HostState is the table's host-owned query state; see ServerQueryV2.
+	HostState json.RawMessage `json:"hostState,omitempty"`
 }
 type MetricSQLPlan struct {
 	ID string
@@ -168,8 +171,11 @@ func compileMetricOutputs(ctx context.Context, q MetricQuery, spec AggSpec, s Sc
 			}
 		}
 	}
-	if spec.MinCount > 0 && len(spec.GroupBy) == 0 {
+	if spec.MinCount.Active() && len(spec.GroupBy) == 0 {
 		return SQLPlan{}, diagnostic("min_count_grouping", "minCount requires at least one grouping field")
+	}
+	if e = validateMinCountMeasure(spec, s); e != nil {
+		return SQLPlan{}, e
 	}
 	scope := spec.Scope
 	if scope == "" {
@@ -368,6 +374,17 @@ func compileMetricOutputs(ctx context.Context, q MetricQuery, spec AggSpec, s Sc
 			return SQLPlan{}, diagnostic("aggregate_required", "paired expression must contain an aggregate")
 		}
 	}
+	// A measured minCount is one more reduction, shared with an identical
+	// aggregate in the metric itself (and with fused siblings).
+	var minNode *exprNode
+	if measure := spec.MinCount.Measure(); measure != "" {
+		if minNode, e = parseExpression(measure); e != nil {
+			return SQLPlan{}, e
+		}
+		if e = collect(minNode); e != nil {
+			return SQLPlan{}, e
+		}
+	}
 	selectGroups, by := groupSQL(groups)
 	for i := range groups {
 		name := fmt.Sprintf("group%d", i)
@@ -444,6 +461,10 @@ func compileMetricOutputs(ctx context.Context, q MetricQuery, spec AggSpec, s Sc
 	if y != nil {
 		fields = append(fields, yv.Value+" AS y", yv.Error+" AS y_error")
 	}
+	if minNode != nil {
+		leaf := leaves[minNode]
+		fields = append(fields, leaf.Value+" AS min_measure", leaf.Error+" AS min_measure_error")
+	}
 	b.stage("SELECT " + strings.Join(fields, ",") + " FROM " + b.rel)
 	order, e := metricOrder(spec, len(groups), y != nil, false)
 	if e != nil {
@@ -481,7 +502,9 @@ func compileMetricOutputs(ctx context.Context, q MetricQuery, spec AggSpec, s Sc
 }
 
 // metricResult ranks and limits reduced groups. MinCount first removes groups
-// below the threshold; group_count then counts only the kept groups. The kept
+// below the threshold: their count, or their min_measure for a measured
+// minimum (kept when that measure is an error); group_count then counts only
+// the kept groups. The kept
 // rows are LEFT JOINed to a one-row hidden_groups count, so a result whose
 // every group is hidden still returns that count in one row whose count is
 // NULL (no bucket). Hidden groups never reach the ranking, LIMIT or Other.
@@ -490,13 +513,22 @@ func (b *planBuilder) metricResult(spec AggSpec, order string) string {
 	if spec.GroupLimit > 0 {
 		limit = " LIMIT " + b.param(spec.GroupLimit, "integer")
 	}
-	if spec.MinCount <= 0 {
+	if !spec.MinCount.Active() {
 		return "SELECT *,COUNT(*) OVER () AS group_count FROM " + b.rel + order + limit
 	}
 	groups := b.rel
-	threshold := b.param(spec.MinCount, "bigint")
-	b.stage("SELECT *,COUNT(*) OVER () AS group_count FROM " + groups + " WHERE count>=" + threshold)
-	return "SELECT k.*,h.hidden_groups FROM (SELECT COUNT(*) AS hidden_groups FROM " + groups + " WHERE count<" + threshold + ") AS h LEFT JOIN " + b.rel + " AS k ON 1=1" + order + limit
+	threshold := b.param(spec.MinCount.Min, "bigint")
+	keep, hide := "count>="+threshold, "count<"+threshold
+	if spec.MinCount.Measure() != "" {
+		real := "double precision"
+		if b.sqlite {
+			real = "REAL"
+		}
+		keep = "(min_measure_error IS NOT NULL OR COALESCE(CAST(min_measure AS " + real + "),0)>=" + threshold + ")"
+		hide = "NOT " + keep
+	}
+	b.stage("SELECT *,COUNT(*) OVER () AS group_count FROM " + groups + " WHERE " + keep)
+	return "SELECT k.*,h.hidden_groups FROM (SELECT COUNT(*) AS hidden_groups FROM " + groups + " WHERE " + hide + ") AS h LEFT JOIN " + b.rel + " AS k ON 1=1" + order + limit
 }
 func groupSQL(groups []ValueSQL) ([]string, string) {
 	sels := []string{}

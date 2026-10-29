@@ -53,8 +53,8 @@ func CompileAt(q WireQuery, schema Schema, startIdx int, now time.Time) (Compile
 		return res, idx, fmt.Errorf("invalid query: %w", err)
 	}
 
-	// WHERE — conjunctive normal form: the AND of terms, each a single predicate
-	// or an OR group of predicates.
+	// WHERE — the AND of terms, each a single predicate or an OR group whose
+	// members are predicates or AND branches of predicates.
 	clauses := make([]string, 0, len(q.Where))
 	for _, term := range q.Where {
 		var (
@@ -324,18 +324,30 @@ func compileLiteral(c WhereClause, schema Schema, idx int, reference ...time.Tim
 	return sql, args, next, nil
 }
 
-// compileOrGroup compiles a disjunction: `(p1) OR (p2) OR ...`. Every member is
+// compileOrGroup compiles a disjunction: `(p1) OR (p2) OR ...`. A member may be
+// an {"all": [...]} branch, compiled as `((a) AND (b))`. Every member is
 // validated (so an unknown field or disabled op is reported) even when the group
-// is dropped. If any disjunct is an always-true no-op (empty value), the whole
-// group is always true and is dropped — mirroring applyQuery, where an
-// always-true member short-circuits the OR to "match everything".
+// is dropped. If any disjunct is an always-true no-op (empty value, or a branch
+// of only such literals), the whole group is always true and is dropped —
+// mirroring applyQuery, where an always-true member short-circuits the OR to
+// "match everything".
 func compileOrGroup(lits []WhereClause, schema Schema, idx int, reference ...time.Time) (string, []any, int, error) {
 	start := idx
 	parts := make([]string, 0, len(lits))
 	var args []any
 	alwaysTrue := false
 	for _, c := range lits {
-		sql, a, next, err := compileLiteral(c, schema, idx, reference...)
+		var (
+			sql  string
+			a    []any
+			next int
+			err  error
+		)
+		if c.IsConjunction() {
+			sql, a, next, err = compileConjunction(c.All, schema, idx, reference...)
+		} else {
+			sql, a, next, err = compileLiteral(c, schema, idx, reference...)
+		}
 		if err != nil {
 			return "", nil, start, err
 		}
@@ -351,6 +363,34 @@ func compileOrGroup(lits []WhereClause, schema Schema, idx int, reference ...tim
 		return "", nil, start, nil
 	}
 	return strings.Join(parts, " OR "), args, idx, nil
+}
+
+// compileConjunction compiles one AND branch of an OR group: `(a) AND (b)`.
+// An always-true literal (empty value) drops out of the AND; a branch of only
+// such literals is always true and returns "".
+func compileConjunction(lits []WhereClause, schema Schema, idx int, reference ...time.Time) (string, []any, int, error) {
+	start := idx
+	parts := make([]string, 0, len(lits))
+	var args []any
+	for _, c := range lits {
+		if c.IsConjunction() {
+			return "", nil, start, fmt.Errorf("filter AND branches cannot nest")
+		}
+		sql, a, next, err := compileLiteral(c, schema, idx, reference...)
+		if err != nil {
+			return "", nil, start, err
+		}
+		if sql == "" {
+			continue
+		}
+		parts = append(parts, "("+sql+")")
+		args = append(args, a...)
+		idx = next
+	}
+	if len(parts) == 0 {
+		return "", nil, start, nil
+	}
+	return strings.Join(parts, " AND "), args, idx, nil
 }
 
 func compileWhere(spec FieldSpec, op, value string, idx int, reference ...time.Time) (string, []any, int, error) {
@@ -611,7 +651,7 @@ func safeIdent(name string) string {
 
 // validateBasicMetricShape guards v1 entry points against dropping v2 intent.
 func validateBasicMetricShape(spec AggSpec) error {
-	if spec.DateGrouping != nil || spec.Expression != "" || spec.ExpressionY != "" || spec.Distribution != nil || (spec.Scope != "" && spec.Scope != "allMatching") || len(spec.Sort) > 0 || spec.GroupLimit != 0 || len(spec.Where) > 0 || spec.MinCount != 0 || len(spec.Diagnostics) > 0 || (spec.Display != nil && spec.Display.Kind == "scatter") {
+	if spec.DateGrouping != nil || spec.Expression != "" || spec.ExpressionY != "" || spec.Distribution != nil || (spec.Scope != "" && spec.Scope != "allMatching") || len(spec.Sort) > 0 || spec.GroupLimit != 0 || len(spec.Where) > 0 || spec.MinCount != (MetricMinCount{}) || len(spec.Diagnostics) > 0 || (spec.Display != nil && spec.Display.Kind == "scatter") {
 		return fmt.Errorf("modern metrics require CompileMetrics")
 	}
 	return nil

@@ -85,6 +85,72 @@ Update only when `api.saved.canUpdate` is true. Optional last/default storage re
 failures fall back to table defaults; explicit broken URL links still block
 execution. A single empty `?q=` is treated as an absent query.
 
+### Host query state
+
+A host that adds its own clauses to the builder (for example a keyword
+condition rendered through the `whereRow` slot) can register their state so
+the native Save, Update, Saved, Default, Share, Reset and Undo/Redo controls
+treat it and the table query as one definition:
+
+```ts
+const api = useQueryTable({
+  schema, transport, syncUrl: true,
+  hostQuery: {
+    ownedParameters: ["record_tool_calls"],          // mirrored in the URL
+    defaults: { version: 1, params: {} },             // legacy saves and Reset
+    normalize: normalizeKeywordState,                 // validate, migrate; throw to reject
+  },
+});
+api.definition;                                       // { query, hostState }
+api.setDefinition(previous => ({ query: { ...previous.query, offset: 0 }, hostState: next }));
+```
+
+`hostState` is `{ version, params: Record<string, string[]> }`. It rides in
+`QueryState.hostState`, so history, saves, `encodeQuery` links and durable
+`@…` snapshots carry it with the query, within the existing size budgets.
+Every request the table sends carries the `hostState` it runs with
+(`ServerQuery`, `ServerQueryV2`, `QueryRequestV3`, `MetricQuery`,
+`AggregationRequest` and distinct-value requests), so the host's transport
+never sees one definition's table query with another's host state; the Go
+request types accept and expose it without interpreting it.
+
+- One `setDefinition` is one history entry and one execution. Edits through
+  `setQuery` keep the current host state unless they set one.
+- A save without host state, including every existing save, restores the
+  host `defaults`. Saved items compare as the definitions they load.
+- `normalize` rejecting a state, or unreadable host state, fails the whole
+  restore or load: the live definition and URL stay as they were, and
+  `saved.load` throws. A table without `hostQuery` rejects a save that carries
+  host state rather than drop it.
+- URL writes replace exactly `ownedParameters` and keep other parameters. A
+  table-only link restores host state from those parameters, and a URL with
+  only those parameters opens the default table query with that host state
+  (an explicit link: a rejected state is a restoration error).
+- Grouping, HAVING and column edits keep the host state; it stays on the
+  grouped query, and leaving grouping or following a Records drill-down
+  carries it back to the source query.
+- Storage must set `storesHostState: true` (the built-in adapters do) to save
+  or persist last-used definitions; otherwise Save reports that it cannot,
+  instead of storing a table-only query.
+
+### Last-used query and execution receipts
+
+By default the last-used query is saved 400 ms after every change, even if it
+never loads. `persistLast: "succeeded"` saves it only once rows and every
+metric of that exact query have loaded, so a bare reload never restores a
+query that failed, timed out or was cancelled; the failed query stays on
+screen to retry or reset. Explicit links, named saves and the default saved
+query are separate choices and are unaffected.
+
+`api.execution` reports the current query's execution apart from
+`api.restoration`: the exact `query`, an execution `key` and increasing
+`generation`, an overall `status` (`running`, `succeeded`, `failed`) and
+separate `rows` and `metrics` statuses with the `error`. An empty result,
+including a page past the end, is a success; a metric that fails while rows
+load is not. A slower earlier execution never updates a later receipt, and
+the receipt is `null` while restoring or inactive. Hosts can use it to build
+their own persistence, retry or reset policies.
+
 Item-detail property views hydrate independently, but synchronize into the
 collection query only after URL/saved-query restoration settles. Detail layouts
 encoded in the restored query take precedence over stored property views.

@@ -2,9 +2,11 @@
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
-import type {
-  AggregationClause,
-  FieldDef,
+import {
+  validateMetric,
+  type AggregationClause,
+  type FieldDef,
+  type FieldSchema,
 } from "@pythia-software/query-table-core";
 import type { QueryTableApi } from "@pythia-software/query-table-react";
 import { MetricsEditor } from "../src/MetricsEditor";
@@ -872,7 +874,7 @@ it("edits a metric's own filter and minimum rows per group without touching the 
     expect(scoped.querySelectorAll(".qt-chip--where")).toHaveLength(2);
     act(() => scoped.querySelector<HTMLButtonElement>('[aria-label="Remove Kind filter"]')!.click());
     expect(scoped.querySelectorAll(".qt-chip--where")).toHaveLength(1);
-    editInput(host.querySelector('[aria-label="Minimum rows per group"]')!, "3");
+    editInput(host.querySelector('[aria-label="Minimum per group"]')!, "3");
     expect(host.textContent).toContain("at least 3 rows");
     expect(host.textContent).toContain("only rows where 1 filter matches");
     act(() => [...host.querySelectorAll("button")].find((b) => b.textContent === "Apply metrics")!.click());
@@ -881,6 +883,96 @@ it("edits a metric's own filter and minimum rows per group without touching the 
     expect(next.aggregations).toEqual([
       { id: "m", op: "count", groupBy: ["kind"], minCount: 3, where: [{ field: "status", op: "=", value: "error" }] },
     ]);
+  } finally {
+    act(() => root.unmount());
+    host.remove();
+  }
+});
+
+it("disables minimum choices validation would reject for the metric", async () => {
+  const host = document.createElement("div");
+  document.body.append(host);
+  let root = createRoot(host);
+  const fields: FieldDef<unknown>[] = [
+    { name: "at", label: "At", type: "datetime", source: { kind: "backend" } },
+    { name: "tool", label: "Tool", type: "text", source: { kind: "backend" } },
+    { name: "calls", label: "Calls", type: "number", source: { kind: "backend" } },
+  ];
+  const render = async (clause: AggregationClause) => {
+    const api = {
+      aggregations: { clauses: [clause] },
+      setQuery: vi.fn(), rows: [], total: 0,
+      query: { where: [], select: [], orderBy: [], limit: 100, offset: 0 },
+      filterValues: vi.fn(async () => ({ values: [], hasMore: false })),
+    } as unknown as QueryTableApi<unknown>;
+    // A fresh editor per metric, so each opens with that metric selected.
+    act(() => root.unmount());
+    root = createRoot(host);
+    await act(async () => root.render(createElement(MetricsEditor, { api, fields, onClose: vi.fn() })));
+    const select = host.querySelector<HTMLSelectElement>('[aria-label="Minimum counts"]')!;
+    return Object.fromEntries([...select.options].map((o) => [o.value, o.disabled]));
+  };
+  try {
+    // A box counts rows only.
+    expect(await render({ id: "b", op: "sum", field: "calls", groupBy: ["tool"], minCount: 2, distribution: { kind: "box", input: "calls" }, display: { kind: "box" } }))
+      .toEqual({ rows: false, "distinct:at": true, "distinct:tool": true, "distinct:calls": true, "sum:calls": true });
+    // A window cannot combine distinct values, but sums add up.
+    const windowed = await render({ id: "w", op: "sum", field: "calls", groupBy: ["at"], minCount: 2, window: { periods: 7 },
+      dateGrouping: { field: "at", interval: "day", includeEmpty: true, range: "observed" } });
+    expect(windowed["distinct:tool"]).toBe(true);
+    expect(windowed["sum:calls"]).toBe(false);
+    // The current choice stays selectable even where it is no longer valid.
+    expect((await render({ id: "c", op: "sum", field: "calls", groupBy: ["tool"], minCount: { min: 2, sum: "calls" },
+      distribution: { kind: "box", input: "calls" }, display: { kind: "box" } }))["sum:calls"]).toBe(false);
+  } finally {
+    act(() => root.unmount());
+    host.remove();
+  }
+});
+
+it("counts a minimum over rows, distinct values or a sum, and keeps an unlisted field", async () => {
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const setQuery = vi.fn();
+  const fields: FieldDef<unknown>[] = [
+    { name: "tool", label: "Tool", type: "text", source: { kind: "backend" } },
+    { name: "conversation", label: "Conversation", type: "text", source: { kind: "backend" } },
+    { name: "calls", label: "Calls", type: "number", source: { kind: "backend" } },
+  ];
+  const api = {
+    aggregations: { clauses: [
+      { id: "m", op: "count", groupBy: ["tool"], minCount: { min: 4, distinct: "conversation" } },
+      { id: "n", op: "count", groupBy: ["tool"], minCount: { min: 2, sum: "gone" } },
+    ] satisfies AggregationClause[] },
+    setQuery,
+    rows: [],
+    total: 0,
+    query: { where: [], select: [], orderBy: [], limit: 100, offset: 0 },
+    filterValues: vi.fn(async () => ({ values: [], hasMore: false })),
+  } as unknown as QueryTableApi<unknown>;
+  const choose = (value: string) => {
+    const select = host.querySelector<HTMLSelectElement>('[aria-label="Minimum counts"]')!;
+    act(() => { select.value = value; select.dispatchEvent(new Event("change", { bubbles: true })); });
+  };
+  try {
+    await act(async () => root.render(createElement(MetricsEditor, { api, fields, onClose: vi.fn() })));
+    expect(host.textContent).toContain("at least 4 distinct Conversation values");
+    const select = host.querySelector<HTMLSelectElement>('[aria-label="Minimum counts"]')!;
+    expect([...select.options].map((o) => o.textContent)).toEqual(["Rows", "Distinct Tool", "Distinct Conversation", "Distinct Calls", "Sum of Calls"]);
+    expect(select.value).toBe("distinct:conversation");
+    choose("sum:calls");
+    editInput(host.querySelector('[aria-label="Minimum per group"]')!, "10");
+    expect(host.textContent).toContain("at least 10 total Calls");
+    act(() => [...host.querySelectorAll("button")].find((b) => b.textContent === "Apply metrics")!.click());
+    let saved = setQuery.mock.calls.at(-1)![0]({ where: [] }).aggregations;
+    expect(saved[0].minCount).toEqual({ min: 10, sum: "calls" });
+    // A field the editor does not list stays selected rather than being dropped.
+    expect(saved[1].minCount).toEqual({ min: 2, sum: "gone" });
+    choose("rows");
+    act(() => [...host.querySelectorAll("button")].find((b) => b.textContent === "Apply metrics")!.click());
+    saved = setQuery.mock.calls.at(-1)![0]({ where: [] }).aggregations;
+    expect(saved[0].minCount).toBe(10);
   } finally {
     act(() => root.unmount());
     host.remove();
@@ -1015,5 +1107,92 @@ it("clears a window and share when the display changes to one that cannot use th
     expect(saved.window).toBeUndefined();
     expect(saved.share).toBeUndefined();
     expect(saved.display).toEqual({ kind: "box" });
+  } finally { act(() => root.unmount()); host.remove(); }
+});
+
+it("drops settings a per-slot summary or a distribution would reject", async () => {
+  const host = document.createElement("div"); document.body.append(host);
+  const root = createRoot(host), setQuery = vi.fn();
+  const fields: FieldDef<unknown>[] = [
+    { name: "at", label: "At", type: "datetime", source: { kind: "backend" }, aggregate: { groupable: true } },
+    { name: "tool", label: "Tool", type: "text", source: { kind: "backend" }, aggregate: { groupable: true } },
+    { name: "calls", label: "Calls", type: "number", source: { kind: "backend" } },
+  ];
+  const slots: AggregationClause = {
+    id: "s", op: "sum", field: "calls", groupBy: ["at", "tool"], display: { kind: "table" }, share: "group0",
+    minCount: { min: 5, distinct: "tool" },
+    dateGrouping: { field: "at", interval: "dayOfWeek", includeEmpty: true, range: "observed" },
+  };
+  const bars: AggregationClause = { id: "b", op: "sum", field: "calls", groupBy: ["tool"], display: { kind: "bar-horizontal" }, minCount: { min: 9, sum: "calls" } };
+  const api = { aggregations: { clauses: [slots, bars] }, setQuery, rows: [], total: 0, query: { where: [] } } as unknown as QueryTableApi<unknown>;
+  const choose = (label: string, value: string) => act(() => {
+    const select = host.querySelector<HTMLSelectElement>(`[aria-label="${label}"]`)!;
+    select.value = value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  const saved = () => {
+    act(() => [...host.querySelectorAll("button")].find((b) => b.textContent === "Apply metrics")!.click());
+    return setQuery.mock.calls.at(-1)![0]({ where: [] }).aggregations as AggregationClause[];
+  };
+  const schema = { name: "calls", idField: "at", fields } as FieldSchema;
+  try {
+    await act(async () => root.render(createElement(MetricsEditor, { api, fields, onClose: vi.fn() })));
+    choose("Summarise each slot", "day");
+    const [slot] = saved();
+    expect(slot!.share).toBeUndefined();
+    expect(slot!.minCount).toBe(5);
+    expect(validateMetric(slot!, schema)).toEqual([]);
+    // Select the bar metric, then make it a box.
+    choose("Editing metric", "b");
+    choose("Metric display", "box");
+    const box = saved()[1]!;
+    expect(box.minCount).toBe(9);
+    expect(validateMetric(box, schema)).toEqual([]);
+  } finally { act(() => root.unmount()); host.remove(); }
+});
+
+it("offers hour-of-day and day-of-week slots with per-occurrence summaries", async () => {
+  const host = document.createElement("div"); document.body.append(host);
+  const root = createRoot(host), setQuery = vi.fn();
+  const fields: FieldDef<unknown>[] = [
+    { name: "at", label: "At", type: "datetime", source: { kind: "backend" }, aggregate: { groupable: true } },
+    { name: "tokens", label: "Tokens", type: "number", source: { kind: "backend" } },
+  ];
+  const clause: AggregationClause = {
+    id: "m", op: "count", groupBy: ["at"], display: { kind: "line" }, window: { periods: 3 },
+    dateGrouping: { field: "at", interval: "day", includeEmpty: true, range: "query", timeZone: "Asia/Kolkata" },
+  };
+  const api = { aggregations: { clauses: [clause] }, setQuery, rows: [], total: 0, query: { where: [] } } as unknown as QueryTableApi<unknown>;
+  const choose = (label: string, value: string) => act(() => {
+    const select = host.querySelector<HTMLSelectElement>(`[aria-label="${label}"]`)!;
+    select.value = value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  const saved = () => {
+    act(() => [...host.querySelectorAll("button")].find((b) => b.textContent === "Apply metrics")!.click());
+    return setQuery.mock.calls.at(-1)![0]({ where: [] }).aggregations[0] as AggregationClause;
+  };
+  try {
+    await act(async () => root.render(createElement(MetricsEditor, { api, fields, onClose: vi.fn() })));
+    const intervals = [...host.querySelector<HTMLSelectElement>('[aria-label="Date interval"]')!.options].map((o) => o.value);
+    expect(intervals).toEqual(["exact", "hour", "day", "week", "month", "year", "hourOfDay", "dayOfWeek"]);
+    expect(host.querySelector('[aria-label="Summarise each slot"]')).toBeNull();
+    choose("Date interval", "dayOfWeek");
+    // Slots have no window; the timezone is kept.
+    expect(host.querySelector('[aria-label="Window"]')).toBeNull();
+    const weekly = saved();
+    expect(weekly.window).toBeUndefined();
+    expect(weekly.dateGrouping).toMatchObject({ interval: "dayOfWeek", timeZone: "Asia/Kolkata" });
+    choose("Summarise each slot", "day");
+    expect(host.querySelector<HTMLInputElement>('[aria-label="Whole intervals only"]')!.disabled).toBe(true);
+    expect(saved().dateGrouping).toMatchObject({ occurrence: { interval: "day", includeEmpty: true } });
+    act(() => host.querySelector<HTMLInputElement>('[aria-label="Count idle occurrences"]')!.click());
+    expect(saved().dateGrouping?.occurrence).toEqual({ interval: "day", includeEmpty: false });
+    // Hour-of-day slots occur hourly.
+    choose("Date interval", "hourOfDay");
+    expect([...host.querySelector<HTMLSelectElement>('[aria-label="Summarise each slot"]')!.options].map((o) => o.value)).toEqual(["rows", "hour"]);
+    expect(saved().dateGrouping?.occurrence).toEqual({ interval: "hour", includeEmpty: false });
+    choose("Date interval", "day");
+    expect(saved().dateGrouping?.occurrence).toBeUndefined();
   } finally { act(() => root.unmount()); host.remove(); }
 });

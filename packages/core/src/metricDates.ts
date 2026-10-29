@@ -1,6 +1,10 @@
 import { coerceValue } from "./ops";
-import { isOrGroup, type QueryState } from "./query";
-import type { MetricDateGrouping, MetricValue } from "./metricTypes";
+import { isWhereGroup, type QueryState } from "./query";
+import type {
+  MetricCycleInterval,
+  MetricDateGrouping,
+  MetricValue,
+} from "./metricTypes";
 import { Temporal } from "temporal-polyfill";
 
 export const METRIC_DATE_INTERVALS = [
@@ -9,7 +13,54 @@ export const METRIC_DATE_INTERVALS = [
   "week",
   "month",
   "year",
+  "hourOfDay",
+  "dayOfWeek",
 ] as const;
+export const METRIC_CYCLE_INTERVALS = ["hourOfDay", "dayOfWeek"] as const;
+
+/** Whether an interval is cyclic: keyed by slot number, not by date. */
+export function isMetricCycle(
+  interval: string | undefined,
+): interval is MetricCycleInterval {
+  return interval === "hourOfDay" || interval === "dayOfWeek";
+}
+
+/** Every slot of a cyclic interval, in order: 0–23 or 1–7 (ISO, Monday 1). */
+export function metricCycleSlots(interval: MetricCycleInterval): number[] {
+  return interval === "hourOfDay"
+    ? Array.from({ length: 24 }, (_, i) => i)
+    : [1, 2, 3, 4, 5, 6, 7];
+}
+
+/** The calendar interval one occurrence of a slot spans: its hour or day.
+ * Calendar intervals are their own unit. */
+export function metricCalendarUnit(
+  interval: MetricDateGrouping["interval"],
+): Exclude<MetricDateGrouping["interval"], MetricCycleInterval> {
+  return interval === "hourOfDay"
+    ? "hour"
+    : interval === "dayOfWeek"
+      ? "day"
+      : interval;
+}
+
+/** The slot an instant occupies in `timeZone`: its local wall-clock hour
+ * (0–23), or its local ISO weekday (1 = Monday … 7 = Sunday). */
+export function metricCycleSlot(
+  time: number,
+  interval: MetricCycleInterval,
+  timeZone = "UTC",
+): number {
+  if (timeZone === "UTC") {
+    const date = new Date(time);
+    return interval === "hourOfDay"
+      ? date.getUTCHours()
+      : ((date.getUTCDay() + 6) % 7) + 1;
+  }
+  const zoned =
+    Temporal.Instant.fromEpochMilliseconds(time).toZonedDateTimeISO(timeZone);
+  return interval === "hourOfDay" ? zoned.hour : zoned.dayOfWeek;
+}
 
 /** Strict calendar input; timestamps require an explicit offset. */
 export function metricDateTime(value: MetricValue, timeZone = "UTC"): number {
@@ -64,9 +115,10 @@ function metricOffsetTransition(
 
 export function metricDateFloor(
   time: number,
-  interval: MetricDateGrouping["interval"],
+  cycleOrInterval: MetricDateGrouping["interval"],
   timeZone = "UTC",
 ): number {
+  const interval = metricCalendarUnit(cycleOrInterval);
   if (timeZone !== "UTC") {
     const zoned =
       Temporal.Instant.fromEpochMilliseconds(time).toZonedDateTimeISO(timeZone);
@@ -96,9 +148,10 @@ export function metricDateFloor(
 
 export function metricDateNext(
   time: number,
-  interval: MetricDateGrouping["interval"],
+  cycleOrInterval: MetricDateGrouping["interval"],
   timeZone = "UTC",
 ): number {
+  const interval = metricCalendarUnit(cycleOrInterval);
   if (timeZone !== "UTC") {
     const zoned =
       Temporal.Instant.fromEpochMilliseconds(time).toZonedDateTimeISO(timeZone);
@@ -143,6 +196,24 @@ export function metricCustomEndTime(value: string, timeZone = "UTC"): number {
   return value.length === 10 ? metricDateNext(time, "day", timeZone) - 1 : time;
 }
 
+/** An IANA timezone identifier this runtime knows, such as America/Denver or
+ * UTC. Fixed offsets ("+02:00") are refused: they do not follow DST. */
+export function isGroupingTimeZone(value: unknown): value is string {
+  if (
+    typeof value !== "string" ||
+    !value ||
+    value.length > 80 ||
+    /^[+-]/.test(value)
+  )
+    return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function validateDateGrouping(config: MetricDateGrouping): void {
   if (
     typeof config.field !== "string" ||
@@ -155,25 +226,37 @@ export function validateDateGrouping(config: MetricDateGrouping): void {
       !["include", "exclude"].includes(config.partialIntervals))
   )
     throw Error("Invalid date grouping definition.");
-  if (config.timeZone !== undefined) {
+  if (config.timeZone !== undefined && !isGroupingTimeZone(config.timeZone))
+    throw Error(
+      "Use a valid IANA grouping timezone, such as America/Denver or UTC.",
+    );
+  if (config.occurrence !== undefined) {
+    const o = config.occurrence as unknown as Record<string, unknown>;
     if (
-      typeof config.timeZone !== "string" ||
-      !config.timeZone ||
-      config.timeZone.length > 80 ||
-      /^[+-]/.test(config.timeZone)
+      !o ||
+      typeof o !== "object" ||
+      Array.isArray(o) ||
+      !["hour", "day"].includes(o.interval as string) ||
+      typeof o.includeEmpty !== "boolean"
     )
+      throw Error("Invalid date grouping occurrence.");
+    if (!isMetricCycle(config.interval))
       throw Error(
-        "Use a valid IANA grouping timezone, such as America/Denver or UTC.",
+        "Occurrences summarise an hour-of-day or day-of-week slot; calendar intervals are already one occurrence each.",
       );
-    try {
-      new Intl.DateTimeFormat("en-US", { timeZone: config.timeZone });
-    } catch {
+    if (config.interval === "hourOfDay" && o.interval !== "hour")
+      throw Error("An hour-of-day slot occurs once per hour: use hourly occurrences.");
+    if (config.partialIntervals === "include")
       throw Error(
-        "Use a valid IANA grouping timezone, such as America/Denver or UTC.",
+        "Occurrences are always whole: a partial day or hour would bias the typical value. Leave out partialIntervals.",
       );
-    }
   }
-  if (config.includeEmpty && config.range === "custom") {
+  if (
+    config.range === "custom" &&
+    (isMetricCycle(config.interval)
+      ? config.occurrence?.includeEmpty
+      : config.includeEmpty)
+  ) {
     const start = metricDateTime(config.start ?? "", config.timeZone),
       end = metricCustomEndTime(config.end ?? "", config.timeZone);
     if (end < start)
@@ -218,7 +301,7 @@ export function metricDateRange(
     end = Infinity;
   for (const term of query.where) {
     if (
-      isOrGroup(term) ||
+      isWhereGroup(term) ||
       term.negated ||
       canonical(term.field) !== canonical(config.field)
     )

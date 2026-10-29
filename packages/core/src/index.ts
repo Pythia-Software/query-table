@@ -5,6 +5,9 @@ export type {
   FilterOp,
   WhereClause,
   OrGroup,
+  OrOfAndsGroup,
+  WhereConjunction,
+  WhereBranch,
   WhereTerm,
   OrderByClause,
   SelectColumn,
@@ -16,6 +19,7 @@ export type {
   ItemPageOptions,
   ItemDetailsState,
   RowId,
+  HostQueryState,
 } from "./query";
 export { itemPageFields, validateItemPageTemplate, renderItemPageTemplate } from "./itemPage";
 export {
@@ -32,7 +36,16 @@ export {
   normalizeQueryState,
   queriesEqual,
   isOrGroup,
+  isOrOfAndsGroup,
+  isWhereConjunction,
+  isWhereGroup,
   predicatesOf,
+  branchesOf,
+  parseHostQueryState,
+  MAX_HOST_QUERY_PARAMS,
+  MAX_HOST_QUERY_VALUES,
+  MAX_HOST_QUERY_VALUE_LENGTH,
+  MAX_HOST_QUERY_STATE_BYTES,
 } from "./query";
 
 export type {
@@ -117,6 +130,16 @@ export * from "./execution";
 export * from "./properties";
 export * from "./propertyStorage";
 export * from "./grouping";
+export {
+  GROUP_KEY_INTERVALS,
+  isCalendarGroupKey,
+  groupKeyField,
+  groupKeyFields,
+  calendarGroupKey,
+  groupKeyTerms,
+  type CalendarGroupKey,
+  type GroupKey,
+} from "./groupKeys";
 export * from "./source";
 export * from "./queryV3";
 export { inspectBucketQuery, groupSourceQuery } from "./drilldown";

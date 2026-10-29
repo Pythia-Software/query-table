@@ -3,19 +3,44 @@ import type { AggregationClause, OrderByClause, WhereTerm } from "./query";
 export type MetricValue = number | string | boolean | null;
 export type MetricKey = MetricValue;
 export type MetricScope = "allMatching" | "shownRows";
+/** Calendar intervals: each bucket is one interval on the timeline, keyed by
+ * its start as an ISO instant. */
+export type MetricCalendarInterval = "hour" | "day" | "week" | "month" | "year";
+/** Cyclic intervals: each bucket is one slot of a repeating cycle, keyed by a
+ * number. `hourOfDay` is the local hour, 0–23; `dayOfWeek` the ISO weekday,
+ * 1 (Monday) to 7 (Sunday). */
+export type MetricCycleInterval = "hourOfDay" | "dayOfWeek";
+/** Summarise each cyclic slot over its occurrences: every whole day or hour
+ * the slot covers inside the query's time bounds. */
+export interface MetricDateOccurrence {
+  /** One occurrence: "day" (dayOfWeek only) or "hour". */
+  interval: "hour" | "day";
+  /** Count occurrences without rows: 0 for direct COUNT, COUNT_DISTINCT and
+   * SUM metrics, no value for other expressions. false leaves them out. */
+  includeEmpty: boolean;
+}
 /** Calendar grouping, currently executed over complete local populations. */
 export interface MetricDateGrouping {
   field: string;
-  interval: "hour" | "day" | "week" | "month" | "year";
+  interval: MetricCalendarInterval | MetricCycleInterval;
   /** IANA timezone identifier; omitted settings retain UTC behavior. */
   timeZone?: string;
+  /** Add a bucket for every interval of the range, or for every slot of a
+   * cyclic interval. */
   includeEmpty: boolean;
+  /** The calendar range empty intervals fill; for a cyclic interval, the range
+   * whose empty occurrences count. */
   range: "query" | "observed" | "custom";
   start?: string;
   end?: string;
   /** "exclude" leaves out intervals the query's bounds cut, and intervals that
-   * have not ended by the evaluation time; omitted includes them. */
+   * have not ended by the evaluation time; omitted includes them. A cyclic
+   * interval's intervals are its hours or days. */
   partialIntervals?: "include" | "exclude";
+  /** Cyclic intervals only: each slot's value is the mean of its
+   * per-occurrence values, and a box distribution summarises them. Only whole
+   * occurrences count. Computed from a calendar metric by planMetricSeries. */
+  occurrence?: MetricDateOccurrence;
 }
 /** A trailing window over a calendar metric's intervals. */
 export interface MetricWindow {
@@ -33,6 +58,14 @@ export interface MetricWindow {
 /** Divide each bucket by the total of all groups ("total") or of its first
  * grouping key ("group0"), such as one calendar interval. */
 export type MetricShare = "total" | "group0";
+
+/** A per-group minimum measured over something other than rows: the distinct
+ *  non-null values of one field (like COUNT_DISTINCT), or the sum of one
+ *  numeric field (like SUM; nulls add nothing). Exactly one of `distinct` and
+ *  `sum` is set. A group whose measure is an error is kept. */
+export type MetricMinCountOf =
+  | { min: number; distinct: string; sum?: never }
+  | { min: number; sum: string; distinct?: never };
 export interface MetricValueFormat {
   kind: "number" | "percent" | "duration" | "date" | "time" | "datetime";
   decimals?: number;
@@ -147,6 +180,8 @@ export interface MetricDiagnostic extends FormulaDiagnostic {
 }
 /** Host must enforce snapshot against the row response; this token alone does not pin data. */
 export interface MetricQuery {
+  /** The table's host-owned state when `hostQuery` is configured. */
+  hostState?: import("./query").HostQueryState;
   snapshot?: string;
   profile?: string;
   expectedRevisions?: Record<string, string>;
@@ -169,6 +204,8 @@ export interface MetricCapabilities {
   filters?: boolean;
   /** Executes AggregationClause.minCount and reports hiddenGroups. */
   minCount?: boolean;
+  /** Also executes an object minCount: distinct values or a sum per group. */
+  minCountMeasures?: boolean;
   maxGroups?: number;
   profile?: string;
 }

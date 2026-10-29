@@ -35,8 +35,20 @@ For code consuming arbitrary grouped values, use core's `GroupedRow` and the
 explicitly typed `prepareGrouping` result. Inline source-row renderer functions
 are not inherited by projected fields; named renderer registrations can be
 reused if they render the supplied value without assuming a source-row shape.
-Record item-detail controls are hidden on groups and restored when grouping is
-removed. Independent source inspectors can use `table.grouping.source.itemDetails`.
+With `itemDetails` enabled, a grouped table offers group Detail:
+`table.itemDetails.subject` is `"group"`, and its popover, modal and row
+expansion show the group's keys, scalar summaries and link summaries from the
+grouped row. It never loads a source item by the group's ID. Add
+`ITEM_DETAILS_COLUMN` to the grouped `select` to show the column, for example
+after the link summaries. The open group is named by its canonical group
+identity (`table.rowId`) in the grouped query's own `itemDetails`, so it
+survives paging, sorting, Share links and URL reloads. After the population
+changes or refreshes, Detail shows a group that is not on the loaded page as
+unavailable rather than with summaries that may be stale. Group property views follow the summaries and reach the query
+only when a group is opened or shared. Page links address source items, so
+groups offer the in-place modes. Record item Detail returns unchanged when
+grouping is removed, and independent source inspectors can use
+`table.grouping.source.itemDetails`.
 
 ## Query shape and execution order
 
@@ -65,7 +77,9 @@ const groupedQuery = normalizeQueryState({
 });
 ```
 
-HAVING predicates use the same operators as WHERE, including their NULL
+HAVING terms have the same shapes as WHERE, including an OR of `{ all: [...] }`
+conjunctions, so a selection of several key combinations filters grouped rows in
+one term. HAVING predicates use the same operators as WHERE, including their NULL
 behavior: `!=` is SQL `<>` on the server backends, so a group whose summary is
 NULL (for example `AVG` over only NULL values) does not match `avg != 0`. Add
 an `is_null` predicate in an OR group to keep such groups, or `is_not_null` to
@@ -98,6 +112,59 @@ Source ID descending breaks ties unless ID is explicitly ordered. Representative
 selection requires unique string or finite numeric source IDs within each group;
 the ID need not be a selectable catalogue field. There is no separate filter
 or second representative strategy.
+
+### Calendar keys
+
+A key can group a datetime field by calendar interval instead of by its exact
+value. Write it as `{ field, interval, timeZone }` in place of the field name;
+plain string keys are unchanged:
+
+```ts
+grouping: {
+  source: originalQuery,
+  keys: [{ field: "called_at", interval: "day", timeZone: "America/Denver" }, "tool"],
+  summaries: [{ id: "calls", op: "count" }],
+  representative: null,
+}
+```
+
+- `interval` is `"hour"`, `"day"`, `"week"` (from Monday), `"month"` or
+  `"year"`. `timeZone` is an IANA name; omitted means UTC.
+- Each group is one local interval, keyed by the interval's start as an ISO
+  instant: local midnight of 2026-03-08 in Denver is
+  `"2026-03-08T07:00:00.000Z"`. Records with no value form one `null` group.
+  The calendar is the one `dateGrouping` uses (`metricDateFloor` and
+  `metricDateNext` in TypeScript, `calendar.go` in Go), so daylight-saving
+  days, partial DST hours and half-hour offsets fall into the same buckets, and
+  the groups' totals equal those of the matching `dateGrouping` metric.
+- The result column is named after the field (`called_at`), typed `datetime`
+  and labelled with its interval ("Called at (day)"). It is the column name in
+  `select`, `where` (HAVING), `orderBy`, metrics over the groups and link
+  templates. A field appears once among the keys, so it cannot be grouped by
+  its exact value and by an interval at the same time. Group identity is the
+  usual `[[field, value], …]` tuple with the interval start as the value.
+- Drill-down is exact. `groupSourceQuery` and query link columns (in the
+  table and in group Detail) select a group's records with `>= start` and
+  `< end` on the field (`is_null` for the null group); `inspectBucketQuery` on
+  a metric over the grouped rows filters the groups with `=` on the start.
+- Hour-of-day and day-of-week are metric intervals (`dateGrouping`), not keys:
+  their slots repeat, so no pair of bounds selects one. Normalization records
+  a diagnostic for them and for any other unknown interval, and `validate()`
+  also rejects a non-datetime field and an unknown timezone.
+- `withGroupingKeys` keeps a key's column, group filters and sorts when only
+  its interval changes. `GroupingView.keys` stays the list of key column names;
+  `GroupingView.groupKeys` holds the keys as defined. The grouping controls
+  offer an interval for datetime keys (new keys start in the viewer's
+  timezone) and show it on the key chip.
+- Servers advertise `calendarGroupKeys` in `QueryCapabilitiesV3`; requests
+  with calendar keys report a diagnostic to hosts without it. `applyQuery`,
+  the DuckDB adapter and the Go `/query-v3` executor (SQLite and PostgreSQL)
+  run them. The Go executor computes each staged record's interval start with
+  the same calendar code as calendar metrics, so calendar keys always use the
+  staged path rather than SQLite's direct reduction. In Go,
+  `GroupingDefinition.Keys` keeps the field names and
+  `GroupingDefinition.KeyIntervals` maps a field to its `GroupKeyInterval`;
+  JSON encoding writes those keys as objects.
 
 ### Median and other formula summaries
 

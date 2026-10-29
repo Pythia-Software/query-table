@@ -21,6 +21,10 @@ type sqliteReductionCache struct {
 	fusions map[string]*sqliteReductionFusion
 	cross   map[string]*sqliteCrossFieldReduction
 	tables  map[string]string
+	proofs  *sqliteSourceProofScope // nil without a host generation
+	// population, when set, receives the matching population counted by the
+	// first fused integer reduction over it (-1 until then).
+	population *int64
 }
 
 var sqliteReductionSequence atomic.Uint64

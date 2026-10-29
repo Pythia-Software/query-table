@@ -1,4 +1,4 @@
-import { isOrGroup, predicatesOf, type SetFilterMetadata, type SetFilterMode, type WhereTerm } from "./query";
+import { isWhereConjunction, isWhereGroup, predicatesOf, type SetFilterMetadata, type SetFilterMode, type WhereBranch, type WhereTerm } from "./query";
 import { filterValues, type FieldDef } from "./schema";
 
 /** What a set editor compiles to: array membership (`includes`) for textarray
@@ -39,7 +39,8 @@ export function createSetFilter(field: string, mode: SetFilterMode, values: stri
 /** Remove presentation metadata at transport boundaries, including inner literals. */
 export function stripSetFilter(term: WhereTerm): WhereTerm {
   const strip = ({ setFilter: _metadata, ...clause }: ReturnType<typeof predicatesOf>[number]) => clause;
-  return isOrGroup(term) ? { any: term.any.map(strip) } : strip(term);
+  if (!isWhereGroup(term)) return strip(term);
+  return { any: term.any.map((member: WhereBranch) => isWhereConjunction(member) ? { all: member.all.map(strip) } : strip(member)) } as WhereTerm;
 }
 
 /** Only collapse explicitly marked, intact editor output. Never infer from predicates. */

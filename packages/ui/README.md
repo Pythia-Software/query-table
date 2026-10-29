@@ -115,7 +115,11 @@ Open **Column Widths** to resize in one step:
 - **Fit All to Screen** fills the viewport; when content overflows, narrow
   columns keep their content width and only the widest ones are trimmed. It
   sets `query.fitToScreen`, so shared links and saved queries fit each viewer's
-  available table area after loading and when that area changes.
+  available table area after loading and when that area changes. No column
+  is trimmed below what its buttons and links need (links shorten to an
+  ellipsis first); if those minimums exceed the screen, the table scrolls
+  horizontally. Set `select.minWidth` on a field whose host renderer needs
+  room the table cannot measure.
 - **Equal Widths** splits the viewport evenly.
 - **Reset Widths** drops explicit widths back to schema defaults.
 

@@ -73,7 +73,8 @@ const errorKinds: AggregationClause = {
 };
 ```
 
-`where` has the table WHERE's shape (CNF terms with optional OR groups), field
+`where` has the table WHERE's shape (terms with optional OR groups and OR of
+`{ all: [...] }` conjunctions), field
 allowlist, operators per type and relative datetime values, and is ANDed with
 the table WHERE before grouping. Relative values resolve against the same
 request clock as the table WHERE. Regex operators are unavailable in metric
@@ -99,6 +100,52 @@ exact, so every engine follows this one rule. `minCount` requires at least one
 grouping field; on a grand-total metric it is a clause diagnostic rather than
 being ignored.
 
+### Minimums over distinct values and sums
+
+`minCount` can also measure each group with a field instead of counting its
+rows:
+
+```ts
+// API cost by model, hiding models used in fewer than five conversations.
+const costByModel: AggregationClause = {
+  id: "cost", op: "sum", field: "cost", groupBy: ["model_family"],
+  minCount: { min: 5, distinct: "conversation_id" },
+};
+// Failure rate by tool over daily rollup rows, hiding tools with fewer than
+// ten calls in total.
+const failureRate: AggregationClause = {
+  id: "failures", op: "count", groupBy: ["tool_name"],
+  expression: "SUM([failures]) / SUM([call_count])",
+  minCount: { min: 10, sum: "call_count" },
+};
+```
+
+`{ min, distinct: field }` keeps a group when it has at least `min` distinct
+non-null values of `field`, exactly as `COUNT_DISTINCT([field])` counts them: a
+model with 40 records in 3 conversations is hidden, one with 6 records in 6
+conversations is kept. `{ min, sum: field }` keeps a group when
+`SUM([field])` reaches `min`. Nulls add nothing, so a group whose values are all
+null sums to 0; `field` must be numeric, and summing a text field is a clause
+diagnostic. A plain number keeps its meaning (rows), and an object needs `min`
+and exactly one of `distinct` and `sum`. The field must be a schema field (not
+a computed one) whose aggregate policy allows `count_distinct` or `sum`. It may
+be different from the metric's own measure, and need not be shown anywhere.
+
+Everything else is as for a row minimum: hidden groups leave before sorting,
+`groupLimit` and Other and are reported as `hiddenGroups`, kept groups' values
+are unchanged, the measure is counted after the metric's `where`, and empty
+calendar fill-ins are never hidden. A group whose measure is an error (an
+unsafe sum, or an invalid stored value) is kept so the error stays visible.
+With a `window`, a summed minimum is summed over the point's window; distinct
+values cannot be combined across intervals, so a distinct minimum with a window
+is a clause diagnostic. Shares compare the minimum per bucket. Distributions
+(box and histogram) currently accept only row minimums; a measured minimum on
+a distribution is a clause diagnostic on every engine.
+
+The Go and SQL executors compute the measure in the same grouped pass as the
+metric, sharing an identical aggregate (`SUM([call_count])` in the failure-rate
+example) and fused or cross-field reductions with sibling metrics.
+
 - **Calendar grouping.** `includeEmpty` fills empty buckets after `minCount`
   selects the observed groups, and those empty buckets are never hidden or
   counted. An observed bucket below the threshold is hidden and leaves a gap; it
@@ -114,14 +161,22 @@ being ignored.
 Executors advertise support explicitly: `metricCapabilities.filters` and
 `metricCapabilities.minCount` for v2 transports, and
 `queryCapabilities.metricFilters` and `queryCapabilities.metricMinCount` for the
-v3 executor. A clause that uses an unadvertised control gets its own error
-result; the other metrics in the batch still run, and the control is never
-silently dropped. The v1 `fetchAggregations` endpoint never receives either
-field. The bundled DuckDB, Go SQLite and Go v3 executors advertise both.
+v3 executor. A distinct or summed minimum also needs
+`metricCapabilities.minCountMeasures` or
+`queryCapabilities.metricMinCountMeasures`. A clause that uses an unadvertised
+control gets its own error result (`metricPopulationError` names it); the other
+metrics in the batch still run, and the control is never silently dropped. The
+v1 `fetchAggregations` endpoint never receives either field. The bundled
+DuckDB, Go SQLite, Go PostgreSQL and Go v3 executors advertise all of them, and
+`ExecuteV2Rows` runs them in memory.
 
 The metric editor exposes **Only rows where…** (the table's filter chips scoped
-to the metric) under *Data scope* and **Minimum rows per group** under
-*Ordering & limits*. Cards note "N groups hidden (fewer than M rows)".
+to the metric) under *Data scope*, and **Minimum per group** with a
+**Counting** choice (rows, distinct values of a field, or the sum of a numeric
+field) under *Ordering & limits*. Cards note "N groups hidden (fewer than M
+rows)", or "(fewer than 5 distinct Conversation values)" and "(fewer than 10
+total Calls)". `metricMinCount`, `metricMinCountMeasure` and
+`metricMinCountText` read either form.
 
 ## Population scope
 
@@ -234,6 +289,9 @@ for the underlying records, or `null` when no exact query exists:
   and timezone (`metricDateNext`), encoded as ISO instants (`…Z`). Filters
   compare instants, so a date-only source value is read as UTC midnight; group
   date-only columns in UTC to keep drilldown on the same day.
+- An hour-of-day or day-of-week slot selects its occurrences inside the date
+  bounds, or returns `null` without bounds (see
+  [Hour of day and day of week](#hour-of-day-and-day-of-week)).
 - A histogram bin adds `>= min` and `< max` (`<= max` for the final bin) on the
   distribution input. The input must be a single numeric field reference; a
   computed expression returns `null`. A box cohort is its group keys.
@@ -255,7 +313,7 @@ const transport: Transport<Row> = {
   metricCapabilities: {
     version: 2, expressions: true, shownRows: true,
     distributions: true, computedFields: true, profile: "qt-postgres-v1",
-    filters: true, minCount: true, // only if the service executes them
+    filters: true, minCount: true, minCountMeasures: true, // only if the service executes them
   },
   fetchMetrics: (request, signal) => fetchMetricBatch(request, signal),
   fetchRowsV2: (request, signal) => fetchComputedRows(request, signal),
@@ -296,7 +354,7 @@ const metricTheme: MetricTheme = {
 };
 ```
 
-Use the same instance-scoped theme on QueryBuilder and MetricsPanel. Typed dimension/value identities keep Linux the same color across charts and distinguish numeric `1` from string `"1"`. A stable domain gives explicit palette order; unknown values hash deterministically. `overrides: [{ value, color }]` pins individual assignments, and `identity` lets equivalent field names share an identity. No global registry or data-arrival order affects colors. Finite palettes may reuse colors; use domains/overrides when uniqueness matters.
+Use the same instance-scoped theme on QueryBuilder and MetricsPanel. Typed dimension/value identities keep Linux the same color across charts and distinguish numeric `1` from string `"1"`. A stable domain gives explicit palette order; unknown values hash deterministically. `overrides: [{ value, color }]` pins individual assignments, and `identity` lets equivalent field names share an identity. No global registry or data-arrival order affects colors. Finite palettes may reuse colors; use domains/overrides when uniqueness matters. Marks grouped by several keys (pie, donut, bar, box, histogram, list) are colored by their whole key, using the first field's layer: two keys drawn in one chart take different colors while the palette has room, and otherwise a key's color depends only on the theme and its values. Scatter charts color by their first key, which names the series. Line charts color by their second key.
 
 CSS tokens cover accent, text, muted, grid, surface, other, null, and error. `MetricClassNames` exposes root/card/title/plot/axis/grid/legend/mark slots. `MetricCard` can render standalone with a clause and result/buckets; `MetricsEditor` can be opened directly with `{ api, fields, onClose, initialMetricId?, theme?, locale? }`. Palette information belongs to the caller and is not serialized into shared query data.
 
@@ -313,8 +371,8 @@ Without calendar grouping, group labels show raw keys; a retained scatter or
 histogram X format does not apply to these keys. Coordinates retain raw values.
 
 When the first grouping field is a groupable `datetime`, Grouping settings offer
-an optional calendar interval (hour/day/week/month/year) and **Include empty
-dates**. The definition stores `dateGrouping`, for example:
+an optional calendar interval (hour/day/week/month/year), the cyclic hour of
+day and day of week (see below) and **Include empty dates**. The definition stores `dateGrouping`, for example:
 
 ```ts
 dateGrouping: {
@@ -342,7 +400,8 @@ interval) or `range: "custom"` with `start` and `end`:
 dateGrouping: { field: "enqueued_at", interval: "day", includeEmpty: true, range: "observed" }
 ```
 
-Bounds inside an OR group do not count, nor do filters on other fields.
+Bounds inside an OR group, including a branch of an OR of conjunctions, do not
+count, nor do filters on other fields.
 Query filters retain their absolute timestamp semantics, including
 UTC interpretation of date-only filter values; grouping does not rewrite them.
 An exclusive upper bound exactly at a local boundary does not create the next
@@ -433,8 +492,9 @@ const modelShare: AggregationClause = {
   `groupLimit` still count. With a window, both are windowed before dividing.
   A share of the total cannot be windowed.
 - **Ordering and limits.** `sort`, `groupLimit` and `minCount` apply to the
-  combined buckets; `minCount` counts the rows in a point's window. Windowed
-  and share results have no Other remainder.
+  combined buckets; `minCount` counts the rows in a point's window, and a
+  summed minimum sums its field over the window. Windowed and share results
+  have no Other remainder.
 - **Drilldown.** `inspectBucketQuery` opens a windowed point's whole window,
   or every interval up to the point for a running value.
 
@@ -445,6 +505,111 @@ for their results; `executeMetrics` and `evaluateMetrics` call it, so every
 engine supports them. A host that sends metric requests itself calls it the
 same way. Servers never receive these fields: `toMetricQuery` and
 `toQueryRequestV3` report an `unexpanded_series` diagnostic instead.
+
+### Hour of day and day of week
+
+Two cyclic intervals profile a typical day or week. Each bucket is a slot of
+the cycle rather than a date:
+
+- `interval: "hourOfDay"` keys each record by its local wall-clock hour, `0`
+  to `23`;
+- `interval: "dayOfWeek"` keys it by its local ISO weekday, `1` (Monday) to
+  `7` (Sunday).
+
+The slot is the one the record's timestamp occupies in `dateGrouping.timeZone`.
+Across a spring-forward change the skipped hour has no records that day; across
+a fall-back change both 01:00 hours fall in slot `1`. Fractional offsets such as
+`Asia/Kolkata` (+05:30) use the local hour, so 03:45Z is slot `9`. Keys are
+numbers in every engine, and rows without a date keep a `null` bucket.
+
+```ts
+const byHour: AggregationClause = {
+  id: "by-hour", op: "count", groupBy: ["at", "provider"],
+  dateGrouping: { field: "at", interval: "hourOfDay",
+    timeZone: "America/New_York", includeEmpty: true, range: "query" },
+  display: { kind: "line" },
+};
+```
+
+- **Grouping.** Slots combine with other `groupBy` fields. `includeEmpty`
+  adds all 24 or 7 slots for each observed series, whatever the date range, so
+  `range`, `start` and `end` do not apply to the slots. Direct COUNT,
+  COUNT_DISTINCT and SUM fill-ins are 0; other expressions have no value.
+  `minCount`, `hiddenGroups`, `sort`, `groupLimit` and shares work as for
+  calendar intervals, and the default order is slot number. Windows need a
+  timeline and are refused. Pooled box and histogram distributions are refused
+  as for calendar intervals; use occurrences below.
+- **Whole intervals.** `partialIntervals: "exclude"` keeps only the whole hours
+  (`hourOfDay`) or days (`dayOfWeek`) inside the date bounds.
+- **Engines.** The local engine (`evaluateMetrics`, `applyAggregations`), the
+  v3 executor of the Go module (SQLite and PostgreSQL) and DuckDB compute
+  slots, and their buckets match for the same rows. Servers advertise
+  `QueryCapabilitiesV3.calendarCycles`; `toQueryRequestV3` reports a diagnostic
+  without it. As for calendar intervals, the v1/v2 metric protocols
+  (`/metrics`) reject date grouping.
+- **Labels.** Charts, lists and tables label slots "09:00" and the locale's
+  short weekday ("Mon"); tooltips use "09:00–10:00" and "Monday"
+  (`metricCycleLabel`). Line charts order slots by number. The metric editor
+  offers **Hour of day** and **Day of week** under Date interval.
+
+#### Per-occurrence statistics
+
+A slot pools every record that falls in it. To describe a *typical* Monday,
+first total each Monday, then summarise those totals. Set
+`dateGrouping.occurrence`:
+
+```ts
+const typicalWeekday: AggregationClause = {
+  id: "typical-weekday", op: "count", groupBy: ["at"],
+  dateGrouping: { field: "at", interval: "dayOfWeek", timeZone: "Europe/Berlin",
+    includeEmpty: true, range: "query",
+    occurrence: { interval: "day", includeEmpty: true } },
+  distribution: { kind: "box", input: "" },  // optional
+  display: { kind: "box" },
+};
+```
+
+- **Occurrences.** `occurrence.interval` is one calendar `"day"` or `"hour"`
+  of the slot (`hourOfDay` occurs hourly, so it needs `"hour"`). The metric is
+  evaluated once per occurrence, with any expression: counts, sums, distinct
+  counts, ratios and medians.
+- **Whole occurrences only.** Occurrences the date bounds cut short, and the
+  occurrence still in progress, are left out, using the same boundary as
+  `partialIntervals: "exclude"`. "Last 30 days" opened at 14:00 drops the
+  partial first and last dates. `partialIntervals: "include"` is refused.
+- **Idle occurrences.** With `occurrence.includeEmpty: true` an occurrence
+  without rows counts as 0 for a direct COUNT, COUNT_DISTINCT or SUM, and has
+  no value for other expressions such as ratios and averages, so it is not a
+  sample. Their range is the clause's `range` (`"query"` needs a lower date
+  bound; the clock ends it), `"observed"` or `"custom"`. `false` counts only
+  occurrences with rows.
+- **Values.** Without a distribution, a slot's `value` is the **mean of its
+  occurrence values**. With `distribution: { kind: "box" }` the bucket carries a
+  box over the occurrence values and `value` is their median, as for every
+  box; `whiskers` applies and `input` is not used. Histograms are refused.
+  `count` is the slot's rows over its counted occurrences, so `minCount` counts
+  rows, and `occurrences` is the number of samples. A slot without any sample
+  has no value.
+- **Execution.** `planMetricSeries` runs one calendar metric per occurrence
+  clause (`interval: occurrence.interval`, whole occurrences only) and folds it
+  into slots, so every engine with calendar grouping supports it, including
+  the Go v3 executor, without server changes. Servers never receive
+  `occurrence`; unexpanded clauses get the `unexpanded_series` diagnostic. An
+  hourly occurrence over a year is 8,760 calendar groups per series, and they
+  count against the engine's group budget.
+
+#### Drill-down
+
+`inspectBucketQuery` selects exactly one slot's records with ordinary
+predicates. Inside the date field's conjunctive bounds (narrowed to whole
+occurrences or whole intervals when the clause uses them), the slot's
+occurrences are disjoint ranges r1…rk. The query adds `>= r1.start`,
+`< rk.end` and, for each gap, an OR group `< ri.end` or `>= ri+1.start`.
+Adjacent ranges, such as a repeated fall-back hour, merge. It returns `null`
+when the query has no lower or upper bound on the date field, or when the
+ranges would take the query past its 100-predicate budget (about 48
+occurrences, such as hour 09:00 over seven weeks). A `null` slot key drills to
+`is_null` as usual.
 
 ### Compact chart integration
 

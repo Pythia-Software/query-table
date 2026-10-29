@@ -9,7 +9,7 @@ import type { MetricQuery, MetricCapabilities } from "./metricTypes";
 //                     the React hook; explicitly durable when callers opt in).
 
 import { normalizeQueryState } from "./query";
-import type { QueryState, RowId } from "./query";
+import type { HostQueryState, QueryState, RowId } from "./query";
 import type { QuerySnapshotStore } from "./queryLinks";
 import type { ServerQuery, AggregationRequest, AggregationResult } from "./encode";
 
@@ -31,6 +31,8 @@ export interface DistinctValuesQuery {
   search: string;
   /** Max suggestions to return (default chosen by the adapter, ~50). */
   limit?: number;
+  /** The table's host-owned state when `hostQuery` is configured. */
+  hostState?: HostQueryState;
 }
 
 export interface DistinctValuesResult {
@@ -100,6 +102,10 @@ export interface SavedQuery {
 export interface StorageAdapter {
   /** Optional authenticated server store. Ordinary URL sync never calls it. */
   snapshots?: QuerySnapshotStore;
+  /** True when last-used and named queries keep `QueryState.hostState`
+   * exactly. A table with `hostQuery` refuses to save through an adapter
+   * without it rather than store a table-only query. */
+  storesHostState?: boolean;
   loadLast(key: string): Promise<QueryState | null>;
   saveLast(key: string, query: QueryState): Promise<void>;
 
@@ -162,6 +168,7 @@ export function memoryStorageAdapter(): StorageAdapter {
   const defaults = new Map<string, string>();
 
   return {
+    storesHostState: true,
     async loadLast(key) {
       const query = last.get(key);
       return query ? normalizeQueryState(query) : null;
@@ -256,6 +263,7 @@ export function localStorageAdapter(): StorageAdapter {
   };
 
   return {
+    storesHostState: true,
     async loadLast(key) {
       if (!ls) return null;
       try {

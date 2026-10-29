@@ -117,6 +117,51 @@ func TestV3FrontendParity(t *testing.T) {
 			}
 		}
 	}
+	// Cyclic slots: local hours across DST changes and fractional or
+	// half-hour-DST offsets, and ISO weekdays across local midnight.
+	cycles := []struct {
+		name, zone string
+		times      []string
+	}{
+		{"ny/dst", "America/New_York", []string{"2026-03-08T06:15:00.000Z", "2026-03-08T07:15:00.000Z", "2026-11-01T05:15:00.000Z", "2026-11-01T06:15:00.000Z", "2026-11-01T06:45:00.000Z"}},
+		{"kolkata", "Asia/Kolkata", []string{"2026-03-01T18:15:00.000Z", "2026-03-01T18:45:00.000Z", "2026-03-02T03:15:00.000Z", "2026-03-08T03:45:00.000Z"}},
+		{"lord-howe", "Australia/Lord_Howe", []string{"2026-10-03T15:15:00.000Z", "2026-10-03T15:35:00.000Z", "2026-04-04T14:45:00.000Z", "2026-04-04T15:05:00.000Z"}},
+		{"utc", "UTC", []string{"2026-03-01T23:59:59.000Z", "2026-03-02T00:00:00.000Z", "2026-03-08T12:00:00.000Z"}},
+	}
+	for _, c := range cycles {
+		for _, interval := range []string{"hourOfDay", "dayOfWeek"} {
+			// AVG can differ by an ULP between SQLite's exact decimal and the browser.
+			for _, op := range []string{"count", "sum", "max"} {
+				for _, extra := range []bool{false, true} {
+					for _, includeEmpty := range []bool{false, true} {
+						rows := []map[string]any{}
+						for i, at := range c.times {
+							key := any("a")
+							if i%2 != 0 {
+								key = nil
+							}
+							rows = append(rows, map[string]any{"id": fmt.Sprint(i), "k": key, "n": float64(i) + 0.5, "at": at, "label": "row", "flag": i%2 == 0})
+						}
+						rows = append(rows, map[string]any{"id": "null", "k": "a", "n": float64(9), "at": nil, "label": nil, "flag": nil})
+						groupBy := []string{"at"}
+						if extra {
+							groupBy = append(groupBy, "k")
+						}
+						field := ""
+						if op != "count" {
+							field = "n"
+						}
+						spec := qt.AggSpec{ID: "cycle", Op: op, Field: field, GroupBy: groupBy, DateGrouping: &qt.MetricDateGrouping{Field: "at", Interval: interval, TimeZone: c.zone, IncludeEmpty: includeEmpty, Range: "query"}}
+						if !includeEmpty {
+							spec.MinCount = qt.MetricMinCount{Min: 2}
+						}
+						q := qt.QueryRequestV3{Version: 3, Profile: qt.SQLiteExpressionProfile, Now: time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC).UnixMilli(), Result: qt.WireQuery{Select: []string{"id"}, Limit: 10}, Metrics: []qt.AggSpec{spec}}
+						run(fmt.Sprintf("cycle/%s/%s/%s/%t/%t", c.name, interval, op, extra, includeEmpty), rows, q)
+					}
+				}
+			}
+		}
+	}
 	q = groupedRequest()
 	q.Grouping.Summaries = append(q.Grouping.Summaries, qt.SummaryColumn{ID: "latest", Op: "max", Field: "at"})
 	q.Result.Select = append(q.Result.Select, "latest")
@@ -134,6 +179,76 @@ func TestV3FrontendParity(t *testing.T) {
 		"set/scalar-none": {none("old"), none("b")},
 	} {
 		run(name, base, qt.QueryRequestV3{Version: 3, Profile: qt.SQLiteExpressionProfile, Result: qt.WireQuery{Select: []string{"id", "label"}, Where: where, OrderBy: []qt.OrderBy{{Field: "id", Dir: "asc"}}, Limit: 10}})
+	}
+	// An OR of AND branches as a record filter, a metric filter, a source
+	// filter and a group filter. The negated literal stays null-exclusive.
+	orOfAnds := qt.WhereTerm{Any: []qt.WhereClause{
+		{All: []qt.WhereClause{{Field: "k", Op: "=", Value: "a"}, {Field: "label", Op: "contains", Value: "o", Negated: true}}},
+		{All: []qt.WhereClause{{Field: "k", Op: "=", Value: "b"}, {Field: "n", Op: ">=", Value: "5"}}},
+		{Field: "label", Op: "=", Value: "empty"},
+	}}
+	run("or-of-ands/records", base, qt.QueryRequestV3{Version: 3, Profile: qt.SQLiteExpressionProfile,
+		Result:  qt.WireQuery{Select: []string{"id"}, Where: []qt.WhereTerm{orOfAnds}, Limit: 10},
+		Metrics: []qt.AggSpec{{ID: "population", Op: "count", GroupBy: []string{"id"}}}})
+	run("or-of-ands/metric-where", base, qt.QueryRequestV3{Version: 3, Profile: qt.SQLiteExpressionProfile,
+		Result:  qt.WireQuery{Select: []string{"id"}, Limit: 10},
+		Metrics: []qt.AggSpec{{ID: "selected", Op: "count", Where: []qt.WhereTerm{orOfAnds}}, {ID: "by_key", Op: "sum", Field: "n", GroupBy: []string{"k"}, Where: []qt.WhereTerm{orOfAnds}}}})
+	q = groupedRequest()
+	q.Source.Where = []qt.WhereTerm{orOfAnds}
+	run("or-of-ands/source", base, q)
+	q = groupedRequest()
+	q.Result.Where = []qt.WhereTerm{{Any: []qt.WhereClause{
+		{All: []qt.WhereClause{{Field: "k", Op: "=", Value: "a"}, {Field: "num", Op: ">=", Value: "2"}}},
+		{All: []qt.WhereClause{{Field: "k", Op: "=", Value: "b"}, {Field: "total", Op: ">", Value: "5"}}},
+	}}}
+	q.Metrics = []qt.AggSpec{{ID: "groups", Op: "count"}}
+	run("or-of-ands/groups", base, q)
+	// Calendar keys in a grouping stage: one group per local interval, keyed by
+	// its start, with summaries, representatives, group filters, ordering and
+	// metrics over the groups, across DST and partial-hour offsets.
+	calendarKeys := []struct {
+		name, zone, interval string
+		times                []string
+	}{
+		{"denver/day", "America/Denver", "day", []string{"2026-03-08T06:30:00.000Z", "2026-03-08T07:30:00.000Z", "2026-03-08T10:30:00.000Z", "2026-03-09T05:59:00.000Z", "2026-03-09T06:00:00.000Z"}},
+		{"utc/hour", "", "hour", []string{"2026-03-01T23:59:59.000Z", "2026-03-02T00:00:00.000Z", "2026-03-02T00:30:00.000Z", "2026-03-02T01:00:00.000Z"}},
+		{"ny/fall-hour", "America/New_York", "hour", []string{"2026-11-01T05:15:00.000Z", "2026-11-01T05:45:00.000Z", "2026-11-01T06:15:00.000Z", "2026-11-01T07:15:00.000Z"}},
+		{"lord-howe/spring-hour", "Australia/Lord_Howe", "hour", []string{"2026-10-03T14:45:00.000Z", "2026-10-03T15:15:00.000Z", "2026-10-03T15:35:00.000Z", "2026-10-03T16:15:00.000Z"}},
+		{"berlin/week", "Europe/Berlin", "week", []string{"2026-12-27T22:30:00.000Z", "2026-12-28T00:30:00.000Z", "2027-01-04T11:00:00.000Z"}},
+		{"denver/month", "America/Denver", "month", []string{"2026-12-31T23:45:00.000Z", "2027-01-01T07:15:00.000Z", "2027-03-15T12:00:00.000Z"}},
+		{"kathmandu/year", "Asia/Kathmandu", "year", []string{"2026-12-31T18:30:00.000Z", "2027-12-31T18:10:00.000Z"}},
+	}
+	for _, c := range calendarKeys {
+		for _, extra := range []bool{false, true} {
+			rows := []map[string]any{}
+			for i, at := range c.times {
+				key := any("a")
+				if i%2 != 0 {
+					key = "b"
+				}
+				rows = append(rows, map[string]any{"id": fmt.Sprint(i), "k": key, "n": float64(i) + 1, "at": at, "label": fmt.Sprint("row", i), "flag": i%2 == 0})
+			}
+			rows = append(rows, map[string]any{"id": "null", "k": "a", "n": float64(9), "at": nil, "label": nil, "flag": nil})
+			q := groupedRequest()
+			q.Grouping.Keys = []string{"at"}
+			if extra {
+				q.Grouping.Keys = append(q.Grouping.Keys, "k")
+			}
+			q.Grouping.KeyIntervals = map[string]qt.GroupKeyInterval{"at": {Interval: c.interval, TimeZone: c.zone}}
+			q.Grouping.Summaries = []qt.SummaryColumn{{ID: "num", Op: "count"}, {ID: "total", Op: "sum", Field: "n"}, {ID: "first_at", Op: "min", Field: "at"}, {ID: "example", Op: "row", Field: "label"}}
+			q.Result.Select = append(append([]string{}, q.Grouping.Keys...), "num", "total", "first_at", "example")
+			q.Result.OrderBy = qt.OrderBys{{Field: "at", Dir: "asc", Nulls: "last"}}
+			q.Result.Where = []qt.WhereTerm{{Field: "num", Op: ">=", Value: "1"}}
+			if extra {
+				q.Result.OrderBy = append(q.Result.OrderBy, qt.OrderBy{Field: "k", Dir: "desc", Nulls: "last"})
+				// A group filter on the key's interval start.
+				q.Result.Where = append(q.Result.Where, qt.WhereTerm{Any: []qt.WhereClause{{Field: "at", Op: ">=", Value: c.times[1]}, {Field: "at", Op: "is_null"}}})
+			}
+			q.Result.Limit = 10
+			q.Result.Offset = 0
+			q.Metrics = []qt.AggSpec{{ID: "groups", Op: "count"}, {ID: "by_key", Op: "sum", Field: "num", GroupBy: []string{"at"}}}
+			run(fmt.Sprintf("calendar-keys/%s/%t", c.name, extra), rows, q)
+		}
 	}
 	body, err := json.Marshal(fixtures)
 	if err != nil {

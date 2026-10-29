@@ -279,6 +279,10 @@ func TestEncodeQueryLinkRejectsWhatStrictDecodingRejects(t *testing.T) {
 		"group member":      {Where: []WhereTerm{{Any: []WhereClause{{Field: "a", Op: "=", Value: "1"}, {Field: "b", Op: "?"}}}}},
 		"predicate budget":  {Where: predicates},
 		"empty OR group":    {Where: []WhereTerm{{Field: "a", Op: "=", Value: "1"}, {Any: []WhereClause{}}}},
+		"empty AND branch":  {Where: []WhereTerm{{Any: []WhereClause{{Field: "a", Op: "=", Value: "1"}, {All: []WhereClause{}}}}}},
+		"nested AND branch": {Where: []WhereTerm{{Any: []WhereClause{{Field: "a", Op: "=", Value: "1"}, {All: []WhereClause{{All: []WhereClause{{Field: "a", Op: "=", Value: "2"}}}}}}}}},
+		"mixed AND branch":  {Where: []WhereTerm{{Any: []WhereClause{{Field: "a", Op: "=", Value: "1"}, {Field: "b", Op: "=", Value: "1", All: []WhereClause{{Field: "a", Op: "=", Value: "2"}}}}}}},
+		"branch literal":    {Where: []WhereTerm{{Any: []WhereClause{{Field: "a", Op: "=", Value: "1"}, {All: []WhereClause{{Field: "a", Op: "=", Value: "2"}, {Field: "b", Op: "?"}}}}}}},
 		"metric without id": {Aggregations: []json.RawMessage{json.RawMessage(`{"op":"count","groupBy":[]}`)}},
 		"metric JSON":       {Aggregations: []json.RawMessage{json.RawMessage(`{`)}},
 		"grouping JSON":     {Grouping: json.RawMessage(`[`)},
@@ -324,14 +328,14 @@ func TestMetricOptionTablesMatchTypeScript(t *testing.T) {
 		t.Fatal(err)
 	}
 	tables := map[string][]optionSpec{
-		"top": metricTopOptions, "window": metricWindowOptions, "dateGrouping": metricDateOptions,
+		"top": metricTopOptions, "window": metricWindowOptions, "dateGrouping": metricDateOptions, "occurrence": metricOccurrenceOptions,
 		"display": metricDisplayOptions, "scale": metricScaleOptions, "format": metricFormatOptions,
 		"list": metricListOptions, "pivot": metricPivotOptions, "distribution": metricDistributionOptions,
-		"layout": metricLayoutOptions,
+		"layout": metricLayoutOptions, "minCount": metricMinCountOptions,
 	}
 	kinds := map[string]optionKind{
 		"string": optionString, "boolean": optionBoolean, "integer": optionInteger,
-		"positiveInteger": optionPositiveInteger, "number": optionNumber,
+		"positiveInteger": optionPositiveInteger, "number": optionNumber, "minCount": optionMinCount,
 	}
 	names := specs.o.keys()
 	if len(names) != len(tables) {

@@ -1,6 +1,9 @@
-import { useState, type ReactNode, type SyntheticEvent } from "react";
+import { createContext, useMemo, useState, type ReactNode, type SyntheticEvent } from "react";
 
 interface Tooltip { label: string; color: string | undefined }
+
+/** Lets a pointer layer show the mark it would pick, without a focusable target. */
+export const MetricTooltipContext = createContext<{ show(label: string, color?: string): void; hide(): void } | null>(null);
 
 /** Keep hover/focus state outside the chart so opening a tooltip does not
  * rebuild axes, formatted labels, or thousands of SVG marks. */
@@ -14,7 +17,12 @@ export function MetricTooltip({ id, children }: { id: string; children: ReactNod
     const color = mark.getAttribute("data-qt-metric-color") ?? undefined;
     setTooltip(previous => previous?.label === label && previous.color === color ? previous : { label, color });
   };
-  return <div className="qt-metric-chart-body" onMouseOver={show} onMouseOut={event => {
+  const context = useMemo(() => ({
+    show: (label: string, color?: string) =>
+      setTooltip(previous => previous?.label === label && previous.color === color ? previous : { label, color }),
+    hide: () => setTooltip(null),
+  }), []);
+  return <MetricTooltipContext.Provider value={context}><div className="qt-metric-chart-body" onMouseOver={show} onMouseOut={event => {
     const target = event.target instanceof Element ? event.target.closest(".qt-metric-mark") : null;
     if (target && (!(event.relatedTarget instanceof Node) || !target.contains(event.relatedTarget))) setTooltip(null);
   }} onMouseLeave={() => setTooltip(null)} onFocus={show} onBlur={() => setTooltip(null)}
@@ -30,5 +38,5 @@ export function MetricTooltip({ id, children }: { id: string; children: ReactNod
       {tooltip.color && <span aria-hidden="true" className="qt-metric-swatch" style={{ background: tooltip.color }} />}
       <span>{tooltip.label}</span>
     </div>}
-  </div>;
+  </div></MetricTooltipContext.Provider>;
 }

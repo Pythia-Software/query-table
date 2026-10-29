@@ -1,4 +1,5 @@
 import {
+  predicatesOf,
   sourceExecutionSchema,
   toQueryRequestV3,
   toServerQuery,
@@ -28,7 +29,7 @@ export async function fetchPreviewRows<Row>(
   if (signal.aborted) throw new DOMException("Aborted", "AbortError");
   const sourceSchema = sourceExecutionSchema(baseSchema, execution, definitions);
   let result: FetchRowsResult<Row>;
-  const computedFilter = query.where.some(term => ("any" in term ? term.any : [term])
+  const computedFilter = query.where.some(term => predicatesOf(term)
     .some(predicate => predicate.field.startsWith("@computed/")));
   if (transport.fetchRowsV2 && execution && !query.grouping && !computedFilter) {
     const request = toServerQueryV2(query, sourceSchema, execution);
@@ -38,7 +39,7 @@ export async function fetchPreviewRows<Row>(
       if (executionRevision(execution, definition.id) !== definition.revision &&
         (request.select.includes(`@computed/${definition.id}`) ||
           request.orderBy.some(term => term.field === `@computed/${definition.id}`) ||
-          request.where.some(term => ("any" in term ? term.any : [term]).some(predicate => predicate.field === `@computed/${definition.id}`))))
+          request.where.some(term => predicatesOf(term).some(predicate => predicate.field === `@computed/${definition.id}`))))
         throw Error("Computed definitions changed. Refresh the server execution handshake.");
     }
     const response = await transport.fetchRowsV2(request, signal);

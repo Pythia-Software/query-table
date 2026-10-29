@@ -46,6 +46,9 @@
 .qt-line-clamp { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-line; overflow-wrap: anywhere; }
 .qt-link { color: var(--qt-accent); text-decoration: none; }
 .qt-link:hover { text-decoration: underline; }
+/* A link in a fitted or narrow cell shortens to an ellipsis inside the cell;
+   its accessible name stays the full label. */
+.qt-cell a.qt-link { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: top; }
 .qt-pills { display: inline-flex; flex-wrap: wrap; gap: 4px; }
 .qt-pill { background: var(--qt-header-bg); border: 1px solid var(--qt-border); border-radius: 999px; padding: 0 8px; font-size: 11px; }
 
@@ -551,6 +554,12 @@
   padding: 0 6px;
 }
 .qt-or-member { display: inline-flex; align-items: center; gap: 4px; }
+/* One AND branch of an OR of conjunctions. */
+.qt-and-branch {
+  border: 1px dashed var(--qt-border);
+  border-radius: var(--qt-radius);
+  padding: 0 4px;
+}
 .qt-chip-or { color: var(--qt-muted); font-weight: 700; font-size: 11px; }
 .qt-pred { display: inline-flex; align-items: center; gap: 4px; }
 
@@ -665,6 +674,7 @@
 .qt-modal-title { margin-top: 0; }
 .qt-modal-footer { text-align: right; margin-top: 12px; }
 .qt-saved-list { list-style: none; padding: 0; margin: 0; }
+.qt-saved-error { margin: 0 0 8px; color: var(--qt-danger, #cf222e); }
 .qt-saved-item { display: flex; align-items: center; gap: 6px; padding: 6px 0; border-bottom: 1px solid var(--qt-border-subtle); }
 .qt-saved-pick { flex: 1; text-align: left; background: transparent; border: 0; cursor: pointer; padding: 4px; color: var(--qt-text); border-radius: 4px; }
 .qt-saved-pick:hover { background: var(--qt-header-bg); }
