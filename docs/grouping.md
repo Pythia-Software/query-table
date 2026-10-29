@@ -42,9 +42,9 @@ grouped row. It never loads a source item by the group's ID. Add
 `ITEM_DETAILS_COLUMN` to the grouped `select` to show the column, for example
 after the link summaries. The open group is named by its canonical group
 identity (`table.rowId`) in the grouped query's own `itemDetails`, so it
-survives paging, sorting, Share links and URL reloads; when the population
-changes and no group has those keys any more, Detail says the group is
-unavailable. Group property views follow the summaries and reach the query
+survives paging, sorting, Share links and URL reloads. After the population
+changes or refreshes, Detail shows a group that is not on the loaded page as
+unavailable rather than with summaries that may be stale. Group property views follow the summaries and reach the query
 only when a group is opened or shared. Page links address source items, so
 groups offer the in-place modes. Record item Detail returns unchanged when
 grouping is removed, and independent source inspectors can use

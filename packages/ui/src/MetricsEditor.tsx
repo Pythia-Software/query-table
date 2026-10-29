@@ -573,6 +573,10 @@ export function MetricsEditor<Row>({
       next.expressionY = "COUNT()";
     if (kind === "scatter" && !selected.expression)
       next.expression = metricExpression(selected);
+    // Distributions count rows for their minimum; a distinct or summed one
+    // would be rejected, so it keeps its threshold over rows.
+    if ((kind === "box" || kind === "histogram") && metricMinCountMeasure(selected))
+      next.minCount = metricMinCount(selected);
     if (kind === "box" || kind === "histogram")
       next.distribution = {
         ...selected.distribution,
@@ -1724,7 +1728,17 @@ export function MetricsEditor<Row>({
                                   ...rest
                                 } = selected.dateGrouping!;
                                 const value = e.target.value;
+                                const perOccurrence = value === "hour" || value === "day";
                                 patch(selected.id, {
+                                  // Per-occurrence summaries take no window or
+                                  // share, and count rows for their minimum.
+                                  ...(perOccurrence
+                                    ? {
+                                        window: undefined,
+                                        share: undefined,
+                                        ...(metricMinCountMeasure(selected) ? { minCount: metricMinCount(selected) } : {}),
+                                      }
+                                    : {}),
                                   dateGrouping:
                                     value === "hour" || value === "day"
                                       ? {

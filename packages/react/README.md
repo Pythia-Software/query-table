@@ -123,7 +123,9 @@ request types accept and expose it without interpreting it.
   `saved.load` throws. A table without `hostQuery` rejects a save that carries
   host state rather than drop it.
 - URL writes replace exactly `ownedParameters` and keep other parameters. A
-  table-only link restores host state from those parameters.
+  table-only link restores host state from those parameters, and a URL with
+  only those parameters opens the default table query with that host state
+  (an explicit link: a rejected state is a restoration error).
 - Grouping, HAVING and column edits keep the host state; it stays on the
   grouped query, and leaving grouping or following a Records drill-down
   carries it back to the source query.

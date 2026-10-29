@@ -11,8 +11,9 @@
   summaries and link summaries in a popover, modal or expanded row, read from
   the grouped row rather than loaded by ID. Add `ITEM_DETAILS_COLUMN` to the
   grouped `select`, after the link columns if you like. The open group is
-  kept by its canonical identity across paging, sorting and URL reloads, and
-  shows an unavailable state once the population no longer has it. Link
+  kept by its canonical identity across paging, sorting and URL reloads. After
+  the population changes or refreshes, a group not on the loaded page shows
+  as unavailable rather than with summaries that may be stale. Link
   summaries in Detail resolve to the same exact-match Records query as in the
   table. Record item Detail is unchanged, including after leaving grouping.
   `ItemDetailsActions` takes a `label`, and `ObjectProperties` a `query` for
@@ -27,7 +28,8 @@
   history entry. Saves without host state restore the host defaults; host
   state the host rejects fails the whole restore or load instead of running a
   broader table-only query, and tables without `hostQuery` reject it. URL
-  writes replace exactly the owned parameters. `StorageAdapter.storesHostState`
+  writes replace exactly the owned parameters, and a URL with only the owned
+  parameters opens the default table query with that host state. `StorageAdapter.storesHostState`
   marks adapters that keep it; the built-in adapters do, and Save refuses
   others. The Go link codec (`LinkQuery.HostState`) round-trips it, and
   `QueryRequestV3`, `ServerQueryV2` and `MetricQuery` accept and expose a
@@ -35,7 +37,9 @@
 - `useQueryTable({ persistLast: "succeeded" })` saves the last-used query only
   after its rows and every metric have loaded. A query that fails, times out
   or is cancelled no longer replaces the last-used query, so a bare reload
-  restores the last one that worked. The default (`"always"`) is unchanged.
+  restores the last one that worked. A success is saved even when the next
+  edit starts within the 400 ms debounce, refreshes of the same query do not
+  postpone it, and unmounting writes it. The default (`"always"`) is unchanged.
 - `api.execution`, an execution receipt for the current query: the exact
   query, an execution key and generation, and overall, row and metric
   statuses with the error. Restoration stays in `api.restoration`. A slower

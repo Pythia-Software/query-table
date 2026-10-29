@@ -242,6 +242,28 @@ describe("hostQuery: URL", () => {
     expect(requests.at(-1)!.hostState).toEqual(keyword("buffer"));
   });
 
+  it("opens host parameters without a table link as the default query with that host state", async () => {
+    const storage = memoryStorageAdapter();
+    await storage.saveLast("tool_calls", errors);
+    window.history.replaceState(null, "", "/calls?record_tool_calls=command&record_tool_calls=buffer");
+    const current = mount({ syncUrl: true, storage });
+    await settle();
+    // Not the last-used query: the link names only host state.
+    expect(current.api.query.where).toEqual([]);
+    expect(current.api.definition!.hostState).toEqual(keyword("buffer"));
+    expect(requests.at(-1)!.hostState).toEqual(keyword("buffer"));
+    expect(new URL(window.location.href).searchParams.getAll("record_tool_calls")).toEqual(["command", "buffer"]);
+  });
+
+  it("fails host parameters the host rejects, even without a table link", async () => {
+    window.history.replaceState(null, "", "/calls?record_tool_calls=unknown&record_tool_calls=x");
+    const current = mount({ syncUrl: true });
+    await settle();
+    expect(current.api.restoration.status).toBe("error");
+    expect(requests).toEqual([]);
+    expect(new URL(window.location.href).searchParams.getAll("record_tool_calls")).toEqual(["unknown", "x"]);
+  });
+
   it("fails an explicit link with unacceptable host state instead of running without it", async () => {
     window.history.replaceState(null, "", `/calls?q=${encodeQuery({ ...errors, hostState: { version: 1, params: { record_tool_calls: ["unknown", "x"] } } })}`);
     const current = mount({ syncUrl: true });

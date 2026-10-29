@@ -60,7 +60,7 @@ function DetailContent<Row>({ api, record, loading, error, onRetry, renderers, m
 function DetailStatus({ loading, error, onRetry, group = false }: { loading: boolean; error: Error | null; onRetry: () => void; group?: boolean }): ReactNode {
   return <div className="qt-item-detail-status">
     {loading ? <p role="status">{group ? "Loading group…" : "Loading item…"}</p> : error ? <><p role="alert">{error.message}</p><button type="button" className="qt-btn" onClick={onRetry}><Icon name="refresh" />Retry</button></>
-      : <p role="status">{group ? "This group is unavailable. The grouped results changed, and no group has these key values now." : "This item is unavailable. It may have been removed or is outside the loaded results."}</p>}
+      : <p role="status">{group ? "This group is unavailable. It is not in the grouped results loaded since they last changed or refreshed; it may be gone or on another page." : "This item is unavailable. It may have been removed or is outside the loaded results."}</p>}
   </div>;
 }
 /** Snapshot the item and collection state, even when URL synchronization is off.

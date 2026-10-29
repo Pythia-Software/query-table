@@ -117,16 +117,53 @@ describe("persistLast: succeeded", () => {
 
       // B stays the current, retryable query; a bare remount restores A.
       expect(tool(current.api.query)).toBe("B");
-      act(() => current.api.refresh());
-      await wait(0);
-      await server.resolve("B");
-      expect(current.api.execution!.status).toBe("succeeded");
       unmount();
-      const again = mount({ transport: server.transport, storage });
+      expect(tool(await storage.loadLast("tool-calls") ?? undefined)).toBe("A");
+      const again = mount({ transport: server.transport, storage, initialQuery: filtered("B") });
       await wait(0);
-      expect(tool(again.current.api.query)).toBe("A");
+      // Retrying B succeeds; it is now the last query that worked.
+      await server.resolve("B");
+      expect(again.current.api.execution!.status).toBe("succeeded");
+      await wait(400);
+      expect(tool(storage.last.at(-1))).toBe("B");
     });
   }
+
+  it("saves a success that a later edit interrupts before the debounce", async () => {
+    const storage = recording();
+    const server = controllable();
+    const { current } = mount({ transport: server.transport, storage, initialQuery: filtered("A") });
+    await wait(0);
+    await server.resolve("A");
+    await wait(400);
+    act(() => current.api.setQuery(filtered("B")));
+    await wait(0);
+    await server.resolve("B");
+    // 300 ms later the user edits to C, which fails.
+    await wait(300);
+    act(() => current.api.setQuery(filtered("C")));
+    await wait(0);
+    await server.reject("C", Error("HTTP 500"));
+    await wait(1000);
+    expect(storage.last.map(tool)).toEqual(["A", "B"]);
+  });
+
+  it("saves under refreshes faster than the debounce", async () => {
+    const storage = recording();
+    const server = controllable();
+    const { current } = mount({ transport: server.transport, storage, initialQuery: filtered("A") });
+    await wait(0);
+    await server.resolve("A");
+    for (let i = 0; i < 5; i++) {
+      await wait(200);
+      act(() => current.api.refresh());
+      await wait(0);
+      await server.resolve("A");
+    }
+    expect(storage.last.map(tool)).toEqual(["A"]);
+    await wait(1000);
+    expect(storage.last.map(tool)).toEqual(["A"]);
+  });
 
   it("does not let a slower earlier query mark a later one healthy", async () => {
     const storage = recording();

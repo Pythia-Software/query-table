@@ -570,7 +570,7 @@ function resolveInitial<Row>(opts: UseQueryTableOptions<Row>): {
     };
   if (opts.syncUrl === true && opts.active !== false && typeof window !== "undefined") {
     const parameter = queryParameter(opts);
-    if (hasQueryLink(window.location.href, parameter))
+    if (hasQueryLink(window.location.href, parameter) || (opts.hostQuery && hostStateFromUrl(window.location.href, opts.hostQuery)))
       return {
         q: defaults,
         fromUrl: true,
@@ -768,11 +768,16 @@ export function useQueryTable<Row>(
   }, [setQuery]);
   const sourceFilters = useQueryFilters(sourceCatalogue, setSourceQuery);
 
-  // Track only this table's URL parameter, including duplicates. Host routes,
-  // anchors and unrelated history.state changes do not restore table state.
+  // Track only this table's URL parameter and the host's owned parameters,
+  // including duplicates. Host routes, anchors and unrelated history.state
+  // changes do not restore table state.
   const observedQueryUrl = useRef<string | null>(null);
+  const tableUrlKey = (url: string) => {
+    const params = new URL(url).searchParams;
+    return JSON.stringify([params.getAll(parameter), ...(hostRef.current?.ownedParameters ?? []).map(name => params.getAll(name))]);
+  };
   const recordQueryUrl = useCallback((url: string) => {
-    observedQueryUrl.current = JSON.stringify(new URL(url).searchParams.getAll(parameter));
+    observedQueryUrl.current = tableUrlKey(url);
   }, [parameter]);
   const ownedParametersKey = JSON.stringify(host?.ownedParameters ?? null);
   const decorateLink = useCallback((url: string, q: QueryState) =>
@@ -800,20 +805,22 @@ export function useQueryTable<Row>(
       signal?.addEventListener("abort", abort, { once: true });
       if (signal?.aborted) currentController.abort();
       setStorageReady(false);
-      const explicitLink = !!location && (navigation || urlSyncEnabled) && hasQueryLink(location, parameter);
+      // The host's own URL parameters are part of the link, with or without
+      // the table's query parameter.
+      const host = hostRef.current;
+      const hostFromUrl = host && location && (navigation || urlSyncEnabled) ? hostStateFromUrl(location, host) : undefined;
+      const explicitLink = !!location && (navigation || urlSyncEnabled) && (hasQueryLink(location, parameter) || !!hostFromUrl);
       setRestoration({ loading: true, error: null });
       try {
         if (currentController.signal.aborted) throw new DOMException("Query restoration cancelled.", "AbortError");
         const fromUrl = location && (navigation || urlSyncEnabled) ? await linkService.resolve(location, parameter, currentController.signal) : null;
-        const defaultSaved = fromUrl ? null : await storage.loadDefaultSaved?.(sourceSchema.name);
-        let restored = fromUrl ?? defaultSaved?.query ?? (navigation ? defaults : await storage.loadLast(sourceSchema.name));
+        // Host parameters alone open the default table query with that host state.
+        const linked = fromUrl ?? (hostFromUrl ? defaults : null);
+        const defaultSaved = linked ? null : await storage.loadDefaultSaved?.(sourceSchema.name);
+        let restored = linked ?? defaultSaved?.query ?? (navigation ? defaults : await storage.loadLast(sourceSchema.name));
         if (currentController.signal.aborted) throw new DOMException("Query restoration cancelled.", "AbortError");
         // A link without host state reads the host's own URL parameters.
-        const host = hostRef.current;
-        if (fromUrl && !fromUrl.hostState && host && location) {
-          const hostState = hostStateFromUrl(location, host);
-          if (hostState) restored = { ...fromUrl, hostState };
-        }
+        if (linked && !fromUrl?.hostState && hostFromUrl) restored = { ...linked, hostState: hostFromUrl };
         if (!cancelled && run === generation && epoch === manualQueryEpoch.current) {
           if (restored) {
             // Host state is resolved before anything commits; a rejected one
@@ -847,7 +854,7 @@ export function useQueryTable<Row>(
     }
     restoreHandler.current = async (location, signal) => {
       location = new URL(location, typeof window !== "undefined" ? window.location.href : undefined).href;
-      const key = JSON.stringify(new URL(location).searchParams.getAll(parameter));
+      const key = tableUrlKey(location);
       const current = restorationCurrent.current;
       if (key === observedQueryUrl.current && current.storageReady && !current.restoration.loading && !current.restoration.error) return;
       recordQueryUrl(location);
@@ -857,7 +864,7 @@ export function useQueryTable<Row>(
     if (typeof window !== "undefined") recordQueryUrl(window.location.href);
     const navigate = () => {
       if (!restorationCurrent.current.active) return;
-      const key = JSON.stringify(new URL(window.location.href).searchParams.getAll(parameter));
+      const key = tableUrlKey(window.location.href);
       if (key === observedQueryUrl.current) return;
       observedQueryUrl.current = key;
       void restore(true).catch(() => { /* Restoration state owns the display error. */ });
@@ -1666,11 +1673,28 @@ export function useQueryTable<Row>(
   }, [active, storageReady, restoration.loading, restoration.error, pageReady, error, failedPage, pageContext,
     aggState.error, aggState.results, aggState.loading, query, executionIdentity]);
   const succeededQuery = execution?.status === "succeeded" ? execution.query : null;
+  // A success stays pending until saved: a later edit that is still running
+  // or fails does not cancel it, and a refresh of the same query does not
+  // restart the debounce. Only a newer success replaces it.
+  const pendingLast = useRef<{ key: string; save: () => void; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const savedLast = useRef<string | null>(null);
   useEffect(() => {
     if (persistLast !== "succeeded" || !succeededQuery || hostStorageUnsupported) return;
-    const t = setTimeout(() => void storage.saveLast(sourceSchema.name, succeededQuery), 400);
-    return () => clearTimeout(t);
+    const key = JSON.stringify([sourceSchema.name, succeededQuery]);
+    if (pendingLast.current?.key === key || (!pendingLast.current && savedLast.current === key)) return;
+    if (pendingLast.current) clearTimeout(pendingLast.current.timer);
+    const save = () => {
+      pendingLast.current = null;
+      savedLast.current = key;
+      void storage.saveLast(sourceSchema.name, succeededQuery);
+    };
+    pendingLast.current = { key, save, timer: setTimeout(save, 400) };
   }, [persistLast, succeededQuery, storage, sourceSchema.name, hostStorageUnsupported]);
+  // Unmounting writes a pending success rather than dropping it.
+  useEffect(() => () => {
+    const pending = pendingLast.current;
+    if (pending) { clearTimeout(pending.timer); pending.save(); }
+  }, []);
 
   const sourceRowId = useCallback((row: Row): RowId | null => {
     const field = sourceSchema.fields.find(f => f.name === sourceSchema.idField);

@@ -2,9 +2,11 @@
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
-import type {
-  AggregationClause,
-  FieldDef,
+import {
+  validateMetric,
+  type AggregationClause,
+  type FieldDef,
+  type FieldSchema,
 } from "@pythia-software/query-table-core";
 import type { QueryTableApi } from "@pythia-software/query-table-react";
 import { MetricsEditor } from "../src/MetricsEditor";
@@ -1105,6 +1107,47 @@ it("clears a window and share when the display changes to one that cannot use th
     expect(saved.window).toBeUndefined();
     expect(saved.share).toBeUndefined();
     expect(saved.display).toEqual({ kind: "box" });
+  } finally { act(() => root.unmount()); host.remove(); }
+});
+
+it("drops settings a per-slot summary or a distribution would reject", async () => {
+  const host = document.createElement("div"); document.body.append(host);
+  const root = createRoot(host), setQuery = vi.fn();
+  const fields: FieldDef<unknown>[] = [
+    { name: "at", label: "At", type: "datetime", source: { kind: "backend" }, aggregate: { groupable: true } },
+    { name: "tool", label: "Tool", type: "text", source: { kind: "backend" }, aggregate: { groupable: true } },
+    { name: "calls", label: "Calls", type: "number", source: { kind: "backend" } },
+  ];
+  const slots: AggregationClause = {
+    id: "s", op: "sum", field: "calls", groupBy: ["at", "tool"], display: { kind: "table" }, share: "group0",
+    minCount: { min: 5, distinct: "tool" },
+    dateGrouping: { field: "at", interval: "dayOfWeek", includeEmpty: true, range: "observed" },
+  };
+  const bars: AggregationClause = { id: "b", op: "sum", field: "calls", groupBy: ["tool"], display: { kind: "bar-horizontal" }, minCount: { min: 9, sum: "calls" } };
+  const api = { aggregations: { clauses: [slots, bars] }, setQuery, rows: [], total: 0, query: { where: [] } } as unknown as QueryTableApi<unknown>;
+  const choose = (label: string, value: string) => act(() => {
+    const select = host.querySelector<HTMLSelectElement>(`[aria-label="${label}"]`)!;
+    select.value = value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  const saved = () => {
+    act(() => [...host.querySelectorAll("button")].find((b) => b.textContent === "Apply metrics")!.click());
+    return setQuery.mock.calls.at(-1)![0]({ where: [] }).aggregations as AggregationClause[];
+  };
+  const schema = { name: "calls", idField: "at", fields } as FieldSchema;
+  try {
+    await act(async () => root.render(createElement(MetricsEditor, { api, fields, onClose: vi.fn() })));
+    choose("Summarise each slot", "day");
+    const [slot] = saved();
+    expect(slot!.share).toBeUndefined();
+    expect(slot!.minCount).toBe(5);
+    expect(validateMetric(slot!, schema)).toEqual([]);
+    // Select the bar metric, then make it a box.
+    choose("Editing metric", "b");
+    choose("Metric display", "box");
+    const box = saved()[1]!;
+    expect(box.minCount).toBe(9);
+    expect(validateMetric(box, schema)).toEqual([]);
   } finally { act(() => root.unmount()); host.remove(); }
 });
 
