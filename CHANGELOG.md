@@ -23,6 +23,11 @@
   derived-field dependency coverage, and preserve focus through restored JSON
   dialogs while keeping normal manual viewer focus behavior.
 
+### Security
+
+- Update demo Vite to 6.4.5 to fix the development server file-deny bypass
+  [GHSA-8g5g-mxqh-grgj](https://github.com/advisories/GHSA-8g5g-mxqh-grgj).
+
 ## 0.9.7 — 2026-10-28
 
 ### Added
