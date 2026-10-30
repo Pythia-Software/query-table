@@ -1,6 +1,13 @@
-import { cloneElement, isValidElement, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { cloneElement, isValidElement, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
   EMPTY_QUERY,
+  isPropertyFieldLoaded,
+  jsonInspectionScopeKey,
+  type ScopedJsonInspectionState,
+  type JsonInspectionScope,
+  type JsonInspectionState,
+  type RowId,
+  type AttentionRegistry,
   readFieldValue,
   readObjectReference,
   objectReferenceKey,
@@ -24,12 +31,18 @@ import {
 import { formatMetricOutput, metricTimestamp } from "./metricFormat";
 import { createMetricColorResolver, type MetricTheme } from "./metricColors";
 import { Icon } from "./Icon";
-import { JsonValueView, JsonViewerModal, type JsonCellProps } from "./JsonCell";
+import { JsonValueView, JsonViewerModal, type JsonCellProps, createJsonInspectionState } from "./JsonCell";
 import { inspectJsonValue } from "./jsonValue";
 import { renderCellDisplay } from "./cellFormatting";
 
 export interface ObjectPropertiesProps<Row> {
   schema: FieldSchema<Row>;
+  recordId?: RowId;
+  jsonInspections?: readonly ScopedJsonInspectionState[];
+  onJsonInspectionChange?: (inspection: ScopedJsonInspectionState) => void;
+  attention?: AttentionRegistry | undefined;
+  /** Preserve focus for inspectors restored by semantic attention. */
+  preserveFocus?: boolean | undefined;
   row: Row;
   view: PropertyViewState;
   onViewChange?: (view: PropertyViewState) => void;
@@ -274,9 +287,48 @@ export function ObjectProperties<Row>(
   const drag = useRef<{ left: number; width: number; value: number } | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [copyError, setCopyError] = useState("");
-  const [jsonViewer, setJsonViewer] = useState<{ props: JsonCellProps; trigger: HTMLElement } | null>(null);
+  const [localInspections, setLocalInspections] = useState<ScopedJsonInspectionState[]>([]);
+  const inspections = [...(props.jsonInspections ?? []), ...localInspections];
+  const idField = schema.fields.find(field => field.name === schema.idField);
+  const identity = props.recordId ?? (idField ? readFieldValue(idField, row) : (row as Record<string, unknown>)[schema.idField]);
+  const rowId = typeof identity === "string" || (typeof identity === "number" && Number.isFinite(identity)) ? identity : undefined;
+  const [anonymousInspection, setAnonymousInspection] = useState<{ row: Row; states: Map<string, JsonInspectionState> }>(() => ({ row, states: new Map() }));
+  const triggers = useRef(new Map<string, HTMLElement>());
+  const latest = useRef(props); latest.current = props;
+  // Use the committed render's exact viewer props, including renderer/format
+  // precedence and decoding options. No viewer means no JSON target to await.
+  const renderedJson = new Map<string, JsonCellProps>();
+  const jsonTargets = useRef(renderedJson);
+  useLayoutEffect(() => { jsonTargets.current = renderedJson; });
+  useEffect(() => {
+    if (!props.attention || rowId === undefined) return;
+    return props.attention.register({ dataset: schema.name, rowId }, { reveal: async (target, signal) => {
+      if (signal.aborted) return false;
+      if (target.field !== undefined) {
+        const property = latest.current.view.properties.find(entry => entry.field === target.field);
+        const field = latest.current.schema.fields.find(entry => entry.name === target.field && entry.property?.enabled !== false);
+        if (!property || !field || !isPropertyFieldLoaded(field, latest.current.loadedFields)) return false;
+        if (target.path !== undefined) {
+          const json = jsonTargets.current.get(target.field);
+          if (!json || !inspectJsonValue(json.value, json.display).entries.some(entry => entry.path === target.path)) return false;
+          const provider = await props.attention!.whenRegistered({ dataset: schema.name, rowId, field: target.field }, signal);
+          return signal.aborted ? false : provider.reveal(target, signal);
+        }
+        const element = [...(surface.current?.querySelectorAll<HTMLElement>("[data-property-field]") ?? [])].find(element => element.dataset.propertyField === target.field);
+        if (!element) return false;
+        element.scrollIntoView?.({ block: "nearest", behavior: "instant" as ScrollBehavior });
+        element.classList.add("qt-attention-target");
+        return true;
+      }
+      surface.current?.scrollIntoView?.({ block: "nearest", behavior: "instant" as ScrollBehavior });
+      return Boolean(surface.current);
+    } });
+  }, [props.attention, schema.name, rowId]);
+  const changeInspection = (entry: ScopedJsonInspectionState) => {
+    if (!props.jsonInspections || rowId === undefined) setLocalInspections(current => [...current.filter(previous => jsonInspectionScopeKey(previous) !== jsonInspectionScopeKey(entry)), entry]);
+    if (rowId !== undefined) props.onJsonInspectionChange?.(entry);
+  };
   useEffect(() => { setCopied(null); setCopyError(""); }, [row]);
-  useEffect(() => { setJsonViewer(null); }, [row]);
   useEffect(() => {
     if (!copied) return;
     const timer = setTimeout(() => setCopied(null), 1800);
@@ -390,14 +442,7 @@ export function ObjectProperties<Row>(
             content = (
               <span className="qt-property-unavailable">Field unavailable</span>
             );
-          else if (
-            coverage &&
-            !coverage.has(field.name) &&
-            !(
-              field.source.kind === "derived" &&
-              field.source.dependencies?.every((name) => coverage.has(name))
-            )
-          )
+          else if (!isPropertyFieldLoaded(field, loadedFields))
             content = (
               <span className="qt-property-unavailable">Not loaded</span>
             );
@@ -414,8 +459,20 @@ export function ObjectProperties<Row>(
               result?.label ??
               propertyContent(field, property, value, props, now);
             if (isValidElement<JsonCellProps & { compact?: boolean }>(display) && display.type === JsonValueView) {
-              if (value != null && value !== "") jsonProps = { ...display.props, label: property.label ?? field.label };
-              display = cloneElement(display, { compact: true });
+              if (display.props.value != null && display.props.value !== "") {
+                const scope: JsonInspectionScope | undefined = rowId === undefined ? undefined : { dataset: schema.name, rowId, field: property.field };
+                const state = scope ? inspections.find(entry => jsonInspectionScopeKey(entry) === jsonInspectionScopeKey(scope))?.state
+                  : anonymousInspection.row === row ? anonymousInspection.states.get(property.field) : undefined;
+                jsonProps = { ...display.props, label: property.label ?? field.label,
+                  inspectionState: state ?? createJsonInspectionState(inspectJsonValue(display.props.value, display.props.display), display.props.display, true),
+                  inspectionScope: scope, onInspectionStateChange: state => {
+                    if (scope) changeInspection({ ...scope, state });
+                    else setAnonymousInspection(previous => ({ row, states: new Map(previous.row === row ? previous.states : []).set(property.field, state) }));
+                  },
+                  attention: props.attention };
+                renderedJson.set(property.field, jsonProps);
+              }
+              display = cloneElement(display, { ...jsonProps, compact: true });
             }
             content = href ? (
               <a
@@ -445,10 +502,10 @@ export function ObjectProperties<Row>(
             );
           }
           return (
-            <div className="qt-property" key={property.id} data-property-type={field?.type}>
+            <div className="qt-property" key={JSON.stringify([rowId, property.id])} data-property-field={property.field} data-property-type={field?.type}>
               <dt><span>{property.label ?? field?.label ?? property.field}</span>{jsonProps && <button type="button" className="qt-link-btn qt-property-json-open"
                 aria-label={`Open ${property.label ?? field?.label ?? property.field} in JSON Viewer`} title="Open in JSON Viewer"
-                onClick={(event) => setJsonViewer({ props: jsonProps!, trigger: event.currentTarget })}><Icon name="panelDefinition" size={14} /></button>}</dt>
+                onClick={(event) => { triggers.current.set(property.field, event.currentTarget); jsonProps!.onInspectionStateChange?.({ ...jsonProps!.inspectionState!, open: true }); }}><Icon name="panelDefinition" size={14} /></button>}</dt>
               <dd tabIndex={available ? 0 : undefined} title={available ? "Double click or press Enter to copy the value" : undefined}
                 onDoubleClick={event => {
                   if (!available || (event.target as HTMLElement).closest("a, button, input, textarea, select, [contenteditable]")) return;
@@ -463,11 +520,13 @@ export function ObjectProperties<Row>(
                 }}>
                 {content}{copied === property.id && <span className="qt-property-copy-feedback" role="status"><Icon name="check" size={13} />Copied</span>}
               </dd>
+              {jsonProps?.inspectionState?.open && entries.find(entry => entry.property.field === property.field)?.property.id === property.id && <JsonViewerModal {...jsonProps} returnFocus={triggers.current.get(property.field)}
+                preserveFocus={props.preserveFocus && !triggers.current.get(property.field)?.isConnected}
+                onClose={() => jsonProps!.onInspectionStateChange?.({ ...jsonProps!.inspectionState!, open: false })} />}
             </div>
           );
         })}
       </dl>
-      {jsonViewer && <JsonViewerModal {...jsonViewer.props} onClose={() => setJsonViewer(null)} returnFocus={jsonViewer.trigger} />}
       {copyError && <p className="qt-property-copy-error" role="status">{copyError}</p>}
       {resolved.error ? (
         <p role="status" className="qt-property-unavailable">

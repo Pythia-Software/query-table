@@ -378,3 +378,6 @@ Item details show initially collapsed JSON trees with a viewer button beside the
 property label and inherit field display settings; property overrides persist
 in saved views and shared item links. Try `/cells`.
 See the [cell display guide](docs/cell-displays.md).
+
+JSON inspection choices now travel with item query links and snapshots. See
+[portable inspection state and semantic attention](docs/json-inspection-state.md).

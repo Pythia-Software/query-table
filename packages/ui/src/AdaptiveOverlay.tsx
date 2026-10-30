@@ -37,6 +37,7 @@ export function ModalSurface({
   returnFocus,
   backdropClassName,
   initialFocus,
+  preserveFocus = false,
 }: {
   title: string;
   onClose: () => void;
@@ -46,6 +47,8 @@ export function ModalSurface({
   returnFocus?: HTMLElement | null | undefined;
   backdropClassName?: string | undefined;
   initialFocus?: string | undefined;
+  /** Semantic attention may reveal a dialog while preserving the caller's focus. */
+  preserveFocus?: boolean | undefined;
 }): ReactNode {
   const mobile = useMobileLayout();
   const titleId = useId();
@@ -93,7 +96,7 @@ export function ModalSurface({
       document.body.style.overflow = "hidden";
     }
     modalStack.push(element);
-    (element.querySelector<HTMLElement>(initialFocus ?? ":not(*)") ?? element).focus();
+    if (!preserveFocus) (element.querySelector<HTMLElement>(initialFocus ?? ":not(*)") ?? element).focus();
     const isTop = () => modalStack[modalStack.length - 1] === element;
     const focusable = () =>
       Array.from(
@@ -156,7 +159,7 @@ export function ModalSurface({
       }
     };
     const onFocus = (event: FocusEvent) => {
-      if (isTop() && !element.contains(event.target as Node)) element.focus();
+      if (!preserveFocus && isTop() && !element.contains(event.target as Node)) element.focus();
     };
     document.addEventListener("keydown", onKey);
     document.addEventListener("focusin", onFocus);
@@ -167,7 +170,7 @@ export function ModalSurface({
       if (modalStack.length === 0)
         document.body.style.overflow = originalOverflow;
       const destination = focusDestination.current ?? previous;
-      if (destination?.isConnected) destination.focus({ preventScroll: true });
+      if (!preserveFocus && destination?.isConnected) destination.focus({ preventScroll: true });
     };
   }, [mobile]);
 

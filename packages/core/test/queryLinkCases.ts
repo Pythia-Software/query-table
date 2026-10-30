@@ -49,6 +49,15 @@ const tenPairs = [
 
 export const stateCases: StateCase[] = [
   {
+    name: "scoped JSON inspection: quoted paths, ordered sets, false and empty search",
+    state: { ...EMPTY_QUERY, itemDetails: { modes: ["modal"], active: { id: 0, mode: "modal" }, jsonInspections: [0, "0"].map(rowId => ({
+      dataset: "items", rowId, field: "payload", state: { version: 1, open: false, search: "", searchMode: "find", raw: false,
+        collapsedPaths: ['$["a.b"]', '$["quote\\\"key"][0]'], expandedBuckets: ['$["items"]:bucket:40', '$["items"]:bucket:20'], visibleEntryLimit: 400,
+        selectedMatch: { path: '$["quote\\\"key"][0]', part: "value", start: 0 }, searchOverrides: [{ path: '$["items"]', expanded: false }] },
+    })) } },
+  },
+
+  {
     name: "host state",
     state: {
       ...EMPTY_QUERY,
@@ -505,6 +514,12 @@ const bomb = deflateSync(new Uint8Array(4 * 1024 * 1024 + 1).fill(0x20));
 const tooManyPredicates = Array.from({ length: 101 }, (_, i) => ({ field: "n", op: "!=", value: String(i) }));
 
 export const invalidCases: InvalidCase[] = [
+  ...[ { version: 2 }, { raw: 0 }, { collapsedPaths: ["$.ambiguous"] }, { expandedBuckets: ["$:bucket:21"] } ].map((patch, index): InvalidCase => ({
+    name: `invalid JSON inspection ${index}`, code: "invalid", token: plain({ d: { modes: ["modal"], jsonInspections: [{ dataset: "items", rowId: 0, field: "payload", state: {
+      version: 1, open: false, search: "", searchMode: "find", raw: false, collapsedPaths: [], expandedBuckets: [], visibleEntryLimit: 200, searchOverrides: [], ...patch,
+    } }] } }),
+  })),
+
   { name: "malformed host state", token: plain({ h: { version: 1, params: { a: "x" } } }), code: "invalid" },
   { name: "unsupported host state version", token: plain({ h: { version: 0, params: {} } }), code: "invalid" },
   { name: "oversized host state", token: plain({ h: { version: 1, params: Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`p${i}`, Array.from({ length: 2 }, () => "x".repeat(3999))])) } }), code: "invalid" },

@@ -68,3 +68,6 @@
   .qt-json-toggle, .qt-json-copy { min-width: calc(var(--_qt-target-width, 0px) + (28px - var(--_qt-target-width, 0px)) * var(--qt-touch-target-scale, 1)); min-height: calc(24px + 8px * var(--qt-touch-target-scale, 1)); }
   .qt-json-copy { opacity: 1; }
 }
+
+/* Attention is a static highlight: reveals never animate or move focus. */
+.qt-attention-target { outline: 2px solid var(--qt-accent); outline-offset: -2px; }

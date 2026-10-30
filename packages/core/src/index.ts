@@ -147,3 +147,6 @@ export { groupLinkQuery, resolveGroupLink, withoutLinkSummaries } from "./groupL
 export type { LinkTargets, ResolvedGroupLink } from "./groupLinks";
 export { applyPatch, matchPatch, removePatch } from "./queryPatch";
 export type { QueryFacet, QueryPatch, QueryPatchMatch, ApplyPatchOptions } from "./queryPatch";
+
+export * from "./jsonInspection";
+export * from "./attention";

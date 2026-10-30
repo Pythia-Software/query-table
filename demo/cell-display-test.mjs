@@ -164,8 +164,8 @@ try {
     await long.getByRole("searchbox").fill("ada");
     assert.equal(await long.getByRole("button", { name: "Copy value at $[0]", exact: true }).count(), 0, "Filter hides unrelated rows");
     assert.equal(await long.locator(".qt-json-search-count").innerText(), "1/4");
-    await long.getByLabel("JSON search mode").selectOption("highlight");
-    assert.equal(await long.getByRole("button", { name: "Copy value at $[0]", exact: true }).count(), 1, "Highlight keeps surrounding content");
+    await long.getByLabel("JSON search mode").selectOption("find");
+    assert.equal(await long.getByRole("button", { name: "Copy value at $[0]", exact: true }).count(), 1, "Find keeps surrounding content");
     await long.getByRole("button", { name: "Next JSON match", exact: true }).click();
     assert.equal(await long.locator(".qt-json-search-count").innerText(), "2/4");
     await long.getByRole("button", { name: "Next JSON match", exact: true }).click();

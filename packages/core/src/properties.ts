@@ -41,6 +41,13 @@ export interface PropertyViewState {
   labelWidth?: number;
 }
 
+/** Projection coverage used by rendering and semantic attention alike. */
+export function isPropertyFieldLoaded<Row>(field: FieldDef<Row>, loadedFields?: readonly string[]): boolean {
+  return !loadedFields || loadedFields.includes(field.name)
+    || (field.source.kind === "derived" && field.source.dependencies !== undefined
+      && field.source.dependencies.every(name => loadedFields.includes(name)));
+}
+
 export const MAX_PROPERTIES = 200;
 const string = (value: unknown, max = 256): value is string =>
   typeof value === "string" && value.length > 0 && value.length <= max;
