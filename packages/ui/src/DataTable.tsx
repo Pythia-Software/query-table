@@ -13,7 +13,7 @@ import { Icon } from "./Icon";
 
 import { GROUP_ID_FIELD, GROUP_LINK_RENDER, ITEM_DETAILS_COLUMN, groupKeyFields, isComputedCellError, isGroupLinkValue, type LinkTargets } from "@pythia-software/query-table-core";
 import { useId, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type SetStateAction } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
 import type { OrderByClause, QueryState, FieldDef, RowId, SelectColumn, WhereClause } from "@pythia-software/query-table-core";
 import { isSortable, readFieldValue } from "@pythia-software/query-table-core";
 import { useColumnDrag, type SelectionApi, type ColumnDragApi } from "@pythia-software/query-table-react";
@@ -215,8 +215,18 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
   const estimateVirtualRow = useCallback((index: number) => entries[index]?.detail ? 400 : normalizedEstimate, [normalizedEstimate, entries]);
   const initialViewportHeight = typeof maxHeight === "number" && maxHeight > 0 ? maxHeight : DEFAULT_MAX_HEIGHT;
   const initialRect = useMemo(() => ({ width: 0, height: initialViewportHeight }), [initialViewportHeight]);
+  const [attentionRange, setAttentionRange] = useState<{ index: number; revision: number | undefined } | null>(null);
+  const holdingAttention = attentionRange?.index === expandedRowIndex && attentionRange?.revision === details?.attentionRevision;
+  const detailRange = useCallback((range: Range) => {
+    // A scroll command can precede the viewport/measurement update. Keep the
+    // target detail mounted while its provider and JSON path become ready.
+    return defaultRangeExtractor((details?.attentionPending || holdingAttention) && expandedRowIndex >= 0
+      ? { ...range, startIndex: expandedRowIndex, endIndex: expandedRowIndex + 1 }
+      : range);
+  }, [details?.attentionPending, holdingAttention, expandedRowIndex]);
   const rowVirtualizer = useVirtualizer<HTMLDivElement, HTMLTableRowElement>({
     count: entries.length,
+    rangeExtractor: detailRange,
     getScrollElement: () => tableWrapRef.current,
     estimateSize: estimateVirtualRow,
     getItemKey: getVirtualRowKey,
@@ -229,9 +239,22 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     useFlushSync: false,
   });
 
+  useLayoutEffect(() => {
+    if (details?.attentionPending && expandedRowIndex >= 0) {
+      setAttentionRange(previous => previous?.index === expandedRowIndex && previous.revision === details.attentionRevision
+        ? previous : { index: expandedRowIndex, revision: details.attentionRevision });
+    } else {
+      const range = rowVirtualizer.range;
+      // Revealing may finish before the scroll event reaches the virtualizer.
+      // Release only once its ordinary range can keep the detail mounted.
+      if (expandedRowIndex < 0 || (range && range.startIndex - normalizedOverscan <= expandedRowIndex + 1
+        && range.endIndex + normalizedOverscan >= expandedRowIndex + 1)) setAttentionRange(null);
+    }
+  }, [details?.attentionPending, details?.attentionRevision, expandedRowIndex, rowVirtualizer.range?.startIndex, rowVirtualizer.range?.endIndex, normalizedOverscan]);
+
   useEffect(() => {
     if (expandedRowIndex >= 0) rowVirtualizer.scrollToIndex(expandedRowIndex, { align: "start" });
-  }, [expandedRowIndex]);
+  }, [expandedRowIndex, details?.attentionRevision]);
 
   useEffect(() => {
     return () => {
@@ -764,6 +787,8 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
         onWheel={onTableWheel}
         style={{ maxHeight, overflowY: "auto" }}
         onScroll={() => {
+          // A later scroll (including a user scroll) resumes normal virtualization.
+          if (!details?.attentionPending) setAttentionRange(null);
           const wrap = tableWrapRef.current;
           if (!wrap) return;
           setShowHorizontalCue(wrap.scrollWidth - wrap.clientWidth - wrap.scrollLeft > 2);

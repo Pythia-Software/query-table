@@ -1,3 +1,4 @@
+import { parseJsonInspections, type ScopedJsonInspectionState } from "./jsonInspection";
 import { normalizePropertyView, type PropertyViewState } from "./properties";
 import type { MetricDisplay, MetricLayout, MetricDistribution, MetricSort, MetricScope, MetricDateGrouping, MetricWindow, MetricShare, MetricMinCountOf } from "./metricTypes";
 import { normalizeMetricOptions } from "./metricNormalize";
@@ -252,6 +253,8 @@ export interface ItemDetailsState {
   views?: Partial<Record<ItemPropertyMode, PropertyViewState>>;
   page?: ItemPageOptions;
   active?: { id: RowId; mode: "modal" | "expand" };
+  /** Record-specific JSON presentation; independent of property instance/layout IDs. */
+  jsonInspections?: ScopedJsonInspectionState[];
 }
 
 /**
@@ -641,6 +644,7 @@ function normalizeQuery(input: unknown, fallback: QueryState, links: boolean): Q
       }
       if (Object.keys(views).length) details.views = views;
     }
+    if (raw.itemDetails.jsonInspections !== undefined) details.jsonInspections = parseJsonInspections(raw.itemDetails.jsonInspections);
     const active = raw.itemDetails.active;
     if (isRecord(active) && (active.mode === "modal" || active.mode === "expand") && modes.includes(active.mode)
       && ((typeof active.id === "string" && active.id.length > 0 && active.id.length <= 1000)

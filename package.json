@@ -46,6 +46,7 @@
     "test:menus": "node demo/menu-test.mjs",
     "test:filter-values": "node demo/filter-value-test.mjs",
     "test:feedback": "node demo/agentation-test.mjs",
+    "test:json-inspection": "node demo/json-inspection-state-test.mjs",
     "test:cells": "node demo/cell-display-test.mjs",
     "test:charts": "node demo/chart-layout-test.mjs",
     "test:fit-controls": "node demo/fit-controls-test.mjs",

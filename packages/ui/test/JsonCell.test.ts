@@ -59,7 +59,7 @@ describe("pretty JSON structure", () => {
     });
     search("needle");
     const mode = container.querySelector<HTMLSelectElement>('[aria-label="JSON search mode"]')!;
-    act(() => { mode.value = "highlight"; mode.dispatchEvent(new Event("change", { bubbles: true })); });
+    act(() => { mode.value = "find"; mode.dispatchEvent(new Event("change", { bubbles: true })); });
     expect(content.scrollTop).toBeGreaterThan(0);
     content.scrollTop = 125;
     act(() => button("Collapse $[0]").click());

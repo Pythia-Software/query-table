@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   FieldSchema, ItemDetailMode, ItemPropertyMode, ItemPageOptions, ItemDetailsState, PropertyViewStorage,
-  QueryState, RelationshipAdapter, RowId, Transport, PropertyViewState,
+  QueryState, RelationshipAdapter, RowId, Transport, PropertyViewState, ScopedJsonInspectionState, AttentionRegistry, AttentionProvider,
 } from "@pythia-software/query-table-core";
+import { isPropertyFieldLoaded, jsonInspectionScopeKey, MAX_JSON_INSPECTIONS } from "@pythia-software/query-table-core";
 import { usePropertyView, type PropertyViewApi } from "./usePropertyView";
 import type { QueryLinksApi } from "./useQueryLinks";
 
@@ -14,6 +15,8 @@ export interface ItemDetailRecord<Row> {
 export interface ItemDetailsOptions<Row> {
   /** Detail catalogue; defaults to the table catalogue. Useful for non-column properties. */
   schema?: FieldSchema<Row>;
+  /** Optional semantic reveal service, shared with host attention navigation. */
+  attention?: AttentionRegistry;
   /** Legacy collection URL parameter. useQueryTable.queryParameter takes precedence. */
   queryParameter?: string;
   /** Creator-approved modalities; users can enable/disable these in Select columns. Defaults to all. */
@@ -32,6 +35,14 @@ export interface ItemDetailsApi<Row> {
   /** "group" details describe grouped result rows, identified by their group identity. */
   subject?: "item" | "group";
   links?: QueryLinksApi;
+  jsonInspections?: readonly ScopedJsonInspectionState[];
+  setJsonInspection?: (inspection: ScopedJsonInspectionState) => void;
+  attention?: AttentionRegistry;
+  preserveFocus?: boolean;
+  /** Ephemeral request counter; virtual tables rematerialize an expanded row per reveal. */
+  attentionRevision?: number;
+  /** Keep the requested virtual detail materialized until its reveal settles. */
+  attentionPending?: boolean;
   schema: FieldSchema<Row>;
   /** Collection catalogue used to resolve Page template fields. */
   pageSchema: FieldSchema<Row>;
@@ -187,7 +198,7 @@ export function useItemDetails<Row>({
       setResult((previous) => previous.id === undefined && !previous.loading && !previous.error && !previous.record ? previous : { source: undefined, epoch: "", id: undefined, record: null, loading: false, error: null });
       return;
     }
-    setResult({ source: loadRow, epoch, id: activeId, record: null, loading: true, error: null });
+    setResult(previous => ({ source: loadRow, epoch, id: activeId, record: previous.id === activeId && previous.source === loadRow ? previous.record : null, loading: true, error: null }));
     void Promise.resolve().then(() => loadRow(activeId, controller.signal)).then((record) => {
       if (!controller.signal.aborted) setResult({ source: loadRow, epoch, id: activeId, record, loading: false, error: null });
     }).catch((error) => {
@@ -196,14 +207,65 @@ export function useItemDetails<Row>({
     });
     return () => controller.abort();
   }, [activeId, loadRow, refreshKey, retryKey]);
+  const preserveFocus = useRef(false);
+  const attentionSequence = useRef(0);
+  const [attentionRequest, setAttentionRequest] = useState({ revision: 0, pending: false });
+  const attentionLatest = useRef({ loadRow, setQuery, modes, views, active, query });
+  attentionLatest.current = { loadRow, setQuery, modes, views, active, query };
+  useEffect(() => {
+    const registry = config?.attention;
+    if (!enabled || !registry) return;
+    const provider: AttentionProvider = { reveal: async (target, signal) => {
+      if (target.rowId === undefined || signal.aborted) return false;
+      const current = attentionLatest.current;
+      const record = await current.loadRow(target.rowId, signal);
+      if (!record || signal.aborted) return false;
+      if (target.field !== undefined && !detailSchema.fields.some(field => field.name === target.field
+        && field.property?.enabled !== false && isPropertyFieldLoaded(field, record.loadedFields))) return false;
+      const mode = current.active?.id === target.rowId ? current.active.mode : current.modes.includes("expand") ? "expand" : current.modes.includes("modal") ? "modal" : null;
+      if (!mode || (target.field !== undefined && !current.views[mode].properties.some(property => property.field === target.field))) return false;
+      preserveFocus.current = true;
+      const revision = ++attentionSequence.current;
+      setAttentionRequest({ revision, pending: true });
+      try {
+        current.setQuery(previous => ({ ...previous, itemDetails: { ...previous.itemDetails, modes: previous.itemDetails?.modes ?? current.modes,
+          views: current.views, active: { id: target.rowId!, mode } } }));
+        const mounted = await registry.whenRegistered({ dataset: detailSchema.name, rowId: target.rowId }, signal);
+        if (mounted.ready) await mounted.ready(signal);
+        return signal.aborted ? false : await mounted.reveal(target, signal);
+      } finally {
+        setAttentionRequest(previous => previous.revision === revision ? { revision, pending: false } : previous);
+      }
+    } };
+    return registry.register({ dataset: detailSchema.name }, provider);
+  }, [enabled, config?.attention, detailSchema]);
   if (!enabled) return;
   const looked = lookupRow && active ? lookupRow(active.id) : null;
   return {
     ...(subject ? { subject } : {}),
     ...(links ? { links } : {}),
+    ...(config?.attention ? { attention: config.attention } : {}),
+    preserveFocus: preserveFocus.current,
+    attentionRevision: attentionRequest.revision,
+    attentionPending: attentionRequest.pending,
+    jsonInspections: query.itemDetails?.jsonInspections ?? [],
+    setJsonInspection(entry) {
+      if (entry.dataset !== detailSchema.name) return;
+      setQuery(current => {
+        // Most recently edited scopes stay at the end. Prefer evicting a closed
+        // inspector, and always make room before strict query normalization.
+        const inspections = (current.itemDetails?.jsonInspections ?? []).filter(previous => jsonInspectionScopeKey(previous) !== jsonInspectionScopeKey(entry));
+        while (inspections.length >= MAX_JSON_INSPECTIONS) {
+          const closed = inspections.findIndex(previous => !previous.state.open);
+          inspections.splice(closed < 0 ? 0 : closed, 1);
+        }
+        return { ...current, itemDetails: { ...current.itemDetails, modes: current.itemDetails?.modes ?? modes,
+          jsonInspections: [...inspections, entry] } };
+      });
+    },
     schema: detailSchema, queryParameter: queryParameter ?? config?.queryParameter ?? "q", properties: modalProperties, propertiesByMode, availableModes, modes, active,
     page, pageSchema: schema,
-    record: lookupRow ? looked ?? null : currentResult ? result.record : null,
+    record: lookupRow ? looked ?? null : result.id === activeId && result.source === loadRow ? result.record : null,
     loading: lookupRow ? looked === undefined : activeId !== undefined && (!currentResult || result.loading),
     error: lookupRow ? null : currentResult ? result.error : null,
     ...(config?.relationships ? { relationships: config.relationships } : {}),
@@ -218,6 +280,8 @@ export function useItemDetails<Row>({
       });
     },
     open(id, mode) {
+      config?.attention?.cancel();
+      preserveFocus.current = false;
       if (!modes.includes(mode)) return;
       setQuery((current) => ({ ...current, itemDetails: {
         ...current.itemDetails, modes: current.itemDetails?.modes ?? modes,
@@ -225,6 +289,7 @@ export function useItemDetails<Row>({
       } }));
     },
     close() {
+      config?.attention?.cancel();
       setQuery((current) => {
         if (!current.itemDetails?.active) return current;
         const { active: _active, ...state } = current.itemDetails;

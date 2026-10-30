@@ -1045,6 +1045,14 @@ func normalizeLinkItemDetails(raw *jsValue) *jsValue {
 			details.set("views", out)
 		}
 	}
+	if inspections := raw.get("jsonInspections"); inspections != nil {
+		normalized := normalizeJSONInspections(inspections)
+		if normalized == nil {
+			panic(jsThrow{"Invalid JSON inspections."})
+		}
+		details.set("jsonInspections", normalized)
+	}
+
 	if active := raw.get("active"); active.isRecord() {
 		mode := active.get("mode")
 		id := active.get("id")

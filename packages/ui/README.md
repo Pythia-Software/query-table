@@ -574,7 +574,7 @@ and original/decoded copying; objects, JSON strings and escaped strings share
 the same inspector. Custom `render` functions and registered keys take precedence.
 Detail properties inherit these displays and embed initially collapsed JSON
 trees in popovers, modals, and expanded rows. A button beside the property label
-opens the full viewer with filter/highlight search, match navigation, and copy
+opens the full viewer with Filter/Find search, match navigation, and copy
 controls. JSON property options can be edited, saved, and shared through the
 existing property-view controls.
 See the [cell display guide](../../docs/cell-displays.md) for typed configuration,
@@ -653,3 +653,6 @@ Hiding a pie remainder retains the full denominator and leaves its angular
 share empty; it does not rescale the selected groups to 100%. A real group named
 Other remains visible. Both settings survive query links and saved views.
 Use `display.legendPosition: "none"` to hide the chart key.
+
+JSON inspection choices now travel with item query links and snapshots. See
+[portable inspection state and semantic attention](../../docs/json-inspection-state.md).

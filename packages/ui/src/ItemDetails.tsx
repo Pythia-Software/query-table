@@ -52,7 +52,9 @@ function DetailContent<Row>({ api, record, loading, error, onRetry, renderers, m
     </div>
     <DetailStatus loading={loading} error={error} onRetry={onRetry} group={noun === "group"} />
   </section>;
-  return <ObjectInspector schema={api.schema} row={record.row} {...(api.subject === "group" ? { query } : {})} propertyApi={api.propertiesByMode[mode]} viewScope={mode === "hover" ? "Popover" : mode === "expand" ? "Row expand" : "Modal"} renderers={renderers}
+  return <ObjectInspector schema={api.schema} row={record.row} recordId={id}
+    {...(api.jsonInspections ? { jsonInspections: api.jsonInspections } : {})}
+    {...(api.setJsonInspection ? { onJsonInspectionChange: api.setJsonInspection } : {})} attention={api.attention} preserveFocus={api.preserveFocus} {...(api.subject === "group" ? { query } : {})} propertyApi={api.propertiesByMode[mode]} viewScope={mode === "hover" ? "Popover" : mode === "expand" ? "Row expand" : "Modal"} renderers={renderers}
     shareAction={actions} onClose={onClose} closeLabel={closeLabel} compact={compact}
     {...(record.loadedFields ? { loadedFields: record.loadedFields } : {})}
     {...(api.relationships ? { relationships: api.relationships } : {})} />;
@@ -96,7 +98,7 @@ export function ItemDetailsPanel<Row>({ api, query, renderers, outsidePage = fal
   if (!api.active) return null;
   const { id, mode } = api.active;
   const content = <DetailContent api={api} record={api.record} loading={api.loading} error={api.error} onRetry={api.retry} renderers={renderers} mode={mode} query={query} id={id} onClose={api.close} />;
-  if (mode === "modal") return <ModalSurface title={api.subject === "group" ? "Group details" : "Item details"} className="qt-modal qt-item-detail-modal" chrome={false} onClose={api.close}>{content}</ModalSurface>;
+  if (mode === "modal") return <ModalSurface title={api.subject === "group" ? "Group details" : "Item details"} className="qt-modal qt-item-detail-modal" preserveFocus={api.preserveFocus} chrome={false} onClose={api.close}>{content}</ModalSurface>;
   const noun = api.subject === "group" ? "group" : "item";
   return <section className="qt-item-expanded" aria-label={`Expanded ${noun} ${id}`}>
     {outsidePage && <p className="qt-item-detail-note">Expanded {noun} is outside the current page.</p>}

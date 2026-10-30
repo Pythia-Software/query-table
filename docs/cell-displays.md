@@ -114,7 +114,7 @@ touch devices in the full viewer. Collapsed containers show a muted count of
 hidden keys (objects) or values (arrays).
 
 Literal, case-insensitive search stays in the upper-right toolbar. Choose **Filter**
-to show matching paths and their ancestors, or **Highlight** to retain surrounding
+to show matching paths and their ancestors, or **Find** to retain surrounding
 content. Search includes descendants of collapsed containers and list buckets.
 The adjoining arrows navigate individual matches (also Enter and Shift+Enter),
 opening the selected match's ancestors and bucket and scrolling it into view.
@@ -199,3 +199,6 @@ all three surfaces. With `npm run demo` running, `npm run test:cells` checks
 desktop/mobile interactions, property editing, shared-link restoration, and
 that clamped virtual rows tile without gaps while scrolling and after a column
 resize, and writes screenshots to `.context/`.
+
+Inspection choices can be controlled and shared through native query/item state;
+see [portable JSON inspection](json-inspection-state.md).

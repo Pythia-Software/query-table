@@ -1,6 +1,175 @@
 {
   "valid": [
     {
+      "name": "scoped JSON inspection: quoted paths, ordered sets, false and empty search",
+      "state": {
+        "select": [],
+        "where": [],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0,
+        "itemDetails": {
+          "modes": [
+            "modal"
+          ],
+          "active": {
+            "id": 0,
+            "mode": "modal"
+          },
+          "jsonInspections": [
+            {
+              "dataset": "items",
+              "rowId": 0,
+              "field": "payload",
+              "state": {
+                "version": 1,
+                "open": false,
+                "search": "",
+                "searchMode": "find",
+                "raw": false,
+                "collapsedPaths": [
+                  "$[\"a.b\"]",
+                  "$[\"quote\\\"key\"][0]"
+                ],
+                "expandedBuckets": [
+                  "$[\"items\"]:bucket:40",
+                  "$[\"items\"]:bucket:20"
+                ],
+                "visibleEntryLimit": 400,
+                "selectedMatch": {
+                  "path": "$[\"quote\\\"key\"][0]",
+                  "part": "value",
+                  "start": 0
+                },
+                "searchOverrides": [
+                  {
+                    "path": "$[\"items\"]",
+                    "expanded": false
+                  }
+                ]
+              }
+            },
+            {
+              "dataset": "items",
+              "rowId": "0",
+              "field": "payload",
+              "state": {
+                "version": 1,
+                "open": false,
+                "search": "",
+                "searchMode": "find",
+                "raw": false,
+                "collapsedPaths": [
+                  "$[\"a.b\"]",
+                  "$[\"quote\\\"key\"][0]"
+                ],
+                "expandedBuckets": [
+                  "$[\"items\"]:bucket:40",
+                  "$[\"items\"]:bucket:20"
+                ],
+                "visibleEntryLimit": 400,
+                "selectedMatch": {
+                  "path": "$[\"quote\\\"key\"][0]",
+                  "part": "value",
+                  "start": 0
+                },
+                "searchOverrides": [
+                  {
+                    "path": "$[\"items\"]",
+                    "expanded": false
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "token": "2d.7VM9T8NADP0vFmOEAuqUEYmhEhXsTQc356pHr7lwd0mJovx3npNSAUKsLN388fzk9ywPZKgY6OiNRCrWGrCjTUav0dfLOjZSJetr7QHKiaMkKsgmOUbKKPjTEgR5RjsrDhE13DvPBr2YOImSdxIiOKi4y8g3gmDHLgoQwqHaY0jRU7zCHsh3tlaGwKcLtvLOcRPFvHDaT6verEvi221JG0A1eWt9krIs6SA9qut8o0LkveHaiHloq4Oky-SkAKhiO9WLRX5m-dm4z5Wls9FunTzWKfRP9mhhwiKH7HntZ0gMdrZwgAVJRX0lA_fnHmdFI0ijONgrZsVJbfg2-YuYDP2g7nfsWpkd1jwfxzH74zqk0q73-df7gI3xSd1kuJ1fRp8O6PnlgPkA",
+      "normalized": {
+        "select": [],
+        "where": [],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0,
+        "itemDetails": {
+          "modes": [
+            "modal"
+          ],
+          "jsonInspections": [
+            {
+              "dataset": "items",
+              "rowId": 0,
+              "field": "payload",
+              "state": {
+                "version": 1,
+                "open": false,
+                "search": "",
+                "searchMode": "find",
+                "raw": false,
+                "collapsedPaths": [
+                  "$[\"a.b\"]",
+                  "$[\"quote\\\"key\"][0]"
+                ],
+                "expandedBuckets": [
+                  "$[\"items\"]:bucket:40",
+                  "$[\"items\"]:bucket:20"
+                ],
+                "visibleEntryLimit": 400,
+                "searchOverrides": [
+                  {
+                    "path": "$[\"items\"]",
+                    "expanded": false
+                  }
+                ],
+                "selectedMatch": {
+                  "path": "$[\"quote\\\"key\"][0]",
+                  "part": "value",
+                  "start": 0
+                }
+              }
+            },
+            {
+              "dataset": "items",
+              "rowId": "0",
+              "field": "payload",
+              "state": {
+                "version": 1,
+                "open": false,
+                "search": "",
+                "searchMode": "find",
+                "raw": false,
+                "collapsedPaths": [
+                  "$[\"a.b\"]",
+                  "$[\"quote\\\"key\"][0]"
+                ],
+                "expandedBuckets": [
+                  "$[\"items\"]:bucket:40",
+                  "$[\"items\"]:bucket:20"
+                ],
+                "visibleEntryLimit": 400,
+                "searchOverrides": [
+                  {
+                    "path": "$[\"items\"]",
+                    "expanded": false
+                  }
+                ],
+                "selectedMatch": {
+                  "path": "$[\"quote\\\"key\"][0]",
+                  "part": "value",
+                  "start": 0
+                }
+              }
+            }
+          ],
+          "active": {
+            "id": 0,
+            "mode": "modal"
+          }
+        }
+      },
+      "packed": "{\"d\":{\"modes\":[\"modal\"],\"jsonInspections\":[{\"dataset\":\"items\",\"rowId\":0,\"field\":\"payload\",\"state\":{\"version\":1,\"open\":false,\"search\":\"\",\"searchMode\":\"find\",\"raw\":false,\"collapsedPaths\":[\"$[\\\"a.b\\\"]\",\"$[\\\"quote\\\\\\\"key\\\"][0]\"],\"expandedBuckets\":[\"$[\\\"items\\\"]:bucket:40\",\"$[\\\"items\\\"]:bucket:20\"],\"visibleEntryLimit\":400,\"searchOverrides\":[{\"path\":\"$[\\\"items\\\"]\",\"expanded\":false}],\"selectedMatch\":{\"path\":\"$[\\\"quote\\\\\\\"key\\\"][0]\",\"part\":\"value\",\"start\":0}}},{\"dataset\":\"items\",\"rowId\":\"0\",\"field\":\"payload\",\"state\":{\"version\":1,\"open\":false,\"search\":\"\",\"searchMode\":\"find\",\"raw\":false,\"collapsedPaths\":[\"$[\\\"a.b\\\"]\",\"$[\\\"quote\\\\\\\"key\\\"][0]\"],\"expandedBuckets\":[\"$[\\\"items\\\"]:bucket:40\",\"$[\\\"items\\\"]:bucket:20\"],\"visibleEntryLimit\":400,\"searchOverrides\":[{\"path\":\"$[\\\"items\\\"]\",\"expanded\":false}],\"selectedMatch\":{\"path\":\"$[\\\"quote\\\\\\\"key\\\"][0]\",\"part\":\"value\",\"start\":0}}}],\"active\":{\"id\":0,\"mode\":\"modal\"}}}"
+    },
+    {
       "name": "host state",
       "state": {
         "select": [],
@@ -7301,6 +7470,26 @@
     }
   ],
   "invalid": [
+    {
+      "name": "invalid JSON inspection 0",
+      "token": "2j.eyJkIjp7Im1vZGVzIjpbIm1vZGFsIl0sImpzb25JbnNwZWN0aW9ucyI6W3siZGF0YXNldCI6Iml0ZW1zIiwicm93SWQiOjAsImZpZWxkIjoicGF5bG9hZCIsInN0YXRlIjp7InZlcnNpb24iOjIsIm9wZW4iOmZhbHNlLCJzZWFyY2giOiIiLCJzZWFyY2hNb2RlIjoiZmluZCIsInJhdyI6ZmFsc2UsImNvbGxhcHNlZFBhdGhzIjpbXSwiZXhwYW5kZWRCdWNrZXRzIjpbXSwidmlzaWJsZUVudHJ5TGltaXQiOjIwMCwic2VhcmNoT3ZlcnJpZGVzIjpbXX19XX19",
+      "code": "invalid"
+    },
+    {
+      "name": "invalid JSON inspection 1",
+      "token": "2j.eyJkIjp7Im1vZGVzIjpbIm1vZGFsIl0sImpzb25JbnNwZWN0aW9ucyI6W3siZGF0YXNldCI6Iml0ZW1zIiwicm93SWQiOjAsImZpZWxkIjoicGF5bG9hZCIsInN0YXRlIjp7InZlcnNpb24iOjEsIm9wZW4iOmZhbHNlLCJzZWFyY2giOiIiLCJzZWFyY2hNb2RlIjoiZmluZCIsInJhdyI6MCwiY29sbGFwc2VkUGF0aHMiOltdLCJleHBhbmRlZEJ1Y2tldHMiOltdLCJ2aXNpYmxlRW50cnlMaW1pdCI6MjAwLCJzZWFyY2hPdmVycmlkZXMiOltdfX1dfX0",
+      "code": "invalid"
+    },
+    {
+      "name": "invalid JSON inspection 2",
+      "token": "2j.eyJkIjp7Im1vZGVzIjpbIm1vZGFsIl0sImpzb25JbnNwZWN0aW9ucyI6W3siZGF0YXNldCI6Iml0ZW1zIiwicm93SWQiOjAsImZpZWxkIjoicGF5bG9hZCIsInN0YXRlIjp7InZlcnNpb24iOjEsIm9wZW4iOmZhbHNlLCJzZWFyY2giOiIiLCJzZWFyY2hNb2RlIjoiZmluZCIsInJhdyI6ZmFsc2UsImNvbGxhcHNlZFBhdGhzIjpbIiQuYW1iaWd1b3VzIl0sImV4cGFuZGVkQnVja2V0cyI6W10sInZpc2libGVFbnRyeUxpbWl0IjoyMDAsInNlYXJjaE92ZXJyaWRlcyI6W119fV19fQ",
+      "code": "invalid"
+    },
+    {
+      "name": "invalid JSON inspection 3",
+      "token": "2j.eyJkIjp7Im1vZGVzIjpbIm1vZGFsIl0sImpzb25JbnNwZWN0aW9ucyI6W3siZGF0YXNldCI6Iml0ZW1zIiwicm93SWQiOjAsImZpZWxkIjoicGF5bG9hZCIsInN0YXRlIjp7InZlcnNpb24iOjEsIm9wZW4iOmZhbHNlLCJzZWFyY2giOiIiLCJzZWFyY2hNb2RlIjoiZmluZCIsInJhdyI6ZmFsc2UsImNvbGxhcHNlZFBhdGhzIjpbXSwiZXhwYW5kZWRCdWNrZXRzIjpbIiQ6YnVja2V0OjIxIl0sInZpc2libGVFbnRyeUxpbWl0IjoyMDAsInNlYXJjaE92ZXJyaWRlcyI6W119fV19fQ",
+      "code": "invalid"
+    },
     {
       "name": "malformed host state",
       "token": "2j.eyJoIjp7InZlcnNpb24iOjEsInBhcmFtcyI6eyJhIjoieCJ9fX0",

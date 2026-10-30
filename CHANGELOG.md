@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Added
+
+- Portable JSON inspection state for standalone cells/views and native item
+  properties. Record-scoped search, Filter/Find, raw/tree, expansion, array
+  ranges, paging, selected occurrences and inspector open state travel through
+  query links, saves and snapshots in both TypeScript and Go.
+- Semantic attention registration, readiness/materialization and cancellable
+  row/property/JSONPath reveals. Reveals open ancestors, scroll and highlight
+  without moving keyboard focus. See [integration](docs/json-inspection-state.md).
+
+### Fixed
+
+- Bound accumulated native JSON inspections before query normalization, evicting
+  older scopes at capacity while preserving recent edits.
+- Rematerialize expanded virtual details for each attention request; reject
+  absent JSON viewers immediately, honor the rendered decoding options and
+  derived-field dependency coverage, and preserve focus through restored JSON
+  dialogs while keeping normal manual viewer focus behavior.
+
 ## 0.9.7 — 2026-10-28
 
 ### Added
