@@ -4,8 +4,8 @@ JSON inspection is a query definition. Native item details carry it in
 `QueryState.itemDetails.jsonInspections`, alongside their property layouts.
 The native Save, Update, Share, snapshots, history and URL controls retain the
 same definition. Oversized links use the existing durable snapshot store;
-sharing never depends on another browser's cache. Version 0.9.7 does not expose
-this contract; consume the release containing this change before integrating.
+sharing never depends on another browser's cache. This contract is available
+from version 0.9.8; upgrade the npm packages and Go module together.
 
 Each entry has `{ dataset, rowId, field, state }`. Dataset is the detail
 catalogue's `schema.name`; `rowId` is the stable record ID, retaining its string

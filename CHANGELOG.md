@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.9.8 — 2026-10-30
+
 ### Added
 
 - Portable JSON inspection state for standalone cells/views and native item
