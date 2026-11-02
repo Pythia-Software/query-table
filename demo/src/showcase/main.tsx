@@ -425,6 +425,7 @@ function Workspace({
               rowId={api.rowId}
               selection={api.selection}
               columnDrag={api.columnDrag}
+              grouping={api.grouping}
               loading={api.loading}
               renderers={renderers}
               itemDetails={api.itemDetails!}

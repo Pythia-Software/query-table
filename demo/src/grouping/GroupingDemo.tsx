@@ -142,6 +142,7 @@ export function GroupingDemo() {
             renderers={renderers}
             rowId={api.rowId}
             columnDrag={api.columnDrag}
+            grouping={api.grouping}
             loading={api.loading}
           />
         </CollapsibleSection>
