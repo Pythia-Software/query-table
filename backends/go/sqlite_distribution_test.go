@@ -9,7 +9,7 @@ import (
 )
 
 func TestSQLiteBoxQuartilesAndTailSampling(t *testing.T) {
-	a := &sqliteBoxAggregate{sum: sqliteRat(0)}
+	a := &sqliteBoxAggregate{}
 	for i := 0; i < 30; i++ {
 		a.Step([]driver.Value{float64(-100 - i), "tukey"})
 	}
@@ -35,7 +35,7 @@ func TestSQLiteBoxQuartilesAndTailSampling(t *testing.T) {
 	if payload.Error != "" || s.Q1 != 0 || s.Median != 0 || s.Q3 != 0 || s.Low != 0 || s.High != 0 || s.Mean != 0 || s.OutlierCount != 60 || len(s.Outliers) != 20 || s.Outliers[0] != -129 || s.Outliers[9] != -120 || s.Outliers[10] != 120 || s.Outliers[19] != 129 {
 		t.Fatal(s)
 	}
-	a = &sqliteBoxAggregate{sum: sqliteRat(0)}
+	a = &sqliteBoxAggregate{}
 	for _, n := range []float64{1, 2, 3, 100} {
 		a.Step([]driver.Value{n, "tukey"})
 	}
@@ -81,5 +81,30 @@ func TestSQLiteHistogramEdgesPrecisionAndBounds(t *testing.T) {
 		if e := (&sqliteHistogramAggregate{}).Step([]driver.Value{nil, config}); e == nil {
 			t.Fatal("accepted invalid edges", config)
 		}
+	}
+}
+
+func TestDistributionMeanCompensatesRoundoff(t *testing.T) {
+	tenths := make([]float64, 10)
+	for i := range tenths {
+		tenths[i] = 0.1
+	}
+	// A naive sum gives 0.9999999999999999 and 0 respectively.
+	if m := distributionMean(tenths); m != 0.1 {
+		t.Fatal(m)
+	}
+	if m := distributionMean([]float64{-1e100, 1, 1e100}); m != 1.0/3 {
+		t.Fatal(m)
+	}
+}
+
+func TestBoxMeanClampsBeforeValidation(t *testing.T) {
+	samples := make([]float64, 55)
+	for i := range samples {
+		samples[i] = 1e-300
+	}
+	value, code, box := distributionBox(samples, "minmax")
+	if code != "" || value == nil || box.Summary.Mean != 1e-300 {
+		t.Fatal(code, box)
 	}
 }
