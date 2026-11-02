@@ -31,8 +31,8 @@ it("matches the core distribution contract using real SQLite execution", () => {
       const actual = bucket.distribution.summary;
       if (expected === null) { expect(actual).toBeNull(); expect(bucket.value).toBeNull(); continue; }
       expect(actual).not.toBeNull();
-      // SQLite uses its exact decimal AVG contract; browser mean accumulates
-      // sorted doubles. Quartiles, fences, endpoints and tail sampling agree exactly.
+      // SQLite compensates its sum of sorted doubles; browser mean accumulates
+      // value/n. Quartiles, fences, endpoints and tail sampling agree exactly.
       const { mean: expectedMean, ...expectedRest } = expected;
       const { mean: actualMean, ...actualRest } = actual!;
       expect(actualRest).toEqual(expectedRest);

@@ -508,9 +508,10 @@ not touch a supplied transaction. Snapshot and plan-token validation retain the
 V2 host callbacks.
 
 The row executor supports plain `count`, `count(field)`, number `sum`/`avg`,
-number/text/enum/datetime `min`/`max`, and scalar `count_distinct`, grouped by text, enum or
-bool fields. Equivalent single-aggregate expressions such as `SUM([cost_usd])`
-are accepted. Every base-field table filter is supported, along with per-metric
+number/text/enum/datetime `min`/`max`, scalar `count_distinct`, and box and
+histogram distributions whose input is one number field (`[duration_ms]`),
+grouped by text, enum or bool fields. Equivalent single-aggregate expressions
+such as `SUM([cost_usd])` are accepted. Every base-field table filter is supported, along with per-metric
 `where`, `minCount`, metric sorting and `groupLimit`. As in SQL V2, regex inside a
 per-metric `where` is a clause error. `processedRows` counts the table-filtered
 population before per-metric predicates; `groupCount` counts visible groups
@@ -523,12 +524,14 @@ accumulator. Group lookup reuses a typed key buffer; only new groups allocate
 keys and validate their text. SUM/AVG accumulate exact decimal integers at each
 input scale, spilling a part to `big.Int` before it overflows. The parts are
 combined into rationals once at finalization, retaining the SQLite profile's
-rounding, absolute-sum bound and numeric diagnostics.
+rounding, absolute-sum bound and numeric diagnostics. Distributions over the same
+field and population share one slice of samples per group; boxes and histograms
+are computed from it once the traversal ends.
 
 Rows are keyed by schema field name. A consumed binding must directly reference
 that same column, e.g. `r.cost_usd` or `r."repository_name"`. SQL expressions,
-computed fields, distributions, paired/formula metrics, `shownRows`, and other
-grouping kinds return `ErrRowsUnsupported`. Runtime values that cannot be
+computed fields, paired/formula metrics, distributions of formulas, `shownRows`,
+and other grouping kinds return `ErrRowsUnsupported`. Runtime values that cannot be
 handled exactly also return that sentinel with **no partial result**. For
 example, unsupported Go types, invalid datetime inputs consumed by parsing,
 embedded NULs passed to text functions, unpaired surrogate escapes in JSON
@@ -632,8 +635,8 @@ Boxes return `MetricBoxDistribution` with a nullable `MetricBoxSummary`:
 min, q1, median, q3, max, mean, observed low/high endpoints, sample count, whisker
 mode, outliers, and total outlier count. Quartiles use the core's exact-linear
 IEEE interpolation, with rounding before addition and clamping to adjacent
-samples. Mean uses the SQLite profile's exact decimal AVG and may differ by
-roundoff from browser accumulation. Whiskers default to minmax; Tukey uses
+samples. Mean is a compensated (Neumaier) sum of the sorted samples divided by
+their count, and may differ by roundoff from browser accumulation. Whiskers default to minmax; Tukey uses
 1.5×IQR fences and actual observed endpoints. Responses retain all outliers up
 to 20; larger populations retain the first 10 and last 10 sorted outliers while
 reporting the full count. `SQLiteMaxBoxSamples` is 100,000 non-null samples per
@@ -648,12 +651,23 @@ are comparable. Bins include their lower bound and exclude their upper bound,
 except the final bin includes the maximum. Constant populations return one
 point interval `[v,v]`; empty/all-null populations return empty edges/counts.
 A group containing only nulls still receives the global edges and zero counts
-when other groups have samples. Histogram state retains only bin counters,
-without the box/median sample cap. Host population and group limits still apply.
+when other groups have samples. Histograms have no per-group sample cap; host
+population and group limits still apply.
 Collapsed floating-point edges return `histogram_precision`; unsafe generated
 edges return `unsafe_integer`. A global input/extent error invalidates every
 histogram group, even if top-N would omit its originating group. The scalar
 `value` used for histogram sorting is the sample count.
+
+`ExecuteV2In` reduces every distribution whose input is one stored number field,
+grouped by stored text, enum or bool fields, without compiled plans: one native
+scan of the matching population feeds the `ExecuteV2Rows` reducers for all such
+metrics in the request, with table and metric filters still evaluated in SQL.
+Results are identical to the compiled plans. Formula or computed inputs,
+`shownRows`, fields with a `ValueErrorExpr`, and other groupings use compiled
+plans, which materialize the population and sort it once per metric. So does
+the whole request when a scanned value cannot be read exactly (for example BLOB
+storage, a bool stored as 2, or text containing NUL). The scan retains 8 bytes
+per sample, bounded by the host's population budget.
 
 Distribution buckets include `nullCount` and `inputErrorCount`; nulls are not
 errors or numeric zero. Errors clear both scalar value and distribution payload.

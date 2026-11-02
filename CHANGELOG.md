@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## 0.9.9 — 2026-11-02
+
+### Changed
+
+- Go SQLite `ExecuteV2In` reduces box and histogram distributions of a stored
+  number field, grouped by text, enum or bool fields, in one native scan of the
+  matching population shared by every such metric in the request, rather than
+  materializing and sorting the population once per metric. Results are
+  identical to the compiled plans, which formula and computed inputs still use.
+  On a 600,000-row table, one grouped box drops from 1.9 s to 0.25 s and four
+  field distributions in one request from 6.2 s to 0.33 s.
+- `ExecuteV2Rows` computes box and histogram distributions of a number field
+  instead of returning `ErrRowsUnsupported`.
+- The SQLite box mean is a compensated sum of the sorted samples instead of an
+  exact rational accumulation, which allocated on every sample. It can differ
+  from 0.9.8 by floating-point roundoff.
+
 ## 0.9.8 — 2026-10-30
 
 ### Added

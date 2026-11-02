@@ -340,6 +340,13 @@ func (d SQLiteV2Dataset) ExecuteV2In(ctx context.Context, tx *sql.Tx, rows *Serv
 				err = errors.Join(err, cleanupErr)
 			}
 		}()
+		direct, streamed, ok, directErr := d.directDistributions(ctx, tx, *metrics, failures, o, maxGroups, maxPopulation)
+		if directErr != nil {
+			return SQLiteV2ExecutionResult{}, directErr
+		}
+		if ok && !counted {
+			total, counted = streamed, true
+		}
 		next := 0
 		for i, spec := range metrics.Metrics {
 			if failures[i] != nil {
@@ -349,6 +356,10 @@ func (d SQLiteV2Dataset) ExecuteV2In(ctx context.Context, tx *sql.Tx, rows *Serv
 			}
 			p := batch.Metrics[next]
 			next++
+			if m, ok := direct[i]; ok {
+				r.Metrics = append(r.Metrics, m)
+				continue
+			}
 			key := p.Fingerprint + "\x00" + p.Scope
 			if previous, ok := memo[key]; ok {
 				previous = cloneSQLiteMetric(previous)

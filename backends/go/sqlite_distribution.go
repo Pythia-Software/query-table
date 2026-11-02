@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"math/big"
 	"sort"
 	"strings"
 )
@@ -83,47 +82,55 @@ func sqliteDistributionFunctions() []SQLiteScalarFunction {
 			if !lok || !hok {
 				return nil, fmt.Errorf("invalid histogram extent")
 			}
-			if payload.Error = sqliteDistributionNumberError(lo); payload.Error == "" {
-				payload.Error = sqliteDistributionNumberError(hi)
+			if lo > hi {
+				return nil, fmt.Errorf("reversed histogram extent")
 			}
-			if payload.Error == "" {
-				if lo > hi {
-					return nil, fmt.Errorf("reversed histogram extent")
-				}
-				if lo == hi {
-					payload.Edges = []float64{lo, hi}
-				} else {
-					payload.Edges = make([]float64, int(bins)+1)
-					for i := range payload.Edges {
-						// Round the product before addition to match the frontend (no FMA).
-						ratio := float64(i) / float64(bins)
-						offset := float64(float64(hi-lo) * ratio)
-						edge := lo + offset
-						if i == 0 {
-							edge = lo
-						}
-						if i == int(bins) {
-							edge = hi
-						}
-						payload.Edges[i] = edge
-						if e := sqliteDistributionNumberError(edge); e != "" {
-							payload.Error = e
-							break
-						}
-						if i > 0 && edge <= payload.Edges[i-1] {
-							payload.Error = "histogram_precision"
-							break
-						}
-					}
-				}
-			}
-		}
-		if payload.Error != "" {
-			payload.Edges = []float64{}
+			payload.Edges, payload.Error = distributionHistogramEdges(lo, hi, int(bins))
 		}
 		data, e := json.Marshal(payload)
 		return string(data), e
 	}}}
+}
+
+// distributionHistogramEdges returns the shared edges of a nonempty extent, or
+// an error code and no edges.
+func distributionHistogramEdges(lo, hi float64, bins int) ([]float64, string) {
+	if e := sqliteDistributionNumberError(lo); e != "" {
+		return []float64{}, e
+	}
+	if e := sqliteDistributionNumberError(hi); e != "" {
+		return []float64{}, e
+	}
+	if lo == hi {
+		return []float64{lo, hi}, ""
+	}
+	edges := make([]float64, bins+1)
+	for i := range edges {
+		// Round the product before addition to match the frontend (no FMA).
+		ratio := float64(i) / float64(bins)
+		offset := float64(float64(hi-lo) * ratio)
+		edge := lo + offset
+		if i == 0 {
+			edge = lo
+		}
+		if i == bins {
+			edge = hi
+		}
+		edges[i] = edge
+		if e := sqliteDistributionNumberError(edge); e != "" {
+			return []float64{}, e
+		}
+		if i > 0 && edge <= edges[i-1] {
+			return []float64{}, "histogram_precision"
+		}
+	}
+	return edges, ""
+}
+
+// distributionHistogramBin is the half-open bin of v; the final bin also
+// includes the maximum. v must lie within edges, which has at least two.
+func distributionHistogramBin(edges []float64, v float64) int {
+	return sort.Search(len(edges)-2, func(i int) bool { return v < edges[i+1] })
 }
 
 type sqliteHistogramEdges struct {
@@ -133,14 +140,15 @@ type sqliteHistogramEdges struct {
 
 func sqliteDistributionAggregates() []SQLiteAggregateDescriptor {
 	return []SQLiteAggregateDescriptor{
-		{Name: "qt_v2_box", Arity: 2, New: func() SQLiteAggregateFunction { return &sqliteBoxAggregate{sum: new(big.Rat)} }},
+		{Name: "qt_v2_box", Arity: 2, New: func() SQLiteAggregateFunction { return &sqliteBoxAggregate{} }},
 		{Name: "qt_v2_histogram", Arity: 2, New: func() SQLiteAggregateFunction { return &sqliteHistogramAggregate{} }},
 	}
 }
 
+// Step only validates and appends; the summary, including the mean, is
+// computed once from the sorted samples.
 type sqliteBoxAggregate struct {
 	samples       []float64
-	sum           *big.Rat
 	whiskers, err string
 }
 
@@ -173,7 +181,6 @@ func (a *sqliteBoxAggregate) Step(values []driver.Value) error {
 		return nil
 	}
 	a.samples = append(a.samples, n)
-	a.sum.Add(a.sum, sqliteRat(n))
 	return nil
 }
 func sqlitePercentile(sorted []float64, p float64) (float64, string) {
@@ -188,42 +195,69 @@ func sqlitePercentile(sorted []float64, p float64) (float64, string) {
 	}
 	return min(r, max(l, raw)), ""
 }
+
+// distributionMean is the compensated (Neumaier) mean of finite samples. Each
+// sample is at most 1e100 in magnitude, so the running sum cannot overflow.
+func distributionMean(samples []float64) float64 {
+	sum, compensation := 0.0, 0.0
+	for _, v := range samples {
+		t := sum + v
+		if math.Abs(sum) >= math.Abs(v) {
+			compensation += (sum - t) + v
+		} else {
+			compensation += (v - t) + sum
+		}
+		sum = t
+	}
+	return (sum + compensation) / float64(len(samples))
+}
 func (a *sqliteBoxAggregate) Value() (driver.Value, error) {
 	if a.err != "" {
 		return sqliteDistributionJSON(nil, a.err, nil)
 	}
-	if len(a.samples) == 0 {
-		return sqliteDistributionJSON(nil, "", &MetricBoxDistribution{Kind: "box"})
-	}
 	sort.Float64s(a.samples)
-	n := len(a.samples)
+	value, code, box := distributionBox(a.samples, a.whiskers)
+	if box == nil {
+		return sqliteDistributionJSON(nil, code, nil)
+	}
+	return sqliteDistributionJSON(value, code, box)
+}
+
+// distributionBox summarizes sorted, validated samples: the median value and
+// box, or an error code. An empty population has no value and no summary.
+func distributionBox(samples []float64, mode string) (*float64, string, *MetricBoxDistribution) {
+	if len(samples) == 0 {
+		return nil, "", &MetricBoxDistribution{Kind: "box"}
+	}
+	n := len(samples)
 	q := make([]float64, 3)
 	for i, p := range []float64{0.25, 0.5, 0.75} {
 		var e string
-		q[i], e = sqlitePercentile(a.samples, p)
+		q[i], e = sqlitePercentile(samples, p)
 		if e != "" {
-			return sqliteDistributionJSON(nil, e, nil)
+			return nil, e, nil
 		}
 	}
-	mean, _ := new(big.Rat).Quo(a.sum, big.NewRat(int64(n), 1)).Float64()
+	// Clamp roundoff to the observed range before validating: a mean of
+	// samples at the range boundary may otherwise round just outside it.
+	mean := min(samples[n-1], max(samples[0], distributionMean(samples)))
 	if e := sqliteDistributionNumberError(mean); e != "" {
-		return sqliteDistributionJSON(nil, e, nil)
+		return nil, e, nil
 	}
-	mode := a.whiskers
 	if mode == "" {
 		mode = "minmax"
 	}
-	s := &MetricBoxSummary{N: int64(n), Min: a.samples[0], Q1: q[0], Median: q[1], Q3: q[2], Max: a.samples[n-1], Mean: min(a.samples[n-1], max(a.samples[0], mean)), Low: a.samples[0], High: a.samples[n-1], Outliers: []float64{}, Whiskers: mode, Method: DistributionPrecision}
+	s := &MetricBoxSummary{N: int64(n), Min: samples[0], Q1: q[0], Median: q[1], Q3: q[2], Max: samples[n-1], Mean: mean, Low: samples[0], High: samples[n-1], Outliers: []float64{}, Whiskers: mode, Method: DistributionPrecision}
 	if mode == "tukey" {
 		spread := float64(1.5 * float64(s.Q3-s.Q1))
 		lowFence, highFence := s.Q1-spread, s.Q3+spread
-		first := sort.Search(n, func(i int) bool { return a.samples[i] >= lowFence })
-		end := sort.Search(n, func(i int) bool { return a.samples[i] > highFence })
+		first := sort.Search(n, func(i int) bool { return samples[i] >= lowFence })
+		end := sort.Search(n, func(i int) bool { return samples[i] > highFence })
 		if first >= end {
-			return sqliteDistributionJSON(nil, "numeric_range", nil)
+			return nil, "numeric_range", nil
 		}
-		s.Low = a.samples[first]
-		s.High = a.samples[end-1]
+		s.Low = samples[first]
+		s.High = samples[end-1]
 		s.OutlierCount = int64(first + n - end)
 		total := int(s.OutlierCount)
 		for i := 0; i < min(total, 20); i++ {
@@ -235,10 +269,10 @@ func (a *sqliteBoxAggregate) Value() (driver.Value, error) {
 			if rank >= first {
 				index = end + rank - first
 			}
-			s.Outliers = append(s.Outliers, a.samples[index])
+			s.Outliers = append(s.Outliers, samples[index])
 		}
 	}
-	return sqliteDistributionJSON(&s.Median, "", &MetricBoxDistribution{Kind: "box", Summary: s})
+	return &s.Median, "", &MetricBoxDistribution{Kind: "box", Summary: s}
 }
 
 type sqliteHistogramAggregate struct {
@@ -299,8 +333,7 @@ func (a *sqliteHistogramAggregate) Step(values []driver.Value) error {
 	if len(a.edges) == 0 || v < a.edges[0] || v > a.edges[len(a.edges)-1] {
 		return fmt.Errorf("sample falls outside shared histogram edges")
 	}
-	bin := sort.Search(len(a.edges)-2, func(i int) bool { return v < a.edges[i+1] })
-	a.counts[bin]++
+	a.counts[distributionHistogramBin(a.edges, v)]++
 	a.n++
 	return nil
 }
