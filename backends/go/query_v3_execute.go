@@ -95,6 +95,12 @@ func (d QueryDatasetV3) ExecuteIn(ctx context.Context, tx *sql.Tx, q QueryReques
 	if _, err = d.sampleLimit(); err != nil {
 		return out, err
 	}
+	if q.Distinct != nil {
+		if o, err = d.options(ctx, tx, q, o); err != nil {
+			return out, err
+		}
+		return d.executeDistinct(ctx, tx, q, o)
+	}
 	if q.Result.Limit < 1 || q.Result.Limit > maxRows || len(q.Metrics) > 20 {
 		return out, diagnostic("resource_limit", "invalid result window or metric budget")
 	}
