@@ -19,6 +19,7 @@ const table = useQueryTable({ schema, clientRows: allRows });
   query={table.query}
   onQueryChange={table.setQuery}
   rowId={table.rowId}
+  grouping={table.grouping}
 />
 <MetricsPanel api={table} aggregations={table.aggregations} fields={table.schema!.fields} />
 ```
@@ -27,7 +28,8 @@ Pass `grouping: false` to disable it. Fields follow the schema's existing
 `aggregate.groupable`, `aggregate.measure`, `aggregate.ops`, select and sort
 capabilities. No demo-specific fields or named representative strategies are
 required. `QueryBuilder` supplies grouping controls unless the host overrides
-its `clauses` slot.
+its `clauses` slot. Passing `grouping` to `DataTable` adds Group By, Remove
+from Group By and Ungroup to the column header menu.
 
 Grouped rows are flat projections; they are not instances of the source record
 type. Use `table.schema`, `table.visibleFields`, and `table.rowId` when rendering.

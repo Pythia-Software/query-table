@@ -6,17 +6,17 @@ import { Icon } from "./Icon";
 //
 // Presentation only: it draws headers (sort affordances), the checkbox column,
 // cells (via the render registry), the right-click CellMenu, column resize
-// handles, the loading bar, and the header menu (sort, column widths). All state
+// handles, the loading bar, and the header menu (sort, grouping, column widths). All state
 // lives in the @pythia-software/query-table-react hook; DataTable receives the resolved view
 // and emits intents through onQueryChange. Its props mirror a conventional
 // schema-driven table so adoption is mechanical.
 
-import { GROUP_ID_FIELD, GROUP_LINK_RENDER, ITEM_DETAILS_COLUMN, groupKeyFields, isComputedCellError, isGroupLinkValue, type LinkTargets } from "@pythia-software/query-table-core";
+import { GROUP_ID_FIELD, GROUP_LINK_RENDER, ITEM_DETAILS_COLUMN, groupKeyField, groupKeyFields, isComputedCellError, isGroupLinkValue, type LinkTargets } from "@pythia-software/query-table-core";
 import { useId, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type SetStateAction } from "react";
 import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
-import type { OrderByClause, QueryState, FieldDef, RowId, SelectColumn, WhereClause } from "@pythia-software/query-table-core";
+import type { GroupKey, OrderByClause, QueryState, FieldDef, RowId, SelectColumn, WhereClause } from "@pythia-software/query-table-core";
 import { isSortable, readFieldValue } from "@pythia-software/query-table-core";
-import { useColumnDrag, type SelectionApi, type ColumnDragApi } from "@pythia-software/query-table-react";
+import { useColumnDrag, type SelectionApi, type ColumnDragApi, type GroupingApi } from "@pythia-software/query-table-react";
 import { createGroupLinkRenderer, resolveRenderer, type RenderRegistry } from "./renderers";
 import type { TableClassNames } from "./classNames";
 import { CellMenu } from "./CellMenu";
@@ -58,6 +58,10 @@ export interface DataTableProps<Row> {
    *  (and vice versa). Omit for a self-contained, table-only drag. */
   columnDrag?: ColumnDragApi;
 
+  /** Grouping controller (`api.grouping`). Pass it to offer Group By, Remove
+   *  from Group By and Ungroup in the header menu. */
+  grouping?: GroupingApi<Row> | undefined;
+
   /** Always-visible trailing column (row actions, links). */
   trailing?: (row: Row) => ReactNode;
   trailingLabel?: string;
@@ -98,6 +102,8 @@ const DEFAULT_ROW_HEIGHT = 37;
 const DEFAULT_OVERSCAN = 8;
 const SELECTION_COLUMN = "__qt_selection__";
 type HeaderSortPlacement = "set" | "append" | "prepend";
+/** What the header menu offers for grouping, given the table's current stage. */
+type HeaderGrouping = { kind: "rows"; groupable: boolean } | { kind: "groups"; key: boolean; keyCount: number };
 
 type MenuState<Row> = {
   field: FieldDef<Row>;
@@ -354,6 +360,29 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
     if (idx === -1) return null;
     const term = query.orderBy[idx]!;
     return { dir: term.dir, priority: query.orderBy.length > 1 ? idx + 1 : null };
+  }
+
+  // ---- grouping (header menu intents; the controller validates and owns undo) ----
+  const grouping = props.grouping;
+  function headerGrouping(f: FieldDef<Row>): HeaderGrouping | null {
+    if (!grouping) return null;
+    if (!query.grouping) {
+      const groupable = grouping.supported && grouping.model.groupableFields.some((g) => g.name === f.name);
+      return { kind: "rows", groupable };
+    }
+    return { kind: "groups", key: groupKeys ? groupKeys.includes(f.name) : false, keyCount: query.grouping.keys.length };
+  }
+  function changeGroupKeys(keys: GroupKey[]) {
+    setMenu(null);
+    if (!grouping) return;
+    try {
+      grouping.changeKeys(keys);
+    } catch (error) {
+      grouping.setNotice(error instanceof Error ? error.message : String(error));
+    }
+  }
+  function removeGroupKey(f: FieldDef<Row>) {
+    changeGroupKeys((query.grouping?.keys ?? []).filter((key) => groupKeyField(key) !== f.name));
   }
 
   // ---- width (resolved from query.select; written back through onQueryChange) ----
@@ -1109,6 +1138,10 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
             canRemoveColumn={fields.length > 1}
             onSetSort={(placement, dir) => applyHeaderSort(menu.field, dir, placement)}
             onRemove={() => removeColumn(menu.field)}
+            grouping={headerGrouping(menu.field)}
+            onGroupBy={() => changeGroupKeys([menu.field.name])}
+            onRemoveGroupKey={() => removeGroupKey(menu.field)}
+            onUngroup={() => changeGroupKeys([])}
             canResetWidths={hasCustomWidths}
             fitToScreen={query.fitToScreen === true}
             onFitColumn={() => {
@@ -1127,7 +1160,8 @@ export function DataTable<Row>(props: DataTableProps<Row>): ReactNode {
 
 function HeaderMenu<Row>({
   field, anchor, sortable, canRemoveColumn, canResetWidths,
-  fitToScreen, onSetSort, onRemove, onFitColumn, onWidthPreset, onResetWidths, onClose,
+  fitToScreen, onSetSort, onRemove, grouping, onGroupBy, onRemoveGroupKey, onUngroup,
+  onFitColumn, onWidthPreset, onResetWidths, onClose,
 }: {
   field: FieldDef<Row>;
   anchor: HTMLElement;
@@ -1137,6 +1171,10 @@ function HeaderMenu<Row>({
   fitToScreen: boolean;
   onSetSort: (placement: HeaderSortPlacement, dir: "asc" | "desc") => void;
   onRemove: () => void;
+  grouping: HeaderGrouping | null;
+  onGroupBy: () => void;
+  onRemoveGroupKey: () => void;
+  onUngroup: () => void;
   onFitColumn: () => void;
   onWidthPreset: (preset: ColumnWidthPreset) => void;
   onResetWidths: () => void;
@@ -1151,6 +1189,18 @@ function HeaderMenu<Row>({
             {placement === "set" ? "Set" : placement === "append" ? "Append" : "Prepend"} Sort ({dir === "asc" ? "Asc" : "Desc"})
           </MenuItem>
         )),
+      )}
+      {grouping && <MenuSeparator />}
+      {grouping?.kind === "rows" && (
+        <MenuItem disabled={!grouping.groupable} onSelect={onGroupBy} title={grouping.groupable ? `One row per ${field.label} value` : `${field.label} cannot be grouped`}>
+          Group By {field.label}
+        </MenuItem>
+      )}
+      {grouping?.kind === "groups" && grouping.key && grouping.keyCount > 1 && (
+        <MenuItem onSelect={onRemoveGroupKey} title="Group by the remaining keys only">Remove from Group By</MenuItem>
+      )}
+      {grouping?.kind === "groups" && (
+        <MenuItem onSelect={onUngroup} title="Back to the source rows">Ungroup</MenuItem>
       )}
       <MenuSeparator />
       <MenuSubmenu label="Column Widths">

@@ -259,6 +259,7 @@ export function App({ dateExample = false, savedQueriesPrototype = false }: {
           rowId={api.rowId}
           selection={api.selection}
           columnDrag={api.columnDrag}
+          grouping={api.grouping}
           loading={api.loading}
           emptyMessage="No runs match this query."
         />

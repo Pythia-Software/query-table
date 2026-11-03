@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Added
+
+- `DataTable` takes an optional `grouping` prop (`api.grouping`). With it, the
+  column header menu offers Group By for groupable columns, and on a grouped
+  table Remove from Group By (on a key column, when there are several keys)
+  and Ungroup. The actions go through the grouping controller, so validation,
+  undo and restoring the previous grouped layout behave as in the query editor.
+
 ## 0.9.9 — 2026-11-02
 
 ### Changed
