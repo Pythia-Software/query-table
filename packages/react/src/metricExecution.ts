@@ -9,8 +9,9 @@ import {
   hasMetricSeries,
   planMetricSeries,
   predicatesOf,
-  toAggregationQuery,
-  toMetricQuery,
+  sourceExecutionSchema,
+  toQueryRequestV3,
+  validateQueryResultV3,
   validateMetric,
   selectMetricShownRows,
   readFieldValue,
@@ -33,6 +34,7 @@ import {
 } from "./formulaWorker";
 
 export interface MetricExecutionContext<Row> {
+  /** Remote execution; defaults to executeV3Metrics over `transport`. */
   executeV3?: (query: QueryState, signal?: AbortSignal) => Promise<AggregationResult>;
   queryContextKey?: string;
   schema: FieldSchema<Row>;
@@ -55,18 +57,51 @@ const abort = (signal?: AbortSignal) => {
   if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
 };
 
-/** Keep dispatch and the hook's committed-page lifecycle on the same route. */
+/** Keep dispatch and the hook's committed-page lifecycle on the same route:
+ * without a remote executor, shown-row metrics read the committed page. */
 export function usesLocalMetricPage<Row>(
   clause: AggregationClause,
   context: MetricExecutionContext<Row>,
 ): boolean {
-  return !context.executeV3 && clause.scope === "shownRows" && (
-    !context.transport?.fetchMetrics ||
-    context.transport.metricCapabilities?.version !== 2 ||
-    context.transport.metricCapabilities.shownRows !== true ||
-    !!clause.dateGrouping ||
-    metricPlans(clause, context.schema, context.resolveComputed).some(hasRegex)
-  );
+  return !context.executeV3 && !context.transport && clause.scope === "shownRows";
+}
+
+/** Run a metric batch as one v3 request (`rows: false`). A clause using a
+ * population control the server does not advertise fails on its own; the
+ * rest of the batch is still sent. `query.grouping`, when present, is the
+ * population the metrics describe. */
+export async function executeV3Metrics<Row>(
+  transport: Transport<Row>,
+  query: QueryState,
+  baseSchema: FieldSchema<Row>,
+  resultSchema: FieldSchema<Row>,
+  execution: ComputedExecution | undefined,
+  now: number,
+  signal?: AbortSignal,
+): Promise<AggregationResult> {
+  const capabilities = transport.queryCapabilities;
+  const refused = new Map<string, string>();
+  for (const clause of query.aggregations ?? []) {
+    const issue = metricPopulationError(clause, { filters: capabilities.metricFilters, minCount: capabilities.metricMinCount, minCountMeasures: capabilities.metricMinCountMeasures });
+    if (issue) refused.set(clause.id, issue);
+  }
+  const runnable = (query.aggregations ?? []).filter(clause => !refused.has(clause.id));
+  let metrics: AggregationResult["metrics"] = [];
+  if (runnable.length) {
+    const request = toQueryRequestV3({ ...query, aggregations: runnable }, baseSchema, capabilities, execution, { now, rows: false });
+    if (request.diagnostics.length) throw Error(request.diagnostics.join(" "));
+    const result = await transport.fetchQueryV3(request, signal);
+    validateQueryResultV3(result, request, resultSchema);
+    metrics = result.metrics;
+  }
+  if (!refused.size) return { metrics };
+  const byId = new Map(metrics.map(metric => [metric.id, metric]));
+  return { metrics: (query.aggregations ?? []).flatMap((clause): AggregationResult["metrics"] => {
+    const issue = refused.get(clause.id);
+    if (issue) return [{ id: clause.id, buckets: [], error: issue }];
+    const metric = byId.get(clause.id);
+    return metric ? [metric] : [];
+  }) };
 }
 
 /** Local regex inputs run in terminable workers; reduction uses only cached values. */
@@ -250,19 +285,15 @@ export async function executeMetrics<Row>(
     return { metrics: series.combine(parts.flatMap((part) => part.metrics)) };
   }
   if (context.executeV3) return context.executeV3(query, signal);
+  if (context.transport)
+    return executeV3Metrics(context.transport, query, context.schema,
+      sourceExecutionSchema(context.schema, context.execution), context.execution, context.now ?? Date.now(), signal);
   if (context.rowsReady === false && clauses.some(c => usesLocalMetricPage(c, context)))
     throw Error("Wait for the current table page before previewing shown-row metrics.");
-  const supportsV2 =
-    !!context.transport?.fetchMetrics &&
-    context.transport.metricCapabilities?.version === 2;
-  if (
-    context.clientRows &&
-    !supportsV2 &&
-    !context.transport?.fetchAggregations
-  )
+  if (context.clientRows)
     return localMetrics(context.clientRows, query, context, signal);
   const shown = clauses.filter(c => usesLocalMetricPage(c, context));
-  let matching = clauses.filter(c => !shown.includes(c));
+  const matching = clauses.filter(c => !shown.includes(c));
   const results: AggregationResult["metrics"] = [];
   if (shown.length) {
     if (!context.rowsReady || !context.shownRows)
@@ -320,132 +351,10 @@ export async function executeMetrics<Row>(
         .metrics,
     );
   }
-  // A capability the server lacks fails only the clauses that need it; the
-  // rest of the batch is still sent.
-  const unsupported = (clause: AggregationClause, error: string) =>
-    results.push({ id: clause.id, buckets: [], error });
-  const calendar = matching.filter((c) => c.dateGrouping);
-  for (const clause of calendar)
-    unsupported(
-      clause,
-      "This server does not support calendar grouping. Enable the v3 query executor.",
+  if (matching.length)
+    throw Error(
+      "Remote all-matching metrics require a metric-capable server transport.",
     );
-  matching = matching.filter((c) => !c.dateGrouping);
-  // Population controls are never dropped: a v1 endpoint, or a v2 server that
-  // does not advertise them, fails only the clauses that use them.
-  {
-    const transport = context.transport;
-    if (transport?.fetchMetrics || transport?.fetchAggregations) {
-      const support =
-        transport.fetchMetrics && transport.metricCapabilities?.version === 2
-          ? transport.metricCapabilities
-          : {};
-      matching = matching.filter((c) => {
-        const error = metricPopulationError(c, support);
-        if (error) unsupported(c, error);
-        return !error;
-      });
-    }
-  }
-  if (matching.length) {
-    const transport = context.transport;
-    if (
-      transport?.fetchMetrics &&
-      transport.metricCapabilities?.version === 2
-    ) {
-      const capabilities = transport.metricCapabilities;
-      const request = toMetricQuery(
-        { ...query, aggregations: matching },
-        context.schema,
-        context.execution,
-      );
-      if (request.diagnostics.length)
-        throw Error(request.diagnostics.map((d) => d.message).join(" "));
-      if (
-        request.profile &&
-        capabilities.profile &&
-        request.profile !== capabilities.profile
-      )
-        throw Error(
-          "Metric transport and computed execution profiles do not match. Refresh the handshake.",
-        );
-      const remoteFields = new Map(
-        context.schema.fields.map((field) => [field.name, field]),
-      );
-      for (const [name, capability] of Object.entries(
-        context.execution?.fields ?? {},
-      ))
-        if (isComputedField(name))
-          remoteFields.set(name, {
-            name,
-            label: name,
-            type: capability.type,
-            source: { kind: "backend" },
-          });
-      const remoteSchema = {
-        ...context.schema,
-        fields: [...remoteFields.values()],
-      };
-      const wire = new Map(request.metrics.map((m) => [m.id, m]));
-      const limitation = (clause: AggregationClause): string | undefined => {
-        if (clause.scope === "shownRows" && !capabilities.shownRows)
-          return "This server does not support shown-row metrics.";
-        if (
-          !capabilities.computedFields &&
-          [
-            ...clause.groupBy,
-            ...metricPlans(clause, remoteSchema).flatMap(
-              (plan) => plan.dependencies,
-            ),
-          ].some(isComputedField)
-        )
-          return "This metric server does not support computed fields.";
-        const sent = wire.get(clause.id);
-        if (
-          !capabilities.expressions &&
-          sent &&
-          !sent.distribution &&
-          (sent.expression !== undefined || sent.expressionY !== undefined)
-        )
-          return "This server does not support composed metric expressions.";
-        if (
-          !capabilities.distributions &&
-          clause.distribution &&
-          (!clause.display ||
-            ["box", "histogram"].includes(clause.display.kind))
-        )
-          return "This server does not support distributions.";
-        return undefined;
-      };
-      const rejected = new Set<string>();
-      for (const clause of matching) {
-        const error = limitation(clause);
-        if (error) {
-          rejected.add(clause.id);
-          unsupported(clause, error);
-        }
-      }
-      const metrics = request.metrics.filter((m) => !rejected.has(m.id));
-      if (metrics.length)
-        results.push(
-          ...(await transport.fetchMetrics({ ...request, metrics }, signal))
-            .metrics,
-        );
-    } else if (transport?.fetchAggregations) {
-      const request = toAggregationQuery(
-        { ...query, aggregations: matching },
-        context.schema,
-      );
-      if (request.diagnostics?.length)
-        throw Error(request.diagnostics.map((d) => d.message).join(" "));
-      results.push(
-        ...(await transport.fetchAggregations(request, signal)).metrics,
-      );
-    } else
-      throw Error(
-        "Remote all-matching metrics require a metric-capable server transport.",
-      );
-  }
   abort(signal);
   const byId = new Map(results.map((r) => [r.id, r]));
   return {

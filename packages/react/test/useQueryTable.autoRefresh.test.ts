@@ -9,8 +9,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import type { FieldSchema, StorageAdapter, Transport } from "@pythia-software/query-table-core";
+import type { FieldSchema, StorageAdapter } from "@pythia-software/query-table-core";
 import { useQueryTable, type QueryTableApi, type UseQueryTableOptions } from "../src/useQueryTable";
+import { memoryV3Transport } from "./v3Transport";
 
 // React's act() requires this flag in a non-test-runner host like ours.
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -141,9 +142,8 @@ describe("useQueryTable auto-refresh + onRefresh", () => {
   });
 
   it("without onRefresh, the internal setNonce path still re-queries on manual + auto refresh", async () => {
-    const rowsResult = { rows: clientRows, total: clientRows.length };
-    const fetchRows = vi.fn(async () => rowsResult);
-    const transport: Transport<Row> = { fetchRows };
+    const transport = memoryV3Transport(clientRows, schema);
+    const fetchRows = transport.fetchQueryV3;
 
     const { result, unmount } = renderHook(() =>
       useQueryTable<Row>({ schema, transport, storage, syncUrl: false }),

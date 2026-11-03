@@ -8,7 +8,6 @@ import {
   inspectBucketQuery,
   metricComputationKey,
   planMetricSeries,
-  toMetricQuery,
   toQueryRequestV3,
   validateMetric,
   type AggregationClause,
@@ -16,6 +15,7 @@ import {
   type FieldSchema,
   type QueryState,
 } from "../src/index";
+import { toMetricQuery } from "../src/metrics";
 
 const schema: FieldSchema = {
   name: "usage",

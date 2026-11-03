@@ -1,47 +1,25 @@
-import type { ServerQueryV2, FetchRowsResultV2 } from "./execution";
 import type { QueryCapabilitiesV3, QueryRequestV3, QueryResultV3 } from "./queryV3";
-import type { MetricQuery, MetricCapabilities } from "./metricTypes";
 // adapters.ts — the pluggable seams. Everything project-specific is injected
 // here so the package core stays generic.
 //
-//   - Transport     : how rows + filter-value suggestions are fetched.
+//   - Transport     : how queries execute on a server (the v3 protocol).
 //   - StorageAdapter: where saved/last queries live (in-memory by default in
 //                     the React hook; explicitly durable when callers opt in).
 
 import { normalizeQueryState } from "./query";
-import type { HostQueryState, QueryState, RowId } from "./query";
+import type { QueryState } from "./query";
 import type { QuerySnapshotStore } from "./queryLinks";
-import type { ServerQuery, AggregationRequest, AggregationResult } from "./encode";
 
 // ---- Transport ------------------------------------------------------------
 
-export interface FetchRowsResult<Row> {
-  rows: Row[];
-  /** Total matching rows before pagination (for "N of M" + paging bounds). */
-  total: number;
-}
-
-/** A keystroke-driven distinct-value lookup. Autocomplete is the DEFAULT value
- *  source for every field (design feedback), so this is how the filter combobox
- *  finds options. `search` is the user's current input; the backend returns the
- *  best matches and whether it truncated (so the UI can prompt "keep typing"). */
-export interface DistinctValuesQuery {
-  field: string;
-  /** Current substring/prefix the user has typed (empty = top values). */
-  search: string;
-  /** Max suggestions to return (default chosen by the adapter, ~50). */
-  limit?: number;
-  /** The table's host-owned state when `hostQuery` is configured. */
-  hostState?: HostQueryState;
-}
-
+/** Filter-value suggestions: the best matches for a search and whether more
+ *  exist (so the UI can prompt "keep typing"). */
 export interface DistinctValuesResult {
   values: string[];
   /** true when more matches exist than were returned — refine by typing. */
   hasMore: boolean;
   /** True if the selected field has at least one NULL in the source dataset.
-   *  False if that field is guaranteed non-null. Omitted when the backend does
-   *  not compute this metadata. */
+   *  False if that field is guaranteed non-null. Omitted when unknown. */
   hasNull?: boolean;
 }
 
@@ -52,36 +30,13 @@ export interface FieldStats {
   max?: string | number;
 }
 
+/** Remote execution. Every row page, metric batch, grouped view, filter
+ *  suggestion, row lookup and field statistic is one v3 request. Omit the
+ *  transport to run `clientRows` locally. */
 export interface Transport<Row = any> {
-  queryCapabilities?: QueryCapabilitiesV3;
-  fetchQueryV3?(query: QueryRequestV3, signal?: AbortSignal): Promise<QueryResultV3>;
-  fetchRowsV2?(query: ServerQueryV2, signal?: AbortSignal): Promise<FetchRowsResultV2<Row>>;
-  metricCapabilities?: MetricCapabilities;
-  fetchMetrics?(query: MetricQuery, signal?: AbortSignal): Promise<AggregationResult>;
-  /** Legacy row execution. A remote table needs this, fetchRowsV2 with a
-   * computedExecution handshake, or fetchQueryV3 with queryCapabilities.
-   * Modern hosts may omit the legacy endpoint, including for draft previews. */
-  fetchRows?(query: ServerQuery, signal?: AbortSignal): Promise<FetchRowsResult<Row>>;
-
-  /** Distinct values for filter autocomplete. Strongly recommended: without it,
-   *  fields fall back to freeform input. The backend should match `search`
-   *  server-side (e.g. ILIKE prefix) and cap at `limit` so large domains stay
-   *  fast and refine per keystroke. */
-  fetchDistinctValues?(q: DistinctValuesQuery, signal?: AbortSignal): Promise<DistinctValuesResult>;
-
-  /** Run the metric panel's GROUP BY queries (one per requested aggregation),
-   *  scoped to the WHERE-filtered set with no paging. Optional: without it, the
-   *  metric panel falls back to applyAggregations over local rows (client mode).
-   *  Implementations compile each AggSpec with backends/go CompileAggregation,
-   *  sharing the same WHERE as fetchRows. */
-  fetchAggregations?(q: AggregationRequest, signal?: AbortSignal): Promise<AggregationResult>;
-
-  /** Re-fetch a single row by id, for in-place updates without a full re-query
-   *  after a mutation. Optional. */
-  fetchRow?(id: RowId, signal?: AbortSignal): Promise<Row | null>;
-
-  /** Stats for the field picker. Optional. */
-  fetchFieldStats?(fields: string[], signal?: AbortSignal): Promise<Record<string, FieldStats>>;
+  /** The server's negotiated v3 capabilities and profile. */
+  queryCapabilities: QueryCapabilitiesV3;
+  fetchQueryV3(query: QueryRequestV3, signal?: AbortSignal): Promise<QueryResultV3>;
 }
 
 // ---- Saved queries --------------------------------------------------------

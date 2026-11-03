@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
-import { applyQuery, applyAggregations, matchesClause, coerceValue, parseRelativeDuration, negateClause, encodeQuery, decodeQuery, toServerQuery, toAggregationQuery, EMPTY_QUERY, OPS_BY_TYPE } from "../src/index";
+import { applyQuery, applyAggregations, matchesClause, coerceValue, parseRelativeDuration, negateClause, encodeQuery, decodeQuery, toServerQuery, toQueryRequestV3, EMPTY_QUERY, OPS_BY_TYPE } from "../src/index";
 import type { FieldSchema, FilterOp, QueryState, WhereClause } from "../src/index";
 
 const fixtures = JSON.parse(readFileSync(new URL("../../../schema/fixtures/relative-time.json", import.meta.url), "utf8")) as {
@@ -62,7 +62,10 @@ describe("signed datetime duration values", () => {
     const q = { ...query([clause("-1h"), clause("+0s", "<")]), aggregations: [{ id: "count", op: "count" as const, groupBy: [] }] };
     expect(decodeQuery(encodeQuery(q))).toEqual(q);
     expect(toServerQuery(q, schema)).toEqual({ select: ["id"], where: q.where, orderBy: [], limit: 100, offset: 0 });
-    expect(toAggregationQuery(q, schema)).toEqual({ where: q.where, aggregations: q.aggregations });
+    const request = toQueryRequestV3(q, schema, { version: 3, profile: "p", groupedRows: false, calendarGrouping: false,
+      computedSourceFilters: false, regex: false, maxRows: 100, maxGroups: 100, maxPopulation: 100 }, undefined, { now, rows: false });
+    expect(request.source.where).toEqual(q.where);
+    expect(request.metrics).toEqual(q.aggregations);
     expect(applyAggregations(rows, q, schema, { now }).metrics[0]?.buckets[0]?.value).toBe(2);
   });
 });

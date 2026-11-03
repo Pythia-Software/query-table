@@ -9,9 +9,8 @@ still uses the `2j.`/`2d.` codec and immutable `@code` references.
 
 | Mode | Rows and metrics | Source guarantee | Metadata and item loading |
 | --- | --- | --- | --- |
-| Existing transport | Existing v1/v2 backend paths | Host backend owns paging | Existing transport |
 | `clientRows` | Local execution over data already in memory | Caller supplies the local dataset | Optional host item loader |
-| `fetchQueryV3` + `queryCapabilities` | SQLite/PostgreSQL backend execution | One authorized transaction per request, bounded narrow staging | Existing transport |
+| `fetchQueryV3` + `queryCapabilities` | SQLite/PostgreSQL/DuckDB backend execution | One authorized transaction per request | v3 `distinct`, row-by-identity and field-statistics requests |
 
 Use the backend executor for remote grouping and aggregation. Return only
 result pages and bounded metric buckets over the network. `clientRows` is for
@@ -89,7 +88,8 @@ database storage overhead and query scratch space use the host's database limits
 ### Server execution example
 
 Use `withServerExecution` from [server-execution.tsx](../examples/server-execution.tsx)
-to add the v3 query endpoint to your existing row, item and metadata services.
+to build the transport over the v3 query endpoint; rows, items, filter
+suggestions and field statistics all use it.
 Keep the transport and storage objects stable. The controller sends query
 configuration and receives result pages and metric buckets; it has no bulk
 population loader or automatic download fallback. Unsupported server operations

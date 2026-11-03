@@ -60,7 +60,7 @@ it("debounces filtering, supports clearing and arbitrary values, and ignores unr
   await type("exp"); await tick(150); await type("exploration-"); await tick(199);
   expect(fetchValues).not.toHaveBeenCalled();
   await tick(1);
-  expect(fetchValues).toHaveBeenCalledExactlyOnceWith("repository_name", "exploration-");
+  expect(fetchValues).toHaveBeenCalledExactlyOnceWith("repository_name", "exploration-", expect.any(AbortSignal));
   expect(options().map(option => option.textContent)).toEqual(names.slice(1, 3));
   await act(async () => rerender()); await tick();
   expect(fetchValues).toHaveBeenCalledTimes(1);
@@ -253,11 +253,11 @@ it("reads suggestions only for an open value editor, once per search", async () 
   expect(inputs()).toHaveLength(3);
   await act(async () => inputs()[1]!.focus());
   await tick(); rerender(); await tick(1000);
-  expect(fetchValues.mock.calls).toEqual([["tags", ""]]);
+  expect(fetchValues.mock.calls).toEqual([["tags", "", expect.any(AbortSignal)]]);
   // Closing and reopening the same search reuses its answer.
   await act(async () => inputs()[0]!.focus());
   await tick();
   await act(async () => inputs()[1]!.focus());
   await tick();
-  expect(fetchValues.mock.calls).toEqual([["tags", ""], ["repository_name", ""]]);
+  expect(fetchValues.mock.calls).toEqual([["tags", "", expect.any(AbortSignal)], ["repository_name", "", expect.any(AbortSignal)]]);
 });

@@ -1,5 +1,4 @@
 import type { FormulaDiagnostic } from "./formula";
-import type { AggregationClause, OrderByClause, WhereTerm } from "./query";
 export type MetricValue = number | string | boolean | null;
 export type MetricKey = MetricValue;
 export type MetricScope = "allMatching" | "shownRows";
@@ -177,35 +176,4 @@ export type MetricDistributionResult =
 export interface MetricDiagnostic extends FormulaDiagnostic {
   metricId?: string;
   code?: string;
-}
-/** Host must enforce snapshot against the row response; this token alone does not pin data. */
-export interface MetricQuery {
-  /** The table's host-owned state when `hostQuery` is configured. */
-  hostState?: import("./query").HostQueryState;
-  snapshot?: string;
-  profile?: string;
-  expectedRevisions?: Record<string, string>;
-  planToken?: string;
-  version: 2;
-  where: WhereTerm[];
-  orderBy: OrderByClause[];
-  limit: number;
-  offset: number;
-  metrics: AggregationClause[];
-  diagnostics: MetricDiagnostic[];
-}
-export interface MetricCapabilities {
-  version: 2;
-  expressions?: boolean;
-  shownRows?: boolean;
-  distributions?: boolean;
-  computedFields?: boolean;
-  /** Executes AggregationClause.where. Clauses using it are refused otherwise. */
-  filters?: boolean;
-  /** Executes AggregationClause.minCount and reports hiddenGroups. */
-  minCount?: boolean;
-  /** Also executes an object minCount: distinct values or a sum per group. */
-  minCountMeasures?: boolean;
-  maxGroups?: number;
-  profile?: string;
 }

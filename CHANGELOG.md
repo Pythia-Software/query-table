@@ -19,6 +19,21 @@
 
 ### Changed
 
+- **Breaking:** v3 is the only query protocol. `Transport` is exactly
+  `{ queryCapabilities, fetchQueryV3 }`, both required. `fetchRows`,
+  `fetchRowsV2`, `fetchMetrics`, `metricCapabilities`, `fetchAggregations`,
+  `fetchDistinctValues`, `fetchRow` and `fetchFieldStats` are removed, with
+  `ServerQueryV2`, `FetchRowsResult(V2)`, `toServerQueryV2`,
+  `AggregationRequest`, `toAggregationQuery`, `MetricQuery`, `toMetricQuery`,
+  `MetricCapabilities` and `DistinctValuesQuery`. Filter suggestions are a v3
+  `distinct` request (`QueryRequestV3.distinct` / `QueryResultV3.distinct`);
+  row refreshes, item lookups and field statistics are ordinary v3 requests.
+  Core builds and reads them with `toDistinctRequestV3`, `toRowRequestV3`,
+  `toFieldStatsRequestV3` and `fetchDistinctValuesV3`, `fetchRowV3`,
+  `fetchFieldStatsV3`. With a transport, every metric batch is one v3 request.
+  `api.filterValues` takes an optional `AbortSignal`, and the DuckDB transport
+  is v3-only. `clientRows`, `metricTransport` and `computedExecution` are
+  unchanged.
 - **Breaking:** `QueryState.fitToScreen` is replaced by `fit: "screen"`, and
   Go's `LinkQuery.FitToScreen` by `LinkQuery.Fit`. The compact link key is
   `ft`. Legacy `fitToScreen: true` (`fs`) links, saved queries and link

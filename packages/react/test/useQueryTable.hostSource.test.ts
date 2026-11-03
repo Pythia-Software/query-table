@@ -6,6 +6,7 @@ import { EMPTY_QUERY, applyQuery, createGroupingModel, encodeQuery, evaluateMetr
   type QueryState, type FieldSchema, type QueryRequestV3,
   type QueryResultV3, type Transport, type QueryCapabilitiesV3, type QuerySnapshot } from "@pythia-software/query-table-core";
 import { useQueryTable, type QueryTableApi, type UseQueryTableOptions } from "../src/useQueryTable";
+import { memoryV3Transport, metricRequests, rowRequests } from "./v3Transport";
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 type Row = { id: string; k: string; n: number; at: string };
 const schema: FieldSchema<Row> = { name:"source",idField:"id",defaultSelect:[{field:"id"},{field:"k"},{field:"n"},{field:"at"}],fields:[
@@ -29,28 +30,25 @@ it("requests grouping source stats only for backend fields and forwards cancella
   const extended:FieldSchema<Row>={...schema,fields:[...schema.fields,
     {name:"double",label:"Double",type:"number",source:{kind:"derived",dependencies:["n"],accessor:row=>row.n*2}},
   ]};
-  const fetchFieldStats=vi.fn(async(names:string[],signal?:AbortSignal)=>{
-    if(names.some(name=>!["id","k","n","at"].includes(name)))throw Error("Unknown backend field");
-    if(signal?.aborted)throw new DOMException("Aborted","AbortError");
-    return Object.fromEntries(names.map(name=>[name,{distinct:5}]));
-  });
-  const transport:Transport<Row>={fetchRows:vi.fn(async()=>({rows:[],total:0})),fetchFieldStats,
-    fetchQueryV3:vi.fn(),queryCapabilities:{version:3,profile:"qt-sqlite-v1",groupedRows:true,calendarGrouping:true,computedSourceFilters:false,regex:false,maxRows:10000,maxGroups:2000,maxPopulation:250000}};
+  const transport=memoryV3Transport<Row>([1,2,3,4,5].map(n=>({id:String(n),k:"k",n,at:"2026-10-13T12:00:00Z"})),extended);
   const api=mount({schema:extended,transport,debounceMs:0});await settle();
   const controller=new AbortController();
   let stats:unknown;
   await act(async()=>{stats=await api().grouping!.source.fieldStats(["n","double","@computed/local","unknown","n"],controller.signal)});
-  expect(stats).toEqual({n:{distinct:5}});expect(fetchFieldStats).toHaveBeenCalledWith(["n"],controller.signal);
-  fetchFieldStats.mockClear();
+  expect(stats).toEqual({n:{distinct:5,min:1,max:5}});
+  const statCalls=transport.fetchQueryV3.mock.calls.filter(([request])=>!request.rows);
+  expect(statCalls).toHaveLength(1);const [request,signal]=statCalls[0]!;
+  expect(request.metrics.map(metric=>metric.id)).toEqual(["n:distinct","n:min","n:max"]);expect(signal).toBe(controller.signal);
+  transport.fetchQueryV3.mockClear();
   await act(async()=>{expect(await api().grouping!.source.fieldStats(["double","@computed/local"],controller.signal)).toEqual({})});
-  expect(fetchFieldStats).not.toHaveBeenCalled();
+  expect(transport.fetchQueryV3).not.toHaveBeenCalled();
   controller.abort();
   await act(async()=>{await expect(api().grouping!.source.fieldStats(["n"],controller.signal)).rejects.toThrow("Aborted")});
 });
 
 it.each(["/tools", "?", "#"])("restores relative router locations (%s)",async form=>{
-  const fetchRows=vi.fn(async()=>({rows:[],total:0}));
-  const api=mount({schema,transport:{fetchRows},syncUrl:true,queryParameter:"q_tools",debounceMs:0});
+  const transport=memoryV3Transport<Row>([],schema);const fetchRows=transport.fetchQueryV3;
+  const api=mount({schema,transport,syncUrl:true,queryParameter:"q_tools",debounceMs:0});
   await settle();
   const token=encodeQuery({...EMPTY_QUERY,limit:17});
   const location=`/tools?q_tools=${token}&host=route#one`;
@@ -66,11 +64,11 @@ it.each(["/tools", "?", "#"])("restores relative router locations (%s)",async fo
 });
 
 it("resolves relative snapshot links and holds requests for invalid relative links",async()=>{
-  const fetchRows=vi.fn(async()=>({rows:[],total:0}));
+  const transport=memoryV3Transport<Row>([],schema);const fetchRows=transport.fetchQueryV3;
   const code="a".repeat(22);
   const snapshots={save:vi.fn(),resolve:vi.fn(async()=>({version:1 as const,code,token:encodeQuery({...EMPTY_QUERY,limit:23}),createdAt:1}))};
   const storage={...memoryStorageAdapter(),snapshots};
-  const api=mount({schema,transport:{fetchRows},storage,syncUrl:true,queryParameter:"q_tools",debounceMs:0,links:{cache:memoryQuerySnapshotCache()}});
+  const api=mount({schema,transport,storage,syncUrl:true,queryParameter:"q_tools",debounceMs:0,links:{cache:memoryQuerySnapshotCache()}});
   await settle();
   const relative=`/tools?q_tools=@${code}&host=route`;
   window.history.pushState(null,"",relative);
@@ -85,9 +83,9 @@ it("resolves relative snapshot links and holds requests for invalid relative lin
 });
 
 it("restores pushState explicitly and gates requests through slow resolution and duplicate errors",async()=>{
-  const fetchRows=vi.fn(async()=>({rows:[],total:0}));let resolve!: (snapshot:QuerySnapshot|null)=>void;
+  const transport=memoryV3Transport<Row>([],schema);const fetchRows=transport.fetchQueryV3;let resolve!: (snapshot:QuerySnapshot|null)=>void;
   const store={...memoryStorageAdapter(),snapshots:{save:vi.fn(async(_key:string,snapshot:QuerySnapshot)=>snapshot),resolve:vi.fn(()=>new Promise<QuerySnapshot|null>(done=>{resolve=done}))}};
-  const api=mount({schema,transport:{fetchRows},storage:store,syncUrl:true,debounceMs:0,links:{cache:memoryQuerySnapshotCache()}});
+  const api=mount({schema,transport,storage:store,syncUrl:true,debounceMs:0,links:{cache:memoryQuerySnapshotCache()}});
   await settle();expect(api().restoration.ready).toBe(true);fetchRows.mockClear();
   window.history.pushState(null,"","/source?q=@aaaaaaaaaaaaaaaaaaaaaa&host=route#one");
   let restore!:Promise<void>;act(()=>{restore=api().restoreLocation(window.location.href)});await settle();
@@ -102,8 +100,7 @@ it("restores pushState explicitly and gates requests through slow resolution and
 });
 
 it("ignores unrelated router changes and pauses a hidden mounted controller",async()=>{
-  let active=true;const fetchRows=vi.fn(async()=>({rows:[],total:0}));
-  const transport={fetchRows};
+  let active=true;const transport=memoryV3Transport<Row>([],schema);const fetchRows=transport.fetchQueryV3;
   const api=mount(()=>({schema,transport,syncUrl:true,active,debounceMs:0}));await settle();
   act(()=>api().setLimit(7));await settle();expect(api().canUndo).toBe(true);
   window.history.pushState(null,"",window.location.pathname+window.location.search+"#different");
@@ -116,14 +113,14 @@ it.each([false,true])("preserves undo, redo and restored state across activation
   let active=true;
   const loadLast=vi.fn(async()=>({...EMPTY_QUERY,limit:25}));
   const storage={...memoryStorageAdapter(),loadLast};
-  const transport={fetchRows:vi.fn(async()=>({rows:[],total:0}))};
+  const transport=memoryV3Transport<Row>([],schema);
   const api=mount(()=>({schema,storage,transport,syncUrl,active,debounceMs:0}));await settle();
   expect(api().query.limit).toBe(25);
   act(()=>api().setLimit(7));act(()=>api().setOffset(1));act(()=>api().undo());await settle();
   expect(api().query.limit).toBe(7);expect(api().canUndo).toBe(true);expect(api().canRedo).toBe(true);
   active=false;api.rerender();await settle();
-  const calls=transport.fetchRows.mock.calls.length,address=window.location.href;
-  await settle();expect(transport.fetchRows).toHaveBeenCalledTimes(calls);expect(window.location.href).toBe(address);
+  const calls=transport.fetchQueryV3.mock.calls.length,address=window.location.href;
+  await settle();expect(transport.fetchQueryV3).toHaveBeenCalledTimes(calls);expect(window.location.href).toBe(address);
   active=true;api.rerender();await settle();
   expect(loadLast).toHaveBeenCalledOnce();expect(api().query.limit).toBe(7);
   expect(api().canUndo).toBe(true);expect(api().canRedo).toBe(true);expect(api().restoration.ready).toBe(true);
@@ -135,9 +132,9 @@ it("restores an initially hidden table on its first activation only",async()=>{
   let active=false;
   const loadLast=vi.fn(async()=>({...EMPTY_QUERY,limit:25}));
   const storage={...memoryStorageAdapter(),loadLast};
-  const transport={fetchRows:vi.fn(async()=>({rows:[],total:0}))};
+  const transport=memoryV3Transport<Row>([],schema);
   const api=mount(()=>({schema,storage,transport,syncUrl:true,active,debounceMs:0}));await settle();
-  expect(loadLast).not.toHaveBeenCalled();expect(transport.fetchRows).not.toHaveBeenCalled();
+  expect(loadLast).not.toHaveBeenCalled();expect(transport.fetchQueryV3).not.toHaveBeenCalled();
   active=true;api.rerender();await settle();expect(api().query.limit).toBe(25);
   act(()=>api().setLimit(7));await settle();
   active=false;api.rerender();await settle();active=true;api.rerender();await settle();
@@ -149,12 +146,12 @@ it("keeps a pending restoration through a hidden interval without starting it ag
   window.history.replaceState(null,"","/source?q=@aaaaaaaaaaaaaaaaaaaaaa");
   const snapshots={save:vi.fn(async(_key:string,snapshot:QuerySnapshot)=>snapshot),resolve:vi.fn(()=>new Promise<QuerySnapshot|null>(done=>{resolve=done}))};
   const storage={...memoryStorageAdapter(),snapshots};
-  const transport={fetchRows:vi.fn(async()=>({rows:[],total:0}))};
+  const transport=memoryV3Transport<Row>([],schema);
   const api=mount(()=>({schema,storage,transport,syncUrl:true,active,debounceMs:0,links:{cache:memoryQuerySnapshotCache()}}));
   await settle();expect(api().restoration.status).toBe("resolving");
   active=false;api.rerender();await settle();
   await act(async()=>{resolve({version:1,code:"a".repeat(22),token:"2j.eyJsIjoyNX0",createdAt:1})});await settle();
-  expect(api().query.limit).toBe(25);expect(transport.fetchRows).not.toHaveBeenCalled();
+  expect(api().query.limit).toBe(25);expect(transport.fetchQueryV3).not.toHaveBeenCalled();
   active=true;api.rerender();await settle();
   expect(snapshots.resolve).toHaveBeenCalledOnce();expect(api().query.limit).toBe(25);expect(api().restoration.ready).toBe(true);
 });
@@ -170,10 +167,10 @@ it("executes grouped rows and shown-group metrics through the negotiated v3 tran
     return {version:3,now:request.now,sourceTotal:rows.length,rows:request.rows?result.rows:[],total:result.total,schema:{name:resultSchema.name,idField:resultSchema.idField,fields:resultSchema.fields.map(field=>({name:field.name,type:field.type}))},metrics:evaluateMetrics(rows,query,schema,{now:request.now}).metrics,execution:{profile:request.profile,planToken:"",resolvedRevisions:{},fields:{}}};
   });
   const query:QueryState={...EMPTY_QUERY,grouping:{source:{...EMPTY_QUERY,where:[{field:"n",op:">=" as const,value:"1"}]},keys:["k"],summaries:[{id:"total",op:"sum",field:"n"}],representative:null},select:[{field:"k"},{field:"total"}],where:[{field:"total",op:">=" as const,value:"4"}],orderBy:[{field:"total",dir:"desc"}],limit:1,aggregations:[{id:"page",op:"sum",field:"total",groupBy:[],scope:"shownRows"}]};
-  const transport={fetchRows:vi.fn(async()=>({rows:[],total:0})),queryCapabilities:capabilities,fetchQueryV3};
+  const transport={queryCapabilities:capabilities,fetchQueryV3};
   const api=mount({schema,transport,initialQuery:query,debounceMs:0});await settle();
   expect(api().error).toBeNull();expect(api().grouping?.supported).toBe(true);expect(api().rows[0]).toMatchObject({k:"b",total:10});expect(api().total).toBe(2);
-  expect(api().aggregations.results?.metrics[0]?.buckets[0]?.value).toBe(10);expect(transport.fetchRows).not.toHaveBeenCalled();
+  expect(api().aggregations.results?.metrics[0]?.buckets[0]?.value).toBe(10);
   expect(fetchQueryV3.mock.calls.some(([request])=>request.rows)).toBe(true);expect(fetchQueryV3.mock.calls.some(([request])=>!request.rows)).toBe(true);
   expect(new Set(fetchQueryV3.mock.calls.map(([request])=>request.now)).size).toBe(1);
 });
@@ -191,7 +188,7 @@ it("computes link columns on the client and never sends them to the v3 server",a
   });
   const query:QueryState={...EMPTY_QUERY,grouping:{source:EMPTY_QUERY,keys:["k"],summaries:[{id:"total",op:"sum",field:"n"},
     {id:"open",op:"link",link:{label:{column:"total"},to:{kind:"query",target:"rows"}}}],representative:null},select:[{field:"open"}],orderBy:[{field:"k",dir:"asc"}]};
-  const transport={fetchRows:vi.fn(async()=>({rows:[],total:0})),queryCapabilities:capabilities,fetchQueryV3};
+  const transport={queryCapabilities:capabilities,fetchQueryV3};
   const api=mount({schema,transport,initialQuery:query,debounceMs:0});await settle();
   expect(api().error).toBeNull();expect(fetchQueryV3).toHaveBeenCalled();
   for(const [request] of fetchQueryV3.mock.calls){expect(request.grouping!.summaries).toEqual([{id:"total",op:"sum",field:"n"}]);expect(request.result.select).toEqual(expect.arrayContaining(["k","total"]))}
@@ -201,15 +198,17 @@ it("computes link columns on the client and never sends them to the v3 server",a
   expect(api().grouping!.diagnostics).toEqual([]);
 });
 
-it("reports unsupported remote metrics without downloading the matching population",async()=>{
-  const transport:Transport<Row>={fetchRows:vi.fn(async()=>({rows:[],total:1_000_000}))};
+it("executes all-matching metrics on the server without downloading the matching population",async()=>{
+  const population:Row[]=Array.from({length:20},(_,i)=>({id:String(i),k:"k",n:i,at:"2026-10-13T12:00:00Z"}));
+  const transport=memoryV3Transport(population,schema);
   const initialQuery:QueryState={...EMPTY_QUERY,select:[{field:"id"}],limit:2,offset:7,
     aggregations:[{id:"count",op:"count",groupBy:[]}]};
   const api=mount({schema,transport,initialQuery,debounceMs:0});await settle();
-  expect(api().aggregations.error?.message).toContain("metric-capable server transport");
-  expect(transport.fetchRows).toHaveBeenCalledOnce();
-  expect(transport.fetchRows).toHaveBeenCalledWith(expect.objectContaining({limit:2,offset:7}),expect.any(AbortSignal));
-  expect(api().rows).toEqual([]);expect(api().total).toBe(1_000_000);
+  expect(api().aggregations.error).toBeNull();expect(api().aggregations.results?.metrics[0]?.buckets[0]?.value).toBe(20);
+  expect(rowRequests(transport)).toHaveLength(1);
+  expect(rowRequests(transport)[0]!.result).toMatchObject({limit:2,offset:7});
+  expect(metricRequests(transport).map(request=>[request.rows,request.metrics.map(metric=>metric.id)])).toEqual([[false,["count"]]]);
+  expect(api().rows).toHaveLength(2);expect(api().total).toBe(20);
 });
 
 it("preserves canonical predicates and validates hidden computed fields in ordinary v3 rows and metrics",async()=>{
@@ -222,7 +221,7 @@ it("preserves canonical predicates and validates hidden computed fields in ordin
     schema:{name:schema.name,idField:schema.idField,fields:[...schema.fields.map(({name,type})=>({name,type})),{name:"@computed/double",type:"number"}]},
     metrics:request.metrics.map(metric=>({id:metric.id,scope:"allMatching",processedRows:1,groupCount:1,buckets:[{keys:[],value:1,count:1}]})),execution,
   }));
-  const transport:Transport<Row>={fetchRows:vi.fn(async()=>({rows:[],total:0})),fetchQueryV3,
+  const transport:Transport<Row>={fetchQueryV3,
     queryCapabilities:{version:3,profile:execution.profile,groupedRows:true,calendarGrouping:true,computedSourceFilters:true,regex:false,maxRows:10000,maxGroups:2000,maxPopulation:250000}};
   const initialQuery:QueryState={...EMPTY_QUERY,select:[{field:"id"},{field:"n"}],where:[{field:"@computed/double",op:">",value:"2"}],
     aggregations:[{id:"count",op:"count",groupBy:[]}]};
@@ -230,7 +229,6 @@ it("preserves canonical predicates and validates hidden computed fields in ordin
   expect(api().query.where).toEqual(initialQuery.where);expect(api().error).toBeNull();expect(api().rows).toEqual([row]);
   expect(api().aggregations.error).toBeNull();expect(api().aggregations.results?.metrics[0]?.buckets[0]?.value).toBe(1);
   for (const [request] of fetchQueryV3.mock.calls) expect(request.source.where[0]).toMatchObject({field:"@computed/double"});
-  expect(transport.fetchRows).not.toHaveBeenCalled();
   const calls=fetchQueryV3.mock.calls.length;
   act(()=>api().setQuery({...initialQuery,where:[{field:"@computed/double",op:">",value:"3"}]}));await settle();
   expect(fetchQueryV3.mock.calls.length).toBeGreaterThan(calls);
@@ -247,7 +245,7 @@ it("uses fresh clocks for ordinary v3 relative filters and explicit previews",as
       schema:{name:projection.name,idField:projection.idField,fields:projection.fields.map(({name,type})=>({name,type}))},
       metrics:request.metrics.map(metric=>({id:metric.id,scope:"allMatching",processedRows:0,groupCount:0,buckets:[]})),execution};
   });
-  const transport:Transport<Row>={fetchRows:vi.fn(async()=>({rows:[],total:0})),fetchQueryV3,
+  const transport:Transport<Row>={fetchQueryV3,
     queryCapabilities:{version:3,profile:execution.profile,groupedRows:true,calendarGrouping:true,computedSourceFilters:true,regex:false,maxRows:10000,maxGroups:2000,maxPopulation:250000}};
   const initialQuery:QueryState={...EMPTY_QUERY,select:[{field:"id"}],where:[{field:"@computed/double",op:">",value:"2"}],
     aggregations:[{id:"count",op:"count",groupBy:[]}]};
@@ -269,16 +267,6 @@ it("uses fresh clocks for ordinary v3 relative filters and explicit previews",as
   expect(fetchQueryV3.mock.calls.at(-1)![0].now).toBe(previewAt);
 });
 
-it("keeps legacy local metric behavior when a transport also exposes v3",async()=>{
-  const rows:Row[]=[{id:"1",k:"a",n:2,at:"2026-10-13T12:00:00Z"}];
-  const initialQuery:QueryState={...EMPTY_QUERY,where:[{field:"removed",op:"=",value:"old saved filter"}],
-    aggregations:[{id:"count",op:"count",groupBy:[]}]};
-  const transport:Transport<Row>={fetchRows:vi.fn(async()=>({rows,total:1})),fetchQueryV3:vi.fn()};
-  const api=mount({schema,clientRows:rows,transport,initialQuery,debounceMs:0});await settle();
-  expect(api().aggregations.error).toBeNull();expect(api().aggregations.results?.metrics[0]?.buckets[0]?.value).toBe(1);
-  expect(transport.fetchQueryV3).not.toHaveBeenCalled();
-});
-
 it("refuses unsupported metric population controls per card on the v3 transport",async()=>{
   const rows:Row[]=[{id:"1",k:"a",n:1,at:"2026-10-13T12:00:00Z"},{id:"2",k:"a",n:3,at:"2026-10-13T12:00:00Z"},{id:"3",k:"b",n:10,at:"2026-10-13T12:00:00Z"}];
   const capabilities:QueryCapabilitiesV3={version:3,groupedRows:true,calendarGrouping:true,computedSourceFilters:true,regex:false,metricMinCount:true,maxRows:10000,maxGroups:2000,maxPopulation:250000,profile:"qt-sqlite-v1"};
@@ -291,7 +279,7 @@ it("refuses unsupported metric population controls per card on the v3 transport"
   });
   const query:QueryState={...EMPTY_QUERY,grouping:{source:{...EMPTY_QUERY},keys:["k"],summaries:[{id:"total",op:"sum",field:"n"},{id:"rows",op:"count"}],representative:null},select:[{field:"k"},{field:"total"}],
     aggregations:[{id:"big",op:"count",groupBy:["k"],minCount:1},{id:"filtered",op:"count",groupBy:[],where:[{field:"total",op:">=" as const,value:"5"}]}]};
-  const transport={fetchRows:vi.fn(async()=>({rows:[],total:0})),queryCapabilities:capabilities,fetchQueryV3};
+  const transport={queryCapabilities:capabilities,fetchQueryV3};
   const api=mount({schema,transport,initialQuery:query,debounceMs:0});await settle();
   expect(api().aggregations.error).toBeNull();
   const metrics=api().aggregations.results?.metrics??[];

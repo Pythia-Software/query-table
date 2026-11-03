@@ -2,7 +2,6 @@ import { executionRevision } from "./computedExecution";
 import { fetchPreviewRows } from "./previewRows";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  predicatesOf,
   isGroupLinkField,
   applyQuery,
   compileFormula,
@@ -260,7 +259,7 @@ export function useComputedColumns<Row>(options: Options<Row>): {
       for (const id of activeIds.split(",").filter(Boolean)) {
         if (
           options.execution?.fields[computedFieldName(id)]?.select &&
-          (transport?.fetchRowsV2 || transport?.fetchQueryV3)
+          transport
         )
           continue;
         const entry = plans.get(id);
@@ -316,7 +315,7 @@ export function useComputedColumns<Row>(options: Options<Row>): {
             if (entry?.error) return { computedError: entry.error };
             if (
               options.execution?.fields[computedFieldName(def.id)]?.select &&
-              (transport?.fetchRowsV2 || transport?.fetchQueryV3)
+              transport
             ) {
               if (
                 options.serverExecution?.profile !==
@@ -364,7 +363,7 @@ export function useComputedColumns<Row>(options: Options<Row>): {
           executionRevision(options.execution, def.id) === def.revision && !!entry?.plan && !hasRegex(entry.plan) },
         sort: {
           enabled:
-            !!(transport?.fetchRowsV2 || transport?.fetchQueryV3) &&
+            !!transport &&
             !!options.execution?.fields[computedFieldName(def.id)]?.sort &&
             executionRevision(options.execution, def.id) === def.revision &&
             !!entry?.plan &&
@@ -373,7 +372,7 @@ export function useComputedColumns<Row>(options: Options<Row>): {
         aggregate: {
           measure: !!entry?.plan,
           groupable:
-            (!!metricTransport?.fetchMetrics && metricTransport.metricCapabilities?.version === 2 || !!metricTransport?.fetchQueryV3) &&
+            !!metricTransport &&
             !!metricExecution?.fields[computedFieldName(def.id)]?.group &&
             executionRevision(metricExecution, def.id) === def.revision &&
             !!entry?.plan &&
@@ -474,11 +473,7 @@ export function useComputedColumns<Row>(options: Options<Row>): {
             offset: 0,
           };
           const now = options.now ?? Date.now();
-          const computedFilter = request.where.some(term => predicatesOf(term)
-            .some(predicate => isComputedField(predicate.field)));
-          const v3 = !(transport.fetchRowsV2 && options.execution && !request.grouping && !computedFilter) &&
-            transport.fetchQueryV3 && transport.queryCapabilities?.version === 3;
-          const pageSize = Math.min(500, v3 ? transport.queryCapabilities!.maxRows : 500);
+          const pageSize = Math.min(500, transport.queryCapabilities.maxRows);
           if (!Number.isInteger(pageSize) || pageSize < 1) throw Error("Invalid negotiated preview row limit.");
           while (batch.length < count) {
             const res = await fetchPreviewRows(transport,

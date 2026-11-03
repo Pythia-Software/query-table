@@ -5,8 +5,6 @@ import {
   applyAggregations,
   metricComputationKey,
   validateMetric,
-  toMetricQuery,
-  toAggregationQuery,
   encodeQuery,
   decodeQuery,
   normalizeQueryState,
@@ -19,6 +17,8 @@ import {
   type FieldSchema,
   type QueryState,
 } from "../src/index";
+import { toMetricQuery } from "../src/metrics";
+import { toServerQueryV2 } from "../src/execution";
 import { rows, runsSchema } from "./fixtures";
 const metric = (
   expression: string,
@@ -181,7 +181,6 @@ describe("production metric expressions", () => {
     ).toEqual(r.metrics);
   });
   it("leaves host tie-break ordering out of both V2 row and shown-row metric projections", async () => {
-    const { toServerQueryV2 } = await import("../src/index");
     const execution = {
       profile: "qt-postgres-v1",
       planToken: "test-plan",
@@ -520,7 +519,6 @@ describe("metric boundaries and computation identity", () => {
     const q = normalizeQueryState(
       query(metric("COUNT()", { display: { kind: "auto" } })),
     );
-    expect(() => toAggregationQuery(q, runsSchema)).toThrow("version 2");
     const bad = normalizeQueryState({
       ...EMPTY_QUERY,
       aggregations: [
@@ -636,7 +634,6 @@ describe("worker and versioned computed execution bridges", () => {
     ).toEqual(["total_ms"]);
   });
   it("gates computed requests by server capabilities and expected revisions", async () => {
-    const { toServerQueryV2 } = await import("../src/index");
     const execution = {
       profile: "qt-pg-row-v1",
       planToken: "bound-plan",
@@ -970,7 +967,6 @@ describe("independent core review regressions", () => {
     ).toBeGreaterThan(0);
   });
   it("shares default/computed ordering gates and revision checks with the row projector", async () => {
-    const { toServerQueryV2 } = await import("../src/index");
     const q = query(metric("COUNT()", { scope: "shownRows" }));
     const localDefault: FieldSchema = {
       ...runsSchema,

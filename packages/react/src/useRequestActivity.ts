@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Transport } from "@pythia-software/query-table-core";
+import type { QueryRequestV3, Transport } from "@pythia-software/query-table-core";
 
 export interface RequestActivityEntry {
   id: number;
@@ -14,16 +14,10 @@ export interface RequestActivityApi {
   entries: readonly RequestActivityEntry[];
   clear: () => void;
 }
-const methods = new Set([
-  "fetchRows",
-  "fetchRowsV2",
-  "fetchQueryV3",
-  "fetchMetrics",
-  "fetchAggregations",
-  "fetchRow",
-  "fetchDistinctValues",
-  "fetchFieldStats",
-]);
+/** What a v3 request asks for; values never leave the request. */
+function requestKind(request: QueryRequestV3 | undefined): string {
+  return request?.distinct ? "DistinctValues" : request?.rows ? "Rows" : "Metrics";
+}
 
 /** Observe the transport boundary without changing receiver, arguments or errors. */
 export function observeTransport<Row>(
@@ -35,7 +29,7 @@ export function observeTransport<Row>(
   return new Proxy(Object.create(transport) as Transport<Row>, {
     get(_target, key) {
       const method = Reflect.get(transport, key, transport);
-      if (!methods.has(String(key)) || typeof method !== "function")
+      if (key !== "fetchQueryV3" || typeof method !== "function")
         return method;
       if (!wrappers.has(key))
         wrappers.set(key, async (...args: unknown[]) => {
@@ -43,7 +37,7 @@ export function observeTransport<Row>(
           const start = performance.now();
           const entry: RequestActivityEntry = {
             id: nextId(),
-            kind: String(key).replace(/^fetch/, ""),
+            kind: requestKind(args[0] as QueryRequestV3 | undefined),
             startedAt: Date.now(),
             status: "pending",
           };

@@ -46,10 +46,11 @@ export function SetFilterEditor<Row>({ api, field, returnFocus, classNames, mode
   useEffect(() => {
     if (strategy.source !== "autocomplete") return;
     let cancelled = false;
+    const ac = new AbortController();
     setLoading(true);
     setError("");
     const timer = setTimeout(() => {
-      api.filterValues(field.name, search).then((result) => {
+      api.filterValues(field.name, search, ac.signal).then((result) => {
         if (!cancelled) setSuggestions(result.values);
       }).catch(() => {
         if (!cancelled) setError("Could not load values. Try searching again.");
@@ -57,7 +58,7 @@ export function SetFilterEditor<Row>({ api, field, returnFocus, classNames, mode
         if (!cancelled) setLoading(false);
       });
     }, 150);
-    return () => { cancelled = true; clearTimeout(timer); };
+    return () => { cancelled = true; clearTimeout(timer); ac.abort(); };
   }, [api.filterValues, field.name, strategy.source, search]);
 
   function toggle(value: string) {

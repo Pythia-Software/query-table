@@ -87,15 +87,19 @@ describe("native tag set editing", () => {
   });
 
   it("adds typed autocomplete keys when the backend returns no suggestions", async () => {
-    const fetchDistinctValues = vi.fn<NonNullable<Transport<Row>["fetchDistinctValues"]>>().mockResolvedValue({ values: [], hasMore: false });
-    const transport: Transport<Row> = { fetchRows: async () => ({ rows: [], total: 0 }), fetchDistinctValues };
+    const fetchQueryV3 = vi.fn<Transport<Row>["fetchQueryV3"]>(async (request) => ({ version: 3, now: request.now, sourceTotal: 0, rows: [], total: 0, metrics: [],
+      schema: { name: schema.name, idField: "id", fields: schema.fields.map(({ name, type }) => ({ name, type })) },
+      ...(request.distinct ? { distinct: { values: [], hasMore: false, hasNull: false } } : {}),
+      execution: { profile: request.profile, planToken: "", resolvedRevisions: {}, fields: {} } }));
+    const transport: Transport<Row> = { queryCapabilities: { version: 3, profile: "qt-test", groupedRows: false, calendarGrouping: false,
+      computedSourceFilters: false, regex: false, maxRows: 100, maxGroups: 100, maxPopulation: 100 }, fetchQueryV3 };
     await mount(EMPTY_QUERY, schemaWithValues({ source: "autocomplete" }), undefined, undefined, transport);
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
     openNewTagFilter();
     const search = container.querySelector<HTMLInputElement>("[aria-label='Search Tags tags']")!;
     inputValue(search, "BrandNewKey");
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 180)); });
-    expect(fetchDistinctValues).toHaveBeenCalledWith({ field: "tags", search: "BrandNewKey" });
+    expect(fetchQueryV3.mock.calls.map(([request]) => request.distinct).filter(Boolean)).toContainEqual({ field: "tags", search: "BrandNewKey", limit: 50 });
     expect(container.querySelectorAll("input[type=checkbox]")).toHaveLength(0);
     pressEnter(search);
     click("Apply filter");

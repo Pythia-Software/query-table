@@ -1,10 +1,11 @@
-import { expect, it, vi } from "vitest";
+import { expect, it } from "vitest";
 import {
   EMPTY_QUERY,
   type FieldSchema,
   type QueryState,
 } from "@pythia-software/query-table-core";
 import { executeMetrics } from "../src/metricExecution";
+import { memoryV3Transport, metricRequests } from "./v3Transport";
 
 const schema: FieldSchema = {
   name: "date-metrics",
@@ -42,37 +43,23 @@ const query: QueryState = {
   ],
 };
 const rows = [{ id: 1, at: "2026-10-02T11:00:00Z" }];
-it("fills from the complete local dataset even with a rows-only transport", async () => {
-  const fetchRows = vi.fn(async () => ({ rows, total: 1 }));
-  const r = await executeMetrics(query, {
-    schema,
-    clientRows: rows,
-    transport: { fetchRows },
-  });
+it("fills from the complete local dataset without a transport", async () => {
+  const r = await executeMetrics(query, { schema, clientRows: rows });
   expect(r.metrics[0]!.buckets.map((b) => b.value)).toEqual([0, 1, 0, 0]);
-  expect(fetchRows).not.toHaveBeenCalled();
 });
-it("fails unsupported server date grouping on its clause before dispatch", async () => {
-  const fetchMetrics = vi.fn(async () => ({ metrics: [] }));
-  const result = await executeMetrics(query, {
-    schema,
-    transport: {
-      fetchRows: async () => ({ rows, total: 1 }),
-      fetchMetrics,
-      metricCapabilities: { version: 2 },
-    },
-  });
-  expect(result.metrics).toEqual([
-    {
-      id: "dates",
-      buckets: [],
-      error: expect.stringContaining("does not support"),
-    },
-  ]);
-  expect(fetchMetrics).not.toHaveBeenCalled();
+it("fills calendar intervals on a v3 server from the query bounds", async () => {
+  const transport = memoryV3Transport(rows, schema);
+  const r = await executeMetrics(query, { schema, transport, now: Date.parse("2026-10-10T00:00:00Z") });
+  expect(r.metrics[0]!.buckets.map((b) => b.value)).toEqual([0, 1, 0, 0]);
+  expect(metricRequests(transport)).toHaveLength(1);
+  expect(metricRequests(transport)[0]!.metrics[0]!.dateGrouping).toMatchObject({ field: "at", interval: "day" });
+});
+it("fails unsupported server date grouping before dispatch", async () => {
+  const transport = memoryV3Transport(rows, schema, { capabilities: { calendarGrouping: false } });
+  await expect(executeMetrics(query, { schema, transport })).rejects.toThrow("does not support calendar grouping");
+  expect(transport.fetchQueryV3).not.toHaveBeenCalled();
 });
 it("uses the committed shown page locally while retaining the original filter bounds", async () => {
-  const fetchMetrics = vi.fn(async () => ({ metrics: [] }));
   const q: QueryState = {
     ...query,
     offset: 30,
@@ -83,13 +70,7 @@ it("uses the committed shown page locally while retaining the original filter bo
     schema,
     rowsReady: true,
     shownRows: rows,
-    transport: {
-      fetchRows: async () => ({ rows, total: 100 }),
-      fetchMetrics,
-      metricCapabilities: { version: 2, shownRows: true },
-    },
   });
   expect(r.metrics[0]!.processedRows).toBe(1);
   expect(r.metrics[0]!.buckets.map((b) => b.value)).toEqual([0, 1, 0, 0]);
-  expect(fetchMetrics).not.toHaveBeenCalled();
 });

@@ -8,12 +8,13 @@ import {
   normalizeQueryState,
   type FieldSchema,
   type HostQueryState,
+  type QueryRequestV3,
   type QueryState,
-  type ServerQuery,
   type StorageAdapter,
   type Transport,
 } from "@pythia-software/query-table-core";
 import { useQueryTable, type HostQueryOptions, type QueryTableApi, type UseQueryTableOptions } from "../src/useQueryTable";
+import { memoryV3Transport, serveQueryV3 } from "./v3Transport";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -43,13 +44,8 @@ const hostQuery: HostQueryOptions = {
 };
 const errors: QueryState = normalizeQueryState({ select: [{ field: "tool" }], where: [{ field: "status", op: "=", value: "error" }] });
 
-let requests: Array<ServerQuery & { hostState?: HostQueryState }> = [];
-const transport: Transport<Row> = {
-  fetchRows: async (query) => {
-    requests.push(query);
-    return { rows: [], total: 0 };
-  },
-};
+let requests: QueryRequestV3[] = [];
+const transport: Transport<Row> = memoryV3Transport<Row>([], schema, { before: (request) => { requests.push(request); } });
 
 let root: Root | undefined;
 function mount(options: Omit<Partial<UseQueryTableOptions<Row>>, "hostQuery"> & { hostQuery?: HostQueryOptions | null }) {
@@ -86,6 +82,10 @@ describe("hostQuery: one definition", () => {
     await settle();
     expect(current.api.definition!.hostState).toEqual(keyword("cache"));
     expect(requests.map((request) => request.hostState)).toEqual([keyword("cache")]);
+    // Filter suggestions and field statistics are requests too.
+    requests = [];
+    await act(async () => { await current.api.filterValues("tool", "B"); await current.api.fieldStats(["tool"]); });
+    expect(requests.map((request) => [!!request.distinct, request.hostState])).toEqual([[true, keyword("cache")], [false, keyword("cache")]]);
     act(() => current.api.undo());
     await settle();
     expect(current.api.definition!.hostState).toEqual(none);
@@ -133,10 +133,11 @@ describe("hostQuery: one definition", () => {
 describe("hostQuery: execution receipts", () => {
   it("starts a new receipt when only the host state changes", async () => {
     const failing: Transport<Row> = {
-      fetchRows: async (query: ServerQuery & { hostState?: HostQueryState }) => {
-        requests.push(query);
-        if (query.hostState?.params.record_tool_calls?.[1] === "bad") throw Error("HTTP 422: bad keyword");
-        return { rows: [], total: 0 };
+      queryCapabilities: transport.queryCapabilities,
+      fetchQueryV3: async (request) => {
+        requests.push(request);
+        if (request.hostState?.params.record_tool_calls?.[1] === "bad") throw Error("HTTP 422: bad keyword");
+        return serveQueryV3<Row>([], schema, request);
       },
     };
     const current = mount({ transport: failing, initialQuery: { ...errors, hostState: keyword("bad") } });
@@ -169,7 +170,7 @@ describe("hostQuery: saved definitions", () => {
     await settle();
     expect(current.api.query.where).toEqual(errors.where);
     expect(current.api.definition!.hostState).toEqual(keyword("(cache OR buffer) NOT obsolete"));
-    expect(requests.map((request) => [request.where, request.hostState])).toEqual([[errors.where, keyword("(cache OR buffer) NOT obsolete")]]);
+    expect(requests.map((request) => [request.result.where, request.hostState])).toEqual([[errors.where, keyword("(cache OR buffer) NOT obsolete")]]);
   });
 
   it("gives a save without host state the host defaults", async () => {

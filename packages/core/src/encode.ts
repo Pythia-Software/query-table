@@ -1,4 +1,4 @@
-import type { MetricKey, MetricValue, MetricScope, MetricDistributionResult, MetricDiagnostic, MetricHistogramBin } from "./metricTypes";
+import type { MetricKey, MetricValue, MetricScope, MetricDistributionResult, MetricHistogramBin } from "./metricTypes";
 import { deflateSync, Inflate } from "fflate";
 import { createSetFilter, readSetFilter } from "./setFilter";
 // encode.ts — URL serialization + the server-bound query subset.
@@ -360,19 +360,7 @@ function termIsPushdown<Row>(
   });
 }
 
-// ---- aggregation server subset --------------------------------------------
-
-/** The backend request for the metric panel. Scope is the whole filtered set:
- *  the SAME pushdown WHERE as the rows query, but NO ORDER BY / LIMIT / OFFSET —
- *  metrics describe every matching row, not the visible page. Mirrors the Go
- *  AggSpec list. */
-export interface AggregationRequest {
-  /** The table's host-owned state when `hostQuery` is configured. */
-  hostState?: HostQueryState;
-  diagnostics?: MetricDiagnostic[];
-  where: WhereTerm[];
-  aggregations: AggregationClause[];
-}
+// ---- metric results --------------------------------------------------------
 
 /** One group's result. `keys` has one entry per AggregationClause.groupBy field,
  *  in axis order (`[]` for a grand total); a null key is the NULL/empty bucket. */
@@ -425,34 +413,3 @@ export interface AggregationResult {
   metrics: AggregationResultEntry[];
 }
 
-/** Project a QueryState into the metric request: the pushdown WHERE subset (same
- *  rule as toServerQuery) plus the aggregations whose measure + group fields are
- *  all server-capable backend columns. Aggregations referencing a derived /
- *  unknown field are dropped — the server has no SQL for them. */
-export function toAggregationQuery<Row>(q: QueryState, schema: FieldSchema<Row>): AggregationRequest {
-  if (q.grouping) throw new Error("Metrics over grouped rows require grouped-query execution.");
-  const suppliedCount = q.where.reduce((n,t)=>n+predicatesOf(t).length,0);
-  q = normalizeQueryState(q);
-  if (q.aggregations?.some(a => a.dateGrouping)) throw new Error("Date grouping currently requires local metric execution.");
-  if (q.aggregations?.some(a => a.diagnostics?.length || a.expression !== undefined || a.expressionY !== undefined || a.distribution || a.scope === "shownRows" || a.sort?.length || a.groupLimit || a.where?.length || a.minCount !== undefined)) throw new Error("Metric definition requires the version 2 metric transport.");
-  const byName = indexFields(schema);
-  const resolveField = (name: string) => resolveFieldName(schema, name) ?? name;
-
-  const where = q.where.filter((term) => termIsPushdown(term, byName, resolveField)).map(stripSetFilter);
-
-  const isBackend = (name: string | undefined): boolean => {
-    if (name == null) return true; // omitted measure (count(*)) is fine
-    const field = resolveField(name);
-    const f = byName.get(field);
-    return f != null && f.source.kind === "backend";
-  };
-
-  const aggregations = (q.aggregations ?? []).filter(
-    (a) => isBackend(a.field) && a.groupBy.every((g) => isBackend(g)),
-  );
-
-  const diagnostics: MetricDiagnostic[] = [];
-  for (const c of q.aggregations ?? []) if (!aggregations.includes(c)) diagnostics.push({ metricId: c.id, code: "unsupported_metric", message: "Metric requires unavailable backend fields.", from: 0, to: 1 });
-  if (where.length !== q.where.length || suppliedCount !== q.where.reduce((n,t)=>n+predicatesOf(t).length,0)) diagnostics.push({ code: "residual_filter", message: "All-matching metrics are unavailable with residual client-only filters.", from: 0, to: 1 });
-  return { where, aggregations, ...(diagnostics.length ? { diagnostics } : {}) };
-}

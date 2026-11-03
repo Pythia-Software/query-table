@@ -158,15 +158,11 @@ example) and fused or cross-field reductions with sibling metrics.
 - **Execution metadata.** `processedRows` remains the scope population before
   the metric's own filter. Host group budgets count hidden groups too.
 
-Executors advertise support explicitly: `metricCapabilities.filters` and
-`metricCapabilities.minCount` for v2 transports, and
-`queryCapabilities.metricFilters` and `queryCapabilities.metricMinCount` for the
-v3 executor. A distinct or summed minimum also needs
-`metricCapabilities.minCountMeasures` or
+Executors advertise support explicitly: `queryCapabilities.metricFilters` and
+`queryCapabilities.metricMinCount`. A distinct or summed minimum also needs
 `queryCapabilities.metricMinCountMeasures`. A clause that uses an unadvertised
 control gets its own error result (`metricPopulationError` names it); the other
-metrics in the batch still run, and the control is never silently dropped. The
-v1 `fetchAggregations` endpoint never receives either field. The bundled
+metrics in the batch still run, and the control is never silently dropped. The bundled
 DuckDB, Go SQLite, Go PostgreSQL and Go v3 executors advertise all of them, and
 `ExecuteV2Rows` runs them in memory.
 
@@ -187,14 +183,13 @@ Remote all-matching metrics execute on the server and return bounded metric
 results. Local mode accepts `clientRows` already available in memory; the
 controller never downloads a population for aggregation. Shown-row metrics may
 use the committed page.
-Existing remote advanced metrics use `fetchMetrics` and explicit
-`metricCapabilities.version: 2`. A negotiated `fetchQueryV3` executor adds
-backend calendar metrics and metrics over grouped results. A legacy
-`fetchAggregations` endpoint remains usable for representable v1 metrics.
-Unsupported features fail explicitly; an all-matching metric never falls back
-to an incomplete page. See the [host integration guide](host-integration-next-release.md).
+With a transport, each metric batch is one `fetchQueryV3` request with
+`rows: false`, including calendar metrics, metrics over grouped results and
+shown-row clauses (the server pages the same ordered result). Unsupported
+features fail explicitly; an all-matching metric never falls back to an
+incomplete page. See the [host integration guide](host-integration-next-release.md).
 
-Shown-row fallback can reduce committed remote rows when all required inputs are present. A V2 transport's `metricCapabilities.shownRows` must be explicitly `true` to execute supported shown-row clauses remotely; false or omitted selects the committed-page fallback. Regex inputs still use workers, and calendar grouping still uses local evaluation unless a V3 executor is selected. Automatic local evaluation waits in a loading state while that page is being fetched; a failed page request ends that wait and surfaces the row error. Applying such metrics adds their input dependencies to row projections. A draft referencing an unloaded field explains that the author must select/refresh it or use a snapshot-capable metric service. It never refetches current IDs and claims that newer values belong to the displayed snapshot.
+Without a transport, shown-row metrics reduce the committed page when all required inputs are present. Regex inputs use workers. Automatic local evaluation waits in a loading state while that page is being prepared; a failed page ends that wait and surfaces the row error. Applying such metrics adds their input dependencies to row projections. A draft referencing an unloaded field explains that the author must select it.
 
 ### Independent remote metrics
 
@@ -226,26 +221,20 @@ readiness changes, and treat supplied rows and handshakes as immutable.
 `metricTransport` defaults to `transport`; supplying it alone leaves the hook in
 client row mode. `metricExecution` provides authoritative computed capabilities,
 revisions, plan token, and snapshot for metrics. When omitted, metrics retain
-the existing execution selection. Both V2 metrics and negotiated V3 metric
-requests use the overrides and appear in `requestActivity`. Query restoration,
+the existing execution selection. Metric requests use the overrides and appear
+in `requestActivity`. Query restoration,
 activation, and query validation still apply before metric execution.
 
 `metricRowsReady(query)` defaults to true and adds a host gate to the hook's
 internal committed-page readiness. It gates local shown-row results and
 previews, including purely local tables. Unavailable previews reject; losing
 readiness clears current results and cancels local work. Previews that become
-obsolete reject with `AbortError`. Remote all-matching requests execute
-independently, including in mixed dashboards; combined results retain the
-original clause order once both populations are ready. Native V2 shown-row
-execution with `shownRows: true` and negotiated V3 execution keep their server
-snapshot semantics and do not depend on this local-page gate.
+obsolete reject with `AbortError`. With a metric transport every clause,
+shown-row ones included, executes on the server with its snapshot semantics and
+does not depend on this local-page gate; a separate metric service should only
+be used for shown-row clauses if it can share the displayed page's snapshot.
 
-To migrate from a local patch, replace its custom hook options with these
-supported options and rerun consumer regressions against the matching package
-versions before removing the patch. A separate HTTP metric query should not
-advertise `shownRows: true` unless it can share the displayed page's snapshot.
-
-A rows-only transport falls back to `clientRows` when a complete client dataset is supplied. Engine selection is per clause: legacy aggregates, including `count_distinct`, retain their existing coercion and grouping behavior even alongside composed formulas or scoped metrics. Legacy empty-text keys share the NULL bucket, matching `is_null` drilldown. Typed datetime grouping converts `Date` objects to ISO keys. The typed local engine gives each metric an independent operation budget (10 million by default); row and retained-memory limits still apply separately. An expensive metric cannot consume another metric's allowance. Direct field aggregate inputs read only their own binding; complex row formulas retain the full dependency input path. Both paths use the formula runtime for type/null/date checks and preserve operation accounting and safe-number validation before reduction. Null-only SUM groups contribute zero to an exact additive Other remainder, with their rows included in its count.
+Engine selection is per clause: legacy aggregates, including `count_distinct`, retain their existing coercion and grouping behavior even alongside composed formulas or scoped metrics. Legacy empty-text keys share the NULL bucket, matching `is_null` drilldown. Typed datetime grouping converts `Date` objects to ISO keys. The typed local engine gives each metric an independent operation budget (10 million by default); row and retained-memory limits still apply separately. An expensive metric cannot consume another metric's allowance. Direct field aggregate inputs read only their own binding; complex row formulas retain the full dependency input path. Both paths use the formula runtime for type/null/date checks and preserve operation accounting and safe-number validation before reduction. Null-only SUM groups contribute zero to an exact additive Other remainder, with their rows included in its count.
 
 Regex row expressions are limited to shown-row local evaluation and execute in terminable workers with bounded input. All-matching regex, regex group formulas, and server regex metric expressions are unsupported. Remote global execution rejects residual filters and unsupported sorts rather than reducing a different population.
 
@@ -309,24 +298,25 @@ resets to 0. For grouped rows, see `groupSourceQuery` in [grouping](grouping.md)
 
 ```ts
 const transport: Transport<Row> = {
-  fetchRows: fetchLegacyRows,
-  metricCapabilities: {
-    version: 2, expressions: true, shownRows: true,
-    distributions: true, computedFields: true, profile: "qt-postgres-v1",
-    filters: true, minCount: true, minCountMeasures: true, // only if the service executes them
-  },
-  fetchMetrics: (request, signal) => fetchMetricBatch(request, signal),
-  fetchRowsV2: (request, signal) => fetchComputedRows(request, signal),
+  queryCapabilities, // the server's v3 handshake, metricFilters/metricMinCount included
+  fetchQueryV3: (request, signal) => postQuery(request, signal),
 };
 ```
 
-These methods are host implementations, not provided HTTP endpoints. `toMetricQuery` produces a validated v2 request with diagnostics, scope/window, active definitions, and an optional computed execution envelope. Hosts must reject diagnostics, validate request shape independently, authorize inputs, and return an `AggregationResult` with matching metric IDs. The Go compiler accepts this contract; see [backend integration](backend-metrics.md) for SQL, limits, and mapping.
+`fetchQueryV3` is a host implementation, not a provided HTTP endpoint (the Go
+`NewQueryV3Handler` serves it). Every remote operation is one `QueryRequestV3`:
+row pages, metric batches (`rows: false`), grouped results, filter suggestions
+(`distinct`, see `toDistinctRequestV3`), single-row lookups (`toRowRequestV3`)
+and field statistics (`toFieldStatsRequestV3`). Hosts must reject diagnostics,
+validate request shape independently, authorize inputs, and return a
+`QueryResultV3` with matching metric IDs; `validateQueryResultV3` checks it on
+the client. See [backend integration](backend-metrics.md) for SQL, limits, and mapping.
 
-Server-computed SELECT and global sorting require `useQueryTable({ ..., computedExecution })` plus `fetchRowsV2`. Obtain `ComputedExecution` from the host's authoritative handshake: profile, plan token, resolved definition revisions, and per-field select/sort/measure/group capabilities. Queries reference `@computed/<id>`; sources are resolved by the server's authorized catalogue. Do not invent capabilities based on browser compilation.
+Server-computed SELECT and global sorting require `useQueryTable({ ..., computedExecution })`. Obtain `ComputedExecution` from the host's authoritative handshake: profile, plan token, resolved definition revisions, and per-field select/sort/measure/group capabilities. Queries reference `@computed/<id>`; sources are resolved by the server's authorized catalogue. Do not invent capabilities based on browser compilation.
 
-Server SELECT is opt-in for each advertised field. With a v2 handshake, fields without SELECT capability still project their base dependencies and evaluate in browser workers on the returned page. A mixed projection can display browser-only formulas beside server sidecars. Browser-only definition edits do not invalidate the server page. Unavailable global sorts and computed grouping remain explicit diagnostics; they never fall back to sorting or grouping the local page.
+Server SELECT is opt-in for each advertised field. Fields without SELECT capability still project their base dependencies and evaluate in browser workers on the returned page. A mixed projection can display browser-only formulas beside server values. Browser-only definition edits do not invalidate the server page. Unavailable global sorts and computed grouping remain explicit diagnostics; they never fall back to sorting or grouping the local page.
 
-Rows return a versioned response with execution identity and computed sidecars keyed by stable row ID and plain computed definition ID. The controller validates identities and revisions for server-selected and hidden server-sort fields before committing values. The full request revision envelope is retained for the backend to validate every reached transitive dependency; browser-only catalogue entries need not appear in the response revisions. The controller suppresses stale values when definitions change. Local computed columns continue to use browser workers; global sorting is available only with a matching server capability/revision envelope. Hidden computed sort dependencies are ordered before pagination.
+Rows return a versioned response with execution identity; computed values are inline in each row under `@computed/<id>` (or `{ computedError }`). The controller validates identities and revisions before committing values. The full request revision envelope is retained for the backend to validate every reached transitive dependency; browser-only catalogue entries need not appear in the response revisions. The controller suppresses stale values when definitions change. Local computed columns continue to use browser workers; global sorting is available only with a matching server capability/revision envelope. Hidden computed sort dependencies are ordered before pagination.
 
 Hosts own authorization, endpoint implementation, execution budgets, cancellation, and row/metric snapshot consistency. Forwarding `snapshot` or a plan token alone does not establish consistency: bind and enforce it on the service, with a shared transaction/snapshot where needed. Go's `CompileExecution` shares catalogue resolution and reference time; the host still executes and maps results. Advertise only capabilities implemented by the deployed service.
 
@@ -503,8 +493,8 @@ schema, { now })` returns plain metric queries, each within the 20-metric
 budget with one clause's parts in the same query, and a `combine` function
 for their results; `executeMetrics` and `evaluateMetrics` call it, so every
 engine supports them. A host that sends metric requests itself calls it the
-same way. Servers never receive these fields: `toMetricQuery` and
-`toQueryRequestV3` report an `unexpanded_series` diagnostic instead.
+same way. Servers never receive these fields: `toQueryRequestV3` reports an
+`unexpanded_series` diagnostic instead.
 
 ### Hour of day and day of week
 

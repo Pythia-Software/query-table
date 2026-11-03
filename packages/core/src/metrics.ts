@@ -28,6 +28,7 @@ import {
   predicatesOf,
   type AggregationClause,
   type AggOp,
+  type OrderByClause,
   type QueryState,
   type WhereTerm,
 } from "./query";
@@ -42,7 +43,7 @@ import {
   type AggregationResult,
   type AggregationBucket,
 } from "./encode";
-import type { MetricQuery, MetricValue, MetricSort } from "./metricTypes";
+import type { MetricDiagnostic, MetricValue, MetricSort } from "./metricTypes";
 import {
   boxSummary,
   histogramEdges,
@@ -758,6 +759,23 @@ export function metricComputationKey(
       }))
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
   );
+}
+/** The metric projection of a query that `toQueryRequestV3` sends as `metrics`.
+ * Internal: not exported from the package. */
+export interface MetricQuery {
+  /** The table's host-owned state when `hostQuery` is configured. */
+  hostState?: import("./query").HostQueryState;
+  snapshot?: string;
+  profile?: string;
+  expectedRevisions?: Record<string, string>;
+  planToken?: string;
+  version: 2;
+  where: WhereTerm[];
+  orderBy: OrderByClause[];
+  limit: number;
+  offset: number;
+  metrics: AggregationClause[];
+  diagnostics: MetricDiagnostic[];
 }
 export function toMetricQuery<Row>(
   q: QueryState,

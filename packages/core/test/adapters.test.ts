@@ -4,15 +4,17 @@ import { EMPTY_QUERY, localStorageAdapter, memoryStorageAdapter } from "../src/i
 
 afterEach(() => vi.unstubAllGlobals());
 
-it("accepts modern-only public row transports", () => {
-  const v2: Transport<{ id: string }> = { fetchRowsV2: async () => ({ version: 2, rows: [], total: 0, computed: [],
-    execution: { profile: "qt-sqlite-v1", planToken: "", resolvedRevisions: {}, fields: {} } }) };
-  const v3: Transport = { fetchQueryV3: async request => ({ version: 3, now: request.now, sourceTotal: 0, rows: [], total: 0,
+it("accepts exactly the v3 executor as a transport", () => {
+  const queryCapabilities = { version: 3 as const, profile: "qt-sqlite-v1", groupedRows: true, calendarGrouping: true,
+    computedSourceFilters: false, regex: false, maxRows: 100, maxGroups: 100, maxPopulation: 100 };
+  const v3: Transport = { queryCapabilities, fetchQueryV3: async request => ({ version: 3, now: request.now, sourceTotal: 0, rows: [], total: 0,
     schema: { name: "source", idField: "id", fields: [] }, metrics: [], execution: { profile: request.profile, planToken: "", resolvedRevisions: {}, fields: {} } }) };
-  expectTypeOf(v2).toExtend<Transport<{ id: string }>>();
   expectTypeOf(v3).toExtend<Transport>();
-  expect(v2.fetchRows).toBeUndefined();
-  expect(v3.fetchRows).toBeUndefined();
+  // @ts-expect-error Legacy row endpoints are not part of the transport.
+  const legacy: Transport = { queryCapabilities, fetchQueryV3: v3.fetchQueryV3, fetchRows: async () => ({ rows: [], total: 0 }) };
+  // @ts-expect-error The negotiated capabilities are required.
+  const unnegotiated: Transport = { fetchQueryV3: v3.fetchQueryV3 };
+  expect([legacy, unnegotiated]).toHaveLength(2);
 });
 
 function localStorageMock() {

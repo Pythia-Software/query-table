@@ -12,6 +12,10 @@ import {
   toQueryRequestV3,
   toServerQuery,
   validateQueryResultV3,
+  fetchDistinctValuesV3,
+  fetchFieldStatsV3,
+  fetchRowV3,
+  toDistinctRequestV3,
   type FieldSchema,
   type AggregationClause,
 } from "@pythia-software/query-table-core";
@@ -431,28 +435,29 @@ describe("DuckDB native conformance", () => {
   });
   it("supports autocomplete, array suggestions and full item lookup", async () => {
     const transport = backend.transport();
-    expect(
-      await transport.fetchDistinctValues!({ field: "tags", search: "milk" }),
-    ).toEqual({ values: ["MILK", "milk"], hasMore: false, hasNull: true });
-    expect(await transport.fetchRow!("3")).toMatchObject({
+    expect(await fetchDistinctValuesV3(transport, schema, "tags", "milk")).toEqual({ values: ["MILK", "milk"], hasMore: false, hasNull: true });
+    expect(await fetchDistinctValuesV3(transport, schema, "category", "")).toEqual({ values: ["a", "b"], hasMore: false, hasNull: true });
+    expect(await fetchDistinctValuesV3(transport, schema, "category", "", { limit: 1 })).toEqual({ values: ["a"], hasMore: true, hasNull: true });
+    // The population is the source WHERE; hasNull ignores the search.
+    const where = [{ field: "category", op: "=" as const, value: "a" }];
+    expect(await fetchDistinctValuesV3(transport, schema, "tags", "x", { where })).toEqual({ values: [], hasMore: false, hasNull: true });
+    expect(await fetchDistinctValuesV3(transport, schema, "category", "", { where: [{ field: "amount", op: ">", value: "15" }] }))
+      .toEqual({ values: ["b", "a"], hasMore: false, hasNull: false });
+    const request = toDistinctRequestV3("category", "", backend.capabilities, { now: Date.now() });
+    for (const invalid of [{ rows: true }, { metrics: [metric("COUNT()")] }])
+      await expect(backend.execute({ ...request, ...invalid })).rejects.toThrow("no rows, metrics or grouping");
+    await expect(backend.execute({ ...request, distinct: { ...request.distinct!, limit: 501 } })).rejects.toThrow("budget");
+    expect(await fetchRowV3(transport, schema, "3")).toMatchObject({
       ...rows[2],
       date: "2025-01-03T13:00:00.000Z",
     });
+    expect(await fetchRowV3(transport, schema, "missing")).toBeNull();
   });
   it("rejects population budgets and recovers its transaction", async () => {
     const small = new DuckDBBackend({ ...backend.options, maxPopulation: 2 });
-    await expect(
-      small
-        .transport()
-        .fetchRows!(toServerQuery(normalizeQueryState({}), schema)),
-    ).rejects.toThrow("budget");
-    expect(
-      (
-        await backend
-          .transport()
-          .fetchRows!(toServerQuery(normalizeQueryState({ limit: 1 }), schema))
-      ).total,
-    ).toBe(6);
+    const request = (limit?: number) => toQueryRequestV3(normalizeQueryState(limit ? { limit } : {}), schema, backend.capabilities);
+    await expect(small.execute(request())).rejects.toThrow("budget");
+    expect((await backend.execute(request(1))).total).toBe(6);
   });
   it("rejects stale clocks, profiles and aborted requests", async () => {
     const request = toQueryRequestV3(
@@ -578,11 +583,12 @@ describe("DuckDB native conformance", () => {
     ).toThrow("explicit");
   });
   it("reports field statistics, and rejects disabled filters", async () => {
+    // Array fields allow no distinct count, so they report no statistics.
     expect(
-      await backend.transport().fetchFieldStats!(["amount", "tags"]),
+      await fetchFieldStatsV3(backend.transport(), schema, ["amount", "tags", "category"]),
     ).toEqual({
       amount: { distinct: 5, min: 5, max: 200 },
-      tags: { distinct: 4 },
+      category: { distinct: 2, min: "a", max: "b" },
     });
     const closed = new DuckDBBackend({
       ...backend.options,
@@ -596,10 +602,7 @@ describe("DuckDB native conformance", () => {
       },
     });
     await expect(
-      closed.transport().fetchDistinctValues!({
-        field: "category",
-        search: "",
-      }),
+      fetchDistinctValuesV3(closed.transport(), schema, "category", ""),
     ).rejects.toThrow("not filterable");
   });
   it("handles row expressions with numeric parameters and stable unique arrays", async () => {

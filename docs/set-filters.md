@@ -101,7 +101,7 @@ falls back to ordinary predicate editors rather than absorbing other filters.
 
 Normalization, compact URL tokens, saved query storage, and undo/redo preserve
 the metadata, including singleton ANY versus ALL versus NONE. EMPTY stores no
-keys. `toServerQuery` and `toAggregationQuery` strip metadata from all terms and
+keys. `toServerQuery` and `toQueryRequestV3` strip metadata from all terms and
 inner predicates. Custom transports should use these existing projections, not
 send editor metadata as an operator. Unrelated filters are unchanged on edit.
 

@@ -74,7 +74,7 @@ export type FieldSource<Row = any, V = unknown> = BackendField | DerivedField<Ro
 
 /** How filter-value candidates are offered. Autocomplete is the DEFAULT for
  *  every field (design feedback): the value input is a combobox backed by
- *  Transport.fetchDistinctValues, which takes a search string so large domains
+ *  a v3 `distinct` request, which takes a search string so large domains
  *  refine per keystroke on the backend. `static` is for closed domains you don't
  *  want a round-trip for; `freeform` opts out of suggestions entirely. */
 export type FilterValues =

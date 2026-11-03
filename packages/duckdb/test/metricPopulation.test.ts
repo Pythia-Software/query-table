@@ -4,7 +4,6 @@ import { DuckDBInstance, type DuckDBConnection as NativeConnection } from "@duck
 import {
   EMPTY_QUERY,
   normalizeQueryState,
-  toMetricQuery,
   toQueryRequestV3,
   type AggregationClause,
   type AggregationResultEntry,
@@ -93,20 +92,9 @@ describe("shared metric population fixture (DuckDB)", () => {
 });
 
 describe("DuckDB metric population transport", () => {
-  it("advertises both controls on the v2 and v3 handshakes", () => {
+  it("advertises both controls on the v3 handshake, and only the v3 executor", () => {
     const transport = backend.transport();
-    expect(transport.metricCapabilities).toMatchObject({ filters: true, minCount: true });
-    expect(transport.queryCapabilities).toMatchObject({ metricFilters: true, metricMinCount: true });
-  });
-  it("matches the fixture through the v2 metric transport", async () => {
-    const transport = backend.transport();
-    for (const c of fixture.cases.filter((c) => !c.grouping && !c.metric.dateGrouping && !("error" in c.expected))) {
-      const request = toMetricQuery(queryFor(c), fixture.schema);
-      expect(request.diagnostics, c.name).toEqual([]);
-      const entry = (await transport.fetchMetrics!(request)).metrics[0]!;
-      // The v2 transport evaluates relative filters against its own clock.
-      if (c.metric.where?.some((term) => "value" in term && term.value.startsWith("-"))) continue;
-      expect(project(entry, c.expected), c.name).toEqual(c.expected);
-    }
+    expect(transport.queryCapabilities).toMatchObject({ metricFilters: true, metricMinCount: true, metricMinCountMeasures: true });
+    expect(Object.keys(transport).sort()).toEqual(["fetchQueryV3", "queryCapabilities"]);
   });
 });

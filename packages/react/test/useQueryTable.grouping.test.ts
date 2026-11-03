@@ -13,6 +13,7 @@ import {
   type QueryTableApi,
   type UseQueryTableOptions,
 } from "../src/useQueryTable";
+import { memoryV3Transport } from "./v3Transport";
 (
   globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
@@ -219,9 +220,13 @@ describe("standard query table grouping", () => {
   });
 
   it("rejects a saved grouped query before contacting an unsupported transport", async () => {
-    const fetchRows = vi.fn(async () => ({ rows, total: 3 }));
+    // A remote schema declares its identity field, which every v3 page returns.
+    const remote: FieldSchema<GroupedRow> = { ...schema, fields: [{ name: "id", label: "Id", type: "number", source: { kind: "backend" } }, ...schema.fields] };
+    const transport = memoryV3Transport(rows, remote, { capabilities: { groupedRows: false } });
+    const fetchRows = transport.fetchQueryV3;
     const current = mount({
-      transport: { fetchRows },
+      schema: remote,
+      transport,
       initialQuery: normalizeQueryState({
         grouping: {
           keys: ["team"],

@@ -31,7 +31,7 @@ it("previews server group drafts, cancels superseded requests and ignores late r
       schema:{name:projection.name,idField:projection.idField,fields:projection.fields.map(({name,type})=>({name,type}))},
       execution:{profile:request.profile,planToken:"",resolvedRevisions:{},fields:{}}};
   };
-  const transport:Transport<GroupedRow>={fetchRows:async()=>({rows:[],total:0}),
+  const transport:Transport<GroupedRow>={
     queryCapabilities:{version:3,profile:"qt-sqlite-v1",groupedRows:true,calendarGrouping:true,computedSourceFilters:false,regex:false,maxRows:10000,maxGroups:2000,maxPopulation:250000},
     fetchQueryV3:async(request,signal)=>request.rows&&request.result.limit===8
       ?new Promise(resolve=>requests.push({request,signal,resolve})):response(request)};

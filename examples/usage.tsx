@@ -2,7 +2,7 @@
 // This is the "does it compose?" test: it typechecks against the real packages
 // (see examples/tsconfig.json). Not shipped; not part of any package build.
 
-import { loadSchema, localStorageAdapter, type Transport, type QueryState, type RowId } from "@pythia-software/query-table-core";
+import { loadSchema, localStorageAdapter, type Transport, type QueryCapabilitiesV3, type QueryResultV3, type QueryState, type RowId } from "@pythia-software/query-table-core";
 import { useQueryTable } from "@pythia-software/query-table-react";
 import {
   DataTable,
@@ -30,30 +30,22 @@ interface Run {
 // 2. Load the schema (the JSON doc shared with the Go backend).
 const schema = loadSchema<Run>(runsDoc);
 
-// 3. A Transport — the only backend-specific glue. Talks the ServerQuery wire
-//    format the Go `Compile` understands.
+// 3. A Transport — the only backend-specific glue. Every request (row pages,
+//    metrics, grouped views, filter-value suggestions, row lookups and field
+//    statistics) is one QueryRequestV3, POSTed here to the Go NewQueryV3Handler.
+//    The capabilities come from the server's handshake.
+declare const capabilities: QueryCapabilitiesV3;
 const transport: Transport<Run> = {
-  async fetchRows(query, signal) {
+  queryCapabilities: capabilities,
+  async fetchQueryV3(request, signal) {
     const res = await fetch("/api/runs/query", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(query),
+      body: JSON.stringify(request),
       signal: signal ?? null,
     });
     if (!res.ok) throw new Error(`Query failed with HTTP ${res.status}`);
-    return res.json() as Promise<{ rows: Run[]; total: number }>;
-  },
-  // Powers filter-value autocomplete: the backend matches `search` (ILIKE) and
-  // returns the top matches + whether it truncated (so the UI says "keep typing").
-  // If available, include `hasNull` to let the UI suppress null-only operators /
-  // order controls when a column is guaranteed non-null.
-  async fetchDistinctValues(q, signal) {
-    const params = new URLSearchParams({ field: q.field, search: q.search });
-    const res = await fetch(`/api/runs/distinct-values?${params}`, {
-      signal: signal ?? null,
-    });
-    if (!res.ok) throw new Error(`Distinct-values request failed with HTTP ${res.status}`);
-    return res.json(); // { values, hasMore, hasNull? }
+    return res.json() as Promise<QueryResultV3>;
   },
 };
 

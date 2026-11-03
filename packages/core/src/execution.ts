@@ -2,17 +2,13 @@ import {
   predicatesOf,
   normalizeQueryState,
   type QueryState,
-  type RowId,
 } from "./query";
 import { toServerQuery, type ServerQuery } from "./encode";
-import {
-  isComputedField,
-  type ComputedExecution,
-  type RowComputedValues,
-} from "./computed";
+import { isComputedField, type ComputedExecution } from "./computed";
 import { selectedFields, type FieldSchema } from "./schema";
 import type { MetricDiagnostic } from "./metricTypes";
-/** Versioned row projection keeps server-computed payload separate from host row fields. */
+/** The ordered row projection metric requests share with the table page.
+ * Internal: not exported from the package. */
 export interface ServerQueryV2 extends ServerQuery {
   version: 2;
   profile: string;
@@ -21,13 +17,6 @@ export interface ServerQueryV2 extends ServerQuery {
   /** Host must enforce this binding against the row response. */
   snapshot?: string;
   diagnostics: MetricDiagnostic[];
-}
-export interface FetchRowsResultV2<Row> {
-  version: 2;
-  rows: Row[];
-  total: number;
-  computed: { id: RowId; values: RowComputedValues }[];
-  execution: ComputedExecution;
 }
 /** Project with a previously resolved server capability envelope. This does not
  * authorize definitions or upload their source; the backend revalidates revisions. */

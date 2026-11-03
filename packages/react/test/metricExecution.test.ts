@@ -6,9 +6,12 @@ import {
   type FieldSchema,
   type FormulaNode,
   type FormulaValue,
+  type QueryRequestV3,
+  type QueryResultV3,
   type Transport,
 } from "@pythia-software/query-table-core";
 import { executeMetrics } from "../src/metricExecution";
+import { MEMORY_V3_CAPABILITIES, memoryV3Transport, metricRequests, v3Response } from "./v3Transport";
 interface Row {
   id: number;
   x: number;
@@ -45,32 +48,26 @@ const clause = {
   groupBy: ["group"],
   expression: "SUM([x]) / SUM([y])",
 };
+/** A v3 transport whose spy answers every metric with `answer`. */
+function v3Transport(answer: (request: QueryRequestV3) => QueryResultV3["metrics"], capabilities: Partial<Transport["queryCapabilities"]> = {}) {
+  const fetchQueryV3 = vi.fn(async (request: QueryRequestV3, _signal?: AbortSignal) => v3Response(request, { metrics: answer(request) }));
+  return { queryCapabilities: { ...MEMORY_V3_CAPABILITIES, ...capabilities }, fetchQueryV3 } satisfies Transport<Row>;
+}
 describe("metric execution boundary", () => {
   it("requires a shown-row minimum's measured field on the page", async () => {
-    const transport: Transport<Row> = {
-      fetchRows: async () => ({ rows, total: 3 }),
-      fetchMetrics: async () => ({ metrics: [] }),
-      metricCapabilities: { version: 2, expressions: true, minCount: true, minCountMeasures: true },
-    };
     const query = { ...EMPTY_QUERY, aggregations: [
       { id: "page", op: "count" as const, groupBy: ["group"], scope: "shownRows" as const, minCount: { min: 2, distinct: "name" } },
     ] };
     // The page loaded group and id only; name is missing, not NULL.
     const page = rows.map(({ id, group }) => ({ id, group }) as Row);
-    await expect(executeMetrics(query, { schema, transport, shownRows: page, rowsReady: true, shownFields: ["id", "group"] }))
+    await expect(executeMetrics(query, { schema, shownRows: page, rowsReady: true, shownFields: ["id", "group"] }))
       .rejects.toThrow("Shown-page input name is not loaded");
-    const result = await executeMetrics(query, { schema, transport, shownRows: rows, rowsReady: true, shownFields: ["id", "group", "name"] });
+    const result = await executeMetrics(query, { schema, shownRows: rows, rowsReady: true, shownFields: ["id", "group", "name"] });
     expect(result.metrics[0]!.buckets.map((b) => b.keys)).toEqual([["a"]]);
   });
-  it.each([false, undefined])("uses committed rows when V2 shownRows is %s, preserving remote revisions and clause order", async (shownRows) => {
-    const fetchRows = vi.fn(async () => ({ rows: [{ ...rows[1]!, x: 999 }], total: 100 }));
-    const fetchMetrics = vi.fn<NonNullable<Transport<Row>["fetchMetrics"]>>(async request => ({
-      metrics: request.metrics.map(m => ({ id: m.id, buckets: [{ keys: [], value: 100, count: 100 }] })),
-    }));
-    const transport: Transport<Row> = {
-      fetchRows, fetchMetrics,
-      metricCapabilities: { version: 2, computedFields: true, expressions: true, ...(shownRows !== undefined ? { shownRows } : {}) },
-    };
+  it("sends shown-row and all-matching clauses in one v3 request with the computed envelope, in clause order", async () => {
+    const transport = v3Transport(request => request.metrics.map(m => ({ id: m.id, buckets: [{ keys: [], value: 100, count: 100 }] })),
+      { profile: "qt-postgres-v1" });
     const execution = {
       profile: "qt-postgres-v1", planToken: "metric-plan", resolvedRevisions: { double: "metric-revision" },
       fields: { "@computed/double": { type: "number" as const, select: true, sort: true, group: true, measure: true } },
@@ -85,45 +82,37 @@ describe("metric execution boundary", () => {
       resolveComputed: (name: string) => name === "@computed/double" ? compileFormula("[x] * 2", schema.fields) : undefined,
     };
     const result = await executeMetrics(query, context);
-    expect(result.metrics.map(m => [m.id, m.buckets[0]?.value])).toEqual([["page", 60], ["all", 100], ["page-count", 1]]);
-    expect(fetchMetrics).toHaveBeenCalledOnce();
-    expect(fetchMetrics.mock.calls[0]![0]).toMatchObject({
-      metrics: [{ id: "all", field: "@computed/double" }],
+    expect(result.metrics.map(m => [m.id, m.buckets[0]?.value])).toEqual([["page", 100], ["all", 100], ["page-count", 100]]);
+    expect(transport.fetchQueryV3).toHaveBeenCalledOnce();
+    expect(transport.fetchQueryV3.mock.calls[0]![0]).toMatchObject({
+      rows: false, result: { offset: 1, limit: 1 },
+      metrics: [{ id: "page", field: "@computed/double", scope: "shownRows" }, { id: "all", field: "@computed/double" }, { id: "page-count", scope: "shownRows" }],
       expectedRevisions: { double: "metric-revision" }, planToken: "metric-plan",
     });
-    expect(fetchRows).not.toHaveBeenCalled();
-    await expect(executeMetrics(query, { ...context, rowsReady: false })).rejects.toThrow("current table page");
-    await expect(executeMetrics(query, { ...context, shownRows: [{ id: 2 } as Row] })).rejects.toThrow("not loaded");
-    expect(fetchRows).not.toHaveBeenCalled();
     const ac = new AbortController(); ac.abort();
     await expect(executeMetrics(query, context, ac.signal)).rejects.toMatchObject({ name: "AbortError" });
+    expect(transport.fetchQueryV3).toHaveBeenCalledOnce();
   });
-  it("falls back to the complete client dataset when a transport cannot aggregate", async () => {
-    const transport: Transport<Row> = {
-      fetchRows: async () => ({ rows: rows.slice(0, 1), total: 3 }),
-    };
+  it("runs metrics on the server even when the complete client dataset is present", async () => {
+    const transport = memoryV3Transport(rows, schema);
     const q = { ...EMPTY_QUERY, aggregations: [clause] };
     expect(
-      await executeMetrics(q, { schema, transport, clientRows: rows }),
+      await executeMetrics(q, { schema, transport, clientRows: rows.slice(0, 1) }),
     ).toEqual(await executeMetrics(q, { schema, clientRows: rows }));
-    const legacy = {
-      ...EMPTY_QUERY,
-      aggregations: [
-        { id: "m", op: "count_distinct" as const, field: "x", groupBy: ["x"] },
-      ],
-    };
     expect(
-      (await executeMetrics(legacy, { schema, transport, clientRows: rows }))
-        .metrics[0]!.buckets,
-    ).toHaveLength(3);
+      (await executeMetrics({ ...EMPTY_QUERY, aggregations: [{ id: "m", op: "count_distinct" as const, field: "x", groupBy: ["group"] }] },
+        { schema, transport, clientRows: rows.slice(0, 1) })).metrics[0]!.buckets.map((b) => b.value),
+    ).toEqual([2, 1]);
     expect(
       (
         await executeMetrics(
           { ...q, where: [{ field: "x", op: ">", value: "15" }] },
-          { schema, transport, clientRows: rows },
+          { schema, transport, clientRows: rows.slice(0, 1) },
         )
       ).metrics[0]!.buckets[0]!.value,
     ).toBe(10);
+    expect(metricRequests(transport)).toHaveLength(3);
+    expect(metricRequests(transport)[2]!.source.where).toEqual([{ field: "x", op: ">", value: "15" }]);
   });
   it("uses the full filtered dataset and a separately committed shown page", async () => {
     const result = await executeMetrics(
@@ -158,38 +147,15 @@ describe("metric execution boundary", () => {
     );
     expect(result.metrics[0]!.buckets.map((b) => b.value)).toEqual([16, 10]);
   });
-  it("never substitutes partial server pages for all-matching results", async () => {
-    const transport: Transport<Row> = {
-      fetchRows: async () => ({ rows: [rows[0]!], total: 3 }),
-    };
+  it("never substitutes partial pages for all-matching results without a server", async () => {
     await expect(
       executeMetrics(
         { ...EMPTY_QUERY, aggregations: [clause] },
-        { schema, transport, shownRows: [rows[0]!], rowsReady: true },
+        { schema, shownRows: [rows[0]!], rowsReady: true },
       ),
     ).rejects.toThrow("metric-capable");
   });
-  it("never silently downgrades modern definitions to v1", async () => {
-    const fetchAggregations = vi.fn(async () => ({ metrics: [] }));
-    await expect(
-      executeMetrics(
-        { ...EMPTY_QUERY, aggregations: [clause] },
-        {
-          schema,
-          transport: {
-            fetchRows: async () => ({ rows, total: 3 }),
-            fetchAggregations,
-          },
-        },
-      ),
-    ).rejects.toThrow();
-    expect(fetchAggregations).not.toHaveBeenCalled();
-  });
-  it("uses committed shown-page inputs without a newer hydration request", async () => {
-    const fetchRows = vi.fn<NonNullable<Transport<Row>["fetchRows"]>>(async () => ({
-      rows: [{ ...rows[0]!, x: 99 }],
-      total: 3,
-    }));
+  it("uses committed shown-page inputs without a server", async () => {
     const q = {
       ...EMPTY_QUERY,
       limit: 1,
@@ -205,83 +171,41 @@ describe("metric execution boundary", () => {
     };
     const result = await executeMetrics(q, {
       schema,
-      transport: { fetchRows },
       shownRows: [rows[0]!],
       rowsReady: true,
     });
     expect(result.metrics[0]!.buckets[0]!.value).toBe(10);
-    expect(fetchRows).not.toHaveBeenCalled();
     await expect(
       executeMetrics(q, {
         schema,
-        transport: { fetchRows },
         shownRows: [{ id: 1 } as Row],
         rowsReady: true,
       }),
     ).rejects.toThrow("not loaded");
   });
-  it("uses one v2 batch for shown/all paired measures and forwards cancellation", async () => {
-    const fetchMetrics = vi.fn<NonNullable<Transport<Row>["fetchMetrics"]>>(
-      async () => ({
-        metrics: [
-          { id: "ratio", buckets: [] },
-          { id: "shown", buckets: [] },
-        ],
-      }),
-    );
+  it("uses one v3 batch for shown/all paired measures and forwards cancellation", async () => {
+    const transport = v3Transport(() => [
+      { id: "ratio", buckets: [] },
+      { id: "shown", buckets: [] },
+    ]);
     const ac = new AbortController();
     await executeMetrics(
       {
         ...EMPTY_QUERY,
         aggregations: [clause, { ...clause, id: "shown", scope: "shownRows" }],
       },
-      {
-        schema,
-        transport: {
-          fetchRows: async () => ({ rows, total: 3 }),
-          fetchMetrics,
-          metricCapabilities: {
-            version: 2,
-            expressions: true,
-            shownRows: true,
-          },
-        },
-      },
+      { schema, transport },
       ac.signal,
     );
-    expect(fetchMetrics).toHaveBeenCalledOnce();
-    expect(fetchMetrics.mock.calls[0]![0].metrics.map((c) => c.scope)).toEqual([
+    expect(transport.fetchQueryV3).toHaveBeenCalledOnce();
+    expect(transport.fetchQueryV3.mock.calls[0]![0].metrics.map((c) => c.scope)).toEqual([
       undefined,
       "shownRows",
     ]);
-    expect(fetchMetrics.mock.calls[0]![1]).toBe(ac.signal);
+    expect(transport.fetchQueryV3.mock.calls[0]![1]).toBe(ac.signal);
   });
-  it("enforces paired-expression, computed-field and profile capability contracts", async () => {
-    const fetchMetrics = vi.fn<NonNullable<Transport<Row>["fetchMetrics"]>>(
-      async () => ({ metrics: [] }),
-    );
-    const base: Transport<Row> = {
-      fetchRows: async () => ({ rows, total: 3 }),
-      fetchMetrics,
-      metricCapabilities: { version: 2 },
-    };
-    const paired = {
-      id: "paired",
-      op: "sum" as const,
-      field: "x",
-      groupBy: ["group"],
-      expressionY: "SUM([y])",
-      display: { kind: "scatter" as const },
-    };
-    const clauseError = async (
-      ...args: Parameters<typeof executeMetrics<Row>>
-    ) => (await executeMetrics(...args)).metrics.map((m) => m.error);
-    expect(
-      await clauseError(
-        { ...EMPTY_QUERY, aggregations: [paired] },
-        { schema, transport: base },
-      ),
-    ).toEqual([expect.stringContaining("composed")]);
+  it("rejects a computed execution handshake from another profile before dispatch", async () => {
+    const transport = v3Transport(() => [], { profile: "other-profile" });
     const execution = {
       profile: "qt-postgres-v1",
       planToken: "same",
@@ -296,88 +220,16 @@ describe("metric execution boundary", () => {
         },
       },
     };
-    const grouped = {
-      id: "grouped",
-      op: "count" as const,
-      groupBy: ["@computed/category"],
-    };
-    expect(
-      await clauseError(
-        { ...EMPTY_QUERY, aggregations: [grouped] },
-        { schema, transport: base, execution },
-      ),
-    ).toEqual([expect.stringContaining("computed fields")]);
     await expect(
       executeMetrics(
-        { ...EMPTY_QUERY, aggregations: [grouped] },
-        {
-          schema,
-          transport: {
-            ...base,
-            metricCapabilities: {
-              version: 2,
-              computedFields: true,
-              profile: "other-profile",
-            },
-          },
-          execution,
-        },
+        { ...EMPTY_QUERY, aggregations: [{ id: "grouped", op: "count" as const, groupBy: ["@computed/category"] }] },
+        { schema, transport, execution },
       ),
-    ).rejects.toThrow("profiles");
-    expect(fetchMetrics).not.toHaveBeenCalled();
+    ).rejects.toThrow("profile");
+    expect(transport.fetchQueryV3).not.toHaveBeenCalled();
   });
-  it("fails only the clauses that need a missing server capability", async () => {
-    const fetchMetrics = vi.fn<NonNullable<Transport<Row>["fetchMetrics"]>>(
-      async (request) => ({
-        metrics: request.metrics.map((m) => ({
-          id: m.id,
-          buckets: [{ keys: [], value: 1, count: 3 }],
-        })),
-      }),
-    );
-    const transport: Transport<Row> = {
-      fetchRows: async () => ({ rows, total: 3 }),
-      fetchMetrics,
-      metricCapabilities: { version: 2, expressions: true },
-    };
-    const result = await executeMetrics(
-      {
-        ...EMPTY_QUERY,
-        aggregations: [
-          { id: "first", op: "sum", field: "x", groupBy: [] },
-          {
-            id: "box",
-            op: "count",
-            groupBy: [],
-            display: { kind: "box" },
-            distribution: { kind: "box", input: "[x]", whiskers: "tukey" },
-          },
-          { id: "last", op: "count", groupBy: [] },
-        ],
-      },
-      { schema, transport },
-    );
-    expect(result.metrics.map((m) => [m.id, m.error])).toEqual([
-      ["first", undefined],
-      ["box", "This server does not support distributions."],
-      ["last", undefined],
-    ]);
-    expect(result.metrics[1]!.buckets).toEqual([]);
-    expect(fetchMetrics).toHaveBeenCalledTimes(1);
-    expect(fetchMetrics.mock.calls[0]![0].metrics.map((m) => m.id)).toEqual([
-      "first",
-      "last",
-    ]);
-  });
-  it("ignores inactive formula alternatives when gating server features", async () => {
-    const fetchMetrics = vi.fn<NonNullable<Transport<Row>["fetchMetrics"]>>(
-      async () => ({ metrics: [] }),
-    );
-    const transport: Transport<Row> = {
-      fetchRows: async () => ({ rows, total: 3 }),
-      fetchMetrics,
-      metricCapabilities: { version: 2, distributions: true },
-    };
+  it("omits inactive formula alternatives from the server request", async () => {
+    const transport = v3Transport(request => request.metrics.map(m => ({ id: m.id, buckets: [] })));
     await executeMetrics(
       {
         ...EMPTY_QUERY,
@@ -394,7 +246,7 @@ describe("metric execution boundary", () => {
       },
       { schema, transport },
     );
-    expect(fetchMetrics.mock.lastCall![0].metrics[0]).not.toHaveProperty(
+    expect(transport.fetchQueryV3.mock.lastCall![0].metrics[0]).not.toHaveProperty(
       "expressionY",
     );
     await executeMetrics(
@@ -415,15 +267,15 @@ describe("metric execution boundary", () => {
       },
       { schema, transport },
     );
-    expect(fetchMetrics.mock.lastCall![0].metrics[0]).not.toHaveProperty(
+    expect(transport.fetchQueryV3.mock.lastCall![0].metrics[0]).not.toHaveProperty(
       "expression",
     );
-    expect(fetchMetrics.mock.lastCall![0].metrics[0]).not.toHaveProperty(
+    expect(transport.fetchQueryV3.mock.lastCall![0].metrics[0]).not.toHaveProperty(
       "expressionY",
     );
-    expect(fetchMetrics).toHaveBeenCalledTimes(2);
+    expect(transport.fetchQueryV3).toHaveBeenCalledTimes(2);
   });
-  it.each([false, true, undefined])("runs regex inputs on a worker with V2 shownRows=%s", async (shownRows) => {
+  it("runs shown-row regex inputs on a worker", async () => {
     const inputs: Record<string, FormulaValue>[] = [];
     const terminate = vi.fn();
     const worker = {
@@ -456,11 +308,6 @@ describe("metric execution boundary", () => {
         clientRows: rows,
         shownRows: [rows[1]!],
         rowsReady: true,
-        transport: {
-          fetchRows: vi.fn(async () => ({ rows, total: 3 })),
-          fetchMetrics: vi.fn(async () => ({ metrics: [] })),
-          metricCapabilities: { version: 2, ...(shownRows !== undefined ? { shownRows } : {}) },
-        },
         workerFactory: () => worker as unknown as Worker,
       },
     );
@@ -571,14 +418,12 @@ describe("metric population capability negotiation", () => {
   const plain = { id: "plain", op: "count" as const, groupBy: ["group"] };
   const filtered = { id: "filtered", op: "count" as const, groupBy: ["group"], where: [{ field: "name", op: "=" as const, value: "alpha" }] };
   const small = { id: "small", op: "count" as const, groupBy: ["group"], minCount: 2 };
-  it("fails only the clauses a v2 server cannot execute exactly", async () => {
-    const fetchMetrics = vi.fn(async (request: { metrics: { id: string }[] }) => ({
-      metrics: request.metrics.map((m) => ({ id: m.id, buckets: [{ keys: ["a"], value: 2, count: 2 }] })),
-    }));
-    const transport = { fetchRows: async () => ({ rows: [], total: 0 }), fetchMetrics, metricCapabilities: { version: 2 as const, minCount: true } } as unknown as Transport<Row>;
+  it("fails only the clauses a v3 server cannot execute exactly", async () => {
+    const transport = v3Transport(request => request.metrics.map((m) => ({ id: m.id, buckets: [{ keys: ["a"], value: 2, count: 2 }] })),
+      { metricFilters: false, metricMinCount: true, metricMinCountMeasures: false });
     const result = await executeMetrics({ ...EMPTY_QUERY, aggregations: [plain, filtered, small] }, { schema, transport });
-    expect(fetchMetrics).toHaveBeenCalledOnce();
-    expect(fetchMetrics.mock.calls[0]![0].metrics.map((m) => m.id)).toEqual(["plain", "small"]);
+    expect(transport.fetchQueryV3).toHaveBeenCalledOnce();
+    expect(transport.fetchQueryV3.mock.calls[0]![0].metrics.map((m) => m.id)).toEqual(["plain", "small"]);
     expect(result.metrics.map((m) => [m.id, m.error ?? null])).toEqual([
       ["plain", null],
       ["filtered", "This server does not support metric filters."],
@@ -587,32 +432,24 @@ describe("metric population capability negotiation", () => {
   });
   it("sends a distinct or summed minimum only to servers that advertise it", async () => {
     const measured = { id: "measured", op: "count" as const, groupBy: ["group"], minCount: { min: 2, distinct: "name" } };
-    const fetchMetrics = vi.fn(async (request: { metrics: { id: string }[] }) => ({
-      metrics: request.metrics.map((m) => ({ id: m.id, buckets: [] })),
-    }));
-    const run = (capabilities: Record<string, unknown>) =>
-      executeMetrics({ ...EMPTY_QUERY, aggregations: [small, measured] }, {
-        schema,
-        transport: { fetchRows: async () => ({ rows: [], total: 0 }), fetchMetrics, metricCapabilities: { version: 2, ...capabilities } } as unknown as Transport<Row>,
-      });
-    const older = await run({ minCount: true });
-    expect(fetchMetrics.mock.calls[0]![0].metrics.map((m) => m.id)).toEqual(["small"]);
+    const calls: QueryRequestV3[] = [];
+    const run = (capabilities: Partial<Transport["queryCapabilities"]>) => {
+      const transport = v3Transport(request => { calls.push(request); return request.metrics.map((m) => ({ id: m.id, buckets: [] })); },
+        { metricFilters: false, metricMinCount: false, metricMinCountMeasures: false, ...capabilities });
+      return executeMetrics({ ...EMPTY_QUERY, aggregations: [small, measured] }, { schema, transport });
+    };
+    const older = await run({ metricMinCount: true });
+    expect(calls[0]!.metrics.map((m) => m.id)).toEqual(["small"]);
     expect(older.metrics[1]).toEqual({ id: "measured", buckets: [], error: "This server does not support a minimum of distinct values or a sum per group." });
-    const current = await run({ minCount: true, minCountMeasures: true });
-    expect(fetchMetrics.mock.calls[1]![0].metrics).toEqual([
+    const none = await run({});
+    expect(calls).toHaveLength(1);
+    expect(none.metrics[0]).toEqual({ id: "small", buckets: [], error: "This server does not support a minimum rows per group." });
+    const current = await run({ metricMinCount: true, metricMinCountMeasures: true });
+    expect(calls[1]!.metrics).toEqual([
       expect.objectContaining({ id: "small", minCount: 2 }),
       expect.objectContaining({ id: "measured", minCount: { min: 2, distinct: "name" } }),
     ]);
     expect(current.metrics.every((m) => !m.error)).toBe(true);
-  });
-  it("never sends population controls to the version 1 aggregation endpoint", async () => {
-    const fetchAggregations = vi.fn(async (request: { aggregations: { id: string }[] }) => ({
-      metrics: request.aggregations.map((a) => ({ id: a.id, buckets: [] })),
-    }));
-    const transport = { fetchRows: async () => ({ rows: [], total: 0 }), fetchAggregations } as unknown as Transport<Row>;
-    const result = await executeMetrics({ ...EMPTY_QUERY, aggregations: [plain, small] }, { schema, transport });
-    expect(fetchAggregations.mock.calls[0]![0].aggregations.map((a) => a.id)).toEqual(["plain"]);
-    expect(result.metrics[1]).toEqual({ id: "small", buckets: [], error: "This server does not support a minimum rows per group." });
   });
   it("evaluates both controls on the local engine, including shown rows", async () => {
     const result = await executeMetrics(
@@ -628,25 +465,18 @@ describe("metric population capability negotiation", () => {
 });
 
 describe("metric series execution", () => {
-  it("sends shares to a v2 server as plain metrics and divides the results", async () => {
+  it("sends shares to a v3 server as plain metrics and divides the results", async () => {
     const sent: string[][] = [];
-    const fetchMetrics = vi.fn<NonNullable<Transport<Row>["fetchMetrics"]>>(async (request) => {
+    const transport = v3Transport((request) => {
       sent.push(request.metrics.map((m) => `${m.expression ?? m.op}:${m.groupBy.join(",")}`));
       expect(request.diagnostics).toEqual([]);
-      return {
-        metrics: request.metrics.map((m) => ({
-          id: m.id,
-          buckets: m.groupBy.length
-            ? [{ keys: ["a"], value: 40, count: 2 }, { keys: ["b"], value: 20, count: 1 }]
-            : [{ keys: [], value: 60, count: 3 }],
-        })),
-      };
+      return request.metrics.map((m) => ({
+        id: m.id,
+        buckets: m.groupBy.length
+          ? [{ keys: ["a"], value: 40, count: 2 }, { keys: ["b"], value: 20, count: 1 }]
+          : [{ keys: [], value: 60, count: 3 }],
+      }));
     });
-    const transport: Transport<Row> = {
-      fetchRows: async () => ({ rows: [], total: 0 }),
-      fetchMetrics,
-      metricCapabilities: { version: 2, expressions: true },
-    };
     const share = { id: "share", op: "sum" as const, field: "x", groupBy: ["group"], share: "total" as const };
     const result = await executeMetrics({ ...EMPTY_QUERY, aggregations: [share, clause] }, { schema, transport });
     expect(sent).toEqual([["sum:group", "sum:", "SUM([x]) / SUM([y]):group"]]);

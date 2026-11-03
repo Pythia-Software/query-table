@@ -92,20 +92,17 @@ export {
 
 export type {
   ServerQuery,
-  AggregationRequest,
   AggregationBucket,
   AggregationResultEntry,
   AggregationResult,
 } from "./encode";
-export { encodeQuery, decodeQuery, decodeQueryStrict, QueryDecodeError, MAX_QUERY_STATE_BYTES, toServerQuery, toAggregationQuery } from "./encode";
+export { encodeQuery, decodeQuery, decodeQueryStrict, QueryDecodeError, MAX_QUERY_STATE_BYTES, toServerQuery } from "./encode";
 export * from "./queryLinks";
 
 export type { ApplyResult } from "./apply";
 export { applyQuery, matchesClause, applyAggregations } from "./apply";
 
 export type {
-  FetchRowsResult,
-  DistinctValuesQuery,
   DistinctValuesResult,
   FieldStats,
   Transport,
@@ -123,11 +120,34 @@ export { parseRelativeDuration, MAX_RELATIVE_TIME_MS } from "./relativeTime";
 export type { QueryEvaluationOptions } from "./relativeTime";
 
 export * from "./metricTypes";
-export * from "./metrics";
+export {
+  METRIC_FUNCTIONS,
+  compileMetric,
+  metricAggregatePlans,
+  reduceMetricValues,
+  evaluateMetricReductions,
+  metricExpression,
+  hasRegex,
+  occurrenceDistribution,
+  metricPlans,
+  validateMetric,
+  metricMinCount,
+  metricMinCountMeasure,
+  metricMinCountText,
+  metricMinCountPlan,
+  metricMinCountKeeps,
+  metricPopulationError,
+  metricDependencies,
+  metricComputationKey,
+  selectMetricShownRows,
+  compareMetricValues,
+  sortMetricBuckets,
+  evaluateMetrics,
+} from "./metrics";
+export type { MetricPlan, MetricReductionOptions, MetricPopulationSupport, MetricEvaluationOptions } from "./metrics";
 export * from "./metricDistributions";
 export * from "./metricDates";
 export * from "./metricSeries";
-export * from "./execution";
 export * from "./properties";
 export * from "./propertyStorage";
 export * from "./grouping";
