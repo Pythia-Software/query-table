@@ -10,14 +10,6 @@ import (
 type sqliteIntegerPlan struct {
 	SQL, NonnegativeSQL, Input string
 	Args                       []any
-	// TrustedSQL omits the per-row storage and absolute-bound proofs. It is
-	// valid only when a source proof covers every expression in Numeric; see
-	// SQLiteSourceProofs. V3's bounded source proofs never build it.
-	TrustedSQL string
-	Numeric    []string
-	// Population reports that qt_integer_population sums to the request's
-	// matching population (V2 only).
-	Population bool
 }
 
 // V3 also proves the complete narrow source's byte size and identity storage.
@@ -32,7 +24,7 @@ type sqliteIntegerSourceProof struct {
 // proves nonnegative populations directly; signed inputs also check their exact
 // absolute total. Other domains retain the ordinary exact decimal reducer.
 // No schema declaration or sampled row is treated as proof about the population.
-func sqliteIntegerReduction(ctx context.Context, q MetricQuery, specs []AggSpec, s Schema, o PlanOptions, combined SQLPlan, sourceProof ...sqliteIntegerSourceProof) *sqliteIntegerPlan {
+func sqliteIntegerReduction(ctx context.Context, q metricRequest, specs []AggSpec, s Schema, o PlanOptions, combined SQLPlan, sourceProof ...sqliteIntegerSourceProof) *sqliteIntegerPlan {
 	if len(specs) < 2 || combined.Scope != "allMatching" {
 		return nil
 	}
@@ -40,7 +32,7 @@ func sqliteIntegerReduction(ctx context.Context, q MetricQuery, specs []AggSpec,
 	nodes := map[string]*exprNode{}
 	expressions := []string{}
 	for _, spec := range specs {
-		expressions = append(expressions, MetricExpression(spec))
+		expressions = append(expressions, metricExpression(spec))
 		// A measured minCount is one more reduction of the combined plan.
 		if measure := spec.MinCount.Measure(); measure != "" {
 			expressions = append(expressions, measure)
@@ -108,7 +100,7 @@ func sqliteIntegerReduction(ctx context.Context, q MetricQuery, specs []AggSpec,
 		projections = []string{"1 AS qt_present"}
 	}
 	where := append(append([]WhereTerm{}, q.Where...), specs[0].Where...)
-	filter, _, err := compileSQLiteWhere(where, s, SQLiteOptions{Now: o.Now}, o.relations)
+	filter, _, err := compileSQLiteWhere(where, s, sqliteOptions{Now: o.Now}, o.relations)
 	if err != nil || ctx.Err() != nil {
 		return nil
 	}
@@ -157,22 +149,10 @@ func sqliteIntegerReduction(ctx context.Context, q MetricQuery, specs []AggSpec,
 		columns = append(columns, "SUM(COUNT(*)) OVER () AS qt_source_count", "SUM(COALESCE(SUM("+strings.Join(parts, "+")+"),0)) OVER () AS qt_source_bytes")
 	}
 	plan := &sqliteIntegerPlan{Input: input, Args: args}
-	for _, name := range names {
-		if s.Fields[name].Kind == FieldNumber {
-			plan.Numeric = append(plan.Numeric, s.Fields[name].Expr)
-		}
-	}
 	modes := []string{"signed", "nonnegative"}
-	if len(sourceProof) == 0 {
-		modes = append(modes, "trusted")
-		// Without metric predicates the groups partition the request's
-		// matching population, so their counts also count that population.
-		plan.Population = len(specs[0].Where) == 0
-		columns = append(columns, "COUNT(*) AS qt_integer_population")
-	}
 	baseColumns, baseGuards := columns, guards
 	for _, mode := range modes {
-		nonnegative, trusted := mode == "nonnegative", mode == "trusted"
+		nonnegative := mode == "nonnegative"
 		columns, guards := append([]string{}, baseColumns...), append([]string{}, baseGuards...)
 		for _, col := range combined.SQLiteReductionColumns {
 			identity := combined.reduction.keys[col.Name]
@@ -202,13 +182,7 @@ func sqliteIntegerReduction(ctx context.Context, q MetricQuery, specs []AggSpec,
 			}
 			value := ""
 			sum := ""
-			if raw != "*" && trusted {
-				// A source proof established INTEGER/NULL storage and a safe
-				// absolute total over the whole authorized source, hence over
-				// every subset. The free result-type check remains a backstop.
-				sum = "SUM(" + raw + ")"
-				guards = append(guards, "typeof("+sum+") IN ('integer','null')")
-			} else if raw != "*" {
+			if raw != "*" {
 				// Declined inputs contribute a REAL zero. Thus an INTEGER/NULL
 				// SUM proves every consumed value met this plan's domain; numeric
 				// text must never be accepted through SQLite's SUM coercion.
@@ -260,12 +234,9 @@ func sqliteIntegerReduction(ctx context.Context, q MetricQuery, specs []AggSpec,
 		if len(sourceProof) > 0 {
 			sql += fmt.Sprintf(" LIMIT %d", sourceProof[0].maxGroups+1)
 		}
-		switch mode {
-		case "trusted":
-			plan.TrustedSQL = sql
-		case "nonnegative":
+		if nonnegative {
 			plan.NonnegativeSQL = sql
-		default:
+		} else {
 			plan.SQL = sql
 		}
 	}

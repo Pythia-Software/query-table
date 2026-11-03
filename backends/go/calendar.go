@@ -222,7 +222,7 @@ func calendarInput(value string, loc *time.Location) (time.Time, error) {
 	}
 	return instant, nil
 }
-func calendarRange(config MetricDateGrouping, q MetricQuery, observed []time.Time, now time.Time, loc *time.Location) (time.Time, time.Time, bool, error) {
+func calendarRange(config MetricDateGrouping, q metricRequest, observed []time.Time, now time.Time, loc *time.Location) (time.Time, time.Time, bool, error) {
 	var min, max time.Time
 	for _, t := range observed {
 		if min.IsZero() || t.Before(min) {
@@ -312,33 +312,33 @@ func calendarRange(config MetricDateGrouping, q MetricQuery, observed []time.Tim
 	return start, end, true, err
 }
 
-func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggSpec, q MetricQuery, s Schema, o PlanOptions, total int64, maxGroups int, tables *[]string) (SQLiteMetricV2, error) {
+func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggSpec, q metricRequest, s Schema, o PlanOptions, total int64, maxGroups int, tables *[]string) (MetricResult, error) {
 	if spec.DateGrouping == nil {
 		if err := d.checkMetricSamples(ctx, tx, spec, q, s, o, maxGroups); err != nil {
-			return SQLiteMetricV2{}, err
+			return MetricResult{}, err
 		}
 		p, err := compileMetricDialect(ctx, q, spec, s, o, d.Dialect == "sqlite")
 		if err == nil {
 			p, err = compileMetricDialect(ctx, q, spec, narrowSchema(s, p.Dependencies, q.Where, spec.Where), o, d.Dialect == "sqlite")
 		}
 		if err != nil {
-			return SQLiteMetricV2{}, err
+			return MetricResult{}, err
 		}
-		return (SQLiteV2Dataset{}).readV2Metric(ctx, tx, MetricSQLPlan{spec.ID, p}, spec, total, q, maxGroups)
+		return (sqliteV2Dataset{}).readV2Metric(ctx, tx, metricSQLPlan{spec.ID, p}, spec, total, q, maxGroups)
 	}
 	config := *spec.DateGrouping
 	loc, err := calendarLocation(config)
 	if err != nil {
-		return SQLiteMetricV2{}, err
+		return MetricResult{}, err
 	}
 	field, ok := s.Fields[config.Field]
 	if !ok || field.Kind != FieldDatetime || !fieldGroupable(field) || len(spec.GroupBy) == 0 || spec.GroupBy[0] != config.Field || spec.Distribution != nil {
-		return SQLiteMetricV2{}, diagnostic("date_grouping", "calendar grouping requires the first datetime key and scalar metrics")
+		return MetricResult{}, diagnostic("date_grouping", "calendar grouping requires the first datetime key and scalar metrics")
 	}
 	if _, err = metricOrder(spec, len(spec.GroupBy), spec.ExpressionY != "", false); err != nil {
-		return SQLiteMetricV2{}, err
+		return MetricResult{}, err
 	}
-	rowQuery := WireQuery{Where: q.Where, OrderBy: OrderBys(q.OrderBy)}
+	rowQuery := WireQuery{Where: q.Where, OrderBy: q.OrderBy}
 	if spec.Scope == "shownRows" {
 		rowQuery.Limit = q.Limit
 		rowQuery.Offset = q.Offset
@@ -349,14 +349,14 @@ func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggS
 	plain.DateGrouping = nil
 	dependencyPlan, err := compileMetricDialect(ctx, q, plain, s, o, d.Dialect == "sqlite")
 	if err != nil {
-		return SQLiteMetricV2{}, err
+		return MetricResult{}, err
 	}
 	names := append([]string{s.IDField, config.Field}, dependencyPlan.Dependencies...)
 	sort.Strings(names)
 	rowQuery.Select = uniqueStrings(names)
 	_, _, maxPopulation, maxBytes, err := d.limits()
 	if err != nil {
-		return SQLiteMetricV2{}, err
+		return MetricResult{}, err
 	}
 	var p SQLPlan
 	if spec.Scope == "shownRows" {
@@ -368,7 +368,7 @@ func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggS
 		p, err = compileQuerySource(ctx, rowQuery, s, o, d.Dialect == "sqlite")
 	}
 	if err != nil {
-		return SQLiteMetricV2{}, err
+		return MetricResult{}, err
 	}
 	dateAlias := ""
 	for _, column := range p.Columns {
@@ -379,12 +379,12 @@ func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggS
 	// Include the ordinal and 24-byte ISO key in this metric's scratch budget.
 	sizeSQL := d.stagingSizeSQL(p.Columns, "8", "CASE WHEN "+queryIdent(dateAlias)+" IS NULL THEN 0 ELSE 24 END")
 	if err = d.checkCalendarStaging(ctx, tx, "("+p.SQL+") AS qt_calendar_budget", sizeSQL, p.Args, maxPopulation, maxBytes); err != nil {
-		return SQLiteMetricV2{}, err
+		return MetricResult{}, err
 	}
 	table := queryTableName()
 	*tables = append(*tables, table)
 	if _, err = tx.ExecContext(ctx, "CREATE TEMP TABLE "+queryIdent(table)+" AS SELECT *,ROW_NUMBER() OVER () AS qt_calendar_row FROM ("+p.SQL+") AS qt_calendar_source", p.Args...); err != nil {
-		return SQLiteMetricV2{}, err
+		return MetricResult{}, err
 	}
 	// A calendar scratch relation lives for one metric, rather than accumulating
 	// with every calendar clause in the request. ExecuteIn also retains a fallback
@@ -393,13 +393,13 @@ func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggS
 		_ = d.dropQueryTables(ctx, tx, []string{table})
 	}()
 	if err = d.checkCalendarStaging(ctx, tx, queryIdent(table), sizeSQL, nil, maxPopulation, maxBytes); err != nil {
-		return SQLiteMetricV2{}, err
+		return MetricResult{}, err
 	}
 	if _, err = tx.ExecContext(ctx, "CREATE UNIQUE INDEX "+queryIdent(table+"_index")+" ON "+queryIdent(table)+" (qt_calendar_row)"); err != nil {
-		return SQLiteMetricV2{}, err
+		return MetricResult{}, err
 	}
 	if _, err = tx.ExecContext(ctx, "ALTER TABLE "+queryIdent(table)+" ADD COLUMN qt_calendar_key TEXT"); err != nil {
-		return SQLiteMetricV2{}, err
+		return MetricResult{}, err
 	}
 	calendarSchema := Schema{Name: s.Name, IDField: s.IDField, Fields: map[string]FieldSpec{}}
 	for _, column := range p.Columns {
@@ -416,11 +416,11 @@ func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggS
 		}
 	}
 	if err = d.keyCalendarColumn(ctx, tx, table, dateAlias, "qt_calendar_key", "text", config.Interval, loc); err != nil {
-		return SQLiteMetricV2{}, err
+		return MetricResult{}, err
 	}
 	bucketName := "__qt_calendar_bucket__"
 	if _, exists := calendarSchema.Fields[bucketName]; exists {
-		return SQLiteMetricV2{}, diagnostic("schema", "reserved calendar field collision")
+		return MetricResult{}, diagnostic("schema", "reserved calendar field collision")
 	}
 	// Text ISO keys avoid PostgreSQL interpreting a staged datetime string under
 	// the connection timezone; original datetime inputs remain available to formulas.
@@ -442,14 +442,14 @@ func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggS
 	options := o
 	options.SourceSQL = "SELECT * FROM " + queryIdent(table)
 	options.SourceArgs = nil
-	if err = d.checkMetricSamples(ctx, tx, modified, MetricQuery{Version: 2}, calendarSchema, options, maxGroups); err != nil {
-		return SQLiteMetricV2{}, err
+	if err = d.checkMetricSamples(ctx, tx, modified, metricRequest{Version: 2}, calendarSchema, options, maxGroups); err != nil {
+		return MetricResult{}, err
 	}
-	metricPlan, err := compileMetricDialect(ctx, MetricQuery{Version: 2}, modified, calendarSchema, options, d.Dialect == "sqlite")
+	metricPlan, err := compileMetricDialect(ctx, metricRequest{Version: 2}, modified, calendarSchema, options, d.Dialect == "sqlite")
 	if err != nil {
-		return SQLiteMetricV2{}, err
+		return MetricResult{}, err
 	}
-	result, err := (SQLiteV2Dataset{}).readV2Metric(ctx, tx, MetricSQLPlan{spec.ID, metricPlan}, modified, total, q, maxGroups)
+	result, err := (sqliteV2Dataset{}).readV2Metric(ctx, tx, metricSQLPlan{spec.ID, metricPlan}, modified, total, q, maxGroups)
 	if err != nil {
 		return result, err
 	}
@@ -505,7 +505,7 @@ func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggS
 	}
 	return result, nil
 }
-func fillCalendarBuckets(ctx context.Context, result *SQLiteMetricV2, config MetricDateGrouping, spec AggSpec, q MetricQuery, now time.Time, loc *time.Location, maxGroups int) error {
+func fillCalendarBuckets(ctx context.Context, result *MetricResult, config MetricDateGrouping, spec AggSpec, q metricRequest, now time.Time, loc *time.Location, maxGroups int) error {
 	observed := []time.Time{}
 	series := map[string][]any{}
 	present := map[string]bool{}
@@ -544,7 +544,7 @@ func fillCalendarBuckets(ctx context.Context, result *SQLiteMetricV2, config Met
 		if len(result.Buckets) >= maxGroups {
 			return diagnostic("resource_limit", "calendar group population exceeds host budget")
 		}
-		bucket := SQLiteMetricV2Bucket{Keys: keys, Count: 0, Value: empty(MetricExpression(spec))}
+		bucket := MetricBucket{Keys: keys, Count: 0, Value: empty(metricExpression(spec))}
 		if spec.ExpressionY != "" {
 			value := empty(spec.ExpressionY)
 			bucket.Y = &value
@@ -599,7 +599,7 @@ func fillCalendarBuckets(ctx context.Context, result *SQLiteMetricV2, config Met
 	}
 	return nil
 }
-func (d QueryDatasetV3) checkMetricSamples(ctx context.Context, tx *sql.Tx, spec AggSpec, q MetricQuery, s Schema, o PlanOptions, maxGroups int) error {
+func (d QueryDatasetV3) checkMetricSamples(ctx context.Context, tx *sql.Tx, spec AggSpec, q metricRequest, s Schema, o PlanOptions, maxGroups int) error {
 	if !metricSampled(spec) {
 		return nil
 	}
@@ -608,7 +608,7 @@ func (d QueryDatasetV3) checkMetricSamples(ctx context.Context, tx *sql.Tx, spec
 	if err != nil {
 		return err
 	}
-	metric, err := (SQLiteV2Dataset{}).readV2Metric(ctx, tx, MetricSQLPlan{probe.ID, p}, probe, 0, q, maxGroups)
+	metric, err := (sqliteV2Dataset{}).readV2Metric(ctx, tx, metricSQLPlan{probe.ID, p}, probe, 0, q, maxGroups)
 	if err != nil {
 		return err
 	}
@@ -687,12 +687,12 @@ func compareQueryValues(a, b any) int {
 	}
 	return 0
 }
-func sortCalendarBuckets(buckets []SQLiteMetricV2Bucket, spec AggSpec) {
+func sortCalendarBuckets(buckets []MetricBucket, spec AggSpec) {
 	ordering := spec.Sort
 	if len(ordering) == 0 {
 		ordering = []MetricSort{{Key: "group0", Dir: "asc", Nulls: "last"}}
 	}
-	target := func(bucket SQLiteMetricV2Bucket, sort MetricSort) any {
+	target := func(bucket MetricBucket, sort MetricSort) any {
 		switch sort.Key {
 		case "value":
 			return bucket.Value

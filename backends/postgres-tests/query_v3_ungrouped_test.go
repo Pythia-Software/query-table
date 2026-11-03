@@ -104,7 +104,7 @@ func ungroupedCases() map[string]qt.QueryRequestV3 {
 		"arrays":                      ungroupedRequest(page([]qt.WhereTerm{{Field: "tags", Op: "includes", Value: "red"}})),
 		"nulls and negation":          ungroupedRequest(page([]qt.WhereTerm{{Field: "k", Op: "is_null"}, {Field: "note", Op: "contains", Value: "o", Negated: true}})),
 		"datetime filter":             ungroupedRequest(page([]qt.WhereTerm{{Field: "at", Op: ">=", Value: "2026-10-20T00:00:00Z"}})),
-		"computed select sort filter": ungroupedRequest(qt.WireQuery{Select: []string{"id", "@computed/double", "@computed/inv", "@computed/big"}, Where: []qt.WhereTerm{{Field: "@computed/double", Op: ">", Value: "2"}}, OrderBy: qt.OrderBys{{Field: "@computed/inv", Dir: "desc", Nulls: "last"}}, Limit: 30}),
+		"computed select sort filter": ungroupedRequest(qt.WireQuery{Select: []string{"id", "@computed/double", "@computed/inv", "@computed/big"}, Where: []qt.WhereTerm{{Field: "@computed/double", Op: ">", Value: "2"}}, OrderBy: []qt.OrderBy{{Field: "@computed/inv", Dir: "desc", Nulls: "last"}}, Limit: 30}),
 		"empty": ungroupedRequest(page([]qt.WhereTerm{{Field: "k", Op: "=", Value: "missing"}}),
 			qt.AggSpec{ID: "count", Op: "count"}, qt.AggSpec{ID: "sum", Op: "sum", Field: "n", GroupBy: byK}, qt.AggSpec{ID: "median", Expression: "MEDIAN([n])"}, qt.AggSpec{ID: "shown", Op: "count", Scope: "shownRows"}),
 		"metrics": ungroupedRequest(page([]qt.WhereTerm{{Field: "m", Op: "!=", Value: "4"}}, qt.OrderBy{Field: "n", Dir: "asc"}),
@@ -118,7 +118,7 @@ func ungroupedCases() map[string]qt.QueryRequestV3 {
 			qt.AggSpec{ID: "scatter", Expression: "SUM([n])", ExpressionY: "COUNT()", GroupBy: byK},
 			qt.AggSpec{ID: "computed", Op: "sum", Field: "@computed/double", GroupBy: []string{"@computed/big"}}, qt.AggSpec{ID: "computed_error", Op: "sum", Field: "@computed/inv"},
 			qt.AggSpec{ID: "invalid", Op: "sum", Field: "note"}),
-		"calendar": ungroupedRequest(qt.WireQuery{Select: []string{"id"}, Where: []qt.WhereTerm{{Field: "at", Op: ">=", Value: "2026-10-05T00:00:00Z"}}, OrderBy: qt.OrderBys{{Field: "at", Dir: "desc"}}, Limit: 15},
+		"calendar": ungroupedRequest(qt.WireQuery{Select: []string{"id"}, Where: []qt.WhereTerm{{Field: "at", Op: ">=", Value: "2026-10-05T00:00:00Z"}}, OrderBy: []qt.OrderBy{{Field: "at", Dir: "desc"}}, Limit: 15},
 			qt.AggSpec{ID: "weeks", Op: "count", GroupBy: []string{"at"}, DateGrouping: &qt.MetricDateGrouping{Field: "at", Interval: "week", TimeZone: "America/New_York", Range: "query"}},
 			qt.AggSpec{ID: "hours", Op: "sum", Field: "n", GroupBy: []string{"at", "k"}, DateGrouping: &qt.MetricDateGrouping{Field: "at", Interval: "hourOfDay", TimeZone: "UTC", Range: "observed"}},
 			qt.AggSpec{ID: "shown_days", Op: "count", Scope: "shownRows", GroupBy: []string{"at"}, MinCount: qt.MetricMinCount{Min: 2}, DateGrouping: &qt.MetricDateGrouping{Field: "at", Interval: "day", TimeZone: "UTC", Range: "observed"}},
@@ -135,7 +135,7 @@ func ungroupedCases() map[string]qt.QueryRequestV3 {
 
 func TestPostgresUngroupedDirectMatchesStaged(t *testing.T) {
 	db, d, o := ungroupedV3(t, 400)
-	staged := qt.StageUngroupedForTesting(d)
+	staged := qt.TestOnlyStageUngrouped(d)
 	for name, q := range ungroupedCases() {
 		t.Run(name, func(t *testing.T) {
 			want, err := executeV3In(db, staged, q, o)
@@ -170,7 +170,7 @@ func TestPostgresUngroupedDirectEnvelopeAndBudgets(t *testing.T) {
 		return nil
 	}
 	o.ValidateSnapshot = func(context.Context, string) error { snapshots++; return nil }
-	staged := qt.StageUngroupedForTesting(d)
+	staged := qt.TestOnlyStageUngrouped(d)
 	want, err := executeV3In(db, staged, q, o)
 	if err != nil {
 		t.Fatal(err)
@@ -209,7 +209,7 @@ func TestPostgresUngroupedDirectEnvelopeAndBudgets(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			limited := d
 			c.modify(&limited)
-			want, wantErr := executeV3In(db, qt.StageUngroupedForTesting(limited), c.q, o)
+			want, wantErr := executeV3In(db, qt.TestOnlyStageUngrouped(limited), c.q, o)
 			got, gotErr := executeV3In(db, limited, c.q, o)
 			if got != want || fmt.Sprint(gotErr) != fmt.Sprint(wantErr) {
 				t.Fatalf("direct %s err=%v\nstaged %s err=%v", got, gotErr, want, wantErr)
@@ -222,7 +222,7 @@ func TestPostgresUngroupedDirectEnvelopeAndBudgets(t *testing.T) {
 	limited := d
 	limited.MaxPopulation, limited.MaxStagingBytes = 1, 1
 	q = ungroupedCases()["metrics"]
-	if _, err = executeV3In(db, qt.StageUngroupedForTesting(limited), q, o); !errors.As(err, &diag) || diag.Code != "resource_limit" {
+	if _, err = executeV3In(db, qt.TestOnlyStageUngrouped(limited), q, o); !errors.As(err, &diag) || diag.Code != "resource_limit" {
 		t.Fatal("staged budget", err)
 	}
 	want, err = executeV3In(db, staged, q, o)
@@ -241,7 +241,7 @@ func largeUngrouped(tb testing.TB) (*sql.DB, *statementLog, qt.QueryDatasetV3, q
 	log := &statementLog{}
 	db := sql.OpenDB(statementHookConnector{base: original.Driver(), hook: log.hook})
 	tb.Cleanup(func() { db.Close() })
-	q := ungroupedRequest(qt.WireQuery{Select: []string{"id", "k", "n", "at", "@computed/double"}, OrderBy: qt.OrderBys{{Field: "at", Dir: "desc", Nulls: "last"}}, Limit: 100, Offset: 500},
+	q := ungroupedRequest(qt.WireQuery{Select: []string{"id", "k", "n", "at", "@computed/double"}, OrderBy: []qt.OrderBy{{Field: "at", Dir: "desc", Nulls: "last"}}, Limit: 100, Offset: 500},
 		qt.AggSpec{ID: "count", Op: "count"}, qt.AggSpec{ID: "sum", Op: "sum", Field: "n", GroupBy: []string{"k"}}, qt.AggSpec{ID: "shown", Op: "avg", Field: "@computed/double", Scope: "shownRows"})
 	return db, log, d, o, q
 }
@@ -252,7 +252,7 @@ func TestPostgresLargeUngroupedPageDoesNotStage(t *testing.T) {
 	}
 	db, log, d, o, q := largeUngrouped(t)
 	var diag *qt.PlanDiagnostic
-	if _, err := executeV3In(db, qt.StageUngroupedForTesting(d), q, o); !errors.As(err, &diag) || diag.Message != "matching population exceeds host budget" {
+	if _, err := executeV3In(db, qt.TestOnlyStageUngrouped(d), q, o); !errors.As(err, &diag) || diag.Message != "matching population exceeds host budget" {
 		t.Fatalf("staged execution must exceed the default population budget: %v", err)
 	}
 	log.reset(nil)
@@ -288,7 +288,7 @@ func BenchmarkPostgresLargeUngroupedPage(b *testing.B) {
 	db, _, d, o, q := largeUngrouped(b)
 	if os.Getenv("QT_BENCH_STAGED") != "" {
 		d.MaxPopulation, d.MaxStagingBytes = 1000000, 1<<30
-		d = qt.StageUngroupedForTesting(d)
+		d = qt.TestOnlyStageUngrouped(d)
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

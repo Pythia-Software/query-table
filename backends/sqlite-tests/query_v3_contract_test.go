@@ -151,7 +151,7 @@ func TestV3NarrowSourceKeepsHiddenSortAndEnumProjection(t *testing.T) {
 	db, d := setupV3(t)
 	q := groupedRequest()
 	q.Grouping = nil
-	q.Result = qt.WireQuery{Select: []string{"id"}, Limit: 2, OrderBy: qt.OrderBys{{Field: "n", Dir: "desc"}}}
+	q.Result = qt.WireQuery{Select: []string{"id"}, Limit: 2, OrderBy: []qt.OrderBy{{Field: "n", Dir: "desc"}}}
 	plan, err := d.SourcePlan(context.Background(), q, qt.PlanOptions{})
 	if err != nil || !reflect.DeepEqual(plan.Fields, []string{"id", "n"}) {
 		t.Fatal(plan.Fields, err)
@@ -169,7 +169,7 @@ func TestV3NarrowSourceKeepsHiddenSortAndEnumProjection(t *testing.T) {
 	label := d.Schema.Fields["label"]
 	label.SQLiteSortField, label.SortExpr = "n", "r.n"
 	d.Schema.Fields["label"] = label
-	q.Result.OrderBy = qt.OrderBys{{Field: "label", Dir: "desc"}}
+	q.Result.OrderBy = []qt.OrderBy{{Field: "label", Dir: "desc"}}
 	out, err = d.Execute(context.Background(), db, q, qt.PlanOptions{})
 	if err != nil || out.Rows[0]["id"] != "4" {
 		t.Fatal(out, err)
@@ -244,9 +244,6 @@ func TestV3ComputedPoliciesSamplesAndSnapshotValidation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, err = d.DescribeComputedPartialIn(ctx, tx, nil, qt.PlanOptions{}); !errors.Is(err, context.Canceled) {
-		t.Fatal(err)
-	}
-	if _, err = (qt.SQLiteV2Dataset{Schema: d.Schema, SourceSQL: d.SourceSQL}).DescribeComputedPartialIn(ctx, tx, nil, qt.PlanOptions{}); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
 }

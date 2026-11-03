@@ -14,7 +14,7 @@ func TestSelectOnlyComputationRunsAfterWindow(t *testing.T) {
 	})
 	o.ExpectedRevisions = map[string]string{"ratio": "1"}
 	q := WireQuery{Select: []string{"id", "@computed/ratio"}, OrderBy: []OrderBy{{Field: "id", Dir: "asc"}}, Limit: 1}
-	p, e := CompileComputedRows(context.Background(), q, metricSchema(), o)
+	p, e := compileTestRows(context.Background(), q, metricSchema(), o)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -32,7 +32,7 @@ func TestSelectOnlyComputationRunsAfterWindow(t *testing.T) {
 		t.Fatal("select-only division evaluated before pagination")
 	}
 	q.OrderBy = []OrderBy{{Field: "@computed/ratio", Dir: "desc"}}
-	p, e = CompileComputedRows(context.Background(), q, metricSchema(), o)
+	p, e = compileTestRows(context.Background(), q, metricSchema(), o)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -50,7 +50,7 @@ func TestSelectOnlyComputationRunsAfterWindow(t *testing.T) {
 	}
 }
 func TestRowStagesDoNotCarryUnusedBindings(t *testing.T) {
-	p, e := CompileRowExpression(context.Background(), "[x]/NULLIF([y],0)", metricSchema(), metricOptions())
+	p, e := compileTestRowExpression(context.Background(), "[x]/NULLIF([y],0)", metricSchema(), metricOptions())
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -81,7 +81,7 @@ func TestFilteredWindowsPruneUnusedBindings(t *testing.T) {
 		if shown {
 			scope = "shownRows"
 		}
-		p, err := CompileMetrics(context.Background(), MetricQuery{Version: 2, Limit: 2, Where: []WhereTerm{{Field: "g", Op: "=", Value: "a"}}, Metrics: []AggSpec{{ID: "m", Expression: "SUM([x])", Scope: scope}}}, s, metricOptions())
+		p, err := compileTestMetrics(context.Background(), metricRequest{Version: 2, Limit: 2, Where: []WhereTerm{{Field: "g", Op: "=", Value: "a"}}, Metrics: []AggSpec{{ID: "m", Expression: "SUM([x])", Scope: scope}}}, s, metricOptions())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -126,7 +126,7 @@ func TestPostgresGroupedBoxPopulation(t *testing.T) {
 }
 
 func TestRowStageDoesNotRetainItsOwnTemporaryInputs(t *testing.T) {
-	p, err := CompileRowExpression(context.Background(), "[x]*2", metricSchema(), metricOptions())
+	p, err := compileTestRowExpression(context.Background(), "[x]*2", metricSchema(), metricOptions())
 	if err != nil {
 		t.Fatal(err)
 	}

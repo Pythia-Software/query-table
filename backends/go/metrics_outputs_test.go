@@ -15,7 +15,7 @@ func TestMetricOutputsShareOneScalarReduction(t *testing.T) {
 	o.SourceSQL = "SELECT * FROM fixture"
 	count := AggSpec{ID: "__qt_count__", Op: "count", GroupBy: []string{"g"}}
 	extra := []summaryOutput{{ID: "total", Expression: "SUM([x])"}, {ID: "ratio", Expression: "SUM([x])/COUNT([y])"}, {ID: "rows", Expression: "COUNT()"}}
-	p, err := compileMetricOutputs(ctx, MetricQuery{Version: 2}, count, metricSchema(), o, true, extra)
+	p, err := compileMetricOutputs(ctx, metricRequest{Version: 2}, count, metricSchema(), o, true, extra)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestMetricOutputsShareOneScalarReduction(t *testing.T) {
 		"row field":    {count, []summaryOutput{{ID: "bare", Expression: "[x]"}}, "aggregate_context"},
 		"no aggregate": {count, []summaryOutput{{ID: "constant", Expression: "1"}}, "aggregate_required"},
 	} {
-		if _, err := compileMetricOutputs(ctx, MetricQuery{Version: 2}, c.spec, metricSchema(), o, true, c.extra); !errors.As(err, &diag) || diag.Code != c.code {
+		if _, err := compileMetricOutputs(ctx, metricRequest{Version: 2}, c.spec, metricSchema(), o, true, c.extra); !errors.As(err, &diag) || diag.Code != c.code {
 			t.Errorf("%s: got %v, want %s", name, err, c.code)
 		}
 	}
@@ -51,7 +51,7 @@ func TestMetricOutputsShareOneScalarReduction(t *testing.T) {
 	x := s.Fields["x"]
 	x.AggregateOps = []string{"sum"}
 	s.Fields["x"] = x
-	if _, err := compileMetricOutputs(ctx, MetricQuery{Version: 2}, count, s, o, true, []summaryOutput{{ID: "avg", Expression: "AVG([x])"}}); !errors.As(err, &diag) || diag.Code != "aggregate_disabled" {
+	if _, err := compileMetricOutputs(ctx, metricRequest{Version: 2}, count, s, o, true, []summaryOutput{{ID: "avg", Expression: "AVG([x])"}}); !errors.As(err, &diag) || diag.Code != "aggregate_disabled" {
 		t.Errorf("aggregate policy: %v", err)
 	}
 }

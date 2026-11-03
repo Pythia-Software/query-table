@@ -31,9 +31,9 @@ func (m MetricMinCount) Active() bool { return m.Min > 0 }
 func (m MetricMinCount) Measure() string {
 	switch {
 	case m.Distinct != "":
-		return MetricExpression(AggSpec{Op: "count_distinct", Field: m.Distinct})
+		return metricExpression(AggSpec{Op: "count_distinct", Field: m.Distinct})
 	case m.Sum != "":
-		return MetricExpression(AggSpec{Op: "sum", Field: m.Sum})
+		return metricExpression(AggSpec{Op: "sum", Field: m.Sum})
 	}
 	return ""
 }

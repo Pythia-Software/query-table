@@ -10,7 +10,7 @@ import (
 // population: matching values by count, then value, and the population's
 // NULLs independent of the search. Text arrays contribute each element.
 func (d QueryDatasetV3) executeDistinct(ctx context.Context, tx *sql.Tx, q QueryRequestV3, o PlanOptions) (QueryResultV3, error) {
-	out := QueryResultV3{Version: 3, Now: q.Now, Rows: []map[string]any{}, Metrics: []SQLiteMetricV2{}, Schema: ProjectedSchema{Name: d.Schema.Name, IDField: d.Schema.IDField, Fields: []ProjectedField{}}}
+	out := QueryResultV3{Version: 3, Now: q.Now, Rows: []map[string]any{}, Metrics: []MetricResult{}, Schema: ProjectedSchema{Name: d.Schema.Name, IDField: d.Schema.IDField, Fields: []ProjectedField{}}}
 	request := *q.Distinct
 	field, ok := d.Schema.Fields[request.Field]
 	if !ok || !field.ServerFilter || strings.TrimSpace(field.Expr) == "" {

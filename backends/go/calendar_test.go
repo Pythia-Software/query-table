@@ -61,18 +61,18 @@ func TestCalendarFutureHalfHourZone(t *testing.T) {
 }
 
 func TestCalendarEmptySeriesDoesNotWalkRange(t *testing.T) {
-	for _, buckets := range [][]SQLiteMetricV2Bucket{nil, {{Keys: []any{nil, "a"}, Count: 1, Value: float64(1)}}} {
+	for _, buckets := range [][]MetricBucket{nil, {{Keys: []any{nil, "a"}, Count: 1, Value: float64(1)}}} {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		result := SQLiteMetricV2{Buckets: buckets}
+		result := MetricResult{Buckets: buckets}
 		config := MetricDateGrouping{Field: "at", Interval: "hour", Range: "custom", IncludeEmpty: true, Start: "1000-01-01", End: "9999-01-01"}
 		spec := AggSpec{ID: "empty", Op: "count", GroupBy: []string{"at", "k"}}
-		err := fillCalendarBuckets(ctx, &result, config, spec, MetricQuery{}, time.Now(), time.UTC, 2000)
+		err := fillCalendarBuckets(ctx, &result, config, spec, metricRequest{}, time.Now(), time.UTC, 2000)
 		cancel()
 		if err != nil || !reflect.DeepEqual(result.Buckets, buckets) {
 			t.Fatalf("empty series: buckets=%#v err=%v", result.Buckets, err)
 		}
 		config.End = "0900-01-01"
-		if err = fillCalendarBuckets(context.Background(), &result, config, spec, MetricQuery{}, time.Now(), time.UTC, 2000); err == nil {
+		if err = fillCalendarBuckets(context.Background(), &result, config, spec, metricRequest{}, time.Now(), time.UTC, 2000); err == nil {
 			t.Fatal("empty series bypassed range validation")
 		}
 	}
@@ -119,8 +119,8 @@ func TestCalendarCycleSlots(t *testing.T) {
 func TestCalendarCycleFill(t *testing.T) {
 	config := MetricDateGrouping{Field: "at", Interval: "dayOfWeek", IncludeEmpty: true, Range: "query"}
 	spec := AggSpec{ID: "m", Op: "count", GroupBy: []string{"at", "k"}, DateGrouping: &config}
-	result := SQLiteMetricV2{Buckets: []SQLiteMetricV2Bucket{{Keys: []any{float64(3), "a"}, Count: 2, Value: float64(2)}, {Keys: []any{nil, "b"}, Count: 1, Value: float64(1)}}}
-	if err := fillCalendarBuckets(context.Background(), &result, config, spec, MetricQuery{}, time.Now(), time.UTC, 2000); err != nil {
+	result := MetricResult{Buckets: []MetricBucket{{Keys: []any{float64(3), "a"}, Count: 2, Value: float64(2)}, {Keys: []any{nil, "b"}, Count: 1, Value: float64(1)}}}
+	if err := fillCalendarBuckets(context.Background(), &result, config, spec, metricRequest{}, time.Now(), time.UTC, 2000); err != nil {
 		t.Fatal(err)
 	}
 	sortCalendarBuckets(result.Buckets, spec)
@@ -135,7 +135,7 @@ func TestCalendarCycleFill(t *testing.T) {
 	if !reflect.DeepEqual(keys, want) {
 		t.Fatalf("keys %v", keys)
 	}
-	if err := fillCalendarBuckets(context.Background(), &result, config, spec, MetricQuery{}, time.Now(), time.UTC, 8); err != nil {
+	if err := fillCalendarBuckets(context.Background(), &result, config, spec, metricRequest{}, time.Now(), time.UTC, 8); err != nil {
 		t.Fatal("a complete cycle needs no new groups", err)
 	}
 }

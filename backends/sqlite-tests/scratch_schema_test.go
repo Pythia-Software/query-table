@@ -68,7 +68,7 @@ func TestV2CleanupPreservesMainTables(t *testing.T) {
 				}
 				return nil
 			})
-			d := qt.SQLiteV2Dataset{Schema: crossFieldSchema(), SourceSQL: "SELECT * FROM source WHERE tenant=?1", SourceArgs: []any{"allowed"}}
+			d := qt.QueryDatasetV3{Dialect: "sqlite", Schema: crossFieldSchema(), SourceSQL: "SELECT * FROM source WHERE tenant=?1", SourceArgs: []any{"allowed"}}
 			q := crossFieldQuery(false)
 			if overflow {
 				if _, err := db.Exec("UPDATE source SET n0=9223372036854775807 WHERE id IN ('00000001','00000002')"); err != nil {
@@ -78,7 +78,7 @@ func TestV2CleanupPreservesMainTables(t *testing.T) {
 				// Same-input fusion leaves its failed CTAS entry for cache.close.
 				q.Metrics = []qt.AggSpec{{ID: "sum", Op: "sum", Field: "n0"}, {ID: "avg", Op: "avg", Field: "n0"}}
 			}
-			want, err := d.ExecuteV2(context.Background(), db, nil, &q, qt.PlanOptions{})
+			want, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -88,7 +88,7 @@ func TestV2CleanupPreservesMainTables(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer tx.Rollback()
-			got, err := d.ExecuteV2In(context.Background(), tx, nil, &q, qt.PlanOptions{})
+			got, err := d.ExecuteIn(context.Background(), tx, q, qt.PlanOptions{})
 			if err != nil || !reflect.DeepEqual(got.Metrics, want.Metrics) {
 				t.Fatalf("fallback changed results: got %#v, want %#v, error=%v", got.Metrics, want.Metrics, err)
 			}

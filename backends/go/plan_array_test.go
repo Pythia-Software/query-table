@@ -12,7 +12,7 @@ func TestPostgresRawArrayProjection(t *testing.T) {
 		"tags": {Name: "tags", Kind: FieldTextArray, Expr: "r.tags"},
 	}}
 	options := PlanOptions{SourceSQL: "SELECT id,tags FROM records"}
-	plan, err := CompileRowsV2(context.Background(), ServerQueryV2{Version: 2, Profile: ServerExpressionProfile, WireQuery: WireQuery{Select: []string{"id", "tags"}, Limit: 10}}, schema, options)
+	plan, err := compileTestRows(context.Background(), WireQuery{Select: []string{"id", "tags"}, Limit: 10}, schema, options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -20,10 +20,10 @@ func TestPostgresRawArrayProjection(t *testing.T) {
 		t.Fatalf("columns: %+v", plan.Columns)
 	}
 	// Raw projection does not expand the formula language or grouping policy.
-	if _, err = CompileRowExpression(context.Background(), "[tags]", schema, options); err == nil {
+	if _, err = compileTestRowExpression(context.Background(), "[tags]", schema, options); err == nil {
 		t.Fatal("arrays must remain unavailable in formulas")
 	}
-	if _, err = CompileMetrics(context.Background(), MetricQuery{Version: 2, Metrics: []AggSpec{{ID: "groups", Op: "count", GroupBy: []string{"tags"}}}}, schema, options); err == nil {
+	if _, err = compileTestMetrics(context.Background(), metricRequest{Version: 2, Metrics: []AggSpec{{ID: "groups", Op: "count", GroupBy: []string{"tags"}}}}, schema, options); err == nil {
 		t.Fatal("array grouping must remain unavailable")
 	}
 }
@@ -34,7 +34,7 @@ func TestPostgresRawArrayProjectionValues(t *testing.T) {
 		"tags": {Kind: FieldTextArray, Expr: "r.tags"},
 	}}
 	options := PlanOptions{SourceSQL: "SELECT * FROM (VALUES (1,ARRAY['alpha','beta']::text[]),(2,ARRAY[]::text[]),(3,NULL::text[])) AS records(id,tags)"}
-	plan, err := CompileRowsV2(context.Background(), ServerQueryV2{Version: 2, Profile: ServerExpressionProfile, WireQuery: WireQuery{Select: []string{"id", "tags"}, Limit: 3}}, schema, options)
+	plan, err := compileTestRows(context.Background(), WireQuery{Select: []string{"id", "tags"}, Limit: 3}, schema, options)
 	if err != nil {
 		t.Fatal(err)
 	}

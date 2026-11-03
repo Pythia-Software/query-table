@@ -2,9 +2,7 @@ package sqlitetests
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"reflect"
 	"testing"
 
 	qt "github.com/Pythia-Software/query-table/backends/go"
@@ -22,75 +20,38 @@ func TestV2SortTargetWithSameSQLExpression(t *testing.T) {
 		value   float64
 	}{{"asc", "a", 0, 2}, {"asc", "b", 1, 4}, {"desc", "b", 1, 4}, {"desc", "a", 2, 2}} {
 		t.Run(test.dir+test.id, func(t *testing.T) {
-			q := qt.ServerQueryV2{Version: 2, Profile: qt.SQLiteExpressionProfile, WireQuery: qt.WireQuery{Select: []string{"id"}, OrderBy: []qt.OrderBy{{Field: "stamp_label", Dir: test.dir}}, Limit: 1, Offset: test.offset}}
-			m := metricV2("SUM([n])")
-			m.OrderBy, m.Limit, m.Offset = q.OrderBy, q.Limit, q.Offset
-			m.Metrics[0].Scope = "shownRows"
-			result, err := d.ExecuteV2(context.Background(), db, &q, &m, qt.PlanOptions{})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(result.Rows.Rows) != 1 || result.Rows.Rows[0]["id"] != test.id || result.Metrics.Metrics[0].Buckets[0].Value != test.value {
-				t.Fatalf("expected page %s and shownRows sum %v, got %#v / %#v", test.id, test.value, result.Rows.Rows, result.Metrics.Metrics[0].Buckets)
+			q := v3Request(qt.WireQuery{Select: []string{"id"}, OrderBy: []qt.OrderBy{{Field: "stamp_label", Dir: test.dir}}, Limit: 1, Offset: test.offset}, true, qt.AggSpec{ID: "m", Expression: "SUM([n])", Scope: "shownRows"})
+			result := executeV3(t, db, d, q, qt.PlanOptions{})
+			if len(result.Rows) != 1 || result.Rows[0]["id"] != test.id || result.Metrics[0].Buckets[0].Value != test.value {
+				t.Fatalf("expected page %s and shownRows sum %v, got %#v / %#v", test.id, test.value, result.Rows, result.Metrics[0].Buckets)
 			}
 		})
-	}
-}
-
-func TestCompactSQLiteQueryPreservesSelection(t *testing.T) {
-	db, d := setup(t)
-	for _, body := range []string{
-		`{"s":[["id",100]],"l":10}`,
-		`{"s":[["id"]],"l":10}`,
-		`{"s":["id"],"l":10}`,
-		`{"c":["id"],"l":10}`,
-		`{"select":["id"],"s":[["n",100]],"l":10}`,
-	} {
-		t.Run(body, func(t *testing.T) {
-			q, err := qt.DecodeSQLiteQuery([]byte(body))
-			if err != nil || !reflect.DeepEqual(q.Select, []string{"id"}) {
-				t.Fatalf("expected id selection, got %#v, %v", q, err)
-			}
-			result, err := d.Rows(context.Background(), db, q)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(result.Rows) != 4 {
-				t.Fatal(result)
-			}
-			for _, row := range result.Rows {
-				if len(row) != 1 || row["id"] == nil {
-					t.Fatalf("expected only id, got %#v", row)
-				}
-			}
-		})
-	}
-	for _, body := range []string{`{"s":[[""]]}`, `{"c":[""]}`} {
-		if _, err := qt.DecodeSQLiteQuery([]byte(body)); err == nil {
-			t.Fatalf("accepted invalid compact selection: %s", body)
-		}
 	}
 }
 
 func TestSQLiteAggregationRejectsResidualDiagnostics(t *testing.T) {
 	db, d := setup(t)
-	var request qt.SQLiteAggregationRequest
-	body := []byte(`{"where":[],"aggregations":[{"id":"count","op":"count"}],"diagnostics":[{"code":"residual_filter","message":"Client-only filter omitted","from":0,"to":1}]}`)
-	err := json.Unmarshal(body, &request)
+	// v3 carries residual diagnostics as strings and rejects any as a version
+	// diagnostic; v1 used objects and the residual_query code.
+	body := []byte(`{"version":3,"profile":"` + qt.SQLiteExpressionProfile + `","now":0,"source":{},"result":{"where":[],"limit":1},"rows":false,"metrics":[{"id":"count","op":"count"}],"diagnostics":["residual_filter"]}`)
+	request, err := qt.DecodeQueryRequestV3(body)
 	var diagnostic *qt.PlanDiagnostic
-	if !errors.As(err, &diagnostic) || diagnostic.Code != "residual_query" {
+	if !errors.As(err, &diagnostic) || diagnostic.Code != "version" {
 		t.Fatalf("expected residual diagnostic at JSON boundary, got %v", err)
 	}
 	// A caller that builds requests directly must receive the same rejection.
-	request = qt.SQLiteAggregationRequest{Aggregations: []qt.AggSpec{{ID: "count", Op: "count"}}, Diagnostics: []any{map[string]any{"code": "residual_filter"}}}
-	if _, err = d.Aggregations(context.Background(), db, request); !errors.As(err, &diagnostic) || diagnostic.Code != "residual_query" {
+	request = metricsV3(nil, nil, 0, 0, qt.AggSpec{ID: "count", Op: "count"})
+	request.Diagnostics = []string{"residual_filter"}
+	if _, err = d.Execute(context.Background(), db, request, qt.PlanOptions{}); !errors.As(err, &diagnostic) || diagnostic.Code != "version" {
 		t.Fatalf("expected residual diagnostic at execution boundary, got %v", err)
 	}
-	if err = json.Unmarshal([]byte(`{"where":[],"aggregations":[{"id":"count","op":"count"}],"diagnostics":[]}`), &request); err != nil {
+	body = []byte(`{"version":3,"profile":"` + qt.SQLiteExpressionProfile + `","now":0,"source":{},"result":{"where":[],"limit":1},"rows":false,"metrics":[{"id":"count","op":"count"}],"diagnostics":[]}`)
+	if request, err = qt.DecodeQueryRequestV3(body); err != nil {
 		t.Fatal(err)
 	}
-	result, err := d.Aggregations(context.Background(), db, request)
-	if err != nil || result.Metrics[0].Buckets[0].Value != int64(4) {
+	result, err := d.Execute(context.Background(), db, request, qt.PlanOptions{})
+	// v3 metric values are JSON numbers (float64); v1 returned SQLite integers.
+	if err != nil || result.Metrics[0].Buckets[0].Value != float64(4) {
 		t.Fatal(result, err)
 	}
 }

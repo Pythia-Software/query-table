@@ -55,7 +55,15 @@ func (a *aggregateBridge) WindowInverse(_ *sqlite.FunctionContext, _ []driver.Va
 }
 func (a *aggregateBridge) Final(_ *sqlite.FunctionContext) { a.fn = nil }
 
-func setup(t *testing.T) (*sql.DB, qt.SQLiteDataset) {
+const runsDDL = `CREATE TABLE runs(id TEXT PRIMARY KEY, tenant TEXT, text TEXT COLLATE NOCASE,n ANY,tags TEXT,stamp TEXT,flag INTEGER) STRICT;
+ INSERT INTO runs VALUES
+ ('a','one','ÉCOLE 100%_x',2,'["RED","école"]','2026-01-01T00:00:00+02:00',1),
+ ('b','one','école',4,'[]','2025-12-31T22:00:00Z',0),
+ ('c','one','',NULL,NULL,NULL,NULL),
+ ('d','one',NULL,6,'["red"]','2026-01-01T00:00:00Z',1),
+ ('e','two','secret',100,'["secret"]','2027-01-01T00:00:00Z',0)`
+
+func setup(t *testing.T) (*sql.DB, qt.QueryDatasetV3) {
 	t.Helper()
 	db, e := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(t.TempDir(), "test.db"))+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
 	if e != nil {
@@ -63,13 +71,7 @@ func setup(t *testing.T) (*sql.DB, qt.SQLiteDataset) {
 	}
 	db.SetMaxOpenConns(4)
 	t.Cleanup(func() { db.Close() })
-	_, e = db.Exec(`CREATE TABLE runs(id TEXT PRIMARY KEY, tenant TEXT, text TEXT COLLATE NOCASE,n ANY,tags TEXT,stamp TEXT,flag INTEGER) STRICT;
- INSERT INTO runs VALUES
- ('a','one','ÉCOLE 100%_x',2,'["RED","école"]','2026-01-01T00:00:00+02:00',1),
- ('b','one','école',4,'[]','2025-12-31T22:00:00Z',0),
- ('c','one','',NULL,NULL,NULL,NULL),
- ('d','one',NULL,6,'["red"]','2026-01-01T00:00:00Z',1),
- ('e','two','secret',100,'["secret"]','2027-01-01T00:00:00Z',0)`)
+	_, e = db.Exec(runsDDL)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -77,15 +79,20 @@ func setup(t *testing.T) (*sql.DB, qt.SQLiteDataset) {
 	for name, kind := range map[string]qt.FieldKind{"id": qt.FieldText, "text": qt.FieldText, "n": qt.FieldNumber, "tags": qt.FieldTextArray, "stamp": qt.FieldDatetime, "flag": qt.FieldBool} {
 		fields[name] = qt.FieldSpec{Name: name, Kind: kind, Expr: "r." + name, SortExpr: "r." + name, ServerFilter: true, Sortable: true}
 	}
-	d := qt.SQLiteDataset{Schema: qt.Schema{Name: "runs", IDField: "id", Fields: fields}, FromSQL: "FROM runs r", BaseWhereSQL: "r.tenant=?", BaseArgs: []any{"one"}}
+	// v3 numeric filters and metrics require the bounded-arithmetic opt-in.
+	n := fields["n"]
+	n.ExpressionNumeric = true
+	fields["n"] = n
+	d := sqliteV3(qt.Schema{Name: "runs", IDField: "id", Fields: fields}, "SELECT * FROM runs WHERE tenant=?1", []any{"one"}, "one", "runs")
 	return db, d
 }
-func ids(r qt.SQLiteRowsResult) []string {
-	result := []string{}
-	for _, row := range r.Rows {
-		result = append(result, row["id"].(string))
+
+// rowsV1 pages every matching row, as the removed v1 Rows did with no limit.
+func rowsV1(ctx context.Context, db *sql.DB, d qt.QueryDatasetV3, w qt.WireQuery) (qt.QueryResultV3, error) {
+	if w.Limit == 0 {
+		w.Limit = 100
 	}
-	return result
+	return d.Execute(ctx, db, rowsV3(w), qt.PlanOptions{})
 }
 func TestFilters(t *testing.T) {
 	db, d := setup(t)
@@ -107,7 +114,7 @@ func TestFilters(t *testing.T) {
 		{"stamp", "=", "2025-12-31T22:00:00Z", false, []string{"a", "b"}},
 	} {
 		t.Run(c.field+c.op+c.value, func(t *testing.T) {
-			r, e := d.Rows(context.Background(), db, qt.WireQuery{Select: []string{"id"}, Where: []qt.WhereTerm{{Field: c.field, Op: c.op, Value: c.value, Negated: c.neg}}})
+			r, e := rowsV1(context.Background(), db, d, qt.WireQuery{Select: []string{"id"}, Where: []qt.WhereTerm{{Field: c.field, Op: c.op, Value: c.value, Negated: c.neg}}})
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -119,7 +126,7 @@ func TestFilters(t *testing.T) {
 	f := d.Schema.Fields["tags"]
 	f.ArrayCaseSensitive = true
 	d.Schema.Fields["tags"] = f
-	r, e := d.Rows(context.Background(), db, qt.WireQuery{Select: []string{"id"}, Where: []qt.WhereTerm{{Field: "tags", Op: "includes", Value: "RED"}}})
+	r, e := rowsV1(context.Background(), db, d, qt.WireQuery{Select: []string{"id"}, Where: []qt.WhereTerm{{Field: "tags", Op: "includes", Value: "RED"}}})
 	if e != nil || !reflect.DeepEqual(ids(r), []string{"a"}) {
 		t.Fatalf("exact arrays: %v %v", ids(r), e)
 	}
@@ -127,21 +134,23 @@ func TestFilters(t *testing.T) {
 func TestSortingAndPaging(t *testing.T) {
 	db, d := setup(t)
 	d.Schema.DefaultSort = []qt.OrderBy{{Field: "stamp", Dir: "asc"}}
-	r, e := d.Rows(context.Background(), db, qt.WireQuery{Select: []string{"text"}, Limit: 2, Offset: 1})
+	r, e := rowsV1(context.Background(), db, d, qt.WireQuery{Select: []string{"text"}, Limit: 2, Offset: 1})
 	if e != nil {
 		t.Fatal(e)
 	}
 	if r.Total != 4 || !reflect.DeepEqual(ids(r), []string{"b", "d"}) {
 		t.Fatal(r)
 	}
-	all, e := d.Rows(context.Background(), db, qt.WireQuery{})
+	// v3 projects only dependencies for an empty select; v1 projected every field.
+	all, e := rowsV1(context.Background(), db, d, qt.WireQuery{Select: []string{"id", "text", "n", "tags", "stamp", "flag"}})
 	if e != nil {
 		t.Fatal(e)
 	}
-	if all.Rows[0]["flag"] != true || all.Rows[0]["stamp"] != "2025-12-31T22:00:00Z" {
+	// v3 writes datetimes with millisecond precision.
+	if all.Rows[0]["flag"] != true || all.Rows[0]["stamp"] != "2025-12-31T22:00:00.000Z" {
 		t.Fatal(all.Rows[0])
 	}
-	r, e = d.Rows(context.Background(), db, qt.WireQuery{Select: []string{"id"}, OrderBy: []qt.OrderBy{{Field: "text", Dir: "asc", Nulls: "first", Extract: &qt.RegexExtract{Regex: "(?i)(école)"}}}})
+	r, e = rowsV1(context.Background(), db, d, qt.WireQuery{Select: []string{"id"}, OrderBy: []qt.OrderBy{{Field: "text", Dir: "asc", Nulls: "first", Extract: &qt.RegexExtract{Regex: "(?i)(école)"}}}})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -152,59 +161,66 @@ func TestSortingAndPaging(t *testing.T) {
 func TestScopeDistinctAndStatistics(t *testing.T) {
 	db, d := setup(t)
 	ctx := context.Background()
-	got, e := d.Distinct(ctx, db, "tags", "ÉCO", 1)
-	if e != nil {
-		t.Fatal(e)
+	distinct := func(field, search string, limit int) *qt.DistinctResultV3 {
+		t.Helper()
+		r, e := d.Execute(ctx, db, distinctV3(field, search, limit), qt.PlanOptions{})
+		if e != nil {
+			t.Fatal(e)
+		}
+		return r.Distinct
 	}
+	got := distinct("tags", "ÉCO", 1)
 	if !reflect.DeepEqual(got.Values, []string{"école"}) || !got.HasNull {
 		t.Fatal(got)
 	}
-	got, e = d.Distinct(ctx, db, "text", "", 1)
-	if e != nil {
-		t.Fatal(e)
-	}
+	got = distinct("text", "", 1)
 	if !got.HasMore || !got.HasNull || got.Values[0] != "" {
 		t.Fatal(got)
 	}
-	stat, e := d.FieldStats(ctx, db, []string{"n", "stamp", "text"})
-	if e != nil {
-		t.Fatal(e)
+	// v1 FieldStats is v3 count_distinct/min/max metrics per field.
+	stats := map[string]qt.MetricResult{}
+	q := metricsV3(nil, nil, 0, 0)
+	for _, field := range []string{"n", "stamp", "text"} {
+		q.Metrics = append(q.Metrics, qt.AggSpec{ID: field + ":distinct", Op: "count_distinct", Field: field}, qt.AggSpec{ID: field + ":max", Op: "max", Field: field})
 	}
-	if stat["n"].Distinct != 3 || stat["n"].Max != int64(6) || stat["stamp"].Distinct != 2 {
-		t.Fatal(stat)
+	for _, m := range executeV3(t, db, d, q, qt.PlanOptions{}).Metrics {
+		stats[m.ID] = m
+	}
+	// v3 metric values are JSON numbers (float64); v1 returned SQLite integers.
+	if stats["n:distinct"].Buckets[0].Value != float64(3) || stats["n:max"].Buckets[0].Value != float64(6) || stats["stamp:distinct"].Buckets[0].Value != float64(2) {
+		t.Fatal(stats)
 	}
 }
 func TestAggregatesAndRefusals(t *testing.T) {
 	db, d := setup(t)
 	ctx := context.Background()
-	request := qt.SQLiteAggregationRequest{Aggregations: []qt.AggSpec{{ID: "sum", Op: "sum", Field: "n"}, {ID: "avg", Op: "avg", Field: "n"}, {ID: "count", Op: "count"}, {ID: "groups", Op: "count", GroupBy: []string{"flag"}}}}
-	r, e := d.Aggregations(ctx, db, request)
-	if e != nil {
-		t.Fatal(e)
-	}
-	if r.Metrics[0].Buckets[0].Value != int64(12) || r.Metrics[1].Buckets[0].Value != float64(4) || r.Metrics[2].Buckets[0].Count != 4 {
+	request := metricsV3(nil, nil, 0, 0, qt.AggSpec{ID: "sum", Op: "sum", Field: "n"}, qt.AggSpec{ID: "avg", Op: "avg", Field: "n"}, qt.AggSpec{ID: "count", Op: "count"}, qt.AggSpec{ID: "groups", Op: "count", GroupBy: []string{"flag"}})
+	r := executeV3(t, db, d, request, qt.PlanOptions{})
+	// v3 metric values are JSON numbers (float64); v1 returned SQLite integers.
+	if r.Metrics[0].Buckets[0].Value != float64(12) || r.Metrics[1].Buckets[0].Value != float64(4) || r.Metrics[2].Buckets[0].Count != 4 {
 		t.Fatal(r)
 	}
-	request.Where = []qt.WhereTerm{{Field: "n", Op: ">", Value: "999"}}
-	r, e = d.Aggregations(ctx, db, request)
-	if e != nil {
-		t.Fatal(e)
-	}
-	if r.Metrics[0].Buckets[0].Value != nil || r.Metrics[2].Buckets[0].Value != int64(0) || len(r.Metrics[3].Buckets) != 0 {
+	request.Result.Where = []qt.WhereTerm{{Field: "n", Op: ">", Value: "999"}}
+	r = executeV3(t, db, d, request, qt.PlanOptions{})
+	if r.Metrics[0].Buckets[0].Value != nil || r.Metrics[2].Buckets[0].Value != float64(0) || len(r.Metrics[3].Buckets) != 0 {
 		t.Fatal(r)
 	}
-	request.Where = nil
+	request.Result.Where = nil
 	d.MaxGroups = 1
-	if _, e = d.Aggregations(ctx, db, request); e == nil {
-		t.Fatal("silently truncated groups")
+	// v3 isolates the group budget to the grouped metric instead of failing the request.
+	r, e := d.Execute(ctx, db, request, qt.PlanOptions{})
+	if e != nil || r.Metrics[3].Error == "" || len(r.Metrics[3].Buckets) != 0 || r.Metrics[2].Error != "" {
+		t.Fatal("silently truncated groups", r, e)
 	}
 	d.MaxGroups = 0
 	for _, value := range []any{int64(9007199254740992), "not numeric", float64(1e100)} {
 		if _, e = db.Exec("UPDATE runs SET n=? WHERE id='a'", value); e != nil {
 			t.Fatal(e)
 		}
-		if _, e = d.Aggregations(ctx, db, qt.SQLiteAggregationRequest{Aggregations: []qt.AggSpec{{ID: "s", Op: "sum", Field: "n"}}}); e == nil {
-			t.Fatal("accepted unsafe value", value)
+		// v3 reports an unsafe stored value on the bucket instead of failing the request.
+		m := runMetric(t, db, d, metricsV3(nil, nil, 0, 0, qt.AggSpec{ID: "s", Op: "sum", Field: "n"}))
+		if m.Error == "" && (len(m.Buckets) != 1 || m.Buckets[0].Error == "" || m.Buckets[0].Value != nil) {
+			t.Fatal("accepted unsafe value", value, m)
 		}
 	}
 }
@@ -216,14 +232,15 @@ func TestPinnedSnapshotAndCancellation(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer tx.Rollback()
-	before, e := d.RowsIn(ctx, tx, qt.WireQuery{Select: []string{"id"}})
+	page := rowsV3(qt.WireQuery{Select: []string{"id"}, Limit: 100})
+	before, e := d.ExecuteIn(ctx, tx, page, qt.PlanOptions{})
 	if e != nil {
 		t.Fatal(e)
 	}
 	if _, e = db.Exec("INSERT INTO runs VALUES ('f','one','new',1,'[]',NULL,0)"); e != nil {
 		t.Fatal(e)
 	}
-	after, e := d.RowsIn(ctx, tx, qt.WireQuery{Select: []string{"id"}})
+	after, e := d.ExecuteIn(ctx, tx, page, qt.PlanOptions{})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -233,13 +250,13 @@ func TestPinnedSnapshotAndCancellation(t *testing.T) {
 	if e = tx.Commit(); e != nil {
 		t.Fatal(e)
 	}
-	fresh, e := d.Rows(ctx, db, qt.WireQuery{Select: []string{"id"}})
+	fresh, e := rowsV1(ctx, db, d, qt.WireQuery{Select: []string{"id"}})
 	if e != nil || fresh.Total != 5 {
 		t.Fatal(fresh, e)
 	}
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()
-	if _, e = d.Rows(canceled, db, qt.WireQuery{}); !errors.Is(e, context.Canceled) {
+	if _, e = rowsV1(canceled, db, d, qt.WireQuery{}); !errors.Is(e, context.Canceled) {
 		t.Fatal(e)
 	}
 }
@@ -292,21 +309,22 @@ func TestComputedStoreAtomicRevisionAndScope(t *testing.T) {
 func TestInjectionAndBadStorage(t *testing.T) {
 	db, d := setup(t)
 	ctx := context.Background()
-	r, e := d.Rows(ctx, db, qt.WireQuery{Select: []string{"id"}, Where: []qt.WhereTerm{{Field: "text", Op: "contains", Value: "' OR 1=1 --"}}})
+	r, e := rowsV1(ctx, db, d, qt.WireQuery{Select: []string{"id"}, Where: []qt.WhereTerm{{Field: "text", Op: "contains", Value: "' OR 1=1 --"}}})
 	if e != nil || len(r.Rows) != 0 {
 		t.Fatal(r, e)
 	}
-	if _, e = d.Rows(ctx, db, qt.WireQuery{Select: []string{"id; DROP TABLE runs"}}); e == nil {
+	if _, e = rowsV1(ctx, db, d, qt.WireQuery{Select: []string{"id; DROP TABLE runs"}}); e == nil {
 		t.Fatal("untrusted column accepted")
 	}
 	if _, e = db.Exec("UPDATE runs SET tags='broken' WHERE id='a'"); e != nil {
 		t.Fatal(e)
 	}
-	r, e = d.Rows(ctx, db, qt.WireQuery{Select: []string{"id"}, Where: []qt.WhereTerm{{Field: "tags", Op: "is_null"}}})
+	r, e = rowsV1(ctx, db, d, qt.WireQuery{Select: []string{"id"}, Where: []qt.WhereTerm{{Field: "tags", Op: "is_null"}}})
 	if e != nil || !reflect.DeepEqual(ids(r), []string{"a", "b", "c"}) {
 		t.Fatal(r, e)
 	}
-	if _, e = d.Rows(ctx, db, qt.WireQuery{}); e == nil || !strings.Contains(e.Error(), "textarray") {
+	// v3 projects only dependencies for an empty select, so select the array.
+	if _, e = rowsV1(ctx, db, d, qt.WireQuery{Select: []string{"id", "tags"}}); e == nil || !strings.Contains(e.Error(), "textarray") {
 		t.Fatal(e)
 	}
 }
@@ -318,15 +336,14 @@ func TestDatetimeStorageModesAndPrecision(t *testing.T) {
  INSERT INTO times VALUES ('a','2026-01-01T00:00:00.000Z',1767225600000,1767225600),('b','2026-01-01T00:00:00.001Z',1767225600001,1767225600.001)`); e != nil {
 		t.Fatal(e)
 	}
-	d.FromSQL = "FROM times r"
-	d.BaseWhereSQL = ""
-	d.BaseArgs = nil
+	d.SourceSQL = "SELECT * FROM times"
+	d.SourceArgs = nil
 	d.Schema.Fields = map[string]qt.FieldSpec{"id": {Name: "id", Kind: qt.FieldText, Expr: "r.id", Sortable: true}, "stamp": {Name: "stamp", Kind: qt.FieldDatetime, Expr: "r.stamp", Sortable: true, ServerFilter: true, SQLiteDatetimeFormat: "utc-millis"}}
 	for _, test := range []struct {
 		op   string
 		want []string
 	}{{"=", []string{}}, {"!=", []string{"a", "b"}}, {">", []string{"b"}}, {">=", []string{"b"}}, {"<", []string{"a"}}, {"<=", []string{"a"}}} {
-		r, e := d.Rows(ctx, db, qt.WireQuery{Select: []string{"id"}, Where: []qt.WhereTerm{{Field: "stamp", Op: test.op, Value: "2026-01-01T00:00:00.0005Z"}}})
+		r, e := rowsV1(ctx, db, d, qt.WireQuery{Select: []string{"id"}, Where: []qt.WhereTerm{{Field: "stamp", Op: test.op, Value: "2026-01-01T00:00:00.0005Z"}}})
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -342,18 +359,19 @@ func TestDatetimeStorageModesAndPrecision(t *testing.T) {
 			f.Expr = "r.seconds"
 		}
 		d.Schema.Fields["stamp"] = f
-		r, e := d.Rows(ctx, db, qt.WireQuery{})
+		r, e := rowsV1(ctx, db, d, qt.WireQuery{Select: []string{"id", "stamp"}})
 		if e != nil {
 			t.Fatal(e)
 		}
-		if r.Rows[0]["stamp"] != "2026-01-01T00:00:00Z" {
+		// v3 writes datetimes with millisecond precision.
+		if r.Rows[0]["stamp"] != "2026-01-01T00:00:00.000Z" {
 			t.Fatal(r)
 		}
 		if format == "unix-millis" && r.Rows[1]["stamp"] != "2026-01-01T00:00:00.001Z" {
 			t.Fatal(r.Rows[1])
 		}
-		choices, e := d.Distinct(ctx, db, "stamp", "2026-01-01", 50)
-		if e != nil || len(choices.Values) != 2 {
+		choices, e := d.Execute(ctx, db, distinctV3("stamp", "2026-01-01", 50), qt.PlanOptions{})
+		if e != nil || len(choices.Distinct.Values) != 2 {
 			t.Fatal(choices, e)
 		}
 	}
@@ -363,9 +381,8 @@ func TestSetFilterCompositions(t *testing.T) {
 	if _, e := db.Exec(`CREATE TABLE sets(id TEXT,tags TEXT);INSERT INTO sets VALUES ('empty','[]'),('a','["a"]'),('b','["b"]'),('ab','["a","b"]'),('c','["c"]'),('missing',NULL)`); e != nil {
 		t.Fatal(e)
 	}
-	d.FromSQL = "FROM sets r"
-	d.BaseWhereSQL = ""
-	d.BaseArgs = nil
+	d.SourceSQL = "SELECT * FROM sets"
+	d.SourceArgs = nil
 	d.Schema.Fields = map[string]qt.FieldSpec{"id": {Name: "id", Kind: qt.FieldText, Expr: "r.id", Sortable: true}, "tags": {Name: "tags", Kind: qt.FieldTextArray, Expr: "r.tags", ServerFilter: true}}
 	include := func(value string, neg bool) qt.WhereClause {
 		return qt.WhereClause{Field: "tags", Op: "includes", Value: value, Negated: neg}
@@ -381,7 +398,7 @@ func TestSetFilterCompositions(t *testing.T) {
 		{"none", []qt.WhereTerm{{Any: []qt.WhereClause{empty, include("a", true)}}, {Any: []qt.WhereClause{empty, include("b", true)}}}, []string{"c", "empty", "missing"}},
 	}
 	for _, c := range cases {
-		r, e := d.Rows(context.Background(), db, qt.WireQuery{Select: []string{"id"}, Where: c.where})
+		r, e := rowsV1(context.Background(), db, d, qt.WireQuery{Select: []string{"id"}, Where: c.where})
 		if e != nil || !reflect.DeepEqual(ids(r), c.want) {
 			t.Fatal(c.name, r, e)
 		}
@@ -393,12 +410,18 @@ func TestIdentityAndCollationGuards(t *testing.T) {
 	if _, e := db.Exec(`UPDATE runs SET text='ASCII' WHERE id='a';UPDATE runs SET text='ascii' WHERE id='b'`); e != nil {
 		t.Fatal(e)
 	}
-	result, e := d.Aggregations(ctx, db, qt.SQLiteAggregationRequest{Aggregations: []qt.AggSpec{{ID: "distinct", Op: "count_distinct", Field: "text"}}})
-	if e != nil || result.Metrics[0].Buckets[0].Value != int64(3) {
+	result, e := d.Execute(ctx, db, metricsV3(nil, nil, 0, 0, qt.AggSpec{ID: "distinct", Op: "count_distinct", Field: "text"}), qt.PlanOptions{})
+	// v3 metric values are JSON numbers (float64); v1 returned SQLite integers.
+	if e != nil || result.Metrics[0].Buckets[0].Value != float64(3) {
 		t.Fatal(result, e)
 	}
-	d.FromSQL = "FROM runs r CROSS JOIN (SELECT 1 UNION ALL SELECT 2) duplicate"
-	if _, e := d.Rows(ctx, db, qt.WireQuery{Select: []string{"id"}}); e == nil || !strings.Contains(e.Error(), "duplicate") {
+	// v3 pages ungrouped rows without an identity check; representative rows
+	// (grouped ROW summaries) are where it rejects duplicate identities.
+	d.SourceSQL = "SELECT runs.* FROM runs CROSS JOIN (SELECT 1 UNION ALL SELECT 2) duplicate WHERE tenant=?1"
+	q := rowsV3(qt.WireQuery{Limit: 10})
+	q.Grouping = &qt.GroupingDefinition{Keys: []string{"flag"}, Summaries: []qt.SummaryColumn{{ID: "example", Op: "row", Field: "id"}}, Representative: &qt.RepresentativeRow{OrderBy: []qt.OrderBy{{Field: "id", Dir: "asc"}}}}
+	q.Source.Limit = 1
+	if _, e := d.Execute(ctx, db, q, qt.PlanOptions{}); e == nil || !strings.Contains(e.Error(), "duplicate") {
 		t.Fatal(e)
 	}
 }

@@ -7,7 +7,8 @@ original V3 request; there is no precomputed input, request rewrite or new API.
 ## Eligibility and guarantees
 
 Plain COUNT, numeric COUNT(field), SUM, AVG, MIN, MAX and COUNT_DISTINCT with
-text/enum keys can share V2's guarded integer reducer. The complete request
+text/enum keys can share the guarded integer reducer used by ungrouped
+metric batches. The complete request
 first passes `SourcePlan`, including aggregate policies, revisions, token and
 snapshot checks and compiler budgets. EXPLAIN must resolve the narrow source
 to the existing closed stored-column opcode allowlist. Functions, including
@@ -98,14 +99,15 @@ to 0.06 ms. These phase wall times include scheduler delays under contention.
 Remaining SQL includes staged validation and result reads. The benchmark prints
 each category alongside full wall/CPU cost.
 
-## Residual V2 cost
+## Residual ungrouped-metric cost
 
-V2 retains 0.9.3 sharing, error isolation, final formulas, sorting, top-N,
+These rows were measured on the since-removed v2 executor, whose metric batch
+now serves ungrouped v3 requests. It retains 0.9.3 sharing, error isolation, final formulas, sorting, top-N,
 minCount and scope/window handling. Its arithmetic was not weakened. A trial
 sharing row-domain checks with native SUMs showed no consistent grouped benefit
 and was discarded. The ten-card COUNT + nine SUM fixture measured:
 
-| V2 execution | Scalar wall / CPU ms | Grouped wall / CPU ms |
+| Ten-card batch | Scalar wall / CPU ms | Grouped wall / CPU ms |
 |---|---:|---:|
 | Full adapter | 48.3 / 48.5 | 98.0 / 94.8 |
 | SQL with storage/bounds/key proofs | 39.6 / 39.6 | 102.1 / 89.4 |
@@ -114,7 +116,7 @@ and was discarded. The ten-card COUNT + nine SUM fixture measured:
 Grouped wall time varied under contention; the guarded row does not establish
 that the adapter is faster than its reduction. Full adapter allocations are
 about 0.96/1.19 MB and 7,221/8,839 allocations for scalar/grouped batches.
-Guarded SQL omits compilation, population preflight, revision verification,
+Guarded SQL omits compilation, population count, revision verification,
 savepoints, mapping and scratch lifetime. Bare SQL additionally omits value
 proofs. No generation bounds/count cache is used. Much of the residual cost
 pays for checking arbitrary authorized values each execution; generation
@@ -123,12 +125,13 @@ caches remain a host guarantee, not a library assumption.
 Tests count submitted reductions and source-function evaluations separately;
 neither measures physical scans. The V3 opaque-source test verifies the same
 function evaluations as the general executor; EXPLAIN performs none. Existing
-V2 reuse, exact decimal, lazy-branch and independent-error suites still apply.
+reuse, exact decimal, lazy-branch and independent-error suites still apply.
 
 ## Consumer decision
 
 The unmodified published 0.9.3 Pharos baseline `19ad3109` was reproduced using
-Node 24.22.0, Go 1.26.8 and modernc SQLite 1.39.1. Full HTTP medians:
+Node 24.22.0, Go 1.26.8 and modernc SQLite 1.39.1. Full HTTP medians (the V2
+rows used the since-removed v2 endpoints):
 
 | Workload | Host accelerator | Ordinary 0.9.3 |
 |---|---:|---:|
@@ -140,7 +143,7 @@ Node 24.22.0, Go 1.26.8 and modernc SQLite 1.39.1. Full HTTP medians:
 These include existing host staging/transaction policy. This release does not
 drop host tables, change connection settings or add another cleanup hook.
 Measure the host policy migration separately. Portable results materially
-reduce V3's gap, but do not establish host-comparable V2 latency. Delete host
+reduce V3's gap, but do not establish host-comparable ungrouped-metric latency. Delete host
 accelerators only after consumer parity/performance acceptance. Upgrade normal
 published artifacts together; do not patch installed packages or module caches.
 

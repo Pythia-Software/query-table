@@ -15,7 +15,7 @@ import (
 func isolationQuery() qt.QueryRequestV3 {
 	q := groupedQuery()
 	q.Grouping = nil
-	q.Result = qt.WireQuery{Select: []string{"id"}, OrderBy: qt.OrderBys{{Field: "id", Dir: "asc"}}, Limit: 10}
+	q.Result = qt.WireQuery{Select: []string{"id"}, OrderBy: []qt.OrderBy{{Field: "id", Dir: "asc"}}, Limit: 10}
 	q.Metrics = []qt.AggSpec{{ID: "sum", Op: "sum", Field: "n"}, {ID: "median", Expression: "MEDIAN([n])", GroupBy: []string{"k"}}, {ID: "count", Op: "count"}}
 	return q
 }

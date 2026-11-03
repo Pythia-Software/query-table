@@ -30,7 +30,7 @@ func init() {
 	}
 }
 
-func setupReuse(t *testing.T) (*sql.DB, qt.SQLiteV2Dataset) {
+func setupReuse(t *testing.T) (*sql.DB, qt.QueryDatasetV3) {
 	db, d := setupV2(t)
 	d.SourceSQL = "SELECT *, qt_test_metric_probe(n) AS sample_n FROM runs WHERE tenant=?1"
 	f := d.Schema.Fields["n"]
@@ -60,9 +60,9 @@ func TestV2ReductionReuse(t *testing.T) {
 	}
 	q := metricV2("")
 	q.Metrics = specs
-	q.Where = []qt.WhereTerm{{Field: "id", Op: "!=", Value: "c"}}
-	q.Limit, q.Offset = 1, 1
-	want := []qt.SQLiteMetricV2{}
+	q.Result.Where = []qt.WhereTerm{{Field: "id", Op: "!=", Value: "c"}}
+	q.Result.Limit, q.Result.Offset = 1, 1
+	want := []qt.MetricResult{}
 	var singleCalls int64
 	for i, spec := range specs {
 		single := q
@@ -82,18 +82,18 @@ func TestV2ReductionReuse(t *testing.T) {
 	for _, indices := range [][]int{{0, 1}, {0, 2, 3}, {0, 1, 2, 3, 4, 5}, {0, 1, 2, 3, 4, 5, 6}} {
 		batch := q
 		batch.Metrics = nil
-		expected := []qt.SQLiteMetricV2{}
+		expected := []qt.MetricResult{}
 		for _, i := range indices {
 			batch.Metrics = append(batch.Metrics, specs[i])
 			expected = append(expected, want[i])
 		}
 		metricProbeCalls.Store(0)
-		result, err := d.ExecuteV2In(ctx, tx, nil, &batch, qt.PlanOptions{})
+		result, err := d.ExecuteIn(ctx, tx, batch, qt.PlanOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !reflect.DeepEqual(result.Metrics.Metrics, expected) {
-			t.Fatalf("batch %v differs: got %+v want %+v", indices, result.Metrics.Metrics, expected)
+		if !reflect.DeepEqual(result.Metrics, expected) {
+			t.Fatalf("batch %v differs: got %+v want %+v", indices, result.Metrics, expected)
 		}
 		calls := metricProbeCalls.Load()
 		if indices[len(indices)-1] != 6 && (calls != singleCalls || calls == 0) {
@@ -111,11 +111,11 @@ func TestV2ReductionReuse(t *testing.T) {
 	limited.MaxGroups = 1
 	guarded := q
 	guarded.Metrics = specs[:6]
-	result, err := limited.ExecuteV2In(ctx, tx, nil, &guarded, qt.PlanOptions{})
+	result, err := limited.ExecuteIn(ctx, tx, guarded, qt.PlanOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, m := range result.Metrics.Metrics {
+	for _, m := range result.Metrics {
 		if m.Error != "group population exceeds host budget" {
 			t.Fatalf("shared reductions bypassed group budget: %#v", m)
 		}
@@ -126,14 +126,23 @@ func TestV2ReductionReuse(t *testing.T) {
 		t.Fatal(err)
 	}
 	single := metricV2("SUM([n])")
-	result, err = d.ExecuteV2In(ctx, tx, nil, &single, qt.PlanOptions{})
-	if err != nil || result.Metrics.Metrics[0].Buckets[0].Value != float64(18) {
+	result, err = d.ExecuteIn(ctx, tx, single, qt.PlanOptions{})
+	if err != nil || result.Metrics[0].Buckets[0].Value != float64(18) {
 		t.Fatal(result, err)
 	}
-	q.Metrics = append(q.Metrics, qt.AggSpec{ID: "bad", Expression: "SUM([missing])"})
+	// v3 plans every metric input into its source projection, so an unknown
+	// field fails the request (v2 failed only that metric).
+	unknown := q
+	unknown.Metrics = append(append([]qt.AggSpec{}, q.Metrics...), qt.AggSpec{ID: "bad", Expression: "SUM([missing])"})
+	var diag *qt.PlanDiagnostic
+	if _, err = d.ExecuteIn(ctx, tx, unknown, qt.PlanOptions{}); !errors.As(err, &diag) || diag.Code != "unknown_field" {
+		t.Fatal("unknown metric field", err)
+	}
+	assertNoReductions(t, tx)
+	q.Metrics = append(q.Metrics, qt.AggSpec{ID: "bad", Expression: "SUM([text])"})
 	// An invalid clause fails only itself; its siblings still execute.
-	result, err = d.ExecuteV2In(ctx, tx, nil, &q, qt.PlanOptions{})
-	if err != nil || len(result.Metrics.Metrics) != len(specs)+1 || result.Metrics.Metrics[len(specs)].Error == "" || result.Metrics.Metrics[0].Error != "" || len(result.Metrics.Metrics[0].Buckets) == 0 {
+	result, err = d.ExecuteIn(ctx, tx, q, qt.PlanOptions{})
+	if err != nil || len(result.Metrics) != len(specs)+1 || result.Metrics[len(specs)].Error == "" || result.Metrics[0].Error != "" || len(result.Metrics[0].Buckets) == 0 {
 		t.Fatal("invalid clause failed its siblings", err)
 	}
 	assertNoReductions(t, tx)
@@ -143,7 +152,7 @@ func TestV2ReductionReuse(t *testing.T) {
 		return qt.ComputedColumn{ID: "hidden", Revision: "2"}, nil
 	})}
 	metricProbeCalls.Store(0)
-	if _, err := d.ExecuteV2In(ctx, tx, nil, &q, opts); err == nil || metricProbeCalls.Load() != 0 {
+	if _, err := d.ExecuteIn(ctx, tx, q, opts); err == nil || metricProbeCalls.Load() != 0 {
 		t.Fatal("stale revision envelope executed", err)
 	}
 }
@@ -156,13 +165,13 @@ func TestV2ReductionCancellationCleanup(t *testing.T) {
 	}
 	defer tx.Rollback()
 	q := metricV2("")
-	q.Metrics = []qt.AggSpec{{ID: "sum", Expression: "SUM([n])"}, {ID: "avg", Expression: "AVG([n])"}, {ID: "box", Distribution: &qt.MetricDistribution{Kind: "box", Input: "[n]"}}}
+	q.Metrics = []qt.AggSpec{{ID: "sum", Expression: "SUM([n])"}, {ID: "avg", Expression: "AVG([n])"}, {ID: "box", Op: "count", Distribution: &qt.MetricDistribution{Kind: "box", Input: "[n]"}}}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	metricProbeCalls.Store(0)
 	metricProbeCancel, metricProbeCancelAfter = cancel, 4
 	defer func() { metricProbeCancel = nil }()
-	if _, err := d.ExecuteV2In(ctx, tx, nil, &q, qt.PlanOptions{}); !errors.Is(err, context.Canceled) {
+	if _, err := d.ExecuteIn(ctx, tx, q, qt.PlanOptions{}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("wanted cancellation, got %v", err)
 	}
 	assertNoReductions(t, tx)
@@ -170,24 +179,36 @@ func TestV2ReductionCancellationCleanup(t *testing.T) {
 }
 
 func TestV2IndexedWindow(t *testing.T) {
-	db, d := setupV2(t)
-	if _, err := db.Exec(`UPDATE runs SET stamp=CASE id WHEN 'a' THEN '2026-01-01T00:00:00.000Z' WHEN 'b' THEN '2026-01-02T00:00:00.000Z' WHEN 'd' THEN '2026-01-03T00:00:00.000Z' END; CREATE INDEX runs_tenant_stamp ON runs(tenant,stamp DESC,id)`); err != nil {
-		t.Fatal(err)
-	}
+	log := &statementLog{}
+	db := hookedDB(t, log, runsDDL+`; UPDATE runs SET stamp=CASE id WHEN 'a' THEN '2026-01-01T00:00:00.000Z' WHEN 'b' THEN '2026-01-02T00:00:00.000Z' WHEN 'd' THEN '2026-01-03T00:00:00.000Z' END; CREATE INDEX runs_tenant_stamp ON runs(tenant,stamp DESC,id)`)
+	_, d := setupV2(t)
 	f := d.Schema.Fields["stamp"]
 	f.SQLiteDatetimeFormat = "utc-millis"
 	d.Schema.Fields["stamp"] = f
 	q := metricV2("SUM([n])")
 	q.Metrics[0].Scope = "shownRows"
-	q.OrderBy = []qt.OrderBy{{Field: "stamp", Dir: "desc"}}
-	q.Where = []qt.WhereTerm{{Field: "stamp", Op: ">", Value: "2025-01-01T00:00:00Z"}}
-	q.Limit = 1
-	batch, err := qt.CompileSQLiteMetrics(context.Background(), q, d.Schema, qt.PlanOptions{SourceSQL: d.SourceSQL, SourceArgs: d.SourceArgs})
-	if err != nil {
-		t.Fatal(err)
+	q.Result.OrderBy = []qt.OrderBy{{Field: "stamp", Dir: "desc"}}
+	q.Result.Where = []qt.WhereTerm{{Field: "stamp", Op: ">", Value: "2025-01-01T00:00:00Z"}}
+	q.Result.Limit = 1
+	log.reset(nil)
+	m := runMetric(t, db, d, q)
+	if m.Buckets[0].Value != float64(6) {
+		t.Fatal(m)
 	}
-	p := batch.Metrics[0]
-	rows, err := db.Query("EXPLAIN QUERY PLAN "+p.SQL, p.Args...)
+	// The plan compilers are internal now: explain the metric statement v3
+	// sent (after its population COUNT), with the arguments it bound.
+	metricSQL, metricArgs := "", []any(nil)
+	log.mu.Lock()
+	for _, statement := range log.seen {
+		if strings.HasPrefix(statement, "WITH") && strings.Contains(statement, "ORDER BY") {
+			metricSQL, metricArgs = statement, log.queryArgs[statement]
+		}
+	}
+	log.mu.Unlock()
+	if metricSQL == "" {
+		t.Fatal("no windowed metric statement")
+	}
+	rows, err := db.Query("EXPLAIN QUERY PLAN "+metricSQL, metricArgs...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,28 +227,25 @@ func TestV2IndexedWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	explain := strings.Join(details, "\n")
-	if !strings.Contains(explain, "runs_tenant_stamp") || p.Stages[1].Materialized {
-		t.Fatalf("window lost its index:\n%s", explain)
-	}
-	m := runMetric(t, db, d, q)
-	if m.Buckets[0].Value != float64(6) {
-		t.Fatal(m)
+	// The window stage (the second CTE) must stay inlined over the source.
+	ctes := strings.SplitN(strings.TrimPrefix(metricSQL, "WITH "), ",\n", 3)
+	if !strings.Contains(explain, "runs_tenant_stamp") || len(ctes) < 2 || !strings.Contains(ctes[1], " AS NOT MATERIALIZED (") {
+		t.Fatalf("window lost its index:\n%s\n%s", explain, metricSQL)
 	}
 	// Selected fields still validate trusted storage after the window.
 	if _, err := db.Exec("UPDATE runs SET stamp='bad' WHERE id='d'"); err != nil {
 		t.Fatal(err)
 	}
-	r := qt.ServerQueryV2{Version: 2, Profile: qt.SQLiteExpressionProfile, WireQuery: qt.WireQuery{Select: []string{"stamp"}, OrderBy: q.OrderBy, Limit: 1}}
-	if _, err := d.ExecuteV2(context.Background(), db, &r, nil, qt.PlanOptions{}); err == nil {
+	r := rowsV3(qt.WireQuery{Select: []string{"stamp"}, OrderBy: q.Result.OrderBy, Limit: 1})
+	if _, err := d.Execute(context.Background(), db, r, qt.PlanOptions{}); err == nil {
 		t.Fatal("invalid selected timestamp accepted")
 	}
 }
-
 func TestV2RepeatedDistributionPayloads(t *testing.T) {
 	db, d := setupReuse(t)
 	for _, kind := range []string{"box", "histogram"} {
 		t.Run(kind, func(t *testing.T) {
-			spec := qt.AggSpec{ID: "original", GroupBy: []string{"flag"}, Distribution: &qt.MetricDistribution{Kind: kind, Input: "[n]", Bins: 2}}
+			spec := qt.AggSpec{ID: "original", GroupBy: []string{"flag"}, Op: "count", Distribution: &qt.MetricDistribution{Kind: kind, Input: "[n]", Bins: 2}}
 			if kind == "box" {
 				spec.Distribution.Bins = 0
 			}
@@ -240,14 +258,14 @@ func TestV2RepeatedDistributionPayloads(t *testing.T) {
 			twin.ID = "twin"
 			q.Metrics = append(q.Metrics, twin)
 			metricProbeCalls.Store(0)
-			result, err := d.ExecuteV2(context.Background(), db, nil, &q, qt.PlanOptions{})
+			result, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}
 			if metricProbeCalls.Load() != singleCalls || singleCalls == 0 {
 				t.Fatal("distribution repeated its scan")
 			}
-			copy := result.Metrics.Metrics[1]
+			copy := result.Metrics[1]
 			copy.ID = original.ID
 			if !reflect.DeepEqual(copy, original) {
 				t.Fatalf("memoized payload changed: %+v vs %+v", copy, original)
@@ -267,7 +285,7 @@ func TestV2RepeatedDistributionPayloads(t *testing.T) {
 					}
 				}
 			}
-			if !reflect.DeepEqual(result.Metrics.Metrics[0], original) {
+			if !reflect.DeepEqual(result.Metrics[0], original) {
 				t.Fatal("sibling distribution mutated")
 			}
 		})

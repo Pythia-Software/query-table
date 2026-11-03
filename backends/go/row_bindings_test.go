@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -92,7 +91,7 @@ func TestPostgresSelectedBindingsFollowWindow(t *testing.T) {
 		if computedSort {
 			q.OrderBy = []OrderBy{{Field: "@computed/sort", Dir: "desc", Nulls: "first"}}
 		}
-		p, err := CompileComputedRows(context.Background(), q, s, o)
+		p, err := compileTestRows(context.Background(), q, s, o)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -132,7 +131,7 @@ func TestPostgresSelectedBindingSubplanLoops(t *testing.T) {
 				if computedSort {
 					q.OrderBy = []OrderBy{{Field: "@computed/sort", Dir: "desc", Nulls: "first"}}
 				}
-				p, err := CompileComputedRows(context.Background(), q, s, o)
+				p, err := compileTestRows(context.Background(), q, s, o)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -191,7 +190,7 @@ func TestPostgresLateBindingSourceAliasCollision(t *testing.T) {
 		"unused": {Kind: FieldNumber, Expr: "r.unreachable", ExpressionNumeric: true},
 	}}
 	o := PlanOptions{SourceSQL: "SELECT i AS id,20 AS f2 FROM generate_series(1,10) i"}
-	p, err := CompileComputedRows(context.Background(), WireQuery{Select: []string{"status"}, Limit: 2}, s, o)
+	p, err := compileTestRows(context.Background(), WireQuery{Select: []string{"status"}, Limit: 2}, s, o)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +203,7 @@ func TestPostgresLateBindingSourceAliasCollision(t *testing.T) {
 func TestPostgresLateBindingSourceNames(t *testing.T) {
 	s, o := lateBindingFixture()
 	o.SourceSQL = "SELECT * FROM qt_source_rows"
-	p, err := CompileComputedRows(context.Background(), WireQuery{Select: []string{"status"}, Limit: 1}, s, o)
+	p, err := compileTestRows(context.Background(), WireQuery{Select: []string{"status"}, Limit: 1}, s, o)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +229,7 @@ func TestPostgresShownMetricBindingsFollowWindow(t *testing.T) {
 	for _, computedSort := range []bool{false, true} {
 		for _, offset := range []int{0, 7, 9999} {
 			t.Run(fmt.Sprintf("computed=%t/offset=%d", computedSort, offset), func(t *testing.T) {
-				q := MetricQuery{Version: 2, Limit: 3, Offset: offset,
+				q := metricRequest{Version: 2, Limit: 3, Offset: offset,
 					Where:   []WhereTerm{{Field: "id", Op: ">", Value: "2"}},
 					OrderBy: []OrderBy{{Field: "id", Dir: "asc"}},
 					Metrics: []AggSpec{
@@ -243,12 +242,11 @@ func TestPostgresShownMetricBindingsFollowWindow(t *testing.T) {
 				if computedSort {
 					q.OrderBy = []OrderBy{{Field: "@computed/sort", Dir: "desc", Nulls: "first"}}
 				}
-				p, err := CompileCombinedMetrics(context.Background(), q, s, o)
+				p, err := compileTestMetrics(context.Background(), q, s, o)
 				if err != nil {
 					t.Fatal(err)
 				}
-				got := executePlan(t, p.SQLPlan)
-				for i, metric := range p.Metrics {
+				for _, metric := range p.Metrics {
 					window, lookup := -1, -1
 					for j, stage := range metric.Stages {
 						if strings.Contains(stage.SQL, " LIMIT ") {
@@ -261,17 +259,7 @@ func TestPostgresShownMetricBindingsFollowWindow(t *testing.T) {
 					if window < 0 || lookup <= window {
 						t.Fatal("measure binding precedes window", metric.Stages)
 					}
-					if metric.reduction != nil && !strings.Contains(metric.Stages[metric.reduction.stage].SQL, "COUNT(*) AS count") {
-						t.Fatal("reduction metadata shifted", metric.reduction)
-					}
-					rows := executePlan(t, metric.SQLPlan)
-					actual := []map[string]any{}
-					for _, bucket := range got[i]["buckets"].([]any) {
-						actual = append(actual, bucket.(map[string]any))
-					}
-					if !reflect.DeepEqual(actual, rows) {
-						t.Fatalf("combined %s: got %v want %v", metric.ID, actual, rows)
-					}
+					executePlan(t, metric.SQLPlan)
 					subplans := 0
 					visitPostgresPlan(explainPostgresPlan(t, metric.SQLPlan), func(node map[string]any) {
 						if node["Parent Relationship"] == "SubPlan" {
@@ -299,7 +287,7 @@ func TestPostgresShownMetricBindingsFollowWindow(t *testing.T) {
 					}
 				}
 				// Compare transitive computed SUM with the row sidecars of the same page.
-				rowPlan, err := CompileComputedRows(context.Background(), WireQuery{Select: []string{"@computed/display"}, Where: q.Where, OrderBy: q.OrderBy, Limit: q.Limit, Offset: q.Offset}, s, o)
+				rowPlan, err := compileTestRows(context.Background(), WireQuery{Select: []string{"@computed/display"}, Where: q.Where, OrderBy: q.OrderBy, Limit: q.Limit, Offset: q.Offset}, s, o)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -308,7 +296,11 @@ func TestPostgresShownMetricBindingsFollowWindow(t *testing.T) {
 				for _, row := range rowValues {
 					sum += row["column0"].(float64)
 				}
-				value := got[0]["buckets"].([]any)[0].(map[string]any)["value"]
+				scalar := executePlan(t, p.Metrics[0].SQLPlan)
+				if len(scalar) != 1 {
+					t.Fatalf("scalar buckets %v", scalar)
+				}
+				value := scalar[0]["value"]
 				if len(rowValues) > 0 && value != sum {
 					t.Fatalf("shown SUM %v sidecars sum %v", value, sum)
 				}

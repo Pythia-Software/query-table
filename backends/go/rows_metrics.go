@@ -2,7 +2,6 @@ package querytable
 
 import (
 	"context"
-	"database/sql"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -12,116 +11,6 @@ import (
 	"strings"
 	"unicode/utf8"
 )
-
-// ExecuteV2Rows runs V2 metrics over an already-authorized in-memory population.
-// It never executes SourceSQL. tx is used only for expected computed revisions
-// when no Resolver was supplied; ordinary requests can pass nil. SourceSQL may
-// be empty. Callers must bind token/snapshot validation to this same population.
-//
-// Row keys are schema field names with direct SQL column bindings. Supported
-// storage is nil/missing (NULL), string (TEXT), int64 (INTEGER), float64 (REAL),
-// and bool for bool fields (bound as 0/1). Text arrays use JSON strings; empty
-// datetime strings are NULL. No other Go types are implicitly coerced.
-//
-// Count, count(field), sum/avg/min/max of numbers, min/max of text/enum/datetime,
-// count_distinct of scalar fields, and box and histogram distributions of a
-// number field are supported, with text/enum/bool grouping, per-metric Where,
-// MinCount (of rows, distinct values or a sum), sorting and GroupLimit.
-// Formulas (including distribution inputs other than one field), computed
-// fields, shownRows and other groupings return ErrRowsUnsupported.
-// Runtime fallback also returns an empty result, so hosts can safely stage and
-// retry the complete request. Field storage errors retain V2 bucket diagnostics.
-func ExecuteV2Rows(ctx context.Context, tx *sql.Tx, d SQLiteV2Dataset, rows []map[string]any, q MetricQuery, o PlanOptions) (SQLiteV2ExecutionResult, error) {
-	return executeV2Rows(ctx, tx, d, rows, q, o, nil)
-}
-
-// visit is a test hook for counting physical population visits.
-func executeV2Rows(ctx context.Context, tx *sql.Tx, d SQLiteV2Dataset, rows []map[string]any, q MetricQuery, o PlanOptions, visit func()) (SQLiteV2ExecutionResult, error) {
-	out := SQLiteV2ExecutionResult{}
-	if err := ctx.Err(); err != nil {
-		return out, err
-	}
-	if d.SourceSQL == "" {
-		d.SourceSQL = "SELECT 1"
-	}
-	maxRows, maxGroups, maxPopulation, err := d.limits()
-	if err != nil {
-		return out, err
-	}
-	if q.Limit > maxRows {
-		return out, diagnostic("resource_limit", "metric row window exceeds host budget")
-	}
-	o = d.options(tx, o)
-	for _, term := range q.Where {
-		for _, p := range term.Predicates() {
-			if strings.HasPrefix(p.Field, "@computed/") {
-				return out, fmt.Errorf("%w: computed filter %s", ErrRowsUnsupported, p.Field)
-			}
-		}
-	}
-	for _, spec := range q.Metrics {
-		if name := rowMetricComputedField(spec); name != "" {
-			return out, fmt.Errorf("%w: computed field %s", ErrRowsUnsupported, name)
-		}
-	}
-	// Reuse the SQL compiler for policy, request and clause validation. It builds
-	// plans only: no SQL runs here, including on the nil-transaction fast path.
-	_, failures, err := compileMetricsPartial(ctx, q, d.Schema, o, true)
-	if err != nil {
-		return out, err
-	}
-	filter, err := CompileRowFilter(q.Where, d.Schema, SQLiteOptions{Now: o.Now})
-	if err != nil {
-		return out, err
-	}
-	revisions := o.ExpectedRevisions
-	if q.ExpectedRevisions != nil {
-		revisions = q.ExpectedRevisions
-	}
-	reducer, err := newRowMetrics(ctx, q, d.Schema, o, failures, maxGroups, rowMetricsOptions{bound: rowFieldSupported})
-	if err != nil {
-		return out, err
-	}
-	total := int64(0)
-	for i, row := range rows {
-		if visit != nil {
-			visit()
-		}
-		if i%256 == 0 {
-			if err = ctx.Err(); err != nil {
-				return out, err
-			}
-		}
-		matches, e := filter.Match(row)
-		if e != nil {
-			return out, e
-		}
-		if !matches {
-			continue
-		}
-		total++
-		if total > int64(maxPopulation) {
-			return out, diagnostic("resource_limit", "matching population exceeds host budget")
-		}
-		if e = reducer.add(row, nil); e != nil {
-			return out, e
-		}
-	}
-	if err = ctx.Err(); err != nil {
-		return out, err
-	}
-	// Match ExecuteV2In's request-error priority: population bounds are
-	// enforced before checking revision entries unused by the metric plans.
-	if _, _, err = d.verifyV2Revisions(ctx, o, revisions); err != nil {
-		return out, err
-	}
-	result, err := reducer.finish(total)
-	if err != nil {
-		return out, err
-	}
-	out.Metrics = &result
-	return out, nil
-}
 
 // rowMetricComputedField names a computed field read by spec, if any.
 func rowMetricComputedField(spec AggSpec) string {
@@ -150,10 +39,10 @@ func rowMetricComputedField(spec AggSpec) string {
 	return ""
 }
 
-// rowMetrics reduces V2 metrics over rows keyed by schema field name. The
-// in-memory executor and the direct SQLite distribution path share it.
+// rowMetrics reduces metrics over rows keyed by schema field name, for the
+// direct SQLite distribution path.
 type rowMetrics struct {
-	result    SQLiteMetricsV2Result
+	result    sqliteMetricsV2Result
 	cohorts   []*rowMetricCohort
 	maxGroups int
 }
@@ -164,14 +53,14 @@ type rowMetricsOptions struct {
 	// bound reports whether rows carry the field's stored value.
 	bound func(name string, f FieldSpec) bool
 	// whereFlag, when set, returns the index of a precomputed row flag for a
-	// metric's Where (or -1 for none) instead of compiling a RowFilter.
+	// metric's Where (or -1 for none) instead of compiling a rowFilter.
 	whereFlag func([]WhereTerm) int
 }
 
-// newRowMetrics prepares the selected metrics, or returns ErrRowsUnsupported
+// newRowMetrics prepares the selected metrics, or returns errRowsUnsupported
 // for a metric shape or binding the row reducers cannot compute exactly.
-func newRowMetrics(ctx context.Context, q MetricQuery, s Schema, o PlanOptions, failures []error, maxGroups int, options rowMetricsOptions) (*rowMetrics, error) {
-	r := &rowMetrics{result: SQLiteMetricsV2Result{Metrics: make([]SQLiteMetricV2, len(q.Metrics))}, maxGroups: maxGroups}
+func newRowMetrics(ctx context.Context, q metricRequest, s Schema, o PlanOptions, failures []error, maxGroups int, options rowMetricsOptions) (*rowMetrics, error) {
+	r := &rowMetrics{result: sqliteMetricsV2Result{Metrics: make([]MetricResult, len(q.Metrics))}, maxGroups: maxGroups}
 	byPopulation := map[string]*rowMetricCohort{}
 	for i, spec := range q.Metrics {
 		if options.include != nil && !options.include[i] {
@@ -196,7 +85,7 @@ func newRowMetrics(ctx context.Context, q MetricQuery, s Schema, o PlanOptions, 
 			c = &rowMetricCohort{groupBy: spec.GroupBy, groups: map[string]*rowMetricGroup{}, flag: -1}
 			if options.whereFlag != nil {
 				c.flag = options.whereFlag(spec.Where)
-			} else if c.filter, e = CompileRowFilter(spec.Where, s, SQLiteOptions{Now: o.Now}); e != nil {
+			} else if c.filter, e = compileRowFilter(spec.Where, s, sqliteOptions{Now: o.Now}); e != nil {
 				return nil, e
 			}
 			for _, name := range spec.GroupBy {
@@ -211,7 +100,7 @@ func newRowMetrics(ctx context.Context, q MetricQuery, s Schema, o PlanOptions, 
 		if name := spec.MinCount.field(); name != "" {
 			f := s.Fields[name]
 			if !options.bound(name, f) || f.Kind == FieldTextArray {
-				return nil, fmt.Errorf("%w: minCount binding %s", ErrRowsUnsupported, name)
+				return nil, fmt.Errorf("%w: minCount binding %s", errRowsUnsupported, name)
 			}
 			measure := rowMetricSpec{index: i, spec: spec, op: "count_distinct", field: name, binding: f}
 			if spec.MinCount.Sum != "" {
@@ -229,9 +118,9 @@ func newRowMetrics(ctx context.Context, q MetricQuery, s Schema, o PlanOptions, 
 func rowMetricShape(spec AggSpec, s Schema, bound func(string, FieldSpec) bool) (rowMetricSpec, error) {
 	m := rowMetricSpec{spec: spec, reduction: -1, threshold: -1}
 	if spec.Scope == "shownRows" || spec.DateGrouping != nil || spec.ExpressionY != "" {
-		return m, fmt.Errorf("%w: metric %s shape", ErrRowsUnsupported, spec.ID)
+		return m, fmt.Errorf("%w: metric %s shape", errRowsUnsupported, spec.ID)
 	}
-	expression := MetricExpression(spec)
+	expression := metricExpression(spec)
 	if spec.Distribution != nil {
 		expression = spec.Distribution.Input
 	}
@@ -243,28 +132,28 @@ func rowMetricShape(spec AggSpec, s Schema, bound func(string, FieldSpec) bool) 
 	if spec.Distribution != nil {
 		// Distributions sample one stored number; formulas use SQL.
 		if n.op != "field" {
-			return m, fmt.Errorf("%w: metric %s distribution input", ErrRowsUnsupported, spec.ID)
+			return m, fmt.Errorf("%w: metric %s distribution input", errRowsUnsupported, spec.ID)
 		}
 		m.op, m.field = "samples", n.text
 		if f := s.Fields[m.field]; !bound(m.field, f) || f.Kind != FieldNumber {
-			return m, fmt.Errorf("%w: metric binding %s", ErrRowsUnsupported, m.field)
+			return m, fmt.Errorf("%w: metric binding %s", errRowsUnsupported, m.field)
 		}
 	} else {
 		m.op = strings.ToLower(n.op)
 		if len(n.args) == 1 && n.args[0].op == "field" {
 			m.field = n.args[0].text
 		} else if m.op != "count" || len(n.args) != 0 {
-			return m, fmt.Errorf("%w: metric %s expression", ErrRowsUnsupported, spec.ID)
+			return m, fmt.Errorf("%w: metric %s expression", errRowsUnsupported, spec.ID)
 		}
 		switch m.op {
 		case "count", "count_distinct", "sum", "avg", "min", "max":
 		default:
-			return m, fmt.Errorf("%w: metric %s operation", ErrRowsUnsupported, spec.ID)
+			return m, fmt.Errorf("%w: metric %s operation", errRowsUnsupported, spec.ID)
 		}
 		if m.field != "" {
 			f := s.Fields[m.field]
 			if !bound(m.field, f) || f.Kind == FieldTextArray {
-				return m, fmt.Errorf("%w: metric binding %s", ErrRowsUnsupported, m.field)
+				return m, fmt.Errorf("%w: metric binding %s", errRowsUnsupported, m.field)
 			}
 		}
 	}
@@ -272,7 +161,7 @@ func rowMetricShape(spec AggSpec, s Schema, bound func(string, FieldSpec) bool) 
 	for _, name := range spec.GroupBy {
 		f := s.Fields[name]
 		if !bound(name, f) || f.Kind != FieldText && f.Kind != FieldEnum && f.Kind != FieldBool {
-			return m, fmt.Errorf("%w: grouping %s", ErrRowsUnsupported, name)
+			return m, fmt.Errorf("%w: grouping %s", errRowsUnsupported, name)
 		}
 	}
 	return m, nil
@@ -317,7 +206,7 @@ func (r *rowMetrics) add(row map[string]any, flags []bool) error {
 }
 
 // finish returns the selected metrics over a matching population of total rows.
-func (r *rowMetrics) finish(total int64) (SQLiteMetricsV2Result, error) {
+func (r *rowMetrics) finish(total int64) (sqliteMetricsV2Result, error) {
 	result := r.result
 	for _, c := range r.cohorts {
 		// SQLite emits one ungrouped aggregate even for an empty population.
@@ -329,7 +218,7 @@ func (r *rowMetrics) finish(total int64) (SQLiteMetricsV2Result, error) {
 				result.Metrics[m.index] = failedMetric(m.spec.ID, m.spec.Scope, "group population exceeds host budget")
 				continue
 			}
-			metric := SQLiteMetricV2{ID: m.spec.ID, Scope: "allMatching", ProcessedRows: total, Coverage: "exact", Buckets: []SQLiteMetricV2Bucket{}}
+			metric := MetricResult{ID: m.spec.ID, Scope: "allMatching", ProcessedRows: total, Coverage: "exact", Buckets: []MetricBucket{}}
 			var histogram *rowHistogram
 			if m.op == "samples" && m.spec.Distribution.Kind == "histogram" {
 				histogram = c.histogram(&m)
@@ -349,7 +238,7 @@ func (r *rowMetrics) finish(total int64) (SQLiteMetricsV2Result, error) {
 					hidden++
 					continue
 				}
-				var bucket SQLiteMetricV2Bucket
+				var bucket MetricBucket
 				if m.op == "samples" {
 					bucket = g.reductions[m.reduction].distribution(&m, histogram)
 				} else {
@@ -357,7 +246,7 @@ func (r *rowMetrics) finish(total int64) (SQLiteMetricsV2Result, error) {
 					if e != nil {
 						return result, e
 					}
-					bucket = SQLiteMetricV2Bucket{Value: value, Error: code}
+					bucket = MetricBucket{Value: value, Error: code}
 				}
 				bucket.Keys, bucket.Count = append([]any{}, g.keys...), g.count
 				metric.Buckets = append(metric.Buckets, bucket)
@@ -392,11 +281,6 @@ func rowExpressionFields(n *exprNode) []string {
 	return names
 }
 
-// ExecuteV2Rows is also available as a dataset method, alongside ExecuteV2In.
-func (d SQLiteV2Dataset) ExecuteV2Rows(ctx context.Context, tx *sql.Tx, rows []map[string]any, q MetricQuery, o PlanOptions) (SQLiteV2ExecutionResult, error) {
-	return ExecuteV2Rows(ctx, tx, d, rows, q, o)
-}
-
 type rowMetricSpec struct {
 	index     int
 	reduction int
@@ -409,7 +293,7 @@ type rowMetricSpec struct {
 	binding   FieldSpec
 }
 type rowMetricCohort struct {
-	filter RowFilter
+	filter rowFilter
 	// flag indexes a precomputed filter of the row; -1 uses filter.
 	flag        int
 	groupBy     []string
@@ -503,7 +387,7 @@ func (c *rowMetricCohort) newGroup(row map[string]any, limit int) (*rowMetricGro
 			return nil, err
 		}
 		if code != "" {
-			return nil, fmt.Errorf("%w: grouping storage %s", ErrRowsUnsupported, field.name)
+			return nil, fmt.Errorf("%w: grouping storage %s", errRowsUnsupported, field.name)
 		}
 		if field.binding.Kind == FieldBool && v != nil {
 			v = v.(int64) != 0
@@ -537,7 +421,7 @@ func rowMetricValue(raw any, f *FieldSpec) (any, string, error) {
 	case FieldText, FieldEnum:
 		s, ok := v.(string)
 		if ok && strings.ContainsRune(s, 0) {
-			return nil, "", fmt.Errorf("%w: embedded NUL text", ErrRowsUnsupported)
+			return nil, "", fmt.Errorf("%w: embedded NUL text", errRowsUnsupported)
 		}
 		if !ok {
 			return nil, "storage_type", nil
@@ -547,7 +431,7 @@ func rowMetricValue(raw any, f *FieldSpec) (any, string, error) {
 		}
 	case FieldDatetime:
 		if text, ok := v.(string); ok && strings.ContainsRune(text, 0) {
-			return nil, "", fmt.Errorf("%w: datetime with embedded NUL", ErrRowsUnsupported)
+			return nil, "", fmt.Errorf("%w: datetime with embedded NUL", errRowsUnsupported)
 		}
 		value, code := sqliteV2Datetime(v, f.SQLiteDatetimeFormat)
 		return value, code, nil
@@ -720,9 +604,9 @@ func (c *rowMetricCohort) histogram(m *rowMetricSpec) *rowHistogram {
 }
 
 // distribution returns one group's distribution bucket, without keys or count.
-func (r *rowMetricReduction) distribution(m *rowMetricSpec, h *rowHistogram) SQLiteMetricV2Bucket {
+func (r *rowMetricReduction) distribution(m *rowMetricSpec, h *rowHistogram) MetricBucket {
 	nulls, invalid := r.nulls, r.invalid
-	b := SQLiteMetricV2Bucket{NullCount: &nulls, InputErrorCount: &invalid}
+	b := MetricBucket{NullCount: &nulls, InputErrorCount: &invalid}
 	if h != nil {
 		if h.err != "" {
 			b.Error = h.err
@@ -761,7 +645,7 @@ func (r *rowMetricReduction) distribution(m *rowMetricSpec, h *rowHistogram) SQL
 	return b
 }
 
-func sortRowMetric(buckets []SQLiteMetricV2Bucket, spec AggSpec) {
+func sortRowMetric(buckets []MetricBucket, spec AggSpec) {
 	terms := append([]MetricSort{}, spec.Sort...)
 	if len(terms) == 0 {
 		terms = []MetricSort{{Key: "value", Dir: "desc"}}
@@ -776,7 +660,7 @@ func sortRowMetric(buckets []SQLiteMetricV2Bucket, spec AggSpec) {
 			terms = append(terms, MetricSort{Key: name, Dir: "asc"})
 		}
 	}
-	get := func(b SQLiteMetricV2Bucket, key string) any {
+	get := func(b MetricBucket, key string) any {
 		if key == "value" {
 			return b.Value
 		}

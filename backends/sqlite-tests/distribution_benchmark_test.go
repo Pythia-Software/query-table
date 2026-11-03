@@ -15,7 +15,7 @@ import (
 // counts and some NULL samples. Run with, for example:
 //
 //	go test -run '^$' -bench Distribution -count 3
-func distributionBenchmark(tb testing.TB, rows int) (*sql.DB, qt.SQLiteV2Dataset) {
+func distributionBenchmark(tb testing.TB, rows int) (*sql.DB, qt.QueryDatasetV3) {
 	tb.Helper()
 	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(tb.TempDir(), "timing.db"))+"?_pragma=cache_size(-32768)")
 	if err != nil {
@@ -34,34 +34,35 @@ CREATE INDEX timing_started ON timing(started);`, rows))
 		tb.Fatal(err)
 	}
 	schema := qt.Schema{Name: "timing", IDField: "id", Fields: map[string]qt.FieldSpec{
-		"id":            {Name: "id", Kind: qt.FieldNumber, Expr: "r.id", Sortable: true},
+		"id":            {Name: "id", Kind: qt.FieldNumber, Expr: "r.id", ExpressionNumeric: true, Sortable: true}, // v3 orders by and validates the numeric identity
 		"effort":        {Name: "effort", Kind: qt.FieldEnum, Expr: "r.effort", Sortable: true, ServerFilter: true},
 		"started":       {Name: "started", Kind: qt.FieldDatetime, Expr: "r.started", SQLiteDatetimeFormat: "rfc3339", Sortable: true, ServerFilter: true},
 		"latency_ms":    {Name: "latency_ms", Kind: qt.FieldNumber, Expr: "r.latency_ms", ExpressionNumeric: true, Sortable: true, ServerFilter: true},
 		"output_tokens": {Name: "output_tokens", Kind: qt.FieldNumber, Expr: "r.output_tokens", ExpressionNumeric: true, Sortable: true, ServerFilter: true},
 	}}
-	return db, qt.SQLiteV2Dataset{Schema: schema, SourceSQL: "SELECT * FROM timing", MaxPopulation: rows}
+	// v3 counts histograms against MaxSamplesPerGroup too; allow the whole table.
+	return db, qt.QueryDatasetV3{Dialect: "sqlite", Schema: schema, SourceSQL: "SELECT * FROM timing", MaxPopulation: rows, MaxSamplesPerGroup: 1000000}
 }
 
 func distributionMetrics() []qt.AggSpec {
 	return []qt.AggSpec{
-		{ID: "latency", GroupBy: []string{"effort"}, Distribution: &qt.MetricDistribution{Kind: "box", Input: "[latency_ms]"}},
-		{ID: "latency_tukey", GroupBy: []string{"effort"}, Distribution: &qt.MetricDistribution{Kind: "box", Input: "[latency_ms]", Whiskers: "tukey"}},
-		{ID: "tokens", GroupBy: []string{"effort"}, Distribution: &qt.MetricDistribution{Kind: "box", Input: "[output_tokens]"}},
-		{ID: "latency_histogram", Distribution: &qt.MetricDistribution{Kind: "histogram", Input: "[latency_ms]", Bins: 20}},
-		{ID: "rate", GroupBy: []string{"effort"}, Distribution: &qt.MetricDistribution{Kind: "histogram", Input: "[output_tokens]*1000/[latency_ms]"}},
+		{ID: "latency", GroupBy: []string{"effort"}, Op: "count", Distribution: &qt.MetricDistribution{Kind: "box", Input: "[latency_ms]"}},
+		{ID: "latency_tukey", GroupBy: []string{"effort"}, Op: "count", Distribution: &qt.MetricDistribution{Kind: "box", Input: "[latency_ms]", Whiskers: "tukey"}},
+		{ID: "tokens", GroupBy: []string{"effort"}, Op: "count", Distribution: &qt.MetricDistribution{Kind: "box", Input: "[output_tokens]"}},
+		{ID: "latency_histogram", Op: "count", Distribution: &qt.MetricDistribution{Kind: "histogram", Input: "[latency_ms]", Bins: 20}},
+		{ID: "rate", GroupBy: []string{"effort"}, Op: "count", Distribution: &qt.MetricDistribution{Kind: "histogram", Input: "[output_tokens]*1000/[latency_ms]"}},
 	}
 }
 
 func runDistributionBenchmark(b *testing.B, metrics []qt.AggSpec) {
 	db, d := distributionBenchmark(b, 600000)
-	q := qt.MetricQuery{Version: 2, Profile: qt.SQLiteExpressionProfile, Metrics: metrics}
+	q := metricsV3(nil, nil, 0, 0, metrics...)
 	runBenchmark(b, func() {
-		r, err := d.ExecuteV2(context.Background(), db, nil, &q, qt.PlanOptions{})
+		r, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
 		if err != nil {
 			b.Fatal(err)
 		}
-		for _, m := range r.Metrics.Metrics {
+		for _, m := range r.Metrics {
 			if m.Error != "" {
 				b.Fatal(m.ID, m.Error)
 			}
@@ -97,35 +98,4 @@ func BenchmarkDistributionBatch(b *testing.B) {
 // 600,000 rows: a grouped histogram of a formula, which needs compiled SQL.
 func BenchmarkDistributionFormula(b *testing.B) {
 	runDistributionBenchmark(b, distributionMetrics()[4:5])
-}
-
-// 600,000 in-memory rows: the four field distributions through ExecuteV2Rows.
-func BenchmarkDistributionRows(b *testing.B) {
-	db, d := distributionBenchmark(b, 600000)
-	result, err := db.Query("SELECT id,effort,latency_ms,output_tokens FROM timing")
-	if err != nil {
-		b.Fatal(err)
-	}
-	var rows []map[string]any
-	for result.Next() {
-		var id int64
-		var effort, latency, tokens any
-		if err = result.Scan(&id, &effort, &latency, &tokens); err != nil {
-			b.Fatal(err)
-		}
-		rows = append(rows, map[string]any{"id": id, "effort": effort, "latency_ms": latency, "output_tokens": tokens})
-	}
-	result.Close()
-	q := qt.MetricQuery{Version: 2, Metrics: distributionMetrics()[:4]}
-	runBenchmark(b, func() {
-		r, err := qt.ExecuteV2Rows(context.Background(), nil, d, rows, q, qt.PlanOptions{})
-		if err != nil {
-			b.Fatal(err)
-		}
-		for _, m := range r.Metrics.Metrics {
-			if m.Error != "" {
-				b.Fatal(m.ID, m.Error)
-			}
-		}
-	})
 }

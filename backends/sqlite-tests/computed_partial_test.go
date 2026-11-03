@@ -34,9 +34,6 @@ func TestComputedPartialDescription(t *testing.T) {
 	if description.Execution.ResolvedRevisions["base"] != "1" || description.Execution.Fields["@computed/child"].Type != "number" {
 		t.Fatal(description)
 	}
-	if _, err = d.DescribeComputedIn(context.Background(), tx, ids, qt.PlanOptions{}); err == nil {
-		t.Fatal("legacy all-or-error API changed")
-	}
 	outage := errors.New("catalogue unavailable")
 	if _, err = d.DescribeComputedPartialIn(context.Background(), tx, []string{"child"}, qt.PlanOptions{Resolver: qt.DefinitionResolverFunc(func(context.Context, string) (qt.ComputedColumn, error) { return qt.ComputedColumn{}, outage })}); !errors.Is(err, outage) {
 		t.Fatal("infrastructure failure hidden", err)

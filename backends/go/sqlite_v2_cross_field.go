@@ -19,16 +19,16 @@ type sqliteCrossFieldReduction struct {
 // Every member has already compiled independently. Only population, scope,
 // per-metric predicates and grouping determine compatibility; final formulas,
 // minCount, sorting and top-N remain in the original consumer plans.
-func (c *sqliteReductionCache) addCrossFields(ctx context.Context, batch MetricBatchPlan, q MetricQuery, s Schema, o PlanOptions) {
+func (c *sqliteReductionCache) addCrossFields(ctx context.Context, batch metricBatchPlan, q metricRequest, s Schema, o PlanOptions) {
 	specs := map[string]AggSpec{}
 	for _, spec := range q.Metrics {
 		specs[spec.ID] = spec
 	}
-	groups := map[string][]MetricSQLPlan{}
+	groups := map[string][]metricSQLPlan{}
 	order := []string{}
 	for _, p := range batch.Metrics {
 		spec := specs[p.ID]
-		if p.reduction == nil || spec.ExpressionY != "" || sampledExpression(MetricExpression(spec)) {
+		if p.reduction == nil || spec.ExpressionY != "" || sampledExpression(metricExpression(spec)) {
 			continue
 		}
 		key, err := json.Marshal(struct {
@@ -61,7 +61,7 @@ func (c *sqliteReductionCache) addCrossFields(ctx context.Context, batch MetricB
 		primary := specs[members[0].ID]
 		extra := []summaryOutput{}
 		for _, member := range members[1:] {
-			extra = append(extra, summaryOutput{ID: member.ID, Expression: MetricExpression(specs[member.ID])})
+			extra = append(extra, summaryOutput{ID: member.ID, Expression: metricExpression(specs[member.ID])})
 		}
 		// Measured minimums are member reductions too, consumed by identity.
 		for _, member := range members {
@@ -89,7 +89,7 @@ func (c *sqliteReductionCache) addCrossFields(ctx context.Context, batch MetricB
 	}
 }
 
-func (c *sqliteReductionCache) crossFieldPlan(ctx context.Context, tx *sql.Tx, p MetricSQLPlan, f *sqliteCrossFieldReduction) (MetricSQLPlan, error) {
+func (c *sqliteReductionCache) crossFieldPlan(ctx context.Context, tx *sql.Tx, p metricSQLPlan, f *sqliteCrossFieldReduction) (metricSQLPlan, error) {
 	table, ok := c.tables[f.key]
 	if !ok {
 		table = fmt.Sprintf("_qt_reduction_%d", sqliteReductionSequence.Add(1))
@@ -97,24 +97,12 @@ func (c *sqliteReductionCache) crossFieldPlan(ctx context.Context, tx *sql.Tx, p
 		statement := "CREATE TEMP TABLE " + table + " AS " + sqlStageCTEs(f.plan.Stages[:i+1]) + "\nSELECT * FROM " + f.plan.Stages[i].Name
 		c.tables[f.key] = table
 		if f.integer != nil {
-			trusted := false
-			if f.integer.TrustedSQL != "" {
-				var err error
-				if trusted, err = c.proofs.proven(ctx, tx, f.integer.Numeric); err != nil {
-					return p, err
-				}
-			}
 			direct, err := sqliteStoredProjection(ctx, tx, f.integer.Input, f.integer.Args)
 			if err != nil {
 				return p, err
 			}
 			candidates := []string{f.integer.SQL}
-			switch {
-			case trusted:
-				// The generation's source proof covers every consumed value. If
-				// the backstop still declines, a guarded plan would too.
-				candidates = []string{f.integer.TrustedSQL}
-			case direct:
+			if direct {
 				candidates = []string{f.integer.NonnegativeSQL, f.integer.SQL}
 			}
 			for _, candidate := range candidates {
@@ -123,14 +111,6 @@ func (c *sqliteReductionCache) crossFieldPlan(ctx context.Context, tx *sql.Tx, p
 				}
 				valid, err := sqliteTryIntegerReduction(ctx, tx, table, candidate, f.integer.Args)
 				if valid {
-					if c.population != nil && *c.population < 0 && f.integer.Population {
-						var n int64
-						if err := tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(qt_integer_population),0) FROM "+table).Scan(&n); err == nil {
-							*c.population = n
-						} else if ctx.Err() != nil {
-							return p, ctx.Err()
-						} // Otherwise the executor counts the population itself.
-					}
 					return c.crossFieldPlan(ctx, tx, p, f)
 				}
 				if ctx.Err() != nil {

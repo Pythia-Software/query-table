@@ -37,7 +37,7 @@ func DecodeQueryRequestV3(data []byte) (QueryRequestV3, error) {
 			return q, diagnostic("query", "source and result must be query objects")
 		}
 		for key := range stage {
-			if !containsString([]string{"select", "s", "c", "where", "w", "orderBy", "o", "limit", "l", "offset", "f"}, key) {
+			if !containsString([]string{"select", "where", "orderBy", "limit", "offset"}, key) {
 				return q, diagnostic("query", "unsupported query stage property: "+key)
 			}
 		}

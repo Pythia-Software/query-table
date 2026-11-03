@@ -9,7 +9,8 @@ import (
 )
 
 // SQLiteExpressionProfile has distinct numeric/storage/collation semantics from
-// PostgreSQL. Requires SQLite 3.38+ and both v1 and v2 function descriptors.
+// PostgreSQL. Requires SQLite 3.38+ and the SQLiteFunctions, SQLiteV2Functions and
+// SQLiteV2Aggregates descriptors.
 const SQLiteExpressionProfile = "qt-sqlite-v1"
 
 func (b *planBuilder) profile() string {
@@ -25,32 +26,7 @@ func (b *planBuilder) collation() string {
 	return ` COLLATE "C"`
 }
 
-// CompileSQLiteMetrics validates the entire v2 batch before returning any plans.
-// Execute every plan and resolve definitions in the same SQLite transaction.
-// SourceSQL uses numbered ?1..?N parameters reserved for SourceArgs.
-func CompileSQLiteMetrics(ctx context.Context, q MetricQuery, s Schema, o PlanOptions) (MetricBatchPlan, error) {
-	return compileMetricsDialect(ctx, q, s, o, true)
-}
-func CompileSQLiteComputedRows(ctx context.Context, q WireQuery, s Schema, o PlanOptions) (SQLPlan, error) {
-	return compileComputedRowsDialect(ctx, q, s, o, true)
-}
-func CompileSQLiteRowsV2(ctx context.Context, q ServerQueryV2, s Schema, o PlanOptions) (SQLPlan, error) {
-	if q.Version != 2 {
-		return SQLPlan{}, diagnostic("version", "row protocol version must be 2")
-	}
-	if q.Profile == "" {
-		return SQLPlan{}, diagnostic("profile_required", "computed row request must specify profile")
-	}
-	if len(q.Diagnostics) > 0 {
-		return SQLPlan{}, diagnostic("residual_query", "row query contains unresolved diagnostics")
-	}
-	o, e := requestOptionsDialect(ctx, true, q.Profile, q.PlanToken, q.Snapshot, q.ExpectedRevisions, o)
-	if e != nil {
-		return SQLPlan{}, e
-	}
-	return CompileSQLiteComputedRows(ctx, q.WireQuery, s, o)
-}
-func CompileSQLiteRowExpression(ctx context.Context, source string, s Schema, o PlanOptions) (SQLPlan, error) {
+func compileSQLiteRowExpression(ctx context.Context, source string, s Schema, o PlanOptions) (SQLPlan, error) {
 	return compileRowExpressionDialect(ctx, source, s, o, true)
 }
 func (b *planBuilder) sqliteField(name string, v ValueSQL) (ValueSQL, error) {
@@ -126,7 +102,7 @@ func (b *planBuilder) sqliteFilter(where []WhereTerm) error {
 	if e != nil {
 		return e
 	}
-	p, keys, e := compileSQLiteWhere(where, s, SQLiteOptions{Now: b.options.Now}, b.options.relations)
+	p, keys, e := compileSQLiteWhere(where, s, sqliteOptions{Now: b.options.Now}, b.options.relations)
 	if e != nil {
 		var relationErr *sqliteRelationError
 		if errors.As(e, &relationErr) {

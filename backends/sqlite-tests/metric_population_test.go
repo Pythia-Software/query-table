@@ -48,7 +48,7 @@ func loadPopulationFixture(t *testing.T) (populationFixture, time.Time) {
 }
 
 // projectPopulation keeps only the fields the fixture states, in its JSON shape.
-func projectPopulation(t *testing.T, metric qt.SQLiteMetricV2, expected map[string]any) map[string]any {
+func projectPopulation(t *testing.T, metric qt.MetricResult, expected map[string]any) map[string]any {
 	t.Helper()
 	data, err := json.Marshal(metric)
 	if err != nil {
@@ -98,7 +98,7 @@ func populationRequest(c populationCase, profile string, now time.Time) qt.Query
 		limit = 100
 	}
 	q := qt.QueryRequestV3{Version: 3, Profile: profile, Now: now.UnixMilli(), Metrics: []qt.AggSpec{c.Metric},
-		Source: qt.WireQuery{Limit: 100}, Result: qt.WireQuery{Where: c.Where, OrderBy: qt.OrderBys(c.OrderBy), Limit: limit}}
+		Source: qt.WireQuery{Limit: 100}, Result: qt.WireQuery{Where: c.Where, OrderBy: []qt.OrderBy(c.OrderBy), Limit: limit}}
 	if c.Grouping != nil {
 		q.Grouping = c.Grouping
 		q.Source.Where, q.Result.Where = c.Where, nil
@@ -163,25 +163,23 @@ func TestMetricPopulationFixtureV3(t *testing.T) {
 	}
 }
 
-func TestMetricPopulationFixtureV2(t *testing.T) {
+// The v2 /metrics engine is now v3's direct ungrouped path, which
+// TestMetricPopulationFixtureV3 runs; this runs the same ungrouped cases
+// through the staged executor, so both v3 paths match the fixture.
+func TestMetricPopulationFixtureV3Staged(t *testing.T) {
 	db, f, now := setupPopulation(t)
-	d := qt.SQLiteV2Dataset{Schema: populationSchema(true), SourceSQL: "SELECT * FROM calls", Scope: "one", Dataset: "calls"}
-	if caps := d.Capabilities(); !caps.Filters || !caps.MinCount {
+	d := qt.TestOnlyStageUngrouped(qt.QueryDatasetV3{Dialect: "sqlite", Schema: populationSchema(true), SourceSQL: "SELECT * FROM calls", Scope: "one", Dataset: "calls"})
+	if caps := d.Capabilities(); !caps.MetricFilters || !caps.MetricMinCount {
 		t.Fatalf("capabilities: %#v", caps)
 	}
 	for _, c := range f.Cases {
 		if c.Grouping != nil || c.Metric.DateGrouping != nil {
-			continue // v3-only stages
+			continue // grouped stages and calendar metrics always stage
 		}
 		t.Run(c.Name, func(t *testing.T) {
-			limit := c.Limit
-			if limit == 0 {
-				limit = 100
-			}
-			q := qt.MetricQuery{Version: 2, Profile: qt.SQLiteExpressionProfile, Where: c.Where, OrderBy: c.OrderBy, Limit: limit, Metrics: []qt.AggSpec{c.Metric}}
-			out, err := d.ExecuteV2(context.Background(), db, nil, &q, qt.PlanOptions{Now: now})
+			out, err := d.Execute(context.Background(), db, populationRequest(c, qt.SQLiteExpressionProfile, now), qt.PlanOptions{})
 			if c.Expected["error"] == true {
-				if err != nil || !strings.Contains(out.Metrics.Metrics[0].Error, "minCount") {
+				if err != nil || !strings.Contains(out.Metrics[0].Error, "minCount") {
 					t.Fatalf("expected a per-metric refusal, got %#v / %v", out.Metrics, err)
 				}
 				return
@@ -189,7 +187,7 @@ func TestMetricPopulationFixtureV2(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := projectPopulation(t, out.Metrics.Metrics[0], c.Expected); !reflect.DeepEqual(got, c.Expected) {
+			if got := projectPopulation(t, out.Metrics[0], c.Expected); !reflect.DeepEqual(got, c.Expected) {
 				t.Fatalf("got  %v\nwant %v", got, c.Expected)
 			}
 		})
@@ -200,23 +198,24 @@ func TestMetricPopulationFixtureV2(t *testing.T) {
 // cached or fused reduction; identical ones still may.
 func TestMetricPopulationReductionReuseKeys(t *testing.T) {
 	db, _, now := setupPopulation(t)
-	d := qt.SQLiteV2Dataset{Schema: populationSchema(true), SourceSQL: "SELECT * FROM calls", Scope: "one", Dataset: "calls"}
+	d := qt.QueryDatasetV3{Dialect: "sqlite", Schema: populationSchema(true), SourceSQL: "SELECT * FROM calls", Scope: "one", Dataset: "calls"}
 	errors := []qt.WhereTerm{{Field: "status", Op: "=", Value: "error"}}
 	ok := []qt.WhereTerm{{Field: "status", Op: "=", Value: "ok"}}
-	q := qt.MetricQuery{Version: 2, Profile: qt.SQLiteExpressionProfile, Limit: 100, Metrics: []qt.AggSpec{
+	q := metricsV3(nil, nil, 100, 0, []qt.AggSpec{
 		{ID: "all", Op: "count", GroupBy: []string{"kind"}},
 		{ID: "errors", Op: "count", GroupBy: []string{"kind"}, Where: errors},
 		{ID: "ok", Op: "count", GroupBy: []string{"kind"}, Where: ok},
 		{ID: "error_ms", Op: "sum", Field: "ms", GroupBy: []string{"kind"}, Where: errors},
 		{ID: "errors_again", Op: "count", GroupBy: []string{"kind"}, Where: errors},
 		{ID: "errors_min", Op: "count", GroupBy: []string{"kind"}, Where: errors, MinCount: qt.MetricMinCount{Min: 2}},
-	}}
-	out, err := d.ExecuteV2(context.Background(), db, nil, &q, qt.PlanOptions{Now: now})
+	}...)
+	q.Now = now.UnixMilli() // v3 takes its evaluation clock from the request
+	out, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	summary := map[string]map[string]any{}
-	for _, m := range out.Metrics.Metrics {
+	for _, m := range out.Metrics {
 		groups := map[string]any{}
 		for _, b := range m.Buckets {
 			key := "<null>"
@@ -238,10 +237,10 @@ func TestMetricPopulationReductionReuseKeys(t *testing.T) {
 	if !reflect.DeepEqual(summary, want) {
 		t.Fatalf("got  %v\nwant %v", summary, want)
 	}
-	if h := out.Metrics.Metrics[5].HiddenGroups; h == nil || *h != 3 {
+	if h := out.Metrics[5].HiddenGroups; h == nil || *h != 3 {
 		t.Fatalf("hidden groups: %v", h)
 	}
-	if out.Metrics.Metrics[1].HiddenGroups != nil {
+	if out.Metrics[1].HiddenGroups != nil {
 		t.Fatal("hiddenGroups must be absent without minCount")
 	}
 }

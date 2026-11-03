@@ -95,7 +95,7 @@ func TestPostgresNullComputedKeys(t *testing.T) {
 						if selected {
 							q.Select = append(q.Select, "@computed/nil")
 						}
-						p, e := CompileComputedRows(context.Background(), q, metricSchema(), o)
+						p, e := compileTestRows(context.Background(), q, metricSchema(), o)
 						if e != nil {
 							t.Fatal(e)
 						}
@@ -107,8 +107,8 @@ func TestPostgresNullComputedKeys(t *testing.T) {
 							t.Fatal(r, p.Columns)
 						}
 					}
-					mq := MetricQuery{Version: 2, OrderBy: []OrderBy{{Field: "@computed/nil", Dir: dir, Nulls: nulls}}, Limit: 2, Offset: 100, Metrics: []AggSpec{{ID: "m", Expression: "SUM([x])", Scope: "shownRows"}}}
-					batch, e := CompileMetrics(context.Background(), mq, metricSchema(), o)
+					mq := metricRequest{Version: 2, OrderBy: []OrderBy{{Field: "@computed/nil", Dir: dir, Nulls: nulls}}, Limit: 2, Offset: 100, Metrics: []AggSpec{{ID: "m", Expression: "SUM([x])", Scope: "shownRows"}}}
+					batch, e := compileTestMetrics(context.Background(), mq, metricSchema(), o)
 					if e != nil {
 						t.Fatal(e)
 					}
@@ -285,7 +285,7 @@ func TestPostgresMetricBoundaryLazyAndFinalResults(t *testing.T) {
 		})
 	}
 	// Row expressions keep their bounded arithmetic semantics.
-	p, e := CompileRowExpression(context.Background(), "[x]+1", metricSchema(), o)
+	p, e := compileTestRowExpression(context.Background(), "[x]+1", metricSchema(), o)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -392,7 +392,7 @@ func TestPostgresRepeatedComputedTextKeepsErrors(t *testing.T) {
 	o.Resolver = DefinitionResolverFunc(func(context.Context, string) (ComputedColumn, error) {
 		return ComputedColumn{ID: "text", Label: "Text", Revision: "1", Expression: ComputedExpression{"qt-expr", 1, `IF([x]/([y]-3)>0,"pos","neg")`}}, nil
 	})
-	p, err := CompileComputedRows(context.Background(), WireQuery{Select: []string{"id", "@computed/text"}, OrderBy: []OrderBy{{Field: "@computed/text", Dir: "asc"}}, Limit: 10}, metricSchema(), o)
+	p, err := compileTestRows(context.Background(), WireQuery{Select: []string{"id", "@computed/text"}, OrderBy: []OrderBy{{Field: "@computed/text", Dir: "asc"}}, Limit: 10}, metricSchema(), o)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -412,7 +412,7 @@ func TestPostgresRepeatedComputedTextKeepsErrors(t *testing.T) {
 		{Expression: "COUNT([@computed/text])", Scope: "shownRows"},
 		{Expression: "MIN([@computed/text])", GroupBy: []string{"@computed/text"}},
 	} {
-		plan, err := CompileMetrics(context.Background(), MetricQuery{Version: 2, Limit: 10, OrderBy: []OrderBy{{Field: "@computed/text", Dir: "asc"}}, Metrics: []AggSpec{func() AggSpec { spec.ID = "m"; return spec }()}}, metricSchema(), o)
+		plan, err := compileTestMetrics(context.Background(), metricRequest{Version: 2, Limit: 10, OrderBy: []OrderBy{{Field: "@computed/text", Dir: "asc"}}, Metrics: []AggSpec{func() AggSpec { spec.ID = "m"; return spec }()}}, metricSchema(), o)
 		if err != nil {
 			t.Fatal(err)
 		}

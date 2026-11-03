@@ -21,7 +21,7 @@ func TestPostgresLongTextRowsAreReturnedIntact(t *testing.T) {
 	q := groupedQuery()
 	q.Grouping = nil
 	q.ExpectedRevisions = map[string]string{"echo": "1"}
-	q.Result = qt.WireQuery{Select: []string{"id", "label", "@computed/echo"}, OrderBy: qt.OrderBys{{Field: "n", Dir: "desc"}}, Limit: 2}
+	q.Result = qt.WireQuery{Select: []string{"id", "label", "@computed/echo"}, OrderBy: []qt.OrderBy{{Field: "n", Dir: "desc"}}, Limit: 2}
 	o := qt.PlanOptions{Resolver: qt.DefinitionResolverFunc(func(_ context.Context, id string) (qt.ComputedColumn, error) {
 		return qt.ComputedColumn{ID: id, Label: "Echo", Revision: "1", Expression: qt.ComputedExpression{Language: "qt-expr", Version: 1, Source: "[label]"}}, nil
 	})}
@@ -47,7 +47,7 @@ func TestPostgresLongTextRowsAreReturnedIntact(t *testing.T) {
 	if out, err = d.Execute(context.Background(), db, q, qt.PlanOptions{}); err != nil || out.Total != 1 || out.Rows[0]["label"] != longText {
 		t.Fatalf("contains: %v %d", err, out.Total)
 	}
-	q.Result = qt.WireQuery{Select: []string{"id"}, OrderBy: qt.OrderBys{{Field: "label", Dir: "desc", Nulls: "last"}}, Limit: 10}
+	q.Result = qt.WireQuery{Select: []string{"id"}, OrderBy: []qt.OrderBy{{Field: "label", Dir: "desc", Nulls: "last"}}, Limit: 10}
 	if out, err = d.Execute(context.Background(), db, q, qt.PlanOptions{}); err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestPostgresLongTextRowsAreReturnedIntact(t *testing.T) {
 	// Grouped representative ROW values are plain projections too.
 	q = groupedQuery()
 	q.Source = qt.WireQuery{}
-	q.Result.OrderBy = qt.OrderBys{{Field: "k", Dir: "asc", Nulls: "last"}}
+	q.Result.OrderBy = []qt.OrderBy{{Field: "k", Dir: "asc", Nulls: "last"}}
 	if out, err = d.Execute(context.Background(), db, q, qt.PlanOptions{}); err != nil {
 		t.Fatal(err)
 	}
