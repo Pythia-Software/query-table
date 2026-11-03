@@ -14,6 +14,7 @@ export type {
   AggOp,
   AggregationClause,
   QueryState,
+  FitMode,
   ItemDetailMode,
   ItemPropertyMode,
   ItemPageOptions,

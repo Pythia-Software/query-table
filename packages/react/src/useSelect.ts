@@ -20,7 +20,7 @@ export interface SelectApi<Row> {
   hide: (field: string) => void;
   /** Reorder via drag-drop: move `field` to `toIndex` in the visible order. */
   move: (field: string, toIndex: number) => void;
-  /** Set a column's pixel width. */
+  /** Set a column's pixel width. Other columns keep any live `fit`. */
   setWidth: (field: string, width: number) => void;
   /** Reset to the schema's default columns (clears query.select). */
   reset: () => void;
@@ -41,13 +41,11 @@ export function useSelect<Row>(query: QueryState, setQuery: SetQuery, schema: Fi
   }, [schema, fields]);
 
   const writeSelect = useCallback(
-    (mutate: (cols: SelectColumn[]) => SelectColumn[], clearFitToScreen = false) => {
+    (mutate: (cols: SelectColumn[]) => SelectColumn[]) => {
       setQuery((prev) => {
         // Materialize current (resolved) columns the first time we diverge from defaults.
         const current = prev.select.length ? prev.select : visible;
-        const next = { ...prev, select: mutate([...current]) };
-        if (clearFitToScreen) delete next.fitToScreen;
-        return next;
+        return { ...prev, select: mutate([...current]) };
       });
     },
     [setQuery, visible],
@@ -68,7 +66,7 @@ export function useSelect<Row>(query: QueryState, setQuery: SetQuery, schema: Fi
   );
   const setWidth = useCallback(
     (field: string, width: number) =>
-      writeSelect((c) => c.map((x) => (x.field === field ? { ...x, width: Math.round(width) } : x)), true),
+      writeSelect((c) => c.map((x) => (x.field === field ? { ...x, width: Math.round(width) } : x))),
     [writeSelect],
   );
   const reset = useCallback(() => setQuery((prev) => ({ ...prev, select: [] })), [setQuery]);

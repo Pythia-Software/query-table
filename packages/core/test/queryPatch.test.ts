@@ -121,7 +121,7 @@ describe("applyPatch", () => {
 });
 
 describe("matchPatch", () => {
-  it("ignores widths, fitToScreen, labels, metric display, layout and IDs", () => {
+  it("ignores widths, fit, labels, metric display, layout and IDs", () => {
     const metrics: QueryPatch = {
       id: "metrics",
       owns: ["metrics", "columns"],
@@ -129,7 +129,7 @@ describe("matchPatch", () => {
     };
     const query: QueryState = {
       ...base,
-      fitToScreen: true,
+      fit: "content",
       select: [{ field: "id", width: 200 }],
       aggregations: [{ id: "b", op: "count", groupBy: ["status"], display: { kind: "pie" }, layout: { widthRem: 9, heightRem: 9, minWidthRem: 1, minHeightRem: 1 } }],
     };

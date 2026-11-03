@@ -46,7 +46,8 @@ var (
 	linkQueryFacets = stringSet("filters", "columns", "order", "grouping", "metrics", "limit")
 	sortDirections  = stringSet("asc", "desc")
 	nullPlacements  = stringSet("first", "last")
-	linkPatchKeys   = []string{"select", "where", "orderBy", "limit", "aggregations", "grouping", "fitToScreen"}
+	linkFitModes    = stringSet("content", "screen")
+	linkPatchKeys   = []string{"select", "where", "orderBy", "limit", "aggregations", "grouping", "fit"}
 )
 
 func boundedJSString(v *jsValue, maxLength int) (string, bool) {
@@ -318,8 +319,14 @@ func normalizeLinkQuery(input *jsValue, links bool) *jsValue {
 		set("limit", jsNum(boundedJSInteger(raw.get("limit"), linkDefaultLimit, 1, maxSafeInteger))).
 		set("offset", jsNum(boundedJSInteger(raw.get("offset"), 0, 0, MaxQueryOffset)))
 
-	if fit := raw.get("fitToScreen"); fit != nil && fit.kind == jsBool && fit.b {
-		out.set("fitToScreen", jsBoolValue(true))
+	if fit := raw.get("fit"); fit.isString() && linkFitModes[fit.s] {
+		out.set("fit", jsStr(fit.s))
+	} else if legacy := raw.get("fitToScreen"); legacy != nil && legacy.kind == jsBool && legacy.b {
+		// Before fit, screen fitting ignored every stored width.
+		out.set("fit", jsStr("screen"))
+		for _, column := range selectList.a {
+			column.del("width")
+		}
 	}
 
 	// Unreadable host state is kept as version 0 rather than dropped, so a
@@ -1391,7 +1398,8 @@ func normalizeLinkPatch(value *jsValue) *jsValue {
 	}
 	query := jsObj()
 	for _, key := range linkPatchKeys {
-		if raw.get(key) != nil && normalized.get(key) != nil {
+		supplied := raw.get(key) != nil || (key == "fit" && raw.get("fitToScreen") != nil)
+		if supplied && normalized.get(key) != nil {
 			query.set(key, normalized.get(key))
 		}
 	}

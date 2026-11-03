@@ -56,7 +56,8 @@ function fromBase64Url(s: string): string {
 //   s = select (as [field], [field, width] or [field, width | null, display]
 //       tuples; older decoders read the first two members and ignore display)
 //   w = where, o = orderBy, l = limit, f = offset
-//   fs = fit to the viewer's screen
+//   ft = live column fit mode ("content" | "screen")
+//   fs = legacy fit to screen (decoded as ft "screen" without widths)
 
 type CompactColumn = [string] | [string, number] | [string, number | null, CellDisplay];
 
@@ -69,6 +70,7 @@ interface CompactQuery {
   g?: AggregationClause[]; // aggregation metrics (omitted when none)
   d?: QueryState["itemDetails"];
   c?: string[]; // legacy alias for select column names
+  ft?: QueryState["fit"];
   fs?: boolean;
   b?: QueryState["grouping"];
   h?: QueryState["hostState"];
@@ -88,7 +90,7 @@ function compactQuery(q: QueryState): CompactQuery {
   if (q.offset) c.f = q.offset;
   if (q.aggregations?.length) c.g = q.aggregations;
   if (q.itemDetails) c.d = q.itemDetails;
-  if (q.fitToScreen) c.fs = true;
+  if (q.fit) c.ft = q.fit;
   if (q.grouping) c.b = q.grouping;
   if (q.hostState) c.h = q.hostState;
   return c;
@@ -238,6 +240,7 @@ function decodeToken(token: string, strict: boolean): QueryState {
       offset: c.f,
       aggregations: c.g,
       itemDetails: c.d,
+      fit: c.ft,
       fitToScreen: c.fs,
       grouping: c.b,
       hostState: c.h,

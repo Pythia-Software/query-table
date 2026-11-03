@@ -96,7 +96,7 @@ transport, so servers and shared links are unaffected.
 ## matchPatch
 
 Both queries are normalized (`normalizeQueryState`). Column widths,
-`fitToScreen`, labels (metric and summary), metric `display`/`layout` and metric
+`fit`, labels (metric and summary), metric `display`/`layout` and metric
 IDs are ignored. Metrics compare as an unordered set. Group keys, summary IDs
 and their order are significant.
 

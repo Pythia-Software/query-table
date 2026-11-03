@@ -181,7 +181,7 @@ regression check (`node demo/dnd-test.mjs`).
 // what data + how to view it — reads like the SQL it compiles to
 interface QueryState {
   select:  SelectColumn[];   // ordered visible columns + per-column width; [] = schema defaults
-  fitToScreen?: boolean;    // responsive widths for each viewer; shared in ?q= and saved queries
+  fit?: "content" | "screen"; // live widths for columns without one; shared in ?q= and saved queries
   where:   WhereTerm[];      // WHERE: AND of terms, each a predicate or OR group (see below)
   orderBy: OrderByClause[];  // multi-sort, priority = array order
   limit:   number;

@@ -86,7 +86,9 @@ type LinkQuery struct {
 	Aggregations []json.RawMessage `json:"aggregations,omitempty"`
 	// ItemDetails is the ItemDetailsState JSON, or nil.
 	ItemDetails json.RawMessage `json:"itemDetails,omitempty"`
-	FitToScreen bool            `json:"fitToScreen,omitempty"`
+	// Fit is the live column sizing mode, "content" or "screen", or "" for
+	// stored widths. Legacy fitToScreen links decode as "screen".
+	Fit string `json:"fit,omitempty"`
 	// Grouping is the GroupingState JSON, or nil.
 	Grouping json.RawMessage `json:"grouping,omitempty"`
 	// HostState is the host-owned state registered with useQueryTable's
@@ -304,7 +306,7 @@ func decodeLinkState(token string) (*jsValue, error) {
 			return nil, linkError(QueryLinkInvalid, "Invalid host state in query link.")
 		}
 	}
-	for key, name := range map[string]string{"l": "limit", "f": "offset", "g": "aggregations", "d": "itemDetails", "fs": "fitToScreen", "b": "grouping", "h": "hostState"} {
+	for key, name := range map[string]string{"l": "limit", "f": "offset", "g": "aggregations", "d": "itemDetails", "ft": "fit", "fs": "fitToScreen", "b": "grouping", "h": "hostState"} {
 		if value := c.get(key); value != nil {
 			input.set(name, value)
 		}
@@ -437,8 +439,8 @@ func compactLinkQuery(state *jsValue) *jsValue {
 	if details := q.get("itemDetails"); details.truthy() {
 		c.set("d", details)
 	}
-	if q.get("fitToScreen").truthy() {
-		c.set("fs", jsBoolValue(true))
+	if fit := q.get("fit"); fit.truthy() {
+		c.set("ft", fit)
 	}
 	if grouping := q.get("grouping"); grouping.truthy() {
 		c.set("b", grouping)
@@ -765,8 +767,8 @@ func (q LinkQuery) jsState() (*jsValue, error) {
 		state.set("limit", jsNum(float64(q.Limit)))
 	}
 	state.set("offset", jsNum(float64(q.Offset)))
-	if q.FitToScreen {
-		state.set("fitToScreen", jsBoolValue(true))
+	if q.Fit != "" {
+		state.set("fit", jsStr(q.Fit))
 	}
 	if q.HostState != nil {
 		params := jsObj()
@@ -875,7 +877,9 @@ func linkQueryFromState(state *jsValue) LinkQuery {
 		}
 		q.OrderBy = append(q.OrderBy, item)
 	}
-	q.FitToScreen = state.get("fitToScreen") != nil
+	if fit := state.get("fit"); fit != nil {
+		q.Fit = fit.s
+	}
 	if host := state.get("hostState"); host != nil {
 		q.HostState = &HostQueryState{Version: int(host.get("version").n), Params: map[string][]string{}}
 		params := host.get("params")

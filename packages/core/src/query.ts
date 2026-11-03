@@ -301,6 +301,10 @@ export function parseHostQueryState(input: unknown): HostQueryState {
   return state;
 }
 
+/** Live column sizing mode; see `QueryState.fit`. */
+export type FitMode = "content" | "screen";
+const FIT_MODES: ReadonlySet<string> = new Set<FitMode>(["content", "screen"]);
+
 export interface QueryState {
   /** Host-owned state registered through `useQueryTable({ hostQuery })`.
    * Only the top-level query carries it; a grouping source never does. */
@@ -312,9 +316,13 @@ export interface QueryState {
   itemDetails?: ItemDetailsState;
   /** Ordered SELECT list + per-column widths. Empty = the schema's default columns. */
   select: SelectColumn[];
-  /** Refit columns to each viewer's table viewport after loading. Manual width
-   *  changes clear this view preference; omitted/false uses stored widths. */
-  fitToScreen?: boolean;
+  /** Live sizing for columns without an explicit `width`, refit after every
+   *  change to what the table shows and kept out of the query:
+   *  - `"content"`: each column fits its widest drawn value.
+   *  - `"screen"`: the columns fill each viewer's table viewport.
+   *  Omitted: stored or default widths. A legacy `fitToScreen: true` (whose
+   *  stored widths were never shown) normalizes to `"screen"` without widths. */
+  fit?: FitMode;
   /** WHERE in conjunctive normal form: the AND of these terms, each a single
    *  predicate or an OR group. A flat list of literals (no groups) is the common
    *  case and the legacy shape, decoded unchanged. */
@@ -579,7 +587,12 @@ function normalizeQuery(input: unknown, fallback: QueryState, links: boolean): Q
     offset: boundedInteger(raw.offset, fallback.offset, 0, MAX_QUERY_OFFSET),
   };
 
-  if (raw.fitToScreen === true) out.fitToScreen = true;
+  if (typeof raw.fit === "string" && FIT_MODES.has(raw.fit)) out.fit = raw.fit as FitMode;
+  else if (raw.fitToScreen === true) {
+    // Before `fit`, screen fitting ignored every stored width.
+    out.fit = "screen";
+    for (const column of select) delete column.width;
+  }
 
   // Unreadable host state is kept as version 0 rather than dropped, so a
   // restore can reject it instead of running a broadened table-only query.
@@ -755,7 +768,7 @@ function normalizeGroupingState(value: unknown, links: boolean): GroupingState {
 }
 
 const QUERY_FACETS: ReadonlySet<string> = new Set(["filters", "columns", "order", "grouping", "metrics", "limit"]);
-const PATCH_QUERY_KEYS = ["select", "where", "orderBy", "limit", "aggregations", "grouping", "fitToScreen"] as const;
+const PATCH_QUERY_KEYS = ["select", "where", "orderBy", "limit", "aggregations", "grouping", "fit"] as const;
 const MAX_LINK_PARAMS = 50;
 
 /** A link spec, or undefined when any part is malformed. Never partially kept:
@@ -821,7 +834,8 @@ function normalizeLinkPatch(value: unknown): QueryPatch | undefined {
     normalized.aggregations?.some((clause) => clause.diagnostics?.length))) return undefined;
   const query: Partial<QueryState> = {};
   for (const key of PATCH_QUERY_KEYS) {
-    if (raw[key] !== undefined && normalized[key] !== undefined) (query as Record<string, unknown>)[key] = normalized[key];
+    const supplied = raw[key] !== undefined || (key === "fit" && raw.fitToScreen !== undefined);
+    if (supplied && normalized[key] !== undefined) (query as Record<string, unknown>)[key] = normalized[key];
   }
   return { id: value.id as string, owns: [...new Set(value.owns as QueryFacet[])], query };
 }
@@ -831,7 +845,7 @@ function normalizeLinkPatch(value: unknown): QueryPatch | undefined {
 export function queriesEqual(a: QueryState, b: QueryState): boolean {
   if (a === b) return true;
   if (a.limit !== b.limit || a.offset !== b.offset) return false;
-  if ((a.fitToScreen === true) !== (b.fitToScreen === true)) return false;
+  if (a.fit !== b.fit) return false;
   if (!sameArray(a.where, b.where)) return false;
   if (!sameArray(a.orderBy, b.orderBy)) return false;
   if (!sameArray(a.select, b.select)) return false;
