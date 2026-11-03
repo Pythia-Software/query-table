@@ -413,7 +413,7 @@ function cloneQueryState(q: QueryState): QueryState {
     limit: q.limit,
     offset: q.offset,
   };
-  if (q.fitToScreen) clone.fitToScreen = true;
+  if (q.fit) clone.fit = q.fit;
   if (q.hostState) clone.hostState = { version: q.hostState.version, params: Object.fromEntries(Object.entries(q.hostState.params).map(([name, values]) => [name, [...values]])) };
   if (q.aggregations)
     clone.aggregations = JSON.parse(

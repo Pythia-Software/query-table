@@ -177,29 +177,14 @@ describe("DataTable column width presets", () => {
     expect(update(query).select).toEqual([{ field: "a", width: 300 }, { field: "b", width: 300 }]);
   });
 
-  it("sizes columns from their measured content", () => {
-    mockTextLayout();
+  it.each([["Fit All to Content", "content"], ["Fit All to Screen", "screen"]] as const)("%s turns on live fitting and clears explicit widths", (label, fit) => {
     const onQueryChange = vi.fn();
     const table = renderTable(onQueryChange);
-    chooseWidthPreset(table, "Fit All to Content");
+    chooseWidthPreset(table, label);
 
+    expect(onQueryChange).toHaveBeenCalledTimes(1);
     const update = onQueryChange.mock.calls[0]![0] as (previous: QueryState) => QueryState;
-    const [a = 0, b = 0] = update(query).select.map((c) => c.width ?? 0);
-    // "a much longer value" (190px) vs "short" (50px); padding is shared.
-    expect(a - b).toBe(140);
-  });
-
-  it("fills the viewport in proportion to content when it fits", () => {
-    mockTextLayout();
-    const onQueryChange = vi.fn();
-    const table = renderTable(onQueryChange);
-    chooseWidthPreset(table, "Fit All to Screen");
-
-    const update = onQueryChange.mock.calls[0]![0] as (previous: QueryState) => QueryState;
-    expect(update(query).fitToScreen).toBe(true);
-    const [a = 0, b = 0] = update(query).select.map((c) => c.width ?? 0);
-    expect(a + b).toBe(600);
-    expect(a).toBeGreaterThan(b * 3);
+    expect(update(query)).toEqual({ ...query, fit, select: [{ field: "a" }, { field: "b" }] });
   });
 
   it("fits only the clicked column", () => {

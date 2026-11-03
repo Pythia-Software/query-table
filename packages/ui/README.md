@@ -110,24 +110,41 @@ Click anywhere in a column header to open its actions menu, including padding
 and blank space. Resize handles remain dedicated to resizing.
 Open **Column Widths** to resize in one step:
 
-- **Fit This Column** sizes the clicked column to its widest rendered value.
-- **Fit All to Content** does the same for every column.
-- **Fit All to Screen** fills the viewport; when content overflows, narrow
-  columns keep their content width and only the widest ones are trimmed. It
-  sets `query.fitToScreen`, so shared links and saved queries fit each viewer's
-  available table area after loading and when that area changes. No column
-  is trimmed below what its buttons and links need (links shorten to an
-  ellipsis first); if those minimums exceed the screen, the table scrolls
-  horizontally. Set `select.minWidth` on a field whose host renderer needs
-  room the table cannot measure.
-- **Equal Widths** splits the viewport evenly.
-- **Reset Widths** drops explicit widths back to schema defaults.
+- **Fit All to Content** sets `query.fit = "content"` and clears explicit
+  widths. Every column without a width then keeps fitting its widest drawn
+  value (header included) after each change to what the table shows: sorting,
+  column changes, filters, grouping, paging, refreshes and new rows. The table
+  is then only as wide as its columns.
+- **Fit All to Screen** sets `query.fit = "screen"` and clears explicit
+  widths. Columns without a width fill the viewport left by resized ones;
+  when content overflows, narrow columns keep their content width and only
+  the widest ones are trimmed. It also refits when the viewport changes.
+- **Fit This Column** returns the clicked column to automatic fitting in
+  either mode. With no mode it sizes the column to its widest drawn value once.
+- **Equal Widths** splits the viewport evenly and turns any mode off.
+- **Reset Widths** drops explicit widths back to automatic fitting (or to
+  schema defaults with no mode).
 
-Widths live in `query.select`, so presets are shareable and undoable.
-The fit-to-screen preference travels in the existing encoded `?q=` parameter
-(`fs: true` in its compact payload). Manual column resizing, fitting a single
-column, another width preset, or resetting widths clears it. Set
-`fitToScreen: true` on an initial query to enable the same behavior directly.
+Choosing the active mode again turns it off and keeps the widths it showed.
+
+Fitted widths are local layout: they are never written to the query, the URL
+or undo history. Dragging or nudging one column stores only that column's
+`width`; the mode stays on and the other columns keep fitting around it. A
+field's `select.width` is a fallback used only when no mode is set. While a
+query is loading the previous widths stay; scrolling a virtualized body never
+refits. A refresh that keeps the query (same columns, filters, sort, paging
+and grouping) only grows content-fitted columns, so a live table stays calm;
+any change to the query refits from scratch. Content fitting stops at 800px.
+No column is fitted below what its buttons and links need (links shorten to
+an ellipsis first); in screen mode, if those minimums exceed the screen, the
+table scrolls horizontally. Set `select.minWidth` on a field whose host renderer needs room
+the table cannot measure.
+
+Set `fit` on a default or initial query to opt in; a stored query without
+`fit` has no live sizing. The mode travels in the encoded `?q=` parameter
+(`ft` in its compact payload). Links from 0.9.9 and earlier with
+`fitToScreen: true` (`fs`) open in screen mode without their stored widths,
+which screen fitting never showed.
 
 ## Cell quick filters
 

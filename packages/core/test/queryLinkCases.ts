@@ -242,7 +242,8 @@ export const stateCases: StateCase[] = [
     },
   },
   { name: "legacy single item view", state: { ...EMPTY_QUERY, itemDetails: { modes: ["expand"], view: view("Name") as never, active: { id: 42, mode: "expand" } } } },
-  { name: "fit to screen", state: { ...EMPTY_QUERY, fitToScreen: true, select: [{ field: "a", width: 100 }] } },
+  { name: "fit to screen", state: { ...EMPTY_QUERY, fit: "screen", select: [{ field: "a", width: 100 }, { field: "b" }] } },
+  { name: "fit to content", state: { ...EMPTY_QUERY, fit: "content", select: [{ field: "a" }, { field: "b", width: 90 }] } },
   {
     name: "grouping with links",
     state: {
@@ -337,6 +338,25 @@ export const tokenCases: TokenCase[] = [
   { name: "legacy names and single order", token: legacy({ c: ["a", "b"], o: { field: "a", dir: "desc" }, l: 20, w: [{ field: "a", op: "=", value: "1" }] }) },
   { name: "legacy string select", token: legacy({ s: ["x", "y"], f: 10 }) },
   { name: "legacy width tuples", token: legacy({ s: [["x", 200], ["y"]] }) },
+  // fs links predate `fit`; their stored widths were never shown.
+  { name: "legacy fit to screen drops widths", token: plain({ s: [["a", 300], ["b", 120, { kind: "text", lines: 2 }]], fs: true }) },
+  { name: "fit mode wins over legacy fit to screen", token: plain({ s: [["a", 300]], ft: "content", fs: true }) },
+  { name: "unknown fit mode falls back to legacy fit to screen", token: plain({ s: [["a", 300]], ft: "wide", fs: true }) },
+  { name: "unknown fit mode is dropped", token: plain({ ft: "Content" }) },
+  {
+    name: "fit in link patches",
+    token: plain({
+      b: {
+        keys: ["k"],
+        summaries: [
+          linkSummary("fit", { patch: { id: "p", owns: ["columns"], query: { fit: "content", select: [{ field: "a", width: 80 }] } } }),
+          linkSummary("legacy", { patch: { id: "q", owns: ["columns"], query: { fitToScreen: true, select: [{ field: "a", width: 80 }] } } }),
+        ],
+        representative: null,
+        source: {},
+      },
+    }),
+  },
   { name: "legacy tokens do not unpack", token: legacy({ d: { modes: ["hover"], views: { pool: [view("A")], refs: { hover: 0 } } } }) },
   { name: "empty token", token: "" },
   {

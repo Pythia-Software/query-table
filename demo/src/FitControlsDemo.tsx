@@ -32,7 +32,7 @@ const fields: FieldSchema<Message>["fields"] = [
 const itemSchema: FieldSchema<Message> = { name: "fit-items", idField: "id", fields };
 const itemQuery: QueryState = {
   select: ["id", "conversation", "tool", "status", "words", "tokens", "cost", "payload", ITEM_DETAILS_COLUMN].map((field) => ({ field })),
-  where: [], orderBy: [], limit: 25, offset: 0, fitToScreen: true,
+  where: [], orderBy: [], limit: 25, offset: 0, fit: "screen",
 };
 const groupSchema: FieldSchema<Message> = { name: "fit-groups", idField: "id", fields };
 const groupQuery: QueryState = {
@@ -53,7 +53,7 @@ const groupQuery: QueryState = {
   },
   // Detail comes last, after the link summaries.
   select: ["conversation", "messages", "word_total", "token_total", "cost_total", "max_words", "tools", "records", "open", ITEM_DETAILS_COLUMN].map((field) => ({ field })),
-  where: [], orderBy: [{ field: "conversation", dir: "asc" }], limit: 3, offset: 0, fitToScreen: true,
+  where: [], orderBy: [{ field: "conversation", dir: "asc" }], limit: 3, offset: 0, fit: "screen",
 };
 const linkTargets: LinkTargets = { fixture: (query) => `/fit-controls?items=${encodeQuery(query)}` };
 

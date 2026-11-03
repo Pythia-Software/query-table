@@ -4,11 +4,32 @@
 
 ### Added
 
+- Live fit to content. `QueryState.fit: "content"` keeps every column without
+  an explicit `width` sized as Fit All to Content would size it, refitting
+  after sorting, column changes, filtering, grouping, paging, refreshes and new
+  rows. Fitted widths stay in `DataTable` state, never in the query, URL or
+  undo history. Loading keeps the previous widths, scrolling never refits, and
+  a refresh of the same query only grows columns. In this mode the table is
+  as wide as its columns rather than stretching them across the viewport.
 - `DataTable` takes an optional `grouping` prop (`api.grouping`). With it, the
   column header menu offers Group By for groupable columns, and on a grouped
   table Remove from Group By (on a key column, when there are several keys)
   and Ungroup. The actions go through the grouping controller, so validation,
   undo and restoring the previous grouped layout behave as in the query editor.
+
+### Changed
+
+- **Breaking:** `QueryState.fitToScreen` is replaced by `fit: "screen"`, and
+  Go's `LinkQuery.FitToScreen` by `LinkQuery.Fit`. The compact link key is
+  `ft`. Legacy `fitToScreen: true` (`fs`) links, saved queries and link
+  patches still decode, as `fit: "screen"` without their stored widths, which
+  screen fitting never showed. Releases up to 0.9.9 ignore `ft`.
+- Both fit modes respect per-column widths. Resizing a column stores only that
+  column's width and keeps the mode; screen mode fits the other columns into
+  the space left. Fit This Column returns a resized column to fitting, Fit All
+  to Content / Screen set the mode and clear widths, Reset Widths clears widths
+  but keeps the mode, and choosing the active mode again turns it off, keeping
+  the widths it showed. `useSelect().setWidth` no longer turns the mode off.
 
 ## 0.9.9 — 2026-11-02
 

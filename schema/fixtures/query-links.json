@@ -2030,29 +2030,72 @@
           {
             "field": "a",
             "width": 100
+          },
+          {
+            "field": "b"
           }
         ],
         "where": [],
         "orderBy": [],
         "limit": 100,
         "offset": 0,
-        "fitToScreen": true
+        "fit": "screen"
       },
-      "token": "2j.eyJzIjpbWyJhIiwxMDBdXSwiZnMiOnRydWV9",
+      "token": "2j.eyJzIjpbWyJhIiwxMDBdLFsiYiJdXSwiZnQiOiJzY3JlZW4ifQ",
       "normalized": {
         "select": [
           {
             "field": "a",
             "width": 100
+          },
+          {
+            "field": "b"
           }
         ],
         "where": [],
         "orderBy": [],
         "limit": 100,
         "offset": 0,
-        "fitToScreen": true
+        "fit": "screen"
       },
-      "packed": "{\"s\":[[\"a\",100]],\"fs\":true}"
+      "packed": "{\"s\":[[\"a\",100],[\"b\"]],\"ft\":\"screen\"}"
+    },
+    {
+      "name": "fit to content",
+      "state": {
+        "select": [
+          {
+            "field": "a"
+          },
+          {
+            "field": "b",
+            "width": 90
+          }
+        ],
+        "where": [],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0,
+        "fit": "content"
+      },
+      "token": "2j.eyJzIjpbWyJhIl0sWyJiIiw5MF1dLCJmdCI6ImNvbnRlbnQifQ",
+      "normalized": {
+        "select": [
+          {
+            "field": "a"
+          },
+          {
+            "field": "b",
+            "width": 90
+          }
+        ],
+        "where": [],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0,
+        "fit": "content"
+      },
+      "packed": "{\"s\":[[\"a\"],[\"b\",90]],\"ft\":\"content\"}"
     },
     {
       "name": "grouping with links",
@@ -6050,6 +6093,155 @@
         "offset": 0
       },
       "packed": "{\"s\":[[\"x\",200],[\"y\"]]}"
+    },
+    {
+      "name": "legacy fit to screen drops widths",
+      "token": "2j.eyJzIjpbWyJhIiwzMDBdLFsiYiIsMTIwLHsia2luZCI6InRleHQiLCJsaW5lcyI6Mn1dXSwiZnMiOnRydWV9",
+      "normalized": {
+        "select": [
+          {
+            "field": "a"
+          },
+          {
+            "field": "b",
+            "display": {
+              "kind": "text",
+              "lines": 2
+            }
+          }
+        ],
+        "where": [],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0,
+        "fit": "screen"
+      },
+      "packed": "{\"s\":[[\"a\"],[\"b\",null,{\"kind\":\"text\",\"lines\":2}]],\"ft\":\"screen\"}"
+    },
+    {
+      "name": "fit mode wins over legacy fit to screen",
+      "token": "2j.eyJzIjpbWyJhIiwzMDBdXSwiZnQiOiJjb250ZW50IiwiZnMiOnRydWV9",
+      "normalized": {
+        "select": [
+          {
+            "field": "a",
+            "width": 300
+          }
+        ],
+        "where": [],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0,
+        "fit": "content"
+      },
+      "packed": "{\"s\":[[\"a\",300]],\"ft\":\"content\"}"
+    },
+    {
+      "name": "unknown fit mode falls back to legacy fit to screen",
+      "token": "2j.eyJzIjpbWyJhIiwzMDBdXSwiZnQiOiJ3aWRlIiwiZnMiOnRydWV9",
+      "normalized": {
+        "select": [
+          {
+            "field": "a"
+          }
+        ],
+        "where": [],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0,
+        "fit": "screen"
+      },
+      "packed": "{\"s\":[[\"a\"]],\"ft\":\"screen\"}"
+    },
+    {
+      "name": "unknown fit mode is dropped",
+      "token": "2j.eyJmdCI6IkNvbnRlbnQifQ",
+      "normalized": {
+        "select": [],
+        "where": [],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0
+      },
+      "packed": "{}"
+    },
+    {
+      "name": "fit in link patches",
+      "token": "2j.eyJiIjp7ImtleXMiOlsiayJdLCJzdW1tYXJpZXMiOlt7ImlkIjoiZml0Iiwib3AiOiJsaW5rIiwibGluayI6eyJsYWJlbCI6ImZpdCIsInRvIjp7ImtpbmQiOiJxdWVyeSIsInRhcmdldCI6InQiLCJwYXRjaCI6eyJpZCI6InAiLCJvd25zIjpbImNvbHVtbnMiXSwicXVlcnkiOnsiZml0IjoiY29udGVudCIsInNlbGVjdCI6W3siZmllbGQiOiJhIiwid2lkdGgiOjgwfV19fX19fSx7ImlkIjoibGVnYWN5Iiwib3AiOiJsaW5rIiwibGluayI6eyJsYWJlbCI6ImxlZ2FjeSIsInRvIjp7ImtpbmQiOiJxdWVyeSIsInRhcmdldCI6InQiLCJwYXRjaCI6eyJpZCI6InEiLCJvd25zIjpbImNvbHVtbnMiXSwicXVlcnkiOnsiZml0VG9TY3JlZW4iOnRydWUsInNlbGVjdCI6W3siZmllbGQiOiJhIiwid2lkdGgiOjgwfV19fX19fV0sInJlcHJlc2VudGF0aXZlIjpudWxsLCJzb3VyY2UiOnt9fX0",
+      "normalized": {
+        "select": [],
+        "where": [],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0,
+        "grouping": {
+          "keys": [
+            "k"
+          ],
+          "summaries": [
+            {
+              "id": "fit",
+              "op": "link",
+              "link": {
+                "label": "fit",
+                "to": {
+                  "kind": "query",
+                  "target": "t",
+                  "patch": {
+                    "id": "p",
+                    "owns": [
+                      "columns"
+                    ],
+                    "query": {
+                      "select": [
+                        {
+                          "field": "a",
+                          "width": 80
+                        }
+                      ],
+                      "fit": "content"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "id": "legacy",
+              "op": "link",
+              "link": {
+                "label": "legacy",
+                "to": {
+                  "kind": "query",
+                  "target": "t",
+                  "patch": {
+                    "id": "q",
+                    "owns": [
+                      "columns"
+                    ],
+                    "query": {
+                      "select": [
+                        {
+                          "field": "a"
+                        }
+                      ],
+                      "fit": "screen"
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "representative": null,
+          "source": {
+            "select": [],
+            "where": [],
+            "orderBy": [],
+            "limit": 100,
+            "offset": 0
+          }
+        }
+      },
+      "packed": "{\"b\":{\"keys\":[\"k\"],\"summaries\":[{\"id\":\"fit\",\"op\":\"link\",\"link\":{\"label\":\"fit\",\"to\":{\"kind\":\"query\",\"target\":\"t\",\"patch\":{\"id\":\"p\",\"owns\":[\"columns\"],\"query\":{\"select\":[{\"field\":\"a\",\"width\":80}],\"fit\":\"content\"}}}}},{\"id\":\"legacy\",\"op\":\"link\",\"link\":{\"label\":\"legacy\",\"to\":{\"kind\":\"query\",\"target\":\"t\",\"patch\":{\"id\":\"q\",\"owns\":[\"columns\"],\"query\":{\"select\":[{\"field\":\"a\"}],\"fit\":\"screen\"}}}}}],\"representative\":null,\"source\":{\"select\":[],\"where\":[],\"orderBy\":[],\"limit\":100,\"offset\":0}}}"
     },
     {
       "name": "legacy tokens do not unpack",

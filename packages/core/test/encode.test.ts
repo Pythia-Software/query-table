@@ -17,13 +17,15 @@ import type { QueryState } from "../src/index";
 import { runsSchema } from "./fixtures";
 
 describe("encodeQuery / decodeQuery", () => {
-  it("round-trips fit-to-screen without changing legacy tokens", () => {
-    const fitted = { ...EMPTY_QUERY, fitToScreen: true };
-    expect(decodeQuery(encodeQuery(fitted))).toEqual(fitted);
-    expect(encodeQuery({ ...EMPTY_QUERY, fitToScreen: false })).toBe(encodeQuery(EMPTY_QUERY));
-    expect(toServerQuery(fitted, runsSchema)).toEqual(toServerQuery(EMPTY_QUERY, runsSchema));
-    expect(queriesEqual(fitted, EMPTY_QUERY)).toBe(false);
-    expect(queriesEqual({ ...EMPTY_QUERY, fitToScreen: false }, EMPTY_QUERY)).toBe(true);
+  it("round-trips fit modes and keeps them out of server queries", () => {
+    for (const fit of ["content", "screen"] as const) {
+      const fitted: QueryState = { ...EMPTY_QUERY, fit, select: [{ field: "a", width: 90 }, { field: "b" }] };
+      expect(decodeQuery(encodeQuery(fitted))).toEqual(fitted);
+      const { fit: _fit, ...unfitted } = fitted;
+      expect(toServerQuery(fitted, runsSchema)).toEqual(toServerQuery(unfitted, runsSchema));
+      expect(queriesEqual(fitted, unfitted)).toBe(false);
+    }
+    expect(queriesEqual({ ...EMPTY_QUERY, fit: "content" }, { ...EMPTY_QUERY, fit: "screen" })).toBe(false);
   });
 
   it("round-trips a full query including widths and multi-sort", () => {
@@ -109,10 +111,18 @@ describe("encodeQuery / decodeQuery", () => {
 });
 
 describe("normalizeQueryState", () => {
-  it("accepts only an explicit boolean fit-to-screen preference", () => {
-    expect(normalizeQueryState({ fitToScreen: true }).fitToScreen).toBe(true);
+  it("accepts only a known fit mode, reading legacy fitToScreen as screen without widths", () => {
+    expect(normalizeQueryState({ fit: "content" }).fit).toBe("content");
+    expect(normalizeQueryState({ fit: "screen", select: [{ field: "a", width: 90 }] }))
+      .toMatchObject({ fit: "screen", select: [{ field: "a", width: 90 }] });
+    for (const fit of ["Content", "", 1, true, {}, null, undefined]) expect(normalizeQueryState({ fit }).fit).toBeUndefined();
+    const legacy = normalizeQueryState({ fitToScreen: true, select: [{ field: "a", width: 90 }] });
+    expect(legacy).toMatchObject({ fit: "screen", select: [{ field: "a" }] });
+    expect(legacy).not.toHaveProperty("fitToScreen");
+    expect(normalizeQueryState({ fit: "content", fitToScreen: true, select: [{ field: "a", width: 90 }] }))
+      .toMatchObject({ fit: "content", select: [{ field: "a", width: 90 }] });
     for (const fitToScreen of [false, "true", 1, {}, null, undefined]) {
-      expect(normalizeQueryState({ fitToScreen }).fitToScreen).toBeUndefined();
+      expect(normalizeQueryState({ fitToScreen }).fit).toBeUndefined();
     }
   });
 
@@ -152,7 +162,7 @@ describe("fit-to-screen persistence", () => {
       setItem: (key: string, value: string) => { values.set(key, value); },
       removeItem: (key: string) => { values.delete(key); },
     };
-    const fitted = { ...EMPTY_QUERY, fitToScreen: true };
+    const fitted: QueryState = { ...EMPTY_QUERY, fit: "content" };
     vi.stubGlobal("localStorage", local);
     try {
       for (const storage of [memoryStorageAdapter(), localStorageAdapter()]) {

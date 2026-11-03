@@ -247,7 +247,7 @@ function facetMatches(query: QueryState, parts: PatchParts, facet: QueryFacet): 
 }
 
 /** Compare a query with a patch. Both are normalized first; column widths,
- * `fitToScreen`, labels, metric display/layout and metric IDs are ignored.
+ * `fit`, labels, metric display/layout and metric IDs are ignored.
  *
  * - `active`: every owned facet matches.
  * - `modified`: some owned facet differs, but the patch is still recognizable:
