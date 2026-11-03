@@ -24,7 +24,7 @@ final class ComputedColumnTests: XCTestCase {
       dependencies, count in
       XCTAssertEqual(dependencies, ["amount"])
       XCTAssertEqual(count, 50)
-      return FetchRowsResult(
+      return RowSample(
         rows: [
           ["payload": .object(["amount": .number(3)])],
           ["payload": .object(["amount": .number(3)])],
@@ -83,7 +83,7 @@ final class ComputedColumnTests: XCTestCase {
         let replacement = ComputedColumn(
           id: "value", label: "Value", source: "2", revision: "remote:2")
         try store.importCatalogue(JSONEncoder().encode([replacement]))
-        return FetchRowsResult(rows: [["payload": .object(["amount": .number(1)])]], total: 1)
+        return RowSample(rows: [["payload": .object(["amount": .number(1)])]], total: 1)
       }
       XCTFail("A stale compiled plan must not publish a preview after catalogue replacement")
     } catch is CancellationError {}

@@ -146,6 +146,28 @@ public struct FieldDefinition: Codable, Equatable, Sendable, Identifiable {
     source.computedId == nil && (sort?.enabled ?? (source.kind == "backend"))
   }
   public var isSelectable: Bool { select?.enabled ?? true }
+  /// Aggregate ops this field allows (TypeScript `aggOpsForField`).
+  public var aggregateOperators: [String] {
+    if let ops = aggregate?.ops { return ops }
+    switch type {
+    case "number": return ["count", "count_distinct", "sum", "avg", "min", "max"]
+    case "datetime", "enum", "text": return ["count", "count_distinct", "min", "max"]
+    case "bool": return ["count", "count_distinct"]
+    default: return ["count"]
+    }
+  }
+  /// Whether a server metric may measure this field (TypeScript `isMeasurable`).
+  public var isMeasurable: Bool {
+    if source.kind == "derived" && source.computedId != nil { return aggregate?.measure == true }
+    guard source.kind == "backend" else { return false }
+    return aggregate?.measure ?? !aggregateOperators.isEmpty
+  }
+  /// Whether a server metric may group by this field (TypeScript `isGroupable`).
+  public var isGroupable: Bool {
+    if source.kind == "derived" && source.computedId != nil { return aggregate?.groupable == true }
+    guard source.kind == "backend" else { return false }
+    return aggregate?.groupable ?? ["enum", "text", "bool"].contains(type)
+  }
   public var filterOperators: [String] {
     if let ops = filter?.ops { return ops }
     let ops: [String]

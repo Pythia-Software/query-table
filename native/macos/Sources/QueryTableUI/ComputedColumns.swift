@@ -2,6 +2,15 @@ import QueryTableCore
 import QueryTableFormula
 import SwiftUI
 
+/// A bounded backend sample of formula inputs and the population it was drawn from.
+public struct RowSample: Equatable, Sendable {
+  public var rows: [QueryRow]
+  public var total: Int
+  public init(rows: [QueryRow], total: Int) {
+    self.rows = rows
+    self.total = total
+  }
+}
 public struct ComputedPreviewGroup: Identifiable {
   public let id: JSONValue
   public let inputs: [JSONValue]
@@ -129,7 +138,7 @@ public final class ComputedColumnController: ObservableObject {
   }
   public func sample(
     source: String, editingID: String? = nil, count: Int,
-    sampler: ([String], Int) async throws -> FetchRowsResult
+    sampler: ([String], Int) async throws -> RowSample
   ) async throws -> ComputedPreview {
     let version = catalogueVersion
     let plan = try await compile(source: source, editingID: editingID)
@@ -203,7 +212,7 @@ public struct ComputedColumnEditor: View {
   @ObservedObject private var store: ComputedColumnController
   private let onSave: (ComputedColumn) -> Void
   private let rows: [QueryRow]
-  private let sampler: (([String], Int) async throws -> FetchRowsResult)?
+  private let sampler: (([String], Int) async throws -> RowSample)?
   @Environment(\.dismiss) private var dismiss
   @State private var editingID: String?
   @State private var revision: String?
@@ -217,7 +226,7 @@ public struct ComputedColumnEditor: View {
   @State private var busy = false
   public init(
     store: ComputedColumnController, rows: [QueryRow] = [],
-    sample: (([String], Int) async throws -> FetchRowsResult)? = nil,
+    sample: (([String], Int) async throws -> RowSample)? = nil,
     onSave: @escaping (ComputedColumn) -> Void
   ) {
     self.store = store
@@ -333,7 +342,7 @@ public struct ComputedColumnEditor: View {
             do {
               let fetch =
                 sampler ?? { _, count in
-                  FetchRowsResult(rows: Array(rows.prefix(count)), total: rows.count)
+                  RowSample(rows: Array(rows.prefix(count)), total: rows.count)
                 }
               let result = try await store.sample(
                 source: source, editingID: editingID, count: sampleCount, sampler: fetch)

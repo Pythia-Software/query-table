@@ -6,6 +6,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { inflateRawSync } from "node:zlib";
 import { build } from "esbuild";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -14,7 +15,7 @@ try {
   const bundle = path.join(scratch, "core.mjs");
   await build({
     stdin: {
-      contents: 'export {encodeQuery,decodeQuery,toServerQuery} from "./packages/core/src/encode.ts"; export {normalizeQueryState} from "./packages/core/src/query.ts"; export {loadSchema} from "./packages/core/src/schema.ts";',
+      contents: 'export {encodeQuery,decodeQuery} from "./packages/core/src/encode.ts"; export {toQueryRequestV3} from "./packages/core/src/queryV3.ts"; export {normalizeQueryState} from "./packages/core/src/query.ts"; export {loadSchema} from "./packages/core/src/schema.ts";',
       resolveDir: root,
       sourcefile: "wire-conformance.ts",
       loader: "ts",
@@ -25,7 +26,22 @@ try {
     outfile: bundle,
     logLevel: "silent",
   });
-  const { encodeQuery, decodeQuery, toServerQuery, normalizeQueryState, loadSchema } = await import(pathToFileURL(bundle).href);
+  const { encodeQuery, decodeQuery, toQueryRequestV3, normalizeQueryState, loadSchema } = await import(pathToFileURL(bundle).href);
+  // The Go handler (backends/go/query_v3_http.go) decodes with DisallowUnknownFields
+  // and accepts only these stage keys, so Swift must never send anything else.
+  const requestKeys = ["hostState", "version", "profile", "now", "expectedRevisions", "planToken", "snapshot", "source", "result", "grouping", "rows", "metrics", "distinct", "diagnostics"];
+  const stageKeys = ["select", "where", "orderBy", "limit", "offset"];
+  const metricKeys = ["dateGrouping", "diagnostics", "display", "expression", "expressionY", "scope", "sort", "groupLimit", "distribution", "id", "op", "field", "groupBy", "where", "minCount"];
+  const capabilities = { version: 3, groupedRows: false, calendarGrouping: false, computedSourceFilters: false, regex: false, regexSourceFilters: false, maxRows: 10000, maxGroups: 2000, maxPopulation: 250000, profile: "qt-sqlite-v1" };
+  const now = 1772964000123;
+  const json = (value) => JSON.parse(JSON.stringify(value));
+  const assertGoDecodable = (request, label) => {
+    for (const key of Object.keys(request)) assert.ok(requestKeys.includes(key), `${label}: unknown request key ${key}`);
+    for (const [key, value] of Object.entries(request)) assert.notEqual(value, null, `${label}: ${key} is null`);
+    assert.equal(typeof request.now, "number", `${label}: now is required`);
+    for (const stage of ["source", "result"]) for (const key of Object.keys(request[stage])) assert.ok(stageKeys.includes(key), `${label}: unsupported ${stage} key ${key}`);
+    for (const metric of request.metrics) for (const key of Object.keys(metric)) assert.ok(metricKeys.includes(key), `${label}: unknown metric key ${key}`);
+  };
   const document = {
     name: "wire_cases",
     idField: "id",
@@ -90,14 +106,16 @@ try {
       },
     },
     {
-      name: "normalization-bounds-and-computed",
+      // TypeScript keeps server-computed `@computed/` references; the native client
+      // has no server-computed columns and drops them, so they are not compared here.
+      name: "normalization-bounds",
       query: {
         select: [{ field: "name", width: 1 }, { field: "amount", width: 9000 }],
-        where: [{ field: "@computed/x", op: "=", value: "x" }, { any: [{ field: "tags", op: "includes", value: "x" }] }],
-        orderBy: [{ field: "name", dir: "asc", nulls: "invalid" }, { field: "@computed/x", dir: "asc" }],
+        where: [{ any: [{ field: "tags", op: "includes", value: "x" }] }],
+        orderBy: [{ field: "name", dir: "asc", nulls: "invalid" }],
         limit: -20,
         offset: 9000000,
-        aggregations: [{ id: "bad", op: "sum", field: "@computed/x", groupBy: [] }],
+        aggregations: [{ id: "rows", op: "count", groupBy: [] }],
       },
     },
     {
@@ -109,13 +127,22 @@ try {
       token: Buffer.from(JSON.stringify({ c: ["name", "amount"], o: { field: "amount", dir: "desc" }, l: 15, f: 30 })).toString("base64url"),
     },
   ];
+  // TypeScript links are versioned ("2j." JSON or "2d." deflate); the native decoder
+  // reads the unversioned base64url JSON form, so hand it the same payload unwrapped.
+  const legacyToken = (token) => {
+    if (token.startsWith("2j.")) return token.slice(3);
+    if (token.startsWith("2d.")) return inflateRawSync(Buffer.from(token.slice(3), "base64url")).toString("base64url");
+    return token;
+  };
   const cases = inputs.map((input) => {
     const query = input.token ? decodeQuery(input.token) : normalizeQueryState(input.query);
-    return { name: input.name, token: input.token ?? encodeQuery(query), query, serverQuery: toServerQuery(query, schema) };
+    return { name: input.name, token: input.token ?? legacyToken(encodeQuery(query)), query,
+      request: json(toQueryRequestV3(query, schema, capabilities, undefined, { now })),
+      metricsOnly: json(toQueryRequestV3(query, schema, capabilities, undefined, { now, rows: false })) };
   });
   const inputPath = path.join(scratch, "input.json");
   const outputPath = path.join(scratch, "output.json");
-  await writeFile(inputPath, JSON.stringify({ schema: document, cases }, null, 2));
+  await writeFile(inputPath, JSON.stringify({ schema: document, capabilities, now, cases }, null, 2));
   const executable = process.env.QUERY_TABLE_CHECKS ?? path.join(root, "native/macos/.build/debug/QueryTableChecks");
   execFileSync(executable, ["--wire-fixture", inputPath, outputPath], { stdio: "inherit" });
   const actual = JSON.parse(await readFile(outputPath, "utf8"));
@@ -124,10 +151,21 @@ try {
     const result = actual.cases.find((item) => item.name === expected.name);
     assert.ok(result, `Missing Swift result: ${expected.name}`);
     assert.deepEqual(normalizeQueryState(decodeQuery(result.token)), normalizeQueryState(expected.query), `${expected.name}: Swift token must decode to the same TypeScript query`);
-    assert.deepEqual(result.serverQuery, expected.serverQuery, `${expected.name}: Swift server projection must match TypeScript`);
+    assert.deepEqual(result.request, expected.request, `${expected.name}: Swift v3 request must match TypeScript toQueryRequestV3`);
+    assert.deepEqual(result.metricsOnly, expected.metricsOnly, `${expected.name}: Swift metrics-only v3 request must match TypeScript`);
+    assertGoDecodable(result.request, expected.name);
+    assertGoDecodable(result.metricsOnly, `${expected.name} (metrics)`);
+    // Autocomplete has no TypeScript builder in this check; verify the contract shape.
+    assertGoDecodable(result.distinct, `${expected.name} (distinct)`);
+    assert.deepEqual(result.distinct.distinct, { field: "name", search: "caf", limit: 30 });
+    assert.equal(result.distinct.rows, false);
+    assert.deepEqual(result.distinct.metrics, []);
+    assert.deepEqual(result.distinct.source.where, []);
+    assert.deepEqual(result.distinct.source, result.distinct.result);
+    assert.equal(result.distinct.now, now);
     console.log(`PASS ${expected.name}`);
   }
-  console.log(`Verified ${cases.length} TypeScript ↔ Swift wire cases.`);
+  console.log(`Verified ${cases.length} TypeScript ↔ Swift v3 wire cases.`);
 } finally {
   await rm(scratch, { recursive: true, force: true });
 }

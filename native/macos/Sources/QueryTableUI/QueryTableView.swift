@@ -793,8 +793,8 @@ private struct PredicateEditor: View {
       }
       do {
         try await Task.sleep(nanoseconds: 200_000_000)
-        let result = try await controller.adapter.fetchDistinctValues(
-          query: DistinctValuesQuery(field: clause.field, search: clause.value, limit: 30))
+        let result = try await controller.suggestions(
+          field: clause.field, search: clause.value, limit: 30)
         try Task.checkCancellation()
         suggestions = result.values
         more = result.hasMore

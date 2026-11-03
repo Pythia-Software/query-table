@@ -6,17 +6,54 @@ import Foundation
 /// Regex is deliberately delegated to server transports: Foundation's regex engine
 /// cannot enforce the execution budget required for untrusted query patterns.
 public struct LocalQueryTransport: QueryTransport {
+  public static let profile = "qt-native-local-v1"
   public let schema: FieldSchema
   public let rows: [QueryRow]
-  private let now: @Sendable () -> Date
-  public init(schema: FieldSchema, rows: [QueryRow], now: @escaping @Sendable () -> Date = { Date() }) {
-    self.now = now
+  public var queryCapabilities: QueryCapabilitiesV3 {
+    QueryCapabilitiesV3(
+      profile: Self.profile, maxRows: 10_000, maxGroups: 100_000,
+      maxPopulation: max(1, rows.count))
+  }
+  public init(schema: FieldSchema, rows: [QueryRow]) {
     self.schema = schema
     self.rows = rows
   }
-  public func fetchRows(query: ServerQuery) async throws -> FetchRowsResult {
+  /// Executes one ungrouped request in process. Relative datetime operands are
+  /// evaluated against `request.now`.
+  public func fetchQueryV3(_ request: QueryRequestV3) async throws -> QueryResultV3 {
     try Task.checkCancellation()
-    var result = try filtered(query.whereTerms)
+    guard request.version == 3, request.diagnostics.isEmpty else {
+      throw QueryTableError.invalidQuery(
+        request.diagnostics.first ?? "A valid version 3 query is required")
+    }
+    guard request.profile == Self.profile else {
+      throw QueryTableError.invalidQuery("Requested query profile is unavailable")
+    }
+    guard request.source == request.result else {
+      throw QueryTableError.unsupported("The local transport executes ungrouped queries only")
+    }
+    let reference = Date(timeIntervalSince1970: Double(request.now) / 1000)
+    let matching = try filtered(request.source.whereTerms, now: reference)
+    if let distinct = request.distinct {
+      guard !request.rows, request.metrics.isEmpty else {
+        throw QueryTableError.invalidQuery("A distinct request cannot also request rows or metrics")
+      }
+      return QueryResultV3(
+        answering: request, schema: schema, distinct: try distinctValues(distinct, in: matching))
+    }
+    for name in request.result.select where schema.field(named: name) == nil {
+      throw QueryTableError.invalidQuery("Unknown field: \(name)")
+    }
+    let metrics = try aggregations(request.metrics, over: matching)
+    guard request.rows else {
+      return QueryResultV3(
+        answering: request, schema: schema, total: matching.count, metrics: metrics)
+    }
+    let page = try sortedPage(matching, query: request.result)
+    return QueryResultV3(
+      answering: request, schema: schema, rows: page, total: matching.count, metrics: metrics)
+  }
+  private func sortedPage(_ matching: [QueryRow], query: ServerQuery) throws -> [QueryRow] {
     let sorts =
       (query.orderBy.isEmpty ? schema.defaultSort ?? [] : query.orderBy)
       + (schema.tiebreakSort ?? [])
@@ -24,7 +61,7 @@ public struct LocalQueryTransport: QueryTransport {
       throw QueryTableError.unsupported(
         "Regex extraction requires a server transport (\(term.field))")
     }
-    result = result.enumerated().sorted { left, right in
+    let result = matching.enumerated().sorted { left, right in
       for term in sorts {
         guard
           let field = schema.field(named: term.field)
@@ -43,30 +80,42 @@ public struct LocalQueryTransport: QueryTransport {
     }.map(\.element)
     let offset = max(0, min(query.offset, result.count))
     let count = max(0, min(query.limit, result.count - offset))
-    return FetchRowsResult(rows: Array(result.dropFirst(offset).prefix(count)), total: result.count)
+    return Array(result.dropFirst(offset).prefix(count))
   }
-  public func fetchDistinctValues(query: DistinctValuesQuery) async throws -> DistinctValuesResult {
-    try Task.checkCancellation()
-    guard let field = schema.field(named: query.field) else {
-      throw QueryTableError.invalidQuery("Unknown field: \(query.field)")
+  /// Distinct values ordered by count descending, then value; NULLs excluded.
+  private func distinctValues(_ query: DistinctRequestV3, in matching: [QueryRow]) throws
+    -> DistinctResultV3
+  {
+    guard let field = schema.field(named: query.field), field.isPushdownFilter else {
+      throw QueryTableError.invalidQuery("Field cannot list values: \(query.field)")
     }
-    let source = rows.map { field.value(in: $0) }
-    let values = Set(
-      source.flatMap { value -> [String] in
-        if value == .null { return [] }
-        if case .array(let a) = value { return a.map(\.displayString) }
-        return [value.displayString]
+    guard (1...DistinctRequestV3.maxLimit).contains(query.limit),
+      query.search.count <= DistinctRequestV3.maxSearchLength
+    else { throw QueryTableError.invalidQuery("Invalid distinct limit or search") }
+    let source = matching.map { field.value(in: $0) }
+    var counts: [String: Int] = [:]
+    for value in source {
+      let members: [JSONValue]
+      if case .array(let items) = value { members = items } else { members = [value] }
+      for member in members where member != .null {
+        let text = member.displayString
+        if query.search.isEmpty || text.range(of: query.search, options: .caseInsensitive) != nil {
+          counts[text, default: 0] += 1
+        }
       }
-    ).filter { query.search.isEmpty || $0.localizedCaseInsensitiveContains(query.search) }.sorted()
-    let limit = max(1, query.limit ?? 50)
-    return DistinctValuesResult(
-      values: Array(values.prefix(limit)), hasMore: values.count > limit,
-      hasNull: source.contains(.null))
+    }
+    let values = counts.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
+      .map(\.key)
+    return DistinctResultV3(
+      values: Array(values.prefix(query.limit)), hasMore: values.count > query.limit,
+      hasNull: source.contains {
+        $0 == .null || (field.type == "textarray" && $0 == .array([]))
+      })
   }
-  public func fetchAggregations(query: AggregationRequest) async throws -> AggregationResult {
-    try Task.checkCancellation()
-    let matching = try filtered(query.whereTerms)
-    let metrics = try query.aggregations.map { a -> AggregationResultEntry in
+  private func aggregations(_ clauses: [AggregationClause], over matching: [QueryRow]) throws
+    -> [AggregationResultEntry]
+  {
+    try clauses.map { a -> AggregationResultEntry in
       guard ["count", "count_distinct", "sum", "avg", "min", "max"].contains(a.op) else {
         throw QueryTableError.invalidQuery("Unknown aggregation: \(a.op)")
       }
@@ -104,13 +153,13 @@ public struct LocalQueryTransport: QueryTransport {
           keys: keys.map { $0 == .null ? nil : $0.displayString }, value: value,
           count: records.count)
       }.sorted { $0.keys.map { $0 ?? "" }.lexicographicallyPrecedes($1.keys.map { $0 ?? "" }) }
-      return AggregationResultEntry(id: a.id, buckets: buckets)
+      return AggregationResultEntry(
+        id: a.id, buckets: buckets, scope: "allMatching", processedRows: matching.count,
+        groupCount: buckets.count)
     }
-    return AggregationResult(metrics: metrics)
   }
   private struct TimeKey: Hashable { let field, op, value: String }
-  private func filtered(_ terms: [WhereTerm]) throws -> [QueryRow] {
-    let reference = now()
+  private func filtered(_ terms: [WhereTerm], now reference: Date) throws -> [QueryRow] {
     // One prepared value per predicate; parse before reading rows so invalid
     // filters also fail on an empty dataset and under negation/OR.
     var times: [TimeKey: Date] = [:]
