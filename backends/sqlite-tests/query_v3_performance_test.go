@@ -405,13 +405,13 @@ func TestV3StagedValuesAreNotRevalidated(t *testing.T) {
 		t.Fatalf("by_first: %#v", m)
 	}
 
-	// Ungrouped rows, sorting and metrics read the staged values directly too.
+	// Staged ungrouped rows, sorting and metrics read the staged values too.
 	q = groupedRequest()
 	q.Grouping = nil
 	q.Result = qt.WireQuery{Select: []string{"id", "at", "label"}, OrderBy: qt.OrderBys{{Field: "at", Dir: "desc", Nulls: "last"}}, Limit: 3}
 	q.Metrics = []qt.AggSpec{{ID: "first", Op: "min", Field: "at", GroupBy: []string{"k"}}, {ID: "total", Op: "sum", Field: "n", Scope: "shownRows"}}
 	calls = afterStaging(log)
-	out, err = d.Execute(context.Background(), db, q, qt.PlanOptions{})
+	out, err = qt.StageUngroupedForTesting(d).Execute(context.Background(), db, q, qt.PlanOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -419,6 +419,10 @@ func TestV3StagedValuesAreNotRevalidated(t *testing.T) {
 		if n := calls(name); n != 0 {
 			t.Fatalf("ungrouped %s ran %d times after staging", name, n)
 		}
+	}
+	// Direct execution validates the source where it reads it, with equal results.
+	if direct, err := d.Execute(context.Background(), db, q, qt.PlanOptions{}); err != nil || !reflect.DeepEqual(direct, out) {
+		t.Fatalf("direct %#v err=%v, staged %#v", direct, err, out)
 	}
 	if got := []any{out.Rows[0]["id"], out.Rows[0]["at"], out.Rows[1]["id"], out.Rows[2]["id"]}; !reflect.DeepEqual(got, []any{"4", "2026-11-01T07:15:00.000Z", "3", "2"}) {
 		t.Fatal(out.Rows)

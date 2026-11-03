@@ -144,6 +144,25 @@ type QueryRequestV3 struct {
 	Diagnostics       []string            `json:"diagnostics,omitempty"`
 	// HostState is the table's host-owned query state; see ServerQueryV2.
 	HostState json.RawMessage `json:"hostState,omitempty"`
+	// Distinct requests filter-value suggestions over the source.where
+	// population instead of rows, metrics or groups.
+	Distinct *DistinctRequestV3 `json:"distinct,omitempty"`
+}
+
+// DistinctRequestV3 matches a literal, case-insensitive substring of each
+// value cast to text; an empty search matches every value.
+type DistinctRequestV3 struct {
+	Field  string `json:"field"`
+	Search string `json:"search"`
+	Limit  int    `json:"limit"`
+}
+
+// DistinctResultV3 orders values by count descending, then value. HasNull
+// reports a NULL (or empty text array) in the population, whatever the search.
+type DistinctResultV3 struct {
+	Values  []string `json:"values"`
+	HasMore bool     `json:"hasMore"`
+	HasNull bool     `json:"hasNull"`
 }
 
 // Validate classifies malformed wire stages and metrics as request diagnostics,
@@ -158,6 +177,14 @@ func (q QueryRequestV3) Validate() error {
 	}{{"source", q.Source}, {"result", q.Result}, {"metrics", WireQuery{Aggregations: q.Metrics}}} {
 		if err := stage.query.Validate(); err != nil {
 			return diagnostic("query", stage.name+": "+err.Error())
+		}
+	}
+	if q.Distinct != nil {
+		if q.Rows || len(q.Metrics) > 0 || q.Grouping != nil {
+			return diagnostic("query", "distinct requests take no rows, metrics or grouping")
+		}
+		if q.Distinct.Field == "" || q.Distinct.Limit < 1 || q.Distinct.Limit > 500 || utf16Length(q.Distinct.Search) > 2000 {
+			return diagnostic("query", "distinct needs a field, a limit of 1–500 and a search of at most 2000 characters")
 		}
 	}
 	return nil
@@ -181,6 +208,7 @@ type QueryResultV3 struct {
 	Schema      ProjectedSchema         `json:"schema"`
 	Metrics     []SQLiteMetricV2        `json:"metrics"`
 	Execution   SQLiteComputedExecution `json:"execution"`
+	Distinct    *DistinctResultV3       `json:"distinct,omitempty"`
 }
 type QueryCapabilitiesV3 struct {
 	RegexSourceFilters        bool `json:"regexSourceFilters"`
@@ -217,7 +245,9 @@ type QueryDatasetV3 struct {
 	ComputedGroupable  map[string]bool
 	ComputedFilterable map[string]bool
 	// Zero defaults to 10000 rows, 2000 groups and 250000 matching source rows.
-	// Explicit MaxGroups may be 1..100000.
+	// Explicit MaxGroups may be 1..100000. MaxPopulation and MaxStagingBytes
+	// bound staged (grouped) execution and calendar metric scratch only:
+	// ungrouped rows, totals, metrics and distinct values read SourceSQL directly.
 	MaxRows, MaxGroups, MaxPopulation int
 	// UTF-8 value/error payload of the narrow source, checked before its copy.
 	// Database storage overhead and query scratch space remain host-managed.
@@ -228,6 +258,9 @@ type QueryDatasetV3 struct {
 	// grouped results never use them. Nil compiles every predicate normally.
 	// See SQLitePredicateRelations.
 	PredicateRelations SQLitePredicateRelations
+	// stageUngrouped sends ungrouped requests through the staged executor;
+	// see StageUngroupedForTesting.
+	stageUngrouped bool
 }
 
 func (d QueryDatasetV3) limits() (int, int, int, int64, error) {

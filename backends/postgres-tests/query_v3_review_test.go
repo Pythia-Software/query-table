@@ -129,14 +129,18 @@ func TestPostgresStagingBudgetsBeforeMaterialization(t *testing.T) {
 		d.MaxStagingBytes = 32
 		created = 0
 		var diag *qt.PlanDiagnostic
-		if _, err := d.Execute(context.Background(), db, q, qt.PlanOptions{}); !errors.As(err, &diag) || diag.Code != "resource_limit" {
+		if _, err := qt.StageUngroupedForTesting(d).Execute(context.Background(), db, q, qt.PlanOptions{}); !errors.As(err, &diag) || diag.Code != "resource_limit" {
 			t.Fatalf("oversized source: %v", err)
 		}
 		if created != 0 {
 			t.Fatalf("oversized source materialized %d temp tables", created)
 		}
+		// Direct ungrouped execution copies nothing, so no staging budget applies.
+		if out, err := d.Execute(context.Background(), db, q, qt.PlanOptions{}); err != nil || created != 0 || len(out.Rows) != 1 || out.Rows[0]["k"] != value {
+			t.Fatalf("direct oversized source: %#v created=%d err=%v", out, created, err)
+		}
 		d.MaxStagingBytes = int64(len(value) + 1)
-		out, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
+		out, err := qt.StageUngroupedForTesting(d).Execute(context.Background(), db, q, qt.PlanOptions{})
 		if err != nil || len(out.Rows) != 1 || out.Rows[0]["k"] != value {
 			t.Fatalf("exact byte boundary: %#v err=%v", out, err)
 		}
@@ -146,8 +150,11 @@ func TestPostgresStagingBudgetsBeforeMaterialization(t *testing.T) {
 	d.MaxStagingBytes = 1000
 	d.MaxPopulation = 1
 	created = 0
-	if _, err := d.Execute(context.Background(), db, q, qt.PlanOptions{}); err == nil || created != 0 {
+	if _, err := qt.StageUngroupedForTesting(d).Execute(context.Background(), db, q, qt.PlanOptions{}); err == nil || created != 0 {
 		t.Fatalf("population budget created=%d err=%v", created, err)
+	}
+	if out, err := d.Execute(context.Background(), db, q, qt.PlanOptions{}); err != nil || created != 0 || out.Total != 2 || out.SourceTotal != 2 {
+		t.Fatalf("direct population created=%d out=%#v err=%v", created, out, err)
 	}
 }
 
