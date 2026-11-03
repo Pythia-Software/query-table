@@ -35,10 +35,11 @@ Named search names/defaults remain browser-local. **Restore demo dashboard** res
 the starter configuration. The backend supports up to 20 metrics per request;
 remove an existing card before adding one to this full starter dashboard.
 
-Rows execute `CompileRowsV2`; metrics execute `CompileMetrics`; computed columns
-use the SQL definition store/resolver from the Go library. Select expressions
-and sorting execute in PostgreSQL before pagination. Row sidecars bind computed
-values to row IDs. All requests import one retained exported PostgreSQL MVCC
+Every request is one v3 query posted to `/api/postgres/query` and executed by
+`QueryDatasetV3.ExecuteIn`: row pages, metric shards and filter suggestions
+alike. Computed columns use the SQL definition store/resolver from the Go
+library. Select expressions and sorting execute in PostgreSQL before
+pagination, and computed values arrive inline in each row. All requests import one retained exported PostgreSQL MVCC
 snapshot, including the canonical computed definitions. Saving a computed
 column refreshes that snapshot and its revisions; other open tabs may need to
 reconnect afterward. Base records remain fixed throughout the session.
@@ -54,10 +55,8 @@ Then click **Refresh data** or change a query. Settings affect the next request.
 
 - Database delay executes a real cancellable `pg_sleep` once per HTTP request.
 - Response delay waits after SQL has completed and its transaction has closed.
-- The activity panel shows pending/completed/aborted/error states, real SQL time,
-  both configured delays, and statement counts. Expand **Latest timing for each
-  metric** for individual SQL/planner durations, stage counts, and SQL sizes.
-  Cards show their loading state
+- The activity panel shows pending/completed/aborted/error states, real SQL time
+  and both configured delays for each request. Cards show their loading state
   while a new request is pending.
 - Query changes cancel obsolete requests through Vite, Go, and PostgreSQL.
 
@@ -76,14 +75,14 @@ one grouped sample pass using their exact emitted edges. Full-population complex
 formulas and exact distributions still cost more than simple count cards.
 
 The seeded schema has indexes for timestamp, day, platform, result, worker,
-duration, and the numeric ID expression. C-collation text indexes match the v2
+duration, and the numeric ID expression. C-collation text indexes match the
 planner's text bindings. Startup refreshes planner statistics after adding them.
 Indexes help selective queries; they do not eliminate scans for all-row metrics.
 
 The host bounds concurrent requests to four, individual statements to 60 seconds,
 requests to three minutes, response payloads to 8 MB, row pages to 1,000, and group
-populations to 10,000. Exact box plots accept at most one million scoped input
-rows. Card-local SQL/validation errors appear on the affected metric.
+populations to 10,000. Exact distributions accept at most one million samples
+per group (`MaxSamplesPerGroup`). Card-local SQL/validation errors appear on the affected metric.
 
 ## Dataset options
 
@@ -118,18 +117,5 @@ metric editing, and refresh persistence. It saves a screenshot under
 `.context/postgres-demo/dashboard.png`. Optional Go integration tests import a
 snapshot after its creator's context is canceled and check refresh repair and
 fractional numeric semantics. These tests do not seed or modify DB records.
-
-To reproduce the SQL latency profiles (read-only, against a running seeded DB):
-
-```sh
-cd demo/server
-QT_DEMO_PROFILE=1 QT_DEMO_TEST_DATABASE_URL='postgresql:///query_table_metrics_demo?host=/tmp&port=5432' go test -run TestProfileLatency -v
-```
-
-This writes generated SQL and `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` artifacts
-for rows, computed throughput, ratios, and histograms under
-`.context/postgres-demo/`. It compares JIT settings as a diagnostic; JIT was not
-the bottleneck in the observed plans. Leave artificial delays at zero when
-measuring SQL performance.
 
 Simulated response latency starts after the database transaction, execution slot, and snapshot read lock have been released. A server deadline returns a JSON HTTP 504 to connected clients. Computed-definition saves return the committed revision even if snapshot renewal fails; stale execution remains blocked until bootstrap/list repairs the snapshot.

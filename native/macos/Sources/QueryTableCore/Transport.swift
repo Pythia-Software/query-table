@@ -185,7 +185,7 @@ public struct QueryRequestV3: Codable, Equatable, Sendable {
   ) -> QueryRequestV3 {
     QueryRequestV3(
       profile: capabilities.profile, now: epochMilliseconds(now),
-      source: ServerQuery(select: [schema.idField], limit: 1), rows: false,
+      source: ServerQuery(select: [], limit: 1), rows: false,
       distinct: DistinctRequestV3(
         field: field, search: search, limit: max(1, min(DistinctRequestV3.maxLimit, limit))),
       hostState: hostState)

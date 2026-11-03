@@ -18,18 +18,23 @@ try {
     metricQuery,
     metadataRequests = 0;
   page.on("pageerror", (error) => errors.push(error.message));
+  // Every request is one v3 query: a row page, a metric shard or field values.
+  const isMetricShard = (body) => !body.rows && !body.distinct && body.metrics.length > 0;
   page.on("request", (request) => {
-    if (request.url().endsWith("/rows")) rowQuery = request.postDataJSON();
-    if (request.url().endsWith("/metrics")) {
-      metricQuery = request.postDataJSON();
+    if (!request.url().endsWith("/api/postgres/query")) return;
+    const body = request.postDataJSON();
+    if (body.distinct) metadataRequests++;
+    else if (body.rows) rowQuery = body;
+    else if (isMetricShard(body)) {
+      metricQuery = body;
       metricQueries.push(metricQuery);
     }
-    if (request.url().endsWith("/distinct")) metadataRequests++;
   });
   page.on("response", (response) => {
     if (
-      response.url().endsWith("/metrics") &&
-      response.request().method() === "POST"
+      response.url().endsWith("/api/postgres/query") &&
+      response.request().method() === "POST" &&
+      isMetricShard(response.request().postDataJSON())
     )
       metricResponses.push(response);
   });
@@ -77,21 +82,12 @@ try {
   const batches = await Promise.all(
     metricResponses.map((response) => response.json()),
   );
-  const initial = {
-    metrics: batches.flatMap((batch) => batch.metrics),
-    debug: { metrics: batches.flatMap((batch) => batch.debug.metrics) },
-  };
+  const initial = { metrics: batches.flatMap((batch) => batch.metrics) };
   metricQuery = {
     ...metricQuery,
     metrics: metricQueries.flatMap((query) => query.metrics),
   };
   assert.equal(initial.metrics.length, 20);
-  assert.equal(initial.debug.metrics.length, 20);
-  assert.ok(
-    initial.debug.metrics.every(
-      (metric) => metric.sqlMs >= 0 && metric.stages > 0,
-    ),
-  );
   const byId = (id) => initial.metrics.find((metric) => metric.id === id);
   assert.equal(byId("pg-runs").buckets[0].value, bootstrap.rows);
   assert.equal(byId("pg-page").buckets[0].value, 100);
@@ -118,25 +114,24 @@ try {
     assert.equal(response.status, 200, JSON.stringify(data));
     return { data, response };
   }
-  const fraction = await post("rows", {
-    ...rowQuery,
+  // A captured v3 request with one stage for both source and result.
+  const withStage = (request, stage) => ({ ...request, source: stage, result: stage });
+  const fraction = await post("query", withStage(rowQuery, {
     select: ["id"],
     where: [{ field: "id", op: "<", value: "1.5" }],
     orderBy: [{ field: "id", dir: "asc" }],
     limit: 10,
     offset: 0,
-  });
+  }));
   assert.equal(fraction.data.total, 1);
   assert.equal(fraction.data.rows[0].id, 1);
-  const filtered = await post("metrics", {
-    ...metricQuery,
-    where: [{ field: "id", op: "<", value: "1.5" }],
+  const filtered = await post("query", {
+    ...withStage(metricQuery, { ...metricQuery.source, where: [{ field: "id", op: "<", value: "1.5" }] }),
     metrics: [metricQuery.metrics.find((metric) => metric.id === "pg-runs")],
   });
   assert.equal(filtered.data.metrics[0].buckets[0].value, 1);
 
-  const sortedQuery = {
-    ...rowQuery,
+  const sortedStage = {
     select: ["id", "@computed/throughput"],
     orderBy: [
       { field: "@computed/throughput", dir: "desc", nulls: "last" },
@@ -146,32 +141,31 @@ try {
     limit: 25,
     offset: 0,
   };
-  const first = await post("rows", sortedQuery);
-  const next = await post("rows", { ...sortedQuery, offset: 25 });
-  const sidecars = [...first.data.computed, ...next.data.computed];
-  const values = sidecars.map((row) => row.values.throughput.value);
+  const first = await post("query", withStage(rowQuery, sortedStage));
+  const next = await post("query", withStage(rowQuery, { ...sortedStage, offset: 25 }));
+  const page50 = [...first.data.rows, ...next.data.rows];
+  const values = page50.map((row) => row["@computed/throughput"]);
   assert.ok(
     values.every(
       (value, index) =>
         typeof value === "number" && (!index || value <= values[index - 1]),
     ),
   );
-  assert.equal(new Set(sidecars.map((row) => row.id)).size, 50);
+  assert.equal(new Set(page50.map((row) => row.id)).size, 50);
   assert.equal(first.data.total, bootstrap.rows);
   console.log(
     "Global computed sorting and pagination: 50 ordered, distinct results across two pages",
   );
 
-  const quick = {
-    ...rowQuery,
+  const quick = withStage(rowQuery, {
     select: ["id"],
     where: [{ field: "id", op: "<", value: "1.5" }],
     orderBy: [],
     limit: 1,
     offset: 0,
-  };
+  });
   const start = Date.now();
-  const delayed = await post("rows", quick, {
+  const delayed = await post("query", quick, {
     "X-Demo-DB-Delay": "250",
     "X-Demo-Response-Delay": "350",
   });
@@ -180,7 +174,7 @@ try {
   assert.equal(delayed.response.headers.get("x-demo-response-delay-ms"), "350");
   const before = await (await fetch(`${origin}/api/postgres/bootstrap`)).json();
   const controller = new AbortController();
-  const canceled = fetch(`${origin}/api/postgres/rows`, {
+  const canceled = fetch(`${origin}/api/postgres/query`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Demo-DB-Delay": "5000" },
     body: JSON.stringify(quick),
@@ -196,7 +190,7 @@ try {
     if (i === 29) assert.fail("Vite did not propagate cancellation to Go");
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  const mismatch = await fetch(`${origin}/api/postgres/rows`, {
+  const mismatch = await fetch(`${origin}/api/postgres/query`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ...quick, snapshot: "expired" }),
