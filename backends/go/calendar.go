@@ -597,7 +597,7 @@ func fillCalendarBuckets(ctx context.Context, result *SQLiteMetricV2, config Met
 	return nil
 }
 func (d QueryDatasetV3) checkMetricSamples(ctx context.Context, tx *sql.Tx, spec AggSpec, q MetricQuery, s Schema, o PlanOptions, maxGroups int) error {
-	if spec.Distribution == nil && !sampledExpression(MetricExpression(spec)) && !sampledExpression(spec.ExpressionY) {
+	if !metricSampled(spec) {
 		return nil
 	}
 	probe := AggSpec{ID: "__qt_samples__", Op: "count", GroupBy: spec.GroupBy, Scope: spec.Scope, Where: spec.Where}

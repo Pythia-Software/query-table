@@ -106,6 +106,9 @@ func (d QueryDatasetV3) ExecuteIn(ctx context.Context, tx *sql.Tx, q QueryReques
 	if err != nil {
 		return out, err
 	}
+	if err = validateQueryMetrics(q); err != nil {
+		return out, err
+	}
 	tables := []string{}
 	defer func() {
 		err = errors.Join(err, d.dropQueryTables(ctx, tx, tables))
@@ -113,6 +116,9 @@ func (d QueryDatasetV3) ExecuteIn(ctx context.Context, tx *sql.Tx, q QueryReques
 			out = QueryResultV3{}
 		}
 	}()
+	if q.Grouping == nil && !d.stageUngrouped {
+		return d.executeUngrouped(ctx, tx, q, o, plan, maxGroups, &tables)
+	}
 	direct, total, err := d.sqliteDirectGroups(ctx, tx, q, o, plan, maxPop, maxGroups, maxBytes, &tables)
 	if err != nil {
 		return out, err
@@ -249,12 +255,7 @@ func (d QueryDatasetV3) ExecuteIn(ctx context.Context, tx *sql.Tx, q QueryReques
 	for _, name := range names {
 		out.Schema.Fields = append(out.Schema.Fields, ProjectedField{name, schemaFieldType(result.Fields[name].Kind)})
 	}
-	out.Execution = SQLiteComputedExecution{Profile: q.Profile, PlanToken: q.PlanToken, Snapshot: q.Snapshot, ResolvedRevisions: plan.ResolvedRevisions, Fields: map[string]SQLiteComputedFieldCapability{}}
-	for _, column := range plan.Columns {
-		if strings.HasPrefix(column.Field, "@computed/") {
-			out.Execution.Fields[column.Field] = plan.ComputedCapabilities[column.Field]
-		}
-	}
+	out.Execution = queryExecution(q, plan)
 	if q.Rows {
 		selected := append([]string{}, resultQuery.Select...)
 		if len(selected) == 0 {
@@ -274,18 +275,7 @@ func (d QueryDatasetV3) ExecuteIn(ctx context.Context, tx *sql.Tx, q QueryReques
 		}
 	}
 	metricQuery := MetricQuery{Version: 2, Where: resultQuery.Where, OrderBy: []OrderBy(resultQuery.OrderBy), Limit: resultQuery.Limit, Offset: resultQuery.Offset}
-	ids := map[string]bool{}
 	for _, spec := range q.Metrics {
-		if err = (WireQuery{Aggregations: []AggSpec{spec}, Limit: q.Result.Limit, Offset: q.Result.Offset, Where: q.Result.Where, OrderBy: q.Result.OrderBy}).Validate(); err != nil {
-			return out, err
-		}
-		if spec.Scope != "" && spec.Scope != "allMatching" && spec.Scope != "shownRows" {
-			return out, diagnostic("scope", "invalid metric scope")
-		}
-		if ids[spec.ID] {
-			return out, diagnostic("duplicate_metric", "duplicate metric ID")
-		}
-		ids[spec.ID] = true
 		metric, e := isolateMetric(ctx, tx, spec.ID, spec.Scope, func() (SQLiteMetricV2, error) {
 			return d.executeMetric(ctx, tx, spec, metricQuery, result, stageOptions, out.Total, maxGroups, &tables)
 		})
@@ -295,6 +285,31 @@ func (d QueryDatasetV3) ExecuteIn(ctx context.Context, tx *sql.Tx, q QueryReques
 		out.Metrics = append(out.Metrics, metric)
 	}
 	return out, ctx.Err()
+}
+func validateQueryMetrics(q QueryRequestV3) error {
+	ids := map[string]bool{}
+	for _, spec := range q.Metrics {
+		if err := (WireQuery{Aggregations: []AggSpec{spec}, Limit: q.Result.Limit, Offset: q.Result.Offset, Where: q.Result.Where, OrderBy: q.Result.OrderBy}).Validate(); err != nil {
+			return err
+		}
+		if spec.Scope != "" && spec.Scope != "allMatching" && spec.Scope != "shownRows" {
+			return diagnostic("scope", "invalid metric scope")
+		}
+		if ids[spec.ID] {
+			return diagnostic("duplicate_metric", "duplicate metric ID")
+		}
+		ids[spec.ID] = true
+	}
+	return nil
+}
+func queryExecution(q QueryRequestV3, plan SourceDependencyPlan) SQLiteComputedExecution {
+	out := SQLiteComputedExecution{Profile: q.Profile, PlanToken: q.PlanToken, Snapshot: q.Snapshot, ResolvedRevisions: plan.ResolvedRevisions, Fields: map[string]SQLiteComputedFieldCapability{}}
+	for _, column := range plan.Columns {
+		if strings.HasPrefix(column.Field, "@computed/") {
+			out.Fields[column.Field] = plan.ComputedCapabilities[column.Field]
+		}
+	}
+	return out
 }
 func containsString(names []string, name string) bool {
 	for _, n := range names {
@@ -367,7 +382,7 @@ func readQueryRows(ctx context.Context, tx *sql.Tx, p SQLPlan, grouped bool, dia
 			code := sqliteErrorCode(values[2*i+1])
 			if code != "" {
 				if !grouped && !strings.HasPrefix(column.Field, "@computed/") {
-					return out, diagnostic(code, "invalid source value for "+column.Field)
+					return out, diagnostic("invalid_source_value", "invalid source value for "+column.Field)
 				}
 				value = map[string]any{"computedError": code}
 			}

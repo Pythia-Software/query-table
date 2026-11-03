@@ -217,7 +217,9 @@ type QueryDatasetV3 struct {
 	ComputedGroupable  map[string]bool
 	ComputedFilterable map[string]bool
 	// Zero defaults to 10000 rows, 2000 groups and 250000 matching source rows.
-	// Explicit MaxGroups may be 1..100000.
+	// Explicit MaxGroups may be 1..100000. MaxPopulation and MaxStagingBytes
+	// bound staged (grouped) execution and calendar metric scratch only:
+	// ungrouped rows, totals and metrics read SourceSQL directly.
 	MaxRows, MaxGroups, MaxPopulation int
 	// UTF-8 value/error payload of the narrow source, checked before its copy.
 	// Database storage overhead and query scratch space remain host-managed.
@@ -228,6 +230,9 @@ type QueryDatasetV3 struct {
 	// grouped results never use them. Nil compiles every predicate normally.
 	// See SQLitePredicateRelations.
 	PredicateRelations SQLitePredicateRelations
+	// stageUngrouped sends ungrouped requests through the staged executor;
+	// see StageUngroupedForTesting.
+	stageUngrouped bool
 }
 
 func (d QueryDatasetV3) limits() (int, int, int, int64, error) {

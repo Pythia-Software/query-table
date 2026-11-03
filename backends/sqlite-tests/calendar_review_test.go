@@ -154,7 +154,8 @@ func TestCalendarScratchBudgetIncludesKeysBeforeCopy(t *testing.T) {
 	if out, err := d.Execute(context.Background(), db, q, qt.PlanOptions{}); err != nil || !strings.Contains(out.Metrics[0].Error, "calendar") {
 		t.Fatalf("calendar budget: %v", err)
 	}
-	if created != 1 {
+	// Ungrouped execution reads the source directly; only the calendar copies.
+	if created != 0 {
 		t.Fatalf("oversized calendar copy materialized %d temp tables", created)
 	}
 }

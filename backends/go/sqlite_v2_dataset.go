@@ -41,6 +41,9 @@ type SQLiteV2Dataset struct {
 	// caching; every execution then proves its own population, as before.
 	SourceGeneration string
 	SourceProofs     *SQLiteSourceProofs
+	// population is a matching population already counted in the same
+	// transaction by the v3 executor, which applies no population budget.
+	population *int64
 }
 type SQLiteMetricCapabilities struct {
 	Version        int  `json:"version"`
@@ -245,9 +248,12 @@ func (d SQLiteV2Dataset) ExecuteV2In(ctx context.Context, tx *sql.Tx, rows *Serv
 	}
 	// Bound the population before expensive formulas, sorting and reductions. The
 	// count itself scans at most budget+1 source rows in the authorized snapshot.
-	filter, _, e := compileSQLiteWhere(where, d.Schema, SQLiteOptions{Now: o.Now}, o.relations)
-	if e != nil {
-		return out, e
+	// A known population (which may use computed predicates) is never recounted.
+	var filter SQLiteWhereResult
+	if d.population == nil {
+		if filter, _, e = compileSQLiteWhere(where, d.Schema, SQLiteOptions{Now: o.Now}, o.relations); e != nil {
+			return out, e
+		}
 	}
 	pred := ""
 	if filter.SQL != "" {
@@ -257,8 +263,11 @@ func (d SQLiteV2Dataset) ExecuteV2In(ctx context.Context, tx *sql.Tx, rows *Serv
 	args := append(append([]any{}, d.SourceArgs...), filter.Args...)
 	proofs := d.sourceProofScope(maxPopulation)
 	total, counted := int64(0), false
+	if d.population != nil {
+		total, counted = *d.population, true
+	}
 	_, bounded := proofs.rows()
-	if filter.SQL == "" {
+	if filter.SQL == "" && !counted {
 		// An unfiltered population is the whole source this generation counted.
 		total, counted = proofs.rows()
 	}
@@ -272,7 +281,7 @@ func (d SQLiteV2Dataset) ExecuteV2In(ctx context.Context, tx *sql.Tx, rows *Serv
 		}
 		counted = true
 	}
-	if total > int64(maxPopulation) {
+	if total > int64(maxPopulation) && d.population == nil {
 		return out, diagnostic("resource_limit", "matching population exceeds host budget")
 	}
 	reduced := int64(-1)
@@ -286,7 +295,7 @@ func (d SQLiteV2Dataset) ExecuteV2In(ctx context.Context, tx *sql.Tx, rows *Serv
 			}
 			counted = true
 		}
-		if total > int64(maxPopulation) {
+		if total > int64(maxPopulation) && d.population == nil {
 			return 0, diagnostic("resource_limit", "matching population exceeds host budget")
 		}
 		return total, nil
