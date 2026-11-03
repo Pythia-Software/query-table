@@ -27,7 +27,7 @@ func BenchmarkCrossFieldV2(b *testing.B) {
 				if _, err = db.Exec(crossFieldDDL(50000)); err != nil {
 					b.Fatal(err)
 				}
-				d := qt.SQLiteV2Dataset{Schema: crossFieldSchema(), SourceSQL: "SELECT * FROM source WHERE tenant=?1", SourceArgs: []any{"allowed"}}
+				d := qt.QueryDatasetV3{Dialect: "sqlite", Schema: crossFieldSchema(), SourceSQL: "SELECT * FROM source WHERE tenant=?1", SourceArgs: []any{"allowed"}}
 				q := crossFieldQuery(grouped)
 				columns := []string{"COUNT(*)"}
 				checkedColumns := []string{"COUNT(*)"}
@@ -92,7 +92,7 @@ func BenchmarkCrossFieldV2(b *testing.B) {
 							b.Fatal(err)
 						}
 					default:
-						requests := []qt.MetricQuery{q}
+						requests := []qt.QueryRequestV3{q}
 						if mode == "independent" {
 							requests = nil
 							for _, spec := range q.Metrics {
@@ -102,11 +102,11 @@ func BenchmarkCrossFieldV2(b *testing.B) {
 							}
 						}
 						for _, request := range requests {
-							r, err := d.ExecuteV2In(context.Background(), tx, nil, &request, qt.PlanOptions{})
+							r, err := d.ExecuteIn(context.Background(), tx, request, qt.PlanOptions{})
 							if err != nil {
 								b.Fatal(err)
 							}
-							for _, m := range r.Metrics.Metrics {
+							for _, m := range r.Metrics {
 								if m.Error != "" {
 									b.Fatal(m.Error)
 								}

@@ -12,15 +12,16 @@ import (
 	"unicode/utf8"
 )
 
-// ErrRowsUnsupported asks the host to stage its rows and use ExecuteV2In.
+// errRowsUnsupported declines a row shape the in-process reducers cannot
+// compute exactly; the caller then compiles the metric to SQL instead.
 // No partial execution result accompanies this error. Test with errors.Is.
-var ErrRowsUnsupported = errors.New("in-memory rows unsupported")
+var errRowsUnsupported = errors.New("in-memory rows unsupported")
 
-// RowFilter is an immutable, reusable SQLite-compatible predicate. The zero
-// value matches every row. Match can return ErrRowsUnsupported for a Go value
+// rowFilter is an immutable, reusable SQLite-compatible predicate. The zero
+// value matches every row. Match can return errRowsUnsupported for a Go value
 // or storage representation that cannot be evaluated exactly.
 // terms is an AND of ORs of AND branches (see WhereTerm.Branches).
-type RowFilter struct{ terms [][][]rowPredicate }
+type rowFilter struct{ terms [][][]rowPredicate }
 type rowPredicate struct {
 	clause       WhereClause
 	field        FieldSpec
@@ -29,27 +30,27 @@ type rowPredicate struct {
 	re           *regexp.Regexp
 }
 
-// CompileRowFilter compiles the same base-field predicates as CompileSQLiteWhere.
+// compileRowFilter compiles the same base-field predicates as compileSQLiteWhere.
 // Values are keyed by schema field name; SQL bindings must be direct references
 // to that column (optionally qualified by r). Computed/SQL expressions require
-// fallback. Missing keys and nil are NULL; see ExecuteV2Rows for storage types.
-func CompileRowFilter(terms []WhereTerm, s Schema, o SQLiteOptions) (RowFilter, error) {
+// fallback. Missing keys and nil are NULL; see sqliteOutput for storage types.
+func compileRowFilter(terms []WhereTerm, s Schema, o sqliteOptions) (rowFilter, error) {
 	if o.Now.IsZero() {
 		o.Now = time.Now()
 	}
 	for _, term := range terms {
 		for _, c := range term.Predicates() {
 			if strings.HasPrefix(c.Field, "@computed/") {
-				return RowFilter{}, fmt.Errorf("%w: computed filter %s", ErrRowsUnsupported, c.Field)
+				return rowFilter{}, fmt.Errorf("%w: computed filter %s", errRowsUnsupported, c.Field)
 			}
 		}
 	}
 	// Use the SQL compiler as the authoritative validation boundary, including
 	// validation of alternatives in OR groups containing a no-op.
-	if _, err := CompileSQLiteWhere(terms, s, o); err != nil {
-		return RowFilter{}, err
+	if _, err := compileSQLiteWhereV1(terms, s, o); err != nil {
+		return rowFilter{}, err
 	}
-	var out RowFilter
+	var out rowFilter
 	for _, term := range terms {
 		var group [][]rowPredicate
 		noOp := false
@@ -58,7 +59,7 @@ func CompileRowFilter(terms []WhereTerm, s Schema, o SQLiteOptions) (RowFilter, 
 			for _, c := range branch {
 				p, keep, err := compileRowPredicate(c, s, o)
 				if err != nil {
-					return RowFilter{}, err
+					return rowFilter{}, err
 				}
 				if keep {
 					preds = append(preds, p)
@@ -76,7 +77,7 @@ func CompileRowFilter(terms []WhereTerm, s Schema, o SQLiteOptions) (RowFilter, 
 		for _, branch := range group {
 			for _, p := range branch {
 				if !rowFieldSupported(p.clause.Field, p.field) {
-					return RowFilter{}, fmt.Errorf("%w: filter binding %s", ErrRowsUnsupported, p.clause.Field)
+					return rowFilter{}, fmt.Errorf("%w: filter binding %s", errRowsUnsupported, p.clause.Field)
 				}
 			}
 		}
@@ -86,7 +87,7 @@ func CompileRowFilter(terms []WhereTerm, s Schema, o SQLiteOptions) (RowFilter, 
 }
 
 // compileRowPredicate prepares one literal; keep is false for a blank no-op.
-func compileRowPredicate(c WhereClause, s Schema, o SQLiteOptions) (rowPredicate, bool, error) {
+func compileRowPredicate(c WhereClause, s Schema, o sqliteOptions) (rowPredicate, bool, error) {
 	f := s.Fields[c.Field]
 	sql, _, _ := sqliteLiteral(c, s, o.Now)
 	if sql == "" {
@@ -109,12 +110,12 @@ func compileRowPredicate(c WhereClause, s Schema, o SQLiteOptions) (rowPredicate
 		p.value = args[0]
 	case "matches_regex", "not_matches_regex":
 		if !validRowFunctionText(c.Value) {
-			return rowPredicate{}, false, fmt.Errorf("%w: regex text", ErrRowsUnsupported)
+			return rowPredicate{}, false, fmt.Errorf("%w: regex text", errRowsUnsupported)
 		}
 		p.re, _ = sqlitePattern(c.Value)
 	case "contains", "starts_with", "ends_with", "includes":
 		if !validRowFunctionText(c.Value) {
-			return rowPredicate{}, false, fmt.Errorf("%w: filter text", ErrRowsUnsupported)
+			return rowPredicate{}, false, fmt.Errorf("%w: filter text", errRowsUnsupported)
 		}
 		if c.Op != "includes" || !f.ArrayCaseSensitive {
 			p.value = strings.ToLower(c.Value)
@@ -151,7 +152,7 @@ func rowFieldSupported(name string, f FieldSpec) bool {
 
 // Match returns whether the row would pass SQLite's WHERE. Runtime fallback
 // errors must be handled before using any selected rows.
-func (f RowFilter) Match(row map[string]any) (bool, error) {
+func (f rowFilter) Match(row map[string]any) (bool, error) {
 	match := true
 	for _, term := range f.terms {
 		anyMatch := false
@@ -183,14 +184,14 @@ func rowStorage(v any, f *FieldSpec) (any, error) {
 		}
 	case bool:
 		if f.Kind != FieldBool {
-			return nil, fmt.Errorf("%w: %T in field %s", ErrRowsUnsupported, v, f.Name)
+			return nil, fmt.Errorf("%w: %T in field %s", errRowsUnsupported, v, f.Name)
 		}
 		if n {
 			return int64(1), nil
 		}
 		return int64(0), nil
 	default:
-		return nil, fmt.Errorf("%w: %T in field %s", ErrRowsUnsupported, v, f.Name)
+		return nil, fmt.Errorf("%w: %T in field %s", errRowsUnsupported, v, f.Name)
 	}
 	if f.Kind == FieldDatetime && v == "" {
 		return nil, nil
@@ -206,7 +207,7 @@ func rowArray(v any) ([]string, error) {
 	}
 	s, ok := v.(string)
 	if !ok || !validRowFunctionText(s) {
-		return nil, fmt.Errorf("%w: array storage", ErrRowsUnsupported)
+		return nil, fmt.Errorf("%w: array storage", errRowsUnsupported)
 	}
 	// Decode into any first: []string would silently accept JSON null elements.
 	var a []any
@@ -225,7 +226,7 @@ func rowArray(v any) ([]string, error) {
 	// decodes unpaired surrogates differently from encoding/json. Validate the
 	// original escapes so Go's replacement runes cannot change membership.
 	if err := validJSONSurrogates(s); err != nil {
-		return nil, fmt.Errorf("%w: array Unicode escapes: %v", ErrRowsUnsupported, err)
+		return nil, fmt.Errorf("%w: array Unicode escapes: %v", errRowsUnsupported, err)
 	}
 	return result, nil
 }
@@ -266,11 +267,11 @@ func (p *rowPredicate) match(raw any) (bool, error) {
 		if p.field.Kind == FieldDatetime && (p.field.SQLiteDatetimeFormat != "utc-millis" && p.field.SQLiteDatetimeFormat != "unix-millis" && p.field.SQLiteDatetimeFormat != "unix-seconds") && v != nil {
 			s, ok := v.(string)
 			if !ok || !validRowFunctionText(s) {
-				return false, fmt.Errorf("%w: datetime storage", ErrRowsUnsupported)
+				return false, fmt.Errorf("%w: datetime storage", errRowsUnsupported)
 			}
 			t, e := sqliteParseTime(s)
 			if e != nil {
-				return false, fmt.Errorf("%w: %v", ErrRowsUnsupported, e)
+				return false, fmt.Errorf("%w: %v", errRowsUnsupported, e)
 			}
 			v = t.UTC().Format("2006-01-02T15:04:05.000000000Z")
 		}
@@ -304,7 +305,7 @@ func (p *rowPredicate) match(raw any) (bool, error) {
 		for _, s := range array {
 			if !p.field.ArrayCaseSensitive {
 				if !validRowFunctionText(s) {
-					return false, fmt.Errorf("%w: array element", ErrRowsUnsupported)
+					return false, fmt.Errorf("%w: array element", errRowsUnsupported)
 				}
 				s = strings.ToLower(s)
 			}
@@ -317,10 +318,10 @@ func (p *rowPredicate) match(raw any) (bool, error) {
 		}
 		s, ok := v.(string)
 		if !ok {
-			return false, fmt.Errorf("%w: text predicate storage", ErrRowsUnsupported)
+			return false, fmt.Errorf("%w: text predicate storage", errRowsUnsupported)
 		}
 		if !validRowFunctionText(s) {
-			return false, fmt.Errorf("%w: text predicate storage", ErrRowsUnsupported)
+			return false, fmt.Errorf("%w: text predicate storage", errRowsUnsupported)
 		}
 		truth = 0
 		switch p.clause.Op {
@@ -410,24 +411,4 @@ func rowCompare(a, b any) int {
 		return 1
 	}
 	return 0
-}
-
-// SQLiteRowValues returns SQL parameters for an untyped staging table in the
-// requested column order. It shares ExecuteV2Rows' storage contract, including
-// bool binding, NaN-to-NULL and empty-datetime-to-NULL normalization. The host
-// owns table creation, column quoting, authorization, insertion and cleanup.
-func SQLiteRowValues(row map[string]any, s Schema, columns []string) ([]any, error) {
-	values := make([]any, len(columns))
-	for i, name := range columns {
-		f, ok := s.Fields[name]
-		if !ok {
-			return nil, fmt.Errorf("unknown staging field %q", name)
-		}
-		v, err := rowStorage(row[name], &f)
-		if err != nil {
-			return nil, err
-		}
-		values[i] = v
-	}
-	return values, nil
 }

@@ -56,7 +56,7 @@ func TestV3FrontendParity(t *testing.T) {
 				q.Grouping.Keys = keys
 				q.Grouping.Representative.OrderBy = []qt.OrderBy{{Field: "n", Dir: "desc", Nulls: nulls}, {Field: "at", Dir: "asc", Nulls: "last"}}
 				q.Result.Where = []qt.WhereTerm{{Field: "num", Op: ">=", Value: "1"}}
-				q.Result.OrderBy = qt.OrderBys{{Field: "total", Dir: "desc"}, {Field: "num", Dir: "desc"}}
+				q.Result.OrderBy = []qt.OrderBy{{Field: "total", Dir: "desc"}, {Field: "num", Dir: "desc"}}
 				for _, key := range keys {
 					q.Result.OrderBy = append(q.Result.OrderBy, qt.OrderBy{Field: key, Dir: "asc", Nulls: "last"})
 				}
@@ -237,7 +237,7 @@ func TestV3FrontendParity(t *testing.T) {
 			q.Grouping.KeyIntervals = map[string]qt.GroupKeyInterval{"at": {Interval: c.interval, TimeZone: c.zone}}
 			q.Grouping.Summaries = []qt.SummaryColumn{{ID: "num", Op: "count"}, {ID: "total", Op: "sum", Field: "n"}, {ID: "first_at", Op: "min", Field: "at"}, {ID: "example", Op: "row", Field: "label"}}
 			q.Result.Select = append(append([]string{}, q.Grouping.Keys...), "num", "total", "first_at", "example")
-			q.Result.OrderBy = qt.OrderBys{{Field: "at", Dir: "asc", Nulls: "last"}}
+			q.Result.OrderBy = []qt.OrderBy{{Field: "at", Dir: "asc", Nulls: "last"}}
 			q.Result.Where = []qt.WhereTerm{{Field: "num", Op: ">=", Value: "1"}}
 			if extra {
 				q.Result.OrderBy = append(q.Result.OrderBy, qt.OrderBy{Field: "k", Dir: "desc", Nulls: "last"})

@@ -32,7 +32,7 @@ func TestComputedSaveInValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = d.DescribeComputedIn(ctx, tx, []string{"base", "child"}, qt.PlanOptions{}); err != nil {
+	if _, err = describeComputedIn(ctx, tx, d, []string{"base", "child"}, qt.PlanOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if err = tx.Commit(); err != nil {
@@ -50,7 +50,7 @@ func TestComputedSaveInValidation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = d.DescribeComputedIn(ctx, tx, []string{"base", "child"}, qt.PlanOptions{})
+			_, err = describeComputedIn(ctx, tx, d, []string{"base", "child"}, qt.PlanOptions{})
 			var diagnostic *qt.PlanDiagnostic
 			if !errors.As(err, &diagnostic) {
 				t.Fatalf("invalid catalogue accepted: %v", err)
@@ -80,7 +80,7 @@ func TestComputedSaveInValidation(t *testing.T) {
 	if _, err = store.SaveIn(ctx, tx, "one", "runs", qt.SaveComputedColumnRequest{Column: column("base", "[n]+3")}); !errors.Is(err, qt.ErrComputedConflict) {
 		t.Fatal("duplicate create accepted", err)
 	}
-	if _, err = d.DescribeComputedIn(ctx, tx, []string{"base", "child"}, qt.PlanOptions{}); err != nil {
+	if _, err = describeComputedIn(ctx, tx, d, []string{"base", "child"}, qt.PlanOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if err = tx.Commit(); err != nil {

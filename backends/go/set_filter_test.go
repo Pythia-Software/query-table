@@ -20,7 +20,7 @@ func TestCompileArrayNullity(t *testing.T) {
 		{"is_not_null", false, "COALESCE(cardinality(tags), 0) > 0"},
 		{"includes", true, "AND COALESCE(cardinality(tags), 0) > 0"},
 	} {
-		compiled, _, err := Compile(WireQuery{Where: []WhereTerm{{Field: "tags", Op: test.op, Value: "a", Negated: test.negated}}}, schema, 1)
+		compiled, _, err := compileTestWhere(WireQuery{Where: []WhereTerm{{Field: "tags", Op: test.op, Value: "a", Negated: test.negated}}}, schema, 1)
 		if err != nil || !strings.Contains(compiled.WhereSQL, test.want) {
 			t.Fatalf("%s: sql=%q, err=%v", test.op, compiled.WhereSQL, err)
 		}
@@ -51,7 +51,7 @@ func TestSetFilterPostgres(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.mode, func(t *testing.T) {
-			compiled, _, err := Compile(WireQuery{Where: test.where}, schema, 1)
+			compiled, _, err := compileTestWhere(WireQuery{Where: test.where}, schema, 1)
 			if err != nil {
 				t.Fatal(err)
 			}

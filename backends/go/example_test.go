@@ -1,6 +1,7 @@
 package querytable
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -39,13 +40,21 @@ func TestExampleSchemaLoads(t *testing.T) {
 		t.Errorf("tiebreak = %+v", s.TiebreakSort)
 	}
 
-	// And it actually compiles a representative query.
+	// And it actually compiles a representative v3 row page. The example does
+	// not opt its numeric bindings into the bounded expression profile, which
+	// v3 needs to sort typed numbers; a host sets expressionNumeric for that.
+	for _, name := range []string{"id", "total_ms"} {
+		f := s.Fields[name]
+		f.ExpressionNumeric = true
+		s.Fields[name] = f
+	}
 	q := WireQuery{
 		Select:  []string{"overall", "is_starred"},
 		Where:   []WhereTerm{{Field: "overall", Op: "=", Value: "FAIL"}},
-		OrderBy: OrderBys{{Field: "total_ms", Dir: "desc"}},
+		OrderBy: []OrderBy{{Field: "total_ms", Dir: "desc"}},
+		Limit:   50,
 	}
-	if _, _, err := Compile(q, s, 1); err != nil {
+	if _, err := compileTestRows(context.Background(), q, s, PlanOptions{SourceSQL: "SELECT * FROM runs r"}); err != nil {
 		t.Fatalf("Compile against example: %v", err)
 	}
 }

@@ -55,7 +55,7 @@ func TestPharosIntegerReductionPromotion(t *testing.T) {
 }
 func TestPharosMetricCloneIndependence(t *testing.T) {
 	n := int64(2)
-	m := SQLiteMetricV2{Buckets: []SQLiteMetricV2Bucket{{Keys: []any{"a"}, NullCount: &n, Distribution: &MetricHistogramDistribution{Edges: []float64{0, 1}, Counts: []int64{2}}}}}
+	m := MetricResult{Buckets: []MetricBucket{{Keys: []any{"a"}, NullCount: &n, Distribution: &MetricHistogramDistribution{Edges: []float64{0, 1}, Counts: []int64{2}}}}}
 	copy := cloneSQLiteMetric(m)
 	copy.Buckets[0].Keys[0] = "b"
 	*copy.Buckets[0].NullCount = 8
@@ -89,8 +89,8 @@ func TestPharosReductionFusionPolicies(t *testing.T) {
 	schema := Schema{Name: "samples", IDField: "id", Fields: map[string]FieldSpec{
 		"id": {Kind: FieldText, Expr: "r.id", Sortable: true}, "x": {Kind: FieldNumber, Expr: "r.x", ExpressionNumeric: true},
 	}}
-	q := MetricQuery{Version: 2, Profile: SQLiteExpressionProfile, Limit: 5, Metrics: []AggSpec{{ID: "sum", Expression: "SUM([x])"}, {ID: "plus", Expression: "SUM([x])+2"}, {ID: "avg", Expression: "AVG([x])"}, {ID: "shown", Expression: "AVG([x])", Scope: "shownRows"}}}
-	batch, err := CompileSQLiteMetrics(context.Background(), q, schema, PlanOptions{SourceSQL: "SELECT * FROM samples"})
+	q := metricRequest{Version: 2, Profile: SQLiteExpressionProfile, Limit: 5, Metrics: []AggSpec{{ID: "sum", Expression: "SUM([x])"}, {ID: "plus", Expression: "SUM([x])+2"}, {ID: "avg", Expression: "AVG([x])"}, {ID: "shown", Expression: "AVG([x])", Scope: "shownRows"}}}
+	batch, err := compileTestSQLiteMetrics(context.Background(), q, schema, PlanOptions{SourceSQL: "SELECT * FROM samples"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func TestRelativeDatetimeResolverBoundsAndAbsoluteValues(t *testing.T) {
 func TestMetricCloneBoxAndSidecarIndependence(t *testing.T) {
 	y := any(float64(1))
 	errors := int64(2)
-	original := SQLiteMetricV2{Buckets: []SQLiteMetricV2Bucket{{Keys: []any{"a"}, Y: &y, InputErrorCount: &errors, Distribution: &MetricBoxDistribution{Summary: &MetricBoxSummary{Outliers: []float64{7}}}}}}
+	original := MetricResult{Buckets: []MetricBucket{{Keys: []any{"a"}, Y: &y, InputErrorCount: &errors, Distribution: &MetricBoxDistribution{Summary: &MetricBoxSummary{Outliers: []float64{7}}}}}}
 	copy := cloneSQLiteMetric(original)
 	*copy.Buckets[0].Y = float64(9)
 	*copy.Buckets[0].InputErrorCount = 8
@@ -148,7 +148,7 @@ func TestSQLiteReuseParameterKeys(t *testing.T) {
 		`SELECT ?1 AS "x?99"`,
 		"SELECT ?1 AS x, '?99''?' AS literal",
 	} {
-		p := MetricSQLPlan{SQLPlan: SQLPlan{Stages: []SQLStage{{Name: "qt0", SQL: sql}, {Name: "qt1", SQL: "SELECT x FROM qt0"}}, Args: []any{1}, SQLiteReductionStage: 1}}
+		p := metricSQLPlan{SQLPlan: SQLPlan{Stages: []SQLStage{{Name: "qt0", SQL: sql}, {Name: "qt1", SQL: "SELECT x FROM qt0"}}, Args: []any{1}, SQLiteReductionStage: 1}}
 		first := sqliteReductionKey(p)
 		p.Args = []any{2}
 		if first == "" || first == sqliteReductionKey(p) {

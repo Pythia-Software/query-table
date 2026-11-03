@@ -25,15 +25,15 @@ func TestRowsFloatNoiseMetricsParity(t *testing.T) {
 	}
 	defer tx.Rollback()
 	stageMemoryRows(t, tx, s, rows)
-	d := qt.SQLiteV2Dataset{Schema: s, SourceSQL: "SELECT * FROM memory"}
+	d := qt.QueryDatasetV3{Dialect: "sqlite", Schema: s, SourceSQL: "SELECT * FROM memory"}
 	for _, groups := range [][]string{nil, {"enum"}} {
-		q := qt.MetricQuery{Version: 2}
+		q := metricsV3(nil, nil, 0, 0)
 		for _, field := range []string{"n", "n2", "n3", "n4", "n5"} {
 			q.Metrics = append(q.Metrics, qt.AggSpec{ID: field, Op: "sum", Field: field, GroupBy: groups})
 		}
 		q.Metrics = append(q.Metrics, qt.AggSpec{ID: "sessions", Op: "count_distinct", Field: "text", GroupBy: groups},
 			qt.AggSpec{ID: "avg", Op: "avg", Field: "n", GroupBy: groups})
-		compareMemory(t, tx, d, rows, q, qt.PlanOptions{})
+		compareStaged(t, tx, d, q, qt.PlanOptions{})
 	}
 }
 
@@ -54,15 +54,15 @@ func TestRowsGroupEncodingParity(t *testing.T) {
 	}
 	defer tx.Rollback()
 	stageMemoryRows(t, tx, s, rows)
-	d := qt.SQLiteV2Dataset{Schema: s, SourceSQL: "SELECT * FROM memory"}
-	q := qt.MetricQuery{Version: 2, Metrics: []qt.AggSpec{{ID: "groups", Op: "count", GroupBy: []string{"text", "enum", "flag"}}}}
-	compareMemory(t, tx, d, rows, q, qt.PlanOptions{})
+	d := qt.QueryDatasetV3{Dialect: "sqlite", Schema: s, SourceSQL: "SELECT * FROM memory"}
+	q := metricsV3(nil, nil, 0, 0, []qt.AggSpec{{ID: "groups", Op: "count", GroupBy: []string{"text", "enum", "flag"}}}...)
+	compareStaged(t, tx, d, q, qt.PlanOptions{})
 	q.Metrics[0].MinCount = qt.MetricMinCount{Min: 2}
 	q.Metrics[0].GroupLimit = 13
 	q.Metrics[0].Sort = []qt.MetricSort{{Key: "group0", Dir: "desc", Nulls: "first"}, {Key: "count", Dir: "asc"}}
-	compareMemory(t, tx, d, rows, q, qt.PlanOptions{})
+	compareStaged(t, tx, d, q, qt.PlanOptions{})
 	d.MaxGroups = 269
-	compareMemory(t, tx, d, rows, q, qt.PlanOptions{})
+	compareStaged(t, tx, d, q, qt.PlanOptions{})
 }
 
 func TestRowsDecimalErrorPriorityParity(t *testing.T) {
@@ -87,13 +87,14 @@ func TestRowsDecimalErrorPriorityParity(t *testing.T) {
 			}
 			defer tx.Rollback()
 			stageMemoryRows(t, tx, s, rows)
-			d := qt.SQLiteV2Dataset{Schema: s, SourceSQL: "SELECT * FROM memory"}
-			q := qt.MetricQuery{Version: 2, Metrics: []qt.AggSpec{{ID: "sum", Op: "sum", Field: "n"}, {ID: "avg", Op: "avg", Field: "n"}}}
-			compareMemory(t, tx, d, rows, q, qt.PlanOptions{})
+			d := qt.QueryDatasetV3{Dialect: "sqlite", Schema: s, SourceSQL: "SELECT * FROM memory"}
+			q := metricsV3(nil, nil, 0, 0, []qt.AggSpec{{ID: "sum", Op: "sum", Field: "n"}, {ID: "avg", Op: "avg", Field: "n"}}...)
+			compareStaged(t, tx, d, q, qt.PlanOptions{})
 			for i, j := 0, len(rows)-1; i < j; i, j = i+1, j-1 {
 				rows[i], rows[j] = rows[j], rows[i]
 			}
-			compareMemory(t, tx, d, rows, q, qt.PlanOptions{})
+			stageMemoryRows(t, tx, s, rows) // restage in the reversed order
+			compareStaged(t, tx, d, q, qt.PlanOptions{})
 		})
 	}
 }

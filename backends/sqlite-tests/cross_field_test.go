@@ -34,8 +34,8 @@ func crossFieldDDL(rows int) string {
  INSERT INTO source SELECT printf('%%08d',i),CASE WHEN i%%5=0 THEN NULL WHEN i%%7=0 THEN '' ELSE 'g'||(i%%3) END,'allowed',%s FROM nums;
  INSERT INTO source SELECT 'hidden','hidden','denied',%s;`, strings.Join(columns, ","), rows, strings.Join(values, ","), strings.Repeat("999,", 8)+"999")
 }
-func crossFieldQuery(grouped bool) qt.MetricQuery {
-	q := qt.MetricQuery{Version: 2, Profile: qt.SQLiteExpressionProfile, Limit: 3, Offset: 1, OrderBy: []qt.OrderBy{{Field: "id", Dir: "desc"}}}
+func crossFieldQuery(grouped bool) qt.QueryRequestV3 {
+	q := metricsV3(nil, []qt.OrderBy{{Field: "id", Dir: "desc"}}, 3, 1)
 	q.Metrics = append(q.Metrics, qt.AggSpec{ID: "count", Op: "count"})
 	for i := 0; i < 9; i++ {
 		q.Metrics = append(q.Metrics, qt.AggSpec{ID: fmt.Sprintf("sum%d", i), Op: "sum", Field: fmt.Sprintf("n%d", i)})
@@ -47,30 +47,30 @@ func crossFieldQuery(grouped bool) qt.MetricQuery {
 	}
 	return q
 }
-func crossFieldDataset(t *testing.T, log *statementLog) (*sql.DB, qt.SQLiteV2Dataset) {
+func crossFieldDataset(t *testing.T, log *statementLog) (*sql.DB, qt.QueryDatasetV3) {
 	t.Helper()
 	db := hookedDB(t, log, crossFieldDDL(30))
-	d := qt.SQLiteV2Dataset{Schema: crossFieldSchema(), SourceSQL: "SELECT * FROM source WHERE tenant=?1", SourceArgs: []any{"allowed"}}
+	d := qt.QueryDatasetV3{Dialect: "sqlite", Schema: crossFieldSchema(), SourceSQL: "SELECT * FROM source WHERE tenant=?1", SourceArgs: []any{"allowed"}}
 	return db, d
 }
-func crossFieldParity(t *testing.T, db *sql.DB, d qt.SQLiteV2Dataset, q qt.MetricQuery, o qt.PlanOptions) qt.SQLiteV2ExecutionResult {
+func crossFieldParity(t *testing.T, db *sql.DB, d qt.QueryDatasetV3, q qt.QueryRequestV3, o qt.PlanOptions) qt.QueryResultV3 {
 	t.Helper()
-	want := []qt.SQLiteMetricV2{}
+	want := []qt.MetricResult{}
 	for _, spec := range q.Metrics {
 		single := q
 		single.Metrics = []qt.AggSpec{spec}
-		r, err := d.ExecuteV2(context.Background(), db, nil, &single, o)
+		r, err := d.Execute(context.Background(), db, single, o)
 		if err != nil {
 			t.Fatal(err)
 		}
-		want = append(want, r.Metrics.Metrics[0])
+		want = append(want, r.Metrics[0])
 	}
-	got, err := d.ExecuteV2(context.Background(), db, nil, &q, o)
+	got, err := d.Execute(context.Background(), db, q, o)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got.Metrics.Metrics, want) {
-		t.Fatalf("batch differs:\ngot %#v\nwant %#v", got.Metrics.Metrics, want)
+	if !reflect.DeepEqual(got.Metrics, want) {
+		t.Fatalf("batch differs:\ngot %#v\nwant %#v", got.Metrics, want)
 	}
 	return got
 }
@@ -87,7 +87,7 @@ func TestV2CrossFieldReductions(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer tx.Rollback()
-			result, err := d.ExecuteV2In(context.Background(), tx, nil, &q, qt.PlanOptions{})
+			result, err := d.ExecuteIn(context.Background(), tx, q, qt.PlanOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -96,16 +96,16 @@ func TestV2CrossFieldReductions(t *testing.T) {
 			}
 			// Population preflight remains separate from the shared reduction. Statement
 			// counts describe submitted work, not physical SQLite table scans.
-			if n := log.count("SELECT COUNT(*) FROM (SELECT 1"); n != 1 {
+			if n := log.count(populationMarker); n != 1 {
 				t.Fatalf("%d population checks", n)
 			}
 			assertNoReductions(t, tx)
-			if result.Metrics.Metrics[0].ProcessedRows != 30 {
+			if result.Metrics[0].ProcessedRows != 30 {
 				t.Fatal(result)
 			}
 			if grouped {
-				result.Metrics.Metrics[1].Buckets[0].Keys[0] = "changed"
-				if reflect.DeepEqual(result.Metrics.Metrics[0].Buckets[0].Keys, result.Metrics.Metrics[1].Buckets[0].Keys) {
+				result.Metrics[1].Buckets[0].Keys[0] = "changed"
+				if reflect.DeepEqual(result.Metrics[0].Buckets[0].Keys, result.Metrics[1].Buckets[0].Keys) {
 					t.Fatal("shared keys")
 				}
 			}
@@ -144,10 +144,10 @@ func TestV2CrossFieldSemantics(t *testing.T) {
 	q.Metrics[1].Where = []qt.WhereTerm{{Field: "id", Op: "!=", Value: "00000001"}}
 	q.Metrics[2].Scope = "shownRows"
 	q.Metrics[3].Scope = "shownRows"
-	q.Where = []qt.WhereTerm{{Field: "id", Op: "!=", Value: "00000002"}}
+	q.Result.Where = []qt.WhereTerm{{Field: "id", Op: "!=", Value: "00000002"}}
 	crossFieldParity(t, db, d, q, qt.PlanOptions{})
 	// Empty populations preserve grouped and scalar COUNT/SUM/AVG semantics.
-	q.Where = []qt.WhereTerm{{Field: "id", Op: "=", Value: "absent"}}
+	q.Result.Where = []qt.WhereTerm{{Field: "id", Op: "=", Value: "absent"}}
 	crossFieldParity(t, db, d, q, qt.PlanOptions{})
 	for i := range q.Metrics {
 		q.Metrics[i].GroupBy = nil
@@ -161,7 +161,7 @@ func TestV2CrossFieldGuards(t *testing.T) {
 	limited := d
 	limited.MaxGroups = 1
 	result := crossFieldParity(t, db, limited, q, qt.PlanOptions{})
-	for _, m := range result.Metrics.Metrics {
+	for _, m := range result.Metrics {
 		if m.Error != "group population exceeds host budget" {
 			t.Fatal(m)
 		}
@@ -169,15 +169,20 @@ func TestV2CrossFieldGuards(t *testing.T) {
 	limited = d
 	limited.MaxPopulation = 2
 	log.reset(nil)
-	if _, err := limited.ExecuteV2(context.Background(), db, nil, &q, qt.PlanOptions{}); err == nil || log.count("CREATE TEMP TABLE") != 0 {
+	// v3 applies MaxPopulation only to staged execution, which must refuse
+	// before copying anything; direct ungrouped metrics ignore it.
+	if _, err := qt.TestOnlyStageUngrouped(limited).Execute(context.Background(), db, q, qt.PlanOptions{}); err == nil || log.count("CREATE TEMP TABLE") != 0 {
 		t.Fatal("population guard", err)
+	}
+	if _, err := limited.Execute(context.Background(), db, q, qt.PlanOptions{}); err != nil {
+		t.Fatal("direct metrics applied the staging budget", err)
 	}
 	q.ExpectedRevisions = map[string]string{"hidden": "1"}
 	log.reset(nil)
 	o := qt.PlanOptions{Resolver: qt.DefinitionResolverFunc(func(context.Context, string) (qt.ComputedColumn, error) {
 		return qt.ComputedColumn{ID: "hidden", Revision: "2"}, nil
 	})}
-	if _, err := d.ExecuteV2(context.Background(), db, nil, &q, o); err == nil || log.count("CREATE TEMP TABLE") != 0 {
+	if _, err := d.Execute(context.Background(), db, q, o); err == nil || log.count("CREATE TEMP TABLE") != 0 {
 		t.Fatal("revision guard", err)
 	}
 	q.ExpectedRevisions = nil
@@ -194,7 +199,7 @@ func TestV2CrossFieldGuards(t *testing.T) {
 		}
 		return nil
 	})
-	if _, err := d.ExecuteV2In(ctx, tx, nil, &q, qt.PlanOptions{}); !errors.Is(err, context.Canceled) {
+	if _, err := d.ExecuteIn(ctx, tx, q, qt.PlanOptions{}); !errors.Is(err, context.Canceled) {
 		t.Fatal("cancellation", err)
 	}
 	assertNoReductions(t, tx)
@@ -212,11 +217,11 @@ func TestV2CrossFieldStatementFailureIsolation(t *testing.T) {
 		}
 		return nil
 	})
-	result, err := d.ExecuteV2(context.Background(), db, nil, &q, qt.PlanOptions{})
+	result, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, m := range result.Metrics.Metrics {
+	for _, m := range result.Metrics {
 		if m.Error != "" {
 			t.Fatal(m)
 		}
@@ -244,12 +249,12 @@ func TestV2CrossFieldSourceEvaluation(t *testing.T) {
 	}
 	single.Metrics = []qt.AggSpec{{ID: "all", Expression: strings.Join(terms, "+"), GroupBy: []string{"k"}}}
 	metricProbeCalls.Store(0)
-	if _, err := d.ExecuteV2(context.Background(), db, nil, &single, qt.PlanOptions{}); err != nil {
+	if _, err := d.Execute(context.Background(), db, single, qt.PlanOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	expected := metricProbeCalls.Load()
 	metricProbeCalls.Store(0)
-	if _, err := d.ExecuteV2(context.Background(), db, nil, &q, qt.PlanOptions{}); err != nil {
+	if _, err := d.Execute(context.Background(), db, q, qt.PlanOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if actual := metricProbeCalls.Load(); actual > expected || actual != 30 {
@@ -296,7 +301,7 @@ func TestV2CrossFieldCollationAndComputed(t *testing.T) {
 	d.Schema.Fields["k"] = f
 	q := crossFieldQuery(true)
 	result := crossFieldParity(t, db, d, q, qt.PlanOptions{})
-	if result.Metrics.Metrics[0].GroupCount != 2 {
+	if result.Metrics[0].GroupCount != 2 {
 		t.Fatal("inherited collation merged keys", result)
 	}
 	q.ExpectedRevisions = map[string]string{"twice": "1"}
@@ -320,7 +325,7 @@ func TestV2CrossFieldCompilerBudgetFallback(t *testing.T) {
 		q.Metrics = append(q.Metrics, qt.AggSpec{ID: fmt.Sprintf("wide%d", i), Expression: "SUM(" + strings.Join(terms, "+") + ")", GroupBy: []string{"k"}})
 	}
 	result := crossFieldParity(t, db, d, q, qt.PlanOptions{})
-	for _, m := range result.Metrics.Metrics {
+	for _, m := range result.Metrics {
 		if m.Error != "" {
 			t.Fatal(m)
 		}
@@ -342,7 +347,7 @@ func TestV2CrossFieldCleanupFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := d.ExecuteV2In(context.Background(), tx, nil, &q, qt.PlanOptions{})
+	out, err := d.ExecuteIn(context.Background(), tx, q, qt.PlanOptions{})
 	if !errors.Is(err, sentinel) || out.Metrics != nil {
 		t.Fatalf("cleanup failure returned a result: %#v %v", out, err)
 	}
@@ -366,7 +371,7 @@ func TestV2CrossFieldStoredAndOpaqueSources(t *testing.T) {
 		t.Helper()
 		log.reset(nil)
 		metricProbeCalls.Store(0)
-		if _, err := d.ExecuteV2(context.Background(), db, nil, &q, qt.PlanOptions{}); err != nil {
+		if _, err := d.Execute(context.Background(), db, q, qt.PlanOptions{}); err != nil {
 			t.Fatal(err)
 		}
 		var reduction string
@@ -403,7 +408,7 @@ func TestV2CrossFieldStoredAndOpaqueSources(t *testing.T) {
 	if _, err := db.Exec("CREATE INDEX source_tenant ON source(tenant)"); err != nil {
 		t.Fatal(err)
 	}
-	q.Where = []qt.WhereTerm{{Field: "n0", Op: ">", Value: "3"}}
+	q.Result.Where = []qt.WhereTerm{{Field: "n0", Op: ">", Value: "3"}}
 	check(false)
 }
 
@@ -444,11 +449,11 @@ func TestV2CrossFieldSourceInspectionFallback(t *testing.T) {
 		}
 		return nil
 	})
-	result, err := d.ExecuteV2(context.Background(), db, nil, &q, qt.PlanOptions{})
+	result, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, m := range result.Metrics.Metrics {
+	for _, m := range result.Metrics {
 		if m.Error != "" {
 			t.Fatal(m)
 		}
@@ -469,7 +474,7 @@ func TestV2CrossFieldSourceInspectionFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	if _, err = d.ExecuteV2In(ctx, tx, nil, &q, qt.PlanOptions{}); !errors.Is(err, context.Canceled) {
+	if _, err = d.ExecuteIn(ctx, tx, q, qt.PlanOptions{}); !errors.Is(err, context.Canceled) {
 		t.Fatal("inspection cancellation", err)
 	}
 	assertNoReductions(t, tx)

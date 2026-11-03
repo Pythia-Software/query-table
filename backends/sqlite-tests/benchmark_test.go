@@ -47,7 +47,7 @@ INSERT INTO bench SELECT printf('%%08d',i),'group '||(i%%%d),CASE WHEN i%%50=0 T
 func benchmarkV3Request(grouping *qt.GroupingDefinition, selected ...string) qt.QueryRequestV3 {
 	return qt.QueryRequestV3{Version: 3, Profile: qt.SQLiteExpressionProfile, Now: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC).UnixMilli(), Rows: true,
 		Grouping: grouping,
-		Result:   qt.WireQuery{Select: selected, OrderBy: qt.OrderBys{{Field: "k", Dir: "asc"}}, Limit: 100}}
+		Result:   qt.WireQuery{Select: selected, OrderBy: []qt.OrderBy{{Field: "k", Dir: "asc"}}, Limit: 100}}
 }
 
 func runV3Benchmark(b *testing.B, db *sql.DB, d qt.QueryDatasetV3, q qt.QueryRequestV3) {
@@ -96,7 +96,7 @@ func BenchmarkV3StagedValues(b *testing.B) {
 		{ID: "row_at", Op: "row", Field: "at"}, {ID: "row_label", Op: "row", Field: "label"},
 	}, Representative: &qt.RepresentativeRow{OrderBy: []qt.OrderBy{{Field: "at", Dir: "desc"}}}}, "k", "num", "total", "first", "last", "row_at", "row_label")
 	q.Result.Where = []qt.WhereTerm{{Field: "num", Op: ">=", Value: "1"}}
-	q.Result.OrderBy = qt.OrderBys{{Field: "first", Dir: "desc"}}
+	q.Result.OrderBy = []qt.OrderBy{{Field: "first", Dir: "desc"}}
 	q.Metrics = []qt.AggSpec{{ID: "latest", Op: "max", Field: "last"}, {ID: "total", Op: "sum", Field: "total"}, {ID: "by_label", Op: "count", GroupBy: []string{"row_label"}, GroupLimit: 10}}
 	runV3Benchmark(b, db, d, q)
 }
@@ -115,19 +115,19 @@ func BenchmarkV3GroupSummaries(b *testing.B) {
 // two row formulas, all grouped by key.
 func BenchmarkV2Metrics(b *testing.B) {
 	db, v3 := benchmarkV3(b, 100000, 1000)
-	d := qt.SQLiteV2Dataset{Schema: v3.Schema, SourceSQL: v3.SourceSQL, Scope: "bench", Dataset: "bench"}
-	q := qt.MetricQuery{Version: 2, Profile: qt.SQLiteExpressionProfile, Metrics: []qt.AggSpec{
+	d := qt.QueryDatasetV3{Dialect: "sqlite", Schema: v3.Schema, SourceSQL: v3.SourceSQL, Scope: "bench", Dataset: "bench"}
+	q := metricsV3(nil, nil, 0, 0, []qt.AggSpec{
 		{ID: "sum", Expression: "SUM([n])", GroupBy: []string{"k"}}, {ID: "avg", Expression: "AVG([n])", GroupBy: []string{"k"}},
 		{ID: "min", Expression: "MIN([n])", GroupBy: []string{"k"}}, {ID: "max", Expression: "MAX([n])", GroupBy: []string{"k"}},
 		{ID: "share", Expression: "SUM(IF([n]>500,[n],0))/COUNT()", GroupBy: []string{"k"}},
 		{ID: "late", Expression: "COUNT(IF(COALESCE([n],0)>100,[at],NULL))", GroupBy: []string{"k"}},
-	}}
+	}...)
 	runBenchmark(b, func() {
-		r, err := d.ExecuteV2(context.Background(), db, nil, &q, qt.PlanOptions{})
+		r, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
 		if err != nil {
 			b.Fatal(err)
 		}
-		for _, m := range r.Metrics.Metrics {
+		for _, m := range r.Metrics {
 			if m.Error != "" {
 				b.Fatal(m.ID, m.Error)
 			}

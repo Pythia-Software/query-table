@@ -17,7 +17,7 @@ import (
 // ungrouped, grouped by day, and grouped with a provider filter that joins
 // the conversation table. The source is a host projection like the
 // consumer's, flattened by SQLite; the filtered source adds the join.
-func scalarMetricsFixture(filtered bool) (string, qt.SQLiteV2Dataset) {
+func scalarMetricsFixture(filtered bool) (string, qt.QueryDatasetV3) {
 	columns, values, fields := []string{}, []string{}, []string{}
 	parts := []string{}
 	for i := 0; i < 8; i++ {
@@ -46,11 +46,11 @@ INSERT INTO authorship SELECT 'm'||n,'c'||(n%%5),printf('2026-09-%%02d',1+n%%5),
 	if filtered {
 		source = "SELECT ma.message_id AS id,ma.day AS day,c.provider AS provider," + strings.Join(fields, ",") + " FROM authorship ma JOIN conversations c ON c.id=ma.conversation_id"
 	}
-	return ddl, qt.SQLiteV2Dataset{Schema: s, SourceSQL: source, Scope: "probe", Dataset: "authorship"}
+	return ddl, qt.QueryDatasetV3{Dialect: "sqlite", Schema: s, SourceSQL: source, Scope: "probe", Dataset: "authorship"}
 }
 
-func scalarMetricsQuery(grouped, filtered bool) qt.MetricQuery {
-	q := qt.MetricQuery{Version: 2, Profile: qt.SQLiteExpressionProfile}
+func scalarMetricsQuery(grouped, filtered bool) qt.QueryRequestV3 {
+	q := metricsV3(nil, nil, 0, 0)
 	q.Metrics = append(q.Metrics, qt.AggSpec{ID: "messages", Op: "count"})
 	for i := 0; i < 9; i++ {
 		q.Metrics = append(q.Metrics, qt.AggSpec{ID: fmt.Sprintf("n%d", i), Op: "sum", Field: fmt.Sprintf("n%d", i)})
@@ -61,7 +61,7 @@ func scalarMetricsQuery(grouped, filtered bool) qt.MetricQuery {
 		}
 	}
 	if filtered {
-		q.Where = []qt.WhereTerm{{Field: "provider", Op: "=", Value: "codex"}}
+		q.Result.Where = []qt.WhereTerm{{Field: "provider", Op: "=", Value: "codex"}}
 	}
 	return q
 }
@@ -98,16 +98,9 @@ func BenchmarkV2ScalarMetrics(b *testing.B) {
 		name              string
 		grouped, filtered bool
 	}{{"scalar", false, false}, {"grouped", true, false}, {"filtered", true, true}} {
-		for _, mode := range []string{"adapter", "adapter-proofs", "adapter-proofs-cold", "guarded-sql", "bare-sql"} {
+		for _, mode := range []string{"adapter", "guarded-sql", "bare-sql"} {
 			b.Run(shape.name+"/"+mode, func(b *testing.B) {
 				ddl, d := scalarMetricsFixture(shape.filtered)
-				if mode != "adapter" && strings.HasPrefix(mode, "adapter") {
-					// adapter-proofs keeps one generation: the untimed warmup
-					// proves the source and timed executions reuse that proof.
-					// adapter-proofs-cold starts a generation for every
-					// execution, as if each followed a write: every one proves.
-					d.SourceGeneration, d.SourceProofs = "1", &qt.SQLiteSourceProofs{}
-				}
 				q := scalarMetricsQuery(shape.grouped, shape.filtered)
 				bare, guarded := scalarMetricsSQL(shape.grouped, shape.filtered, d.SourceSQL)
 				base, err := sql.Open("sqlite", ":memory:")
@@ -120,8 +113,8 @@ func BenchmarkV2ScalarMetrics(b *testing.B) {
 					phase := "other"
 					switch {
 					case strings.HasPrefix(statement, "EXPLAIN "):
-						phase = "source-proof"
-					case strings.HasPrefix(statement, "SELECT COUNT(*) FROM (SELECT 1 FROM"):
+						phase = "source-inspection"
+					case strings.Contains(statement, populationMarker):
 						phase = "population"
 					case strings.Contains(statement, "qt_integer_input"):
 						phase = "reduction"
@@ -150,15 +143,12 @@ func BenchmarkV2ScalarMetrics(b *testing.B) {
 					}
 					defer tx.Rollback()
 					switch mode {
-					case "adapter", "adapter-proofs", "adapter-proofs-cold":
-						if mode == "adapter-proofs-cold" {
-							d.SourceGeneration = fmt.Sprint("cold", runs)
-						}
-						r, err := d.ExecuteV2In(context.Background(), tx, nil, &q, qt.PlanOptions{})
+					case "adapter":
+						r, err := d.ExecuteIn(context.Background(), tx, q, qt.PlanOptions{})
 						if err != nil {
 							b.Fatal(err)
 						}
-						for _, m := range r.Metrics.Metrics {
+						for _, m := range r.Metrics {
 							if m.Error != "" || len(m.Buckets) == 0 {
 								b.Fatal(m.ID, m.Error)
 							}

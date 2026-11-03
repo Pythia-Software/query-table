@@ -19,7 +19,7 @@ func TestV3UngroupedComputedErrorCells(t *testing.T) {
 	db, d := setupV3(t)
 	q := groupedRequest()
 	q.Grouping = nil
-	q.Result = qt.WireQuery{Select: []string{"id", "@computed/inv"}, OrderBy: qt.OrderBys{{Field: "id", Dir: "asc"}}, Limit: 10}
+	q.Result = qt.WireQuery{Select: []string{"id", "@computed/inv"}, OrderBy: []qt.OrderBy{{Field: "id", Dir: "asc"}}, Limit: 10}
 	q.ExpectedRevisions = map[string]string{"inv": "1"}
 	o := qt.PlanOptions{Resolver: qt.DefinitionResolverFunc(func(_ context.Context, id string) (qt.ComputedColumn, error) {
 		return qt.ComputedColumn{ID: id, Label: "Inverse", Revision: "1", Expression: qt.ComputedExpression{Language: "qt-expr", Version: 1, Source: "1/([n]-1)"}}, nil
@@ -95,7 +95,7 @@ SELECT CAST(i AS TEXT) AS id,CASE i%%3 WHEN 0 THEN NULL WHEN 1 THEN '' ELSE 'key
 			d.MaxGroups = groups
 			q := groupedRequest()
 			q.Grouping = &qt.GroupingDefinition{Keys: []string{"n", "k"}}
-			q.Result = qt.WireQuery{Select: []string{"k", "n"}, OrderBy: qt.OrderBys{{Field: "n", Dir: "asc"}}, Limit: groups}
+			q.Result = qt.WireQuery{Select: []string{"k", "n"}, OrderBy: []qt.OrderBy{{Field: "n", Dir: "asc"}}, Limit: groups}
 			out, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
 			if err != nil {
 				t.Fatal(err)
@@ -152,7 +152,7 @@ func TestV3StagingBudgetsBeforeMaterialization(t *testing.T) {
 		d.MaxStagingBytes = 32
 		created = 0
 		var diag *qt.PlanDiagnostic
-		if _, err := qt.StageUngroupedForTesting(d).Execute(context.Background(), db, q, qt.PlanOptions{}); !errors.As(err, &diag) || diag.Code != "resource_limit" {
+		if _, err := qt.TestOnlyStageUngrouped(d).Execute(context.Background(), db, q, qt.PlanOptions{}); !errors.As(err, &diag) || diag.Code != "resource_limit" {
 			t.Fatalf("oversized source: %v", err)
 		}
 		if created != 0 {
@@ -163,7 +163,7 @@ func TestV3StagingBudgetsBeforeMaterialization(t *testing.T) {
 			t.Fatalf("direct oversized source: %#v created=%d err=%v", out, created, err)
 		}
 		d.MaxStagingBytes = int64(len(value) + 1)
-		out, err := qt.StageUngroupedForTesting(d).Execute(context.Background(), db, q, qt.PlanOptions{})
+		out, err := qt.TestOnlyStageUngrouped(d).Execute(context.Background(), db, q, qt.PlanOptions{})
 		if err != nil || len(out.Rows) != 1 || out.Rows[0]["k"] != value {
 			t.Fatalf("exact byte boundary: %#v err=%v", out, err)
 		}
@@ -173,7 +173,7 @@ func TestV3StagingBudgetsBeforeMaterialization(t *testing.T) {
 	d.MaxStagingBytes = 1000
 	d.MaxPopulation = 1
 	created = 0
-	if _, err := qt.StageUngroupedForTesting(d).Execute(context.Background(), db, q, qt.PlanOptions{}); err == nil || created != 0 {
+	if _, err := qt.TestOnlyStageUngrouped(d).Execute(context.Background(), db, q, qt.PlanOptions{}); err == nil || created != 0 {
 		t.Fatalf("population budget created=%d err=%v", created, err)
 	}
 	if out, err := d.Execute(context.Background(), db, q, qt.PlanOptions{}); err != nil || created != 0 || out.Total != 2 || out.SourceTotal != 2 {
@@ -188,7 +188,7 @@ func TestFormulaGroupErrorsHaveDistinctIdentities(t *testing.T) {
 	}
 	q := groupedRequest()
 	q.ExpectedRevisions = map[string]string{"inv": "1"}
-	q.Grouping = &qt.GroupingDefinition{Keys: []string{"@computed/inv"}, Summaries: []qt.SummaryColumn{{ID: "num", Op: "count"}, {ID: "total", Op: "sum", Field: "n"}, {ID: "example", Op: "row", Field: "label"}}, Representative: &qt.RepresentativeRow{OrderBy: qt.OrderBys{{Field: "id", Dir: "asc"}}}}
+	q.Grouping = &qt.GroupingDefinition{Keys: []string{"@computed/inv"}, Summaries: []qt.SummaryColumn{{ID: "num", Op: "count"}, {ID: "total", Op: "sum", Field: "n"}, {ID: "example", Op: "row", Field: "label"}}, Representative: &qt.RepresentativeRow{OrderBy: []qt.OrderBy{{Field: "id", Dir: "asc"}}}}
 	q.Result = qt.WireQuery{Select: []string{"@computed/inv", "num", "total", "example"}, Limit: 10}
 	d.ComputedGroupable = map[string]bool{"inv": true}
 	options := qt.PlanOptions{Resolver: qt.DefinitionResolverFunc(func(_ context.Context, id string) (qt.ComputedColumn, error) {

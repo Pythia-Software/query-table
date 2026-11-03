@@ -54,10 +54,10 @@ type SQLitePredicateRelation struct {
 // and transaction, at most once per distinct predicate. Return ok false to
 // keep the ordinary predicate. A returned error fails the execution.
 //
-// Relations apply to base-field predicates in rows (SQLiteDataset,
-// SQLiteV2Dataset), /metrics V2 populations and metric filters, and
-// /query-v3 source and row filters. They never apply to group filters over
-// grouped results, to computed fields, or to ExecuteV2Rows. Inside an OR
+// Relations apply to base-field predicates in QueryDatasetV3 source and row
+// filters, ungrouped populations and metric filters. They never apply to
+// group filters over grouped results, to computed fields, or to in-process
+// distribution rows. Inside an OR
 // term they are used only when every branch has a usable relation;
 // otherwise the whole term keeps its ordinary predicates.
 type SQLitePredicateRelations interface {

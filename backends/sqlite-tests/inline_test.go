@@ -14,14 +14,14 @@ import (
 // consumers or aggregates of a field must not evaluate its binding again.
 func TestV2InlineProjectionsKeepHostInputsShared(t *testing.T) {
 	db, d := setupReuse(t) // n is bound to a counted host function
-	probe := func(q qt.MetricQuery) int64 {
+	probe := func(q qt.QueryRequestV3) int64 {
 		t.Helper()
 		metricProbeCalls.Store(0)
-		r, err := d.ExecuteV2(context.Background(), db, nil, &q, qt.PlanOptions{})
+		r, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, m := range r.Metrics.Metrics {
+		for _, m := range r.Metrics {
 			if m.Error != "" {
 				t.Fatal(m.ID, m.Error)
 			}
@@ -30,11 +30,11 @@ func TestV2InlineProjectionsKeepHostInputsShared(t *testing.T) {
 	}
 	for _, shape := range []struct {
 		name   string
-		modify func(*qt.MetricQuery)
+		modify func(*qt.QueryRequestV3)
 	}{
-		{"all rows", func(*qt.MetricQuery) {}},
-		{"grouped", func(q *qt.MetricQuery) { q.Metrics[0].GroupBy = []string{"flag"} }},
-		{"shown rows", func(q *qt.MetricQuery) { q.Metrics[0].Scope, q.Limit = "shownRows", 2 }},
+		{"all rows", func(*qt.QueryRequestV3) {}},
+		{"grouped", func(q *qt.QueryRequestV3) { q.Metrics[0].GroupBy = []string{"flag"} }},
+		{"shown rows", func(q *qt.QueryRequestV3) { q.Metrics[0].Scope, q.Result.Limit = "shownRows", 2 }},
 	} {
 		t.Run(shape.name, func(t *testing.T) {
 			q := metricV2("SUM([n])")
@@ -141,23 +141,21 @@ func TestInlinedFormulaChainsKeepValuesAndErrors(t *testing.T) {
 		}
 		return qt.ComputedColumn{ID: id, Label: id, Revision: "1", Expression: qt.ComputedExpression{Language: "qt-expr", Version: 1, Source: source}}, nil
 	})}
-	q := qt.ServerQueryV2{Version: 2, Profile: qt.SQLiteExpressionProfile, ExpectedRevisions: map[string]string{"nested": "1", "lazy": "1"},
-		WireQuery: qt.WireQuery{Select: []string{"id", "@computed/nested", "@computed/lazy"}, OrderBy: []qt.OrderBy{{Field: "id", Dir: "asc"}}, Limit: 10}}
-	r, err := d.ExecuteV2(context.Background(), db, &q, nil, o)
-	if err != nil {
-		t.Fatal(err)
-	}
+	q := rowsV3(qt.WireQuery{Select: []string{"id", "@computed/nested", "@computed/lazy"}, OrderBy: []qt.OrderBy{{Field: "id", Dir: "asc"}}, Limit: 10})
+	q.ExpectedRevisions = map[string]string{"nested": "1", "lazy": "1"}
+	r := executeV3(t, db, d, q, o)
 	for i, want := range []struct {
 		nested any
 		lazy   string
 	}{{float64(2), "divide_by_zero"}, {float64(4), "divide_by_zero"}, {float64(0), "divide_by_zero"}, {float64(6), ""}} {
-		values := r.Rows.Computed[i].Values
+		// v3 writes computed values inline: the value, or {"computedError": code}.
+		row := r.Rows[i]
 		lazyCode := ""
-		if values["lazy"].Error != nil {
-			lazyCode = values["lazy"].Error.Code
+		if cell, failed := row["@computed/lazy"].(map[string]any); failed {
+			lazyCode, _ = cell["computedError"].(string)
 		}
-		if !reflect.DeepEqual(values["nested"].Value, want.nested) || lazyCode != want.lazy {
-			t.Fatalf("row %d: %#v", i, values)
+		if !reflect.DeepEqual(row["@computed/nested"], want.nested) || lazyCode != want.lazy {
+			t.Fatalf("row %d: %#v", i, row)
 		}
 	}
 }

@@ -8,21 +8,33 @@ import (
 	"testing"
 )
 
+func snapshotDataset() QueryDatasetV3 {
+	return QueryDatasetV3{Schema: metricSchema(), SourceSQL: metricOptions().SourceSQL, Dialect: "postgres"}
+}
+
+const (
+	snapshotRowsJSON    = `{"version":3,"profile":"qt-postgres-v1","now":0,"snapshot":"snapshot-2","source":{"select":["id"],"limit":2},"result":{"select":["id"],"where":[],"orderBy":[],"limit":2,"offset":0},"rows":true,"metrics":[]}`
+	snapshotMetricsJSON = `{"version":3,"profile":"qt-postgres-v1","now":0,"snapshot":"snapshot-2","source":{"limit":1},"result":{"limit":1},"rows":false,"metrics":[{"id":"count","op":"count","groupBy":[]}]}`
+)
+
 func TestSnapshotBindingRequired(t *testing.T) {
 	ctx := context.Background()
+	d := snapshotDataset()
 	options := metricOptions()
-	var rows ServerQueryV2
-	if err := json.Unmarshal([]byte(`{"version":2,"profile":"qt-postgres-v1","snapshot":"snapshot-2","where":[],"orderBy":[],"select":["id"],"limit":2,"offset":0}`), &rows); err != nil {
+	var rows, metrics QueryRequestV3
+	if err := json.Unmarshal([]byte(snapshotRowsJSON), &rows); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(snapshotMetricsJSON), &metrics); err != nil {
 		t.Fatal(err)
 	}
 	if rows.Snapshot != "snapshot-2" {
 		t.Fatal(rows)
 	}
-	if _, err := CompileRowsV2(ctx, rows, metricSchema(), options); err == nil {
+	if _, err := d.SourcePlan(ctx, rows, options); err == nil {
 		t.Fatal("missing snapshot validation accepted")
 	}
-	metrics := MetricQuery{Version: 2, Snapshot: "snapshot-2", Metrics: []AggSpec{{ID: "count", Op: "count", GroupBy: []string{}}}}
-	if _, err := CompileMetrics(ctx, metrics, metricSchema(), options); err == nil {
+	if _, err := d.SourcePlan(ctx, metrics, options); err == nil {
 		t.Fatal("metric snapshot ignored")
 	}
 	expected := errors.New("snapshot expired")
@@ -32,31 +44,29 @@ func TestSnapshotBindingRequired(t *testing.T) {
 		}
 		return expected
 	}
-	if _, err := CompileRowsV2(ctx, rows, metricSchema(), options); !errors.Is(err, expected) {
+	if _, err := d.SourcePlan(ctx, rows, options); !errors.Is(err, expected) {
 		t.Fatal(err)
 	}
-	if _, err := CompileMetrics(ctx, metrics, metricSchema(), options); !errors.Is(err, expected) {
+	if _, err := d.SourcePlan(ctx, metrics, options); !errors.Is(err, expected) {
 		t.Fatal(err)
 	}
 	options.ValidateSnapshot = func(_ context.Context, snapshot string) error { return nil }
-	if _, err := CompileRowsV2(ctx, rows, metricSchema(), options); err != nil {
+	if _, err := d.SourcePlan(ctx, rows, options); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := CompileMetrics(ctx, metrics, metricSchema(), options); err != nil {
+	if _, err := d.SourcePlan(ctx, metrics, options); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestSnapshotEnvelopeAndCallback(t *testing.T) {
 	// Reusing a decoded request must clear old snapshot metadata when omitted.
-	var rows ServerQueryV2
-	var metrics MetricQuery
-	rowJSON := `{"version":2,"profile":"qt-postgres-v1","snapshot":"snapshot-2","select":["id"],"limit":2}`
-	metricJSON := `{"version":2,"snapshot":"snapshot-2","metrics":[{"id":"n","op":"count","groupBy":[]}]}`
-	if err := json.Unmarshal([]byte(rowJSON), &rows); err != nil {
+	d := snapshotDataset()
+	var rows, metrics QueryRequestV3
+	if err := json.Unmarshal([]byte(snapshotRowsJSON), &rows); err != nil {
 		t.Fatal(err)
 	}
-	if err := json.Unmarshal([]byte(metricJSON), &metrics); err != nil {
+	if err := json.Unmarshal([]byte(snapshotMetricsJSON), &metrics); err != nil {
 		t.Fatal(err)
 	}
 	if metrics.Snapshot != "snapshot-2" {
@@ -73,41 +83,40 @@ func TestSnapshotEnvelopeAndCallback(t *testing.T) {
 		}
 		return nil
 	}
-	p, err := CompileRowsV2(ctx, rows, metricSchema(), o)
+	p, err := d.SourcePlan(ctx, rows, o)
 	if err != nil || !p.RequiresSnapshot {
 		t.Fatal(p, err)
 	}
-	batch, err := CompileMetrics(ctx, metrics, metricSchema(), o)
-	if err != nil || !batch.RequiresSharedSnapshot || !batch.Metrics[0].RequiresSnapshot {
+	batch, err := d.SourcePlan(ctx, metrics, o)
+	if err != nil || !batch.RequiresSnapshot {
 		t.Fatal(batch, err)
 	}
 	if calls != 2 {
 		t.Fatal("expected one validation per request", calls)
 	}
 	rows.Snapshot, metrics.Snapshot = strings.Repeat("s", 10001), strings.Repeat("s", 10001)
-	for _, compile := range []func() error{
-		func() error { _, err := CompileRowsV2(ctx, rows, metricSchema(), o); return err },
-		func() error { _, err := CompileMetrics(ctx, metrics, metricSchema(), o); return err },
-	} {
+	for _, request := range []QueryRequestV3{rows, metrics} {
 		var diagnostic *PlanDiagnostic
-		if err := compile(); !errors.As(err, &diagnostic) || diagnostic.Code != "snapshot_validation_required" {
+		if _, err := d.SourcePlan(ctx, request, o); !errors.As(err, &diagnostic) || diagnostic.Code != "snapshot_validation_required" {
 			t.Fatal(err)
 		}
 	}
 	if calls != 2 {
 		t.Fatal("oversized snapshot reached host", calls)
 	}
-	if err := json.Unmarshal([]byte(`{"version":2,"profile":"qt-postgres-v1","select":["id"],"limit":2}`), &rows); err != nil {
+	// DecodeQueryRequestV3 always decodes into a fresh request.
+	rows, err = DecodeQueryRequestV3([]byte(strings.Replace(snapshotRowsJSON, `"snapshot":"snapshot-2",`, "", 1)))
+	if err != nil {
 		t.Fatal(err)
 	}
 	if rows.Snapshot != "" {
 		t.Fatal("stale row snapshot", rows.Snapshot)
 	}
 	metrics.Snapshot = ""
-	if _, err := CompileRowsV2(ctx, rows, metricSchema(), o); err != nil {
+	if _, err := d.SourcePlan(ctx, rows, o); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := CompileMetrics(ctx, metrics, metricSchema(), o); err != nil {
+	if _, err := d.SourcePlan(ctx, metrics, o); err != nil {
 		t.Fatal(err)
 	}
 	if calls != 2 {

@@ -25,9 +25,9 @@ type MetricDistribution struct {
 	Bins     int    `json:"bins,omitempty"`
 }
 
-// MetricQuery is the v2 computation-only request. Presentation is intentionally
+// metricRequest is the internal metric batch the v3 executor compiles. Presentation is intentionally
 // ignored by the compiler. Diagnostics/residual filters must never be discarded.
-type MetricQuery struct {
+type metricRequest struct {
 	Profile           string            `json:"profile,omitempty"`
 	ExpectedRevisions map[string]string `json:"expectedRevisions,omitempty"`
 	PlanToken         string            `json:"planToken,omitempty"`
@@ -39,43 +39,24 @@ type MetricQuery struct {
 	Offset            int               `json:"offset"`
 	Metrics           []AggSpec         `json:"metrics"`
 	Diagnostics       []any             `json:"diagnostics,omitempty"`
-	// HostState is the table's host-owned query state; see ServerQueryV2.
+	// HostState is the table's host-owned query state; see QueryRequestV3.
 	HostState json.RawMessage `json:"hostState,omitempty"`
 }
-type MetricSQLPlan struct {
+type metricSQLPlan struct {
 	ID string
 	SQLPlan
 }
-type MetricBatchPlan struct {
-	Metrics                []MetricSQLPlan
+type metricBatchPlan struct {
+	Metrics                []metricSQLPlan
 	RequiresSharedSnapshot bool
-}
-
-// CompileMetrics compiles every requested metric or returns an error. Each plan
-// is one statement; execute the batch in one repeatable-read snapshot. X/Y are
-// always reduced together using one grouped relation, never positionally joined.
-func CompileMetrics(ctx context.Context, q MetricQuery, s Schema, o PlanOptions) (MetricBatchPlan, error) {
-	return compileMetricsDialect(ctx, q, s, o, false)
-}
-func compileMetricsDialect(ctx context.Context, q MetricQuery, s Schema, o PlanOptions, sqlite bool) (MetricBatchPlan, error) {
-	result, failures, err := compileMetricsPartial(ctx, q, s, o, sqlite)
-	if err != nil {
-		return MetricBatchPlan{}, err
-	}
-	for i, failure := range failures {
-		if failure != nil {
-			return MetricBatchPlan{}, fmt.Errorf("metric %s: %w", q.Metrics[i].ID, failure)
-		}
-	}
-	return result, nil
 }
 
 // compileMetricsPartial validates the request as a whole, then compiles each
 // metric. Clause-level failures are returned per index (aligned with
 // q.Metrics, whose failed entries are omitted from the batch); request-level
 // failures return err.
-func compileMetricsPartial(ctx context.Context, q MetricQuery, s Schema, o PlanOptions, sqlite bool) (MetricBatchPlan, []error, error) {
-	result := MetricBatchPlan{RequiresSharedSnapshot: true}
+func compileMetricsPartial(ctx context.Context, q metricRequest, s Schema, o PlanOptions, sqlite bool) (metricBatchPlan, []error, error) {
+	result := metricBatchPlan{RequiresSharedSnapshot: true}
 	failures := make([]error, len(q.Metrics))
 	var optionErr error
 	o, optionErr = requestOptionsDialect(ctx, sqlite, q.Profile, q.PlanToken, q.Snapshot, q.ExpectedRevisions, o)
@@ -91,7 +72,10 @@ func compileMetricsPartial(ctx context.Context, q MetricQuery, s Schema, o PlanO
 	if len(q.Diagnostics) > 0 {
 		return result, nil, diagnostic("residual_query", "query contains unresolved client diagnostics")
 	}
-	if err := (WireQuery{Where: q.Where, OrderBy: q.OrderBy, Limit: q.Limit, Offset: q.Offset, Aggregations: q.Metrics}).Validate(); err != nil {
+	if err := (WireQuery{Where: q.Where, OrderBy: q.OrderBy, Limit: q.Limit, Offset: q.Offset}).Validate(); err != nil {
+		return result, nil, err
+	}
+	if err := validateMetricSpecs(q.Metrics); err != nil {
 		return result, nil, err
 	}
 	ids := map[string]bool{}
@@ -105,16 +89,16 @@ func compileMetricsPartial(ctx context.Context, q MetricQuery, s Schema, o PlanO
 		p, e := compileMetricDialect(ctx, q, spec, s, o, sqlite)
 		if e != nil {
 			if _, clause := metricClauseError(ctx, e); !clause {
-				return MetricBatchPlan{}, nil, fmt.Errorf("metric %s: %w", spec.ID, e)
+				return metricBatchPlan{}, nil, fmt.Errorf("metric %s: %w", spec.ID, e)
 			}
 			failures[i] = e
 			continue
 		}
-		result.Metrics = append(result.Metrics, MetricSQLPlan{spec.ID, p})
+		result.Metrics = append(result.Metrics, metricSQLPlan{spec.ID, p})
 	}
 	return result, failures, nil
 }
-func MetricExpression(spec AggSpec) string {
+func metricExpression(spec AggSpec) string {
 	if spec.Expression != "" {
 		return spec.Expression
 	}
@@ -123,10 +107,7 @@ func MetricExpression(spec AggSpec) string {
 	}
 	return strings.ToUpper(spec.Op) + "([" + strings.ReplaceAll(spec.Field, "]", "]]") + "])"
 }
-func compileMetric(ctx context.Context, q MetricQuery, spec AggSpec, s Schema, o PlanOptions) (SQLPlan, error) {
-	return compileMetricDialect(ctx, q, spec, s, o, false)
-}
-func compileMetricDialect(ctx context.Context, q MetricQuery, spec AggSpec, s Schema, o PlanOptions, sqlite bool) (SQLPlan, error) {
+func compileMetricDialect(ctx context.Context, q metricRequest, spec AggSpec, s Schema, o PlanOptions, sqlite bool) (SQLPlan, error) {
 	return compileMetricOutputs(ctx, q, spec, s, o, sqlite, nil)
 }
 
@@ -138,7 +119,7 @@ type summaryOutput struct{ ID, Expression string }
 // compileMetricOutputs compiles spec and reduces each extra expression in the
 // same pass, as extraN/extraN_error columns. Callers must compile each extra
 // on its own first: a combined plan can still exceed a compiler budget.
-func compileMetricOutputs(ctx context.Context, q MetricQuery, spec AggSpec, s Schema, o PlanOptions, sqlite bool, extra []summaryOutput) (SQLPlan, error) {
+func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s Schema, o PlanOptions, sqlite bool, extra []summaryOutput) (SQLPlan, error) {
 	if len(extra) > 0 && (spec.Distribution != nil || spec.ExpressionY != "") {
 		return SQLPlan{}, diagnostic("invalid_metric", "additional outputs require a scalar metric")
 	}
@@ -233,7 +214,7 @@ func compileMetricOutputs(ctx context.Context, q MetricQuery, spec AggSpec, s Sc
 		}
 		return b.distribution(spec, groups, scope)
 	}
-	n, e := parseExpression(MetricExpression(spec))
+	n, e := parseExpression(metricExpression(spec))
 	if e != nil {
 		return SQLPlan{}, e
 	}

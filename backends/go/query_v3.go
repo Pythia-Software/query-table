@@ -142,7 +142,8 @@ type QueryRequestV3 struct {
 	Rows              bool                `json:"rows"`
 	Metrics           []AggSpec           `json:"metrics"`
 	Diagnostics       []string            `json:"diagnostics,omitempty"`
-	// HostState is the table's host-owned query state; see ServerQueryV2.
+	// HostState is the table's host-owned query state (TS HostQueryState).
+	// Query Table never interprets it; hosts run their own clauses from it.
 	HostState json.RawMessage `json:"hostState,omitempty"`
 	// Distinct requests filter-value suggestions over the source.where
 	// population instead of rows, metrics or groups.
@@ -174,10 +175,13 @@ func (q QueryRequestV3) Validate() error {
 	for _, stage := range []struct {
 		name  string
 		query WireQuery
-	}{{"source", q.Source}, {"result", q.Result}, {"metrics", WireQuery{Aggregations: q.Metrics}}} {
+	}{{"source", q.Source}, {"result", q.Result}} {
 		if err := stage.query.Validate(); err != nil {
 			return diagnostic("query", stage.name+": "+err.Error())
 		}
+	}
+	if err := validateMetricSpecs(q.Metrics); err != nil {
+		return diagnostic("query", "metrics: "+err.Error())
 	}
 	if q.Distinct != nil {
 		if q.Rows || len(q.Metrics) > 0 || q.Grouping != nil {
@@ -200,15 +204,15 @@ type ProjectedSchema struct {
 	Fields  []ProjectedField `json:"fields"`
 }
 type QueryResultV3 struct {
-	SourceTotal int64                   `json:"sourceTotal"`
-	Version     int                     `json:"version"`
-	Now         int64                   `json:"now"`
-	Rows        []map[string]any        `json:"rows"`
-	Total       int64                   `json:"total"`
-	Schema      ProjectedSchema         `json:"schema"`
-	Metrics     []SQLiteMetricV2        `json:"metrics"`
-	Execution   SQLiteComputedExecution `json:"execution"`
-	Distinct    *DistinctResultV3       `json:"distinct,omitempty"`
+	SourceTotal int64             `json:"sourceTotal"`
+	Version     int               `json:"version"`
+	Now         int64             `json:"now"`
+	Rows        []map[string]any  `json:"rows"`
+	Total       int64             `json:"total"`
+	Schema      ProjectedSchema   `json:"schema"`
+	Metrics     []MetricResult    `json:"metrics"`
+	Execution   ComputedExecution `json:"execution"`
+	Distinct    *DistinctResultV3 `json:"distinct,omitempty"`
 }
 type QueryCapabilitiesV3 struct {
 	RegexSourceFilters        bool `json:"regexSourceFilters"`
@@ -259,7 +263,7 @@ type QueryDatasetV3 struct {
 	// See SQLitePredicateRelations.
 	PredicateRelations SQLitePredicateRelations
 	// stageUngrouped sends ungrouped requests through the staged executor;
-	// see StageUngroupedForTesting.
+	// see TestOnlyStageUngrouped.
 	stageUngrouped bool
 }
 
@@ -348,7 +352,7 @@ func (d QueryDatasetV3) options(ctx context.Context, tx *sql.Tx, q QueryRequestV
 }
 
 type SourceDependencyPlan struct {
-	ComputedCapabilities map[string]SQLiteComputedFieldCapability
+	ComputedCapabilities map[string]ComputedFieldCapability
 	ComputedPolicies     map[string][]string
 	SQLPlan
 	Fields       []string // source projection, including canonical computed keys
@@ -446,7 +450,7 @@ func (d QueryDatasetV3) SourcePlan(ctx context.Context, q QueryRequestV3, o Plan
 			return out, diagnostic("grouping", "invalid grouping definition")
 		}
 		count := AggSpec{ID: "__qt_count__", Op: "count", GroupBy: g.Keys}
-		plan, e := compileMetricDialect(ctx, MetricQuery{Version: 2}, count, d.Schema, o, sqlite)
+		plan, e := compileMetricDialect(ctx, metricRequest{Version: 2}, count, d.Schema, o, sqlite)
 		if e != nil {
 			return out, e
 		}
@@ -486,9 +490,9 @@ func (d QueryDatasetV3) SourcePlan(ctx context.Context, q QueryRequestV3, o Plan
 				p, err = compileRowExpressionDialect(ctx, "["+strings.ReplaceAll(s.Field, "]", "]]")+"]", d.Schema, o, sqlite)
 				fields[s.Field] = true
 			} else {
-				p, err = compileMetricDialect(ctx, MetricQuery{Version: 2}, summarySpec(s, g.Keys), d.Schema, o, sqlite)
+				p, err = compileMetricDialect(ctx, metricRequest{Version: 2}, summarySpec(s, g.Keys), d.Schema, o, sqlite)
 				if err == nil {
-					names, e := expressionFields(MetricExpression(summarySpec(s, g.Keys)))
+					names, e := expressionFields(metricExpression(summarySpec(s, g.Keys)))
 					if e != nil {
 						return out, e
 					}
@@ -563,7 +567,7 @@ func (d QueryDatasetV3) SourcePlan(ctx context.Context, q QueryRequestV3, o Plan
 			return out, e
 		}
 		for _, spec := range q.Metrics {
-			names, e := expressionFields(MetricExpression(spec))
+			names, e := expressionFields(metricExpression(spec))
 			if e != nil {
 				return out, e
 			}
@@ -608,7 +612,6 @@ func (d QueryDatasetV3) SourcePlan(ctx context.Context, q QueryRequestV3, o Plan
 	}
 	sort.Strings(source.Select)
 	source.Select = uniqueStrings(source.Select)
-	source.Aggregations = nil
 	// The complete source has no page semantics. Sorting it (including host
 	// defaults) adds work without affecting reducers or representative ordering.
 	source.OrderBy = nil
@@ -621,7 +624,7 @@ func (d QueryDatasetV3) SourcePlan(ctx context.Context, q QueryRequestV3, o Plan
 	}
 	out.SQLPlan = plan
 	out.ComputedPolicies = map[string][]string{}
-	out.ComputedCapabilities = map[string]SQLiteComputedFieldCapability{}
+	out.ComputedCapabilities = map[string]ComputedFieldCapability{}
 	for _, column := range plan.Columns {
 		if strings.HasPrefix(column.Field, "@computed/") {
 			definition, e := compileRowExpressionDialect(ctx, "["+column.Field+"]", d.Schema, o, sqlite)
@@ -629,7 +632,7 @@ func (d QueryDatasetV3) SourcePlan(ctx context.Context, q QueryRequestV3, o Plan
 				return out, e
 			}
 			out.ComputedPolicies[column.Field] = computedInputPolicy(definition, d.Schema)
-			capability := (SQLiteV2Dataset{Schema: d.Schema, ComputedGroupable: d.ComputedGroupable}).capabilityForPlan(column.Field, definition)
+			capability := (sqliteV2Dataset{Schema: d.Schema, ComputedGroupable: d.ComputedGroupable}).capabilityForPlan(column.Field, definition)
 			capability.Filter = d.ComputedFilterable[strings.TrimPrefix(column.Field, "@computed/")]
 			out.ComputedCapabilities[column.Field] = capability
 		}

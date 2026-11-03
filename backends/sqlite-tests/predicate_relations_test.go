@@ -181,26 +181,25 @@ func trigramPaths(t *testing.T, db *sql.DB, relations qt.SQLitePredicateRelation
 		out[name] = value
 	}
 
-	v1 := qt.SQLiteDataset{Schema: schema, FromSQL: "FROM calls r", PredicateRelations: relations}
-	rows, err := v1.Rows(ctx, db, qt.WireQuery{Select: []string{"id"}, Where: where, Limit: 1000})
-	record("v1 rows", rows, err)
-	aggregations, err := v1.Aggregations(ctx, db, qt.SQLiteAggregationRequest{Where: where, Aggregations: []qt.AggSpec{{ID: "n", Op: "count", GroupBy: []string{"provider"}}}})
-	record("v1 aggregations", aggregations, err)
-
-	v2 := qt.SQLiteV2Dataset{Schema: schema, SourceSQL: "SELECT * FROM calls", Scope: "s", Dataset: "calls", PredicateRelations: relations}
-	rowQuery := qt.ServerQueryV2{Version: 2, Profile: qt.SQLiteExpressionProfile, WireQuery: qt.WireQuery{Select: []string{"id", "command"}, Where: where, Limit: 1000}}
-	v2Rows, err := v2.ExecuteV2(ctx, db, &rowQuery, nil, qt.PlanOptions{})
-	record("v2 rows", v2Rows, err)
-	population, err := v2.ExecuteV2(ctx, db, nil, &qt.MetricQuery{Version: 2, Profile: qt.SQLiteExpressionProfile, Where: where, Metrics: []qt.AggSpec{
-		{ID: "n", Op: "count"},
-		{ID: "tokens", Op: "sum", Field: "tokens", GroupBy: []string{"provider"}},
-	}}, qt.PlanOptions{})
-	record("v2 population metrics", population, err)
-	scoped, err := v2.ExecuteV2(ctx, db, nil, &qt.MetricQuery{Version: 2, Profile: qt.SQLiteExpressionProfile, Metrics: []qt.AggSpec{
-		{ID: "all", Op: "count"},
-		{ID: "filtered", Op: "count", GroupBy: []string{"provider"}, Where: where},
-	}}, qt.PlanOptions{})
-	record("v2 metric filters", scoped, err)
+	// The paths the removed v1 Rows/Aggregations and v2 rows/metrics entry
+	// points served, now as direct (ungrouped) v3 requests.
+	direct := qt.QueryDatasetV3{Dialect: "sqlite", Schema: schema, SourceSQL: "SELECT * FROM calls", Scope: "s", Dataset: "calls", PredicateRelations: relations}
+	rows, err := direct.Execute(ctx, db, rowsV3(qt.WireQuery{Select: []string{"id"}, Where: where, Limit: 1000}), qt.PlanOptions{})
+	record("id rows", rows, err)
+	aggregations, err := direct.Execute(ctx, db, metricsV3(where, nil, 0, 0, qt.AggSpec{ID: "n", Op: "count", GroupBy: []string{"provider"}}), qt.PlanOptions{})
+	record("grouped count", aggregations, err)
+	commandRows, err := direct.Execute(ctx, db, rowsV3(qt.WireQuery{Select: []string{"id", "command"}, Where: where, Limit: 1000}), qt.PlanOptions{})
+	record("command rows", commandRows, err)
+	population, err := direct.Execute(ctx, db, metricsV3(where, nil, 0, 0,
+		qt.AggSpec{ID: "n", Op: "count"},
+		qt.AggSpec{ID: "tokens", Op: "sum", Field: "tokens", GroupBy: []string{"provider"}},
+	), qt.PlanOptions{})
+	record("population metrics", population, err)
+	scoped, err := direct.Execute(ctx, db, metricsV3(nil, nil, 0, 0,
+		qt.AggSpec{ID: "all", Op: "count"},
+		qt.AggSpec{ID: "filtered", Op: "count", GroupBy: []string{"provider"}, Where: where},
+	), qt.PlanOptions{})
+	record("metric filters", scoped, err)
 
 	v3 := qt.QueryDatasetV3{Schema: schema, SourceSQL: "SELECT * FROM calls", Dialect: "sqlite", Scope: "s", Dataset: "calls", PredicateRelations: relations}
 	v3Query := func(q qt.QueryRequestV3) qt.QueryResultV3 {
@@ -345,13 +344,13 @@ func TestPredicateRelationsReplaceOnlyWhenExact(t *testing.T) {
 	}
 	// Negation of the lying exact relation keeps the compiler's null/empty guard.
 	negated := []qt.WhereTerm{{Field: "command", Op: "contains", Value: "absent_82f14c", Negated: true}}
-	v2 := qt.SQLiteV2Dataset{Schema: trigramSchema(), SourceSQL: "SELECT * FROM calls", PredicateRelations: lie(true, "SELECT id FROM calls WHERE id = 'c05'")}
-	q := qt.ServerQueryV2{Version: 2, Profile: qt.SQLiteExpressionProfile, WireQuery: qt.WireQuery{Select: []string{"id", "command"}, Where: negated, Limit: 1000}}
-	result, err := v2.ExecuteV2(context.Background(), db, &q, nil, qt.PlanOptions{})
+	v2 := qt.QueryDatasetV3{Dialect: "sqlite", Schema: trigramSchema(), SourceSQL: "SELECT * FROM calls", PredicateRelations: lie(true, "SELECT id FROM calls WHERE id = 'c05'")}
+	q := rowsV3(qt.WireQuery{Select: []string{"id", "command"}, Where: negated, Limit: 1000})
+	result, err := v2.Execute(context.Background(), db, q, qt.PlanOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, row := range result.Rows.Rows {
+	for _, row := range result.Rows {
 		if row["id"] == "c05" || row["command"] == nil || row["command"] == "" {
 			t.Fatalf("negated exact relation row %v", row)
 		}
@@ -360,8 +359,8 @@ func TestPredicateRelationsReplaceOnlyWhenExact(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM calls WHERE command IS NOT NULL AND command <> ''`).Scan(&nonempty); err != nil {
 		t.Fatal(err)
 	}
-	if result.Rows.Total != nonempty-1 {
-		t.Fatalf("negated total %d, want %d", result.Rows.Total, nonempty-1)
+	if result.Total != nonempty-1 {
+		t.Fatalf("negated total %d, want %d", result.Total, nonempty-1)
 	}
 }
 
@@ -384,14 +383,14 @@ func TestPredicateRelationsUseTheExecutionTransaction(t *testing.T) {
 	}
 	relations := &trigramRelations{mode: trigramExact}
 	where := []qt.WhereTerm{{Field: "command", Op: "contains", Value: "needle_77"}}
-	q := qt.ServerQueryV2{Version: 2, Profile: qt.SQLiteExpressionProfile, WireQuery: qt.WireQuery{Select: []string{"id"}, Where: where, Limit: 10}}
+	q := rowsV3(qt.WireQuery{Select: []string{"id"}, Where: where, Limit: 10})
 	for _, provider := range []qt.SQLitePredicateRelations{nil, relations} {
-		d := qt.SQLiteV2Dataset{Schema: trigramSchema(), SourceSQL: "SELECT * FROM calls", PredicateRelations: provider}
-		result, err := d.ExecuteV2In(ctx, tx, &q, nil, qt.PlanOptions{})
+		d := qt.QueryDatasetV3{Dialect: "sqlite", Schema: trigramSchema(), SourceSQL: "SELECT * FROM calls", PredicateRelations: provider}
+		result, err := d.ExecuteIn(ctx, tx, q, qt.PlanOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if result.Rows.Total != 1 || result.Rows.Rows[0]["id"] != "new" {
+		if result.Total != 1 || result.Rows[0]["id"] != "new" {
 			t.Fatalf("provider %v: %+v", provider != nil, result.Rows)
 		}
 	}
@@ -399,12 +398,12 @@ func TestPredicateRelationsUseTheExecutionTransaction(t *testing.T) {
 		t.Fatalf("relation used %d times", relations.used)
 	}
 	// Another connection's snapshot does not see the uncommitted row.
-	d := qt.SQLiteV2Dataset{Schema: trigramSchema(), SourceSQL: "SELECT * FROM calls", PredicateRelations: relations}
-	outside, err := d.ExecuteV2(ctx, db, &q, nil, qt.PlanOptions{})
+	d := qt.QueryDatasetV3{Dialect: "sqlite", Schema: trigramSchema(), SourceSQL: "SELECT * FROM calls", PredicateRelations: relations}
+	outside, err := d.Execute(ctx, db, q, qt.PlanOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if outside.Rows.Total != 0 {
+	if outside.Total != 0 {
 		t.Fatalf("outside snapshot saw %+v", outside.Rows)
 	}
 }
@@ -420,9 +419,9 @@ func TestPredicateRelationErrorsFailTheExecution(t *testing.T) {
 	})
 	where := []qt.WhereTerm{{Field: "command", Op: "contains", Value: "test"}}
 	for _, provider := range []qt.SQLitePredicateRelations{failing, bad} {
-		v2 := qt.SQLiteV2Dataset{Schema: trigramSchema(), SourceSQL: "SELECT * FROM calls", PredicateRelations: provider}
+		v2 := qt.QueryDatasetV3{Dialect: "sqlite", Schema: trigramSchema(), SourceSQL: "SELECT * FROM calls", PredicateRelations: provider}
 		// A metric-only filter would otherwise be isolated as a metric error.
-		_, err := v2.ExecuteV2(context.Background(), db, nil, &qt.MetricQuery{Version: 2, Profile: qt.SQLiteExpressionProfile, Metrics: []qt.AggSpec{{ID: "n", Op: "count", Where: where}}}, qt.PlanOptions{})
+		_, err := v2.Execute(context.Background(), db, metricsV3(nil, nil, 0, 0, qt.AggSpec{ID: "n", Op: "count", Where: where}), qt.PlanOptions{})
 		if err == nil || !strings.Contains(err.Error(), "predicate relation") {
 			t.Fatalf("metric filter: %v", err)
 		}

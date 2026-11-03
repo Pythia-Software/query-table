@@ -19,7 +19,7 @@ func directRequest() qt.QueryRequestV3 {
 		{ID: "distinct", Op: "count_distinct", Field: "n0"},
 	}}
 	q.Source = qt.WireQuery{Limit: 1, Offset: 100}
-	q.Result = qt.WireQuery{Select: []string{"k", "rows", "values", "total", "mean", "low", "high", "distinct"}, OrderBy: qt.OrderBys{{Field: "rows", Dir: "desc"}}, Limit: 2, Offset: 1}
+	q.Result = qt.WireQuery{Select: []string{"k", "rows", "values", "total", "mean", "low", "high", "distinct"}, OrderBy: []qt.OrderBy{{Field: "rows", Dir: "desc"}}, Limit: 2, Offset: 1}
 	q.Metrics = []qt.AggSpec{{ID: "all", Op: "count"}, {ID: "shown", Op: "sum", Field: "rows", Scope: "shownRows"}}
 	return q
 }

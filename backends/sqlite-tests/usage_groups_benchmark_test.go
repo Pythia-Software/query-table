@@ -42,7 +42,7 @@ CREATE INDEX usage_provider ON usage(tenant,provider);`, strings.Join(columns, "
 	q := groupedRequest()
 	q.Source = qt.WireQuery{Limit: 1, Offset: 100}
 	q.Grouping = &qt.GroupingDefinition{Keys: []string{"day"}, Summaries: []qt.SummaryColumn{{ID: "messages", Op: "count"}, {ID: "words_total", Op: "sum", Field: "n0"}, {ID: "mean", Op: "avg", Field: "n0"}}}
-	q.Result = qt.WireQuery{Select: []string{"day", "messages", "words_total", "mean"}, OrderBy: qt.OrderBys{{Field: "day", Dir: "asc"}}, Limit: 2}
+	q.Result = qt.WireQuery{Select: []string{"day", "messages", "words_total", "mean"}, OrderBy: []qt.OrderBy{{Field: "day", Dir: "asc"}}, Limit: 2}
 	q.Metrics = []qt.AggSpec{{ID: "groups", Op: "count"}, {ID: "shown_messages", Op: "sum", Field: "messages", Scope: "shownRows"}}
 	return ddl, d, q
 }

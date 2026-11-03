@@ -134,9 +134,6 @@ type rowAlias struct{ stage, reads int }
 // SQLite projection, so nested CASE chains grow linearly, not exponentially.
 const maxInlineReads = 8
 
-func newPlan(ctx context.Context, s Schema, o PlanOptions) (*planBuilder, error) {
-	return newPlanDialect(ctx, s, o, false)
-}
 func newPlanDialect(ctx context.Context, s Schema, o PlanOptions, sqlite bool) (*planBuilder, error) {
 	if sqlite {
 		if e := validateSQLiteSchema(s); e != nil {
@@ -726,8 +723,7 @@ func (b *planBuilder) filter(where []WhereTerm) error {
 	if err != nil {
 		return err
 	}
-	q := WireQuery{Where: where}
-	p, _, err := CompileAt(q, s, len(b.args)+1, b.options.Now)
+	p, _, err := compilePostgresWhere(where, s, len(b.args)+1, b.options.Now)
 	if err != nil {
 		return diagnostic("filter", err.Error())
 	}
@@ -826,11 +822,6 @@ func (b *planBuilder) order(terms []OrderBy) (string, error) {
 	return strings.Join(out, ","), nil
 }
 
-// CompileComputedRows resolves SELECT and hidden ORDER BY dependencies before
-// applying the globally ordered page window. Computed filters are not admitted.
-func CompileComputedRows(ctx context.Context, q WireQuery, s Schema, o PlanOptions) (SQLPlan, error) {
-	return compileComputedRowsDialect(ctx, q, s, o, false)
-}
 func compileComputedRowsDialect(ctx context.Context, q WireQuery, s Schema, o PlanOptions, sqlite bool) (SQLPlan, error) {
 	if err := q.Validate(); err != nil {
 		return SQLPlan{}, err
@@ -908,11 +899,6 @@ func schemaHasErrors(s Schema) bool {
 	return false
 }
 
-// CompileRowExpression builds a standalone typed value/error projection over an
-// authorized source, useful for host-side definition validation and previews.
-func CompileRowExpression(ctx context.Context, source string, s Schema, o PlanOptions) (SQLPlan, error) {
-	return compileRowExpressionDialect(ctx, source, s, o, false)
-}
 func compileRowExpressionDialect(ctx context.Context, source string, s Schema, o PlanOptions, sqlite bool) (SQLPlan, error) {
 	b, e := newPlanDialect(ctx, s, o, sqlite)
 	if e != nil {

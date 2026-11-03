@@ -1,7 +1,8 @@
-// Package querytable compiles a frontend QueryState into parameterized SQL,
-// validated against a server-defined field schema. It is the Go projection of
-// @pythia-software/query-table-core: the wire types here mirror the TS shapes exactly so a
-// base64url ?q= token (or a JSON request body) round-trips without translation.
+// Package querytable executes the version 3 query protocol of
+// @pythia-software/query-table-core against SQLite or PostgreSQL, validated
+// against a server-defined field schema. QueryDatasetV3 runs a QueryRequestV3
+// (decoded by DecodeQueryRequestV3; served by NewQueryV3Handler) inside a
+// host-authorized source SELECT. The wire types mirror the TS shapes exactly.
 //
 // Safety model: the column
 // expression for each field comes from the schema, never from request input. An
@@ -15,19 +16,17 @@
 // view or validate a link it receives. They reproduce normalizeQueryState and
 // the TypeScript limits and error codes (QueryLinkError); the shared fixtures
 // in schema/fixtures/query-links.json hold both implementations to the same
-// tokens. DecodeWireQuery remains the reader for legacy server-bound tokens.
+// tokens.
 package querytable
 
 import (
-	"encoding/base64"
+	"bytes"
 	"encoding/json"
 	"fmt"
-	"strings"
 )
 
-// Structural limits mirror @pythia-software/query-table-core. Compile and
-// DecodeWireQuery both enforce them so callers are protected whether a query
-// came from a URL token or was decoded from a JSON request body elsewhere.
+// Structural limits mirror @pythia-software/query-table-core. Every query stage
+// and metric enforces them whether it was decoded from JSON or built by a host.
 const (
 	// MaxQueryLimit is the largest row limit representable by this platform.
 	// The package does not impose a smaller application-level row cap; consumers
@@ -183,8 +182,8 @@ type RegexExtract struct {
 
 // AggSpec mirrors @pythia-software/query-table-core AggregationClause: one aggregate op over one
 // measure column (Field; empty ⇒ COUNT(*)), broken down by zero or more group
-// columns. Compiled by CompileAggregation; the metric panel runs one per spec
-// over the WHERE-filtered set (no paging).
+// columns. A QueryRequestV3 runs one per metric over the matching population
+// (or the shown page, for Scope "shownRows").
 type AggSpec struct {
 	DateGrouping *MetricDateGrouping `json:"dateGrouping,omitempty"`
 	Diagnostics  []string            `json:"diagnostics,omitempty"`
@@ -208,73 +207,29 @@ type AggSpec struct {
 	MinCount MetricMinCount `json:"minCount,omitzero"`
 }
 
-// WireQuery is the server-bound subset of QueryState (the TS ServerQuery / the
-// {s,w,o,...} `?q=` payload). View-only state (column widths) never arrives.
-//
-// OrderBy unmarshals from BOTH the new array form and the legacy single-object
-// form, so legacy links keep compiling.
+// WireQuery is one stage (source or result) of a QueryRequestV3: the TS
+// ServerQuery. On the wire it has exactly select, where, orderBy, limit and
+// offset; view-only state (column widths) never arrives.
 type WireQuery struct {
-	Select       []string    `json:"select,omitempty"`
-	Where        []WhereTerm `json:"w,omitempty"`
-	OrderBy      OrderBys    `json:"o,omitempty"`
-	Limit        int         `json:"l,omitempty"`
-	Offset       int         `json:"f,omitempty"`
-	Aggregations []AggSpec   `json:"g,omitempty"`
+	Select  []string    `json:"select,omitempty"`
+	Where   []WhereTerm `json:"where,omitempty"`
+	OrderBy []OrderBy   `json:"orderBy,omitempty"`
+	Limit   int         `json:"limit,omitempty"`
+	Offset  int         `json:"offset,omitempty"`
 }
 
-// UnmarshalJSON accepts both the readable ServerQuery property names emitted
-// by @pythia-software/query-table-core and the compact names used inside a URL token. It
-// validates resource limits before returning, so a normal json.Decoder is a
-// safe API boundary even when the caller does not use DecodeWireQuery.
+// UnmarshalJSON rejects unknown stage properties and validates resource
+// limits before returning, so a normal json.Decoder is a safe API boundary
+// even when the caller does not use DecodeQueryRequestV3.
 func (q *WireQuery) UnmarshalJSON(data []byte) error {
-	var payload struct {
-		Select              []string        `json:"select"`
-		CompactSelect       json.RawMessage `json:"s"`
-		LegacySelect        json.RawMessage `json:"c"`
-		Where               []WhereTerm     `json:"where"`
-		CompactWhere        []WhereTerm     `json:"w"`
-		OrderBy             OrderBys        `json:"orderBy"`
-		CompactOrderBy      OrderBys        `json:"o"`
-		Limit               *int            `json:"limit"`
-		CompactLimit        *int            `json:"l"`
-		Offset              *int            `json:"offset"`
-		CompactOffset       *int            `json:"f"`
-		Aggregations        []AggSpec       `json:"aggregations"`
-		CompactAggregations []AggSpec       `json:"g"`
-	}
-	if err := json.Unmarshal(data, &payload); err != nil {
+	type stage WireQuery
+	var payload stage
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&payload); err != nil {
 		return err
 	}
-
-	q.Select = payload.Select
-	if q.Select == nil {
-		q.Select = decodeSelect(payload.CompactSelect, payload.LegacySelect)
-	}
-	q.Where = payload.Where
-	if q.Where == nil {
-		q.Where = payload.CompactWhere
-	}
-	q.OrderBy = payload.OrderBy
-	if q.OrderBy == nil {
-		q.OrderBy = payload.CompactOrderBy
-	}
-	q.Limit = 0
-	if payload.Limit != nil {
-		q.Limit = *payload.Limit
-	} else if payload.CompactLimit != nil {
-		q.Limit = *payload.CompactLimit
-	}
-	q.Offset = 0
-	if payload.Offset != nil {
-		q.Offset = *payload.Offset
-	} else if payload.CompactOffset != nil {
-		q.Offset = *payload.CompactOffset
-	}
-	q.Aggregations = payload.Aggregations
-	if q.Aggregations == nil {
-		q.Aggregations = payload.CompactAggregations
-	}
-
+	*q = WireQuery(payload)
 	return q.Validate()
 }
 
@@ -296,9 +251,6 @@ func (q WireQuery) Validate() error {
 	}
 	if len(q.OrderBy) > MaxOrderByTerms {
 		return fmt.Errorf("orderBy has %d terms; maximum is %d", len(q.OrderBy), MaxOrderByTerms)
-	}
-	if len(q.Aggregations) > MaxAggregations {
-		return fmt.Errorf("aggregations has %d items; maximum is %d", len(q.Aggregations), MaxAggregations)
 	}
 	for _, field := range q.Select {
 		if field == "" || len(field) > maxFieldNameLength {
@@ -331,7 +283,15 @@ func (q WireQuery) Validate() error {
 			return fmt.Errorf("sort regex for %q exceeds %d bytes", term.Field, maxRegexBytes)
 		}
 	}
-	for _, aggregation := range q.Aggregations {
+	return nil
+}
+
+// validateMetricSpecs rejects malformed metric shapes before compilation.
+func validateMetricSpecs(specs []AggSpec) error {
+	if len(specs) > MaxAggregations {
+		return fmt.Errorf("aggregations has %d items; maximum is %d", len(specs), MaxAggregations)
+	}
+	for _, aggregation := range specs {
 		if aggregation.ID == "" || len(aggregation.ID) > maxFieldNameLength {
 			return fmt.Errorf("invalid aggregation id")
 		}
@@ -361,112 +321,6 @@ func (q WireQuery) Validate() error {
 		}
 		if metricLiterals > MaxWhereClauses {
 			return fmt.Errorf("aggregation %q filter has %d clauses; maximum is %d", aggregation.ID, metricLiterals, MaxWhereClauses)
-		}
-	}
-	return nil
-}
-
-// OrderBys is a slice of OrderBy that also accepts a single object on decode
-// (legacy compatibility) and a base64url `c`/`s` is handled at the WireQuery
-// level via DecodeWireQuery.
-type OrderBys []OrderBy
-
-// UnmarshalJSON accepts either `[{...},{...}]` (current) or `{...}` (legacy).
-func (o *OrderBys) UnmarshalJSON(b []byte) error {
-	trimmed := strings.TrimSpace(string(b))
-	if trimmed == "null" || trimmed == "" {
-		*o = nil
-		return nil
-	}
-	if strings.HasPrefix(trimmed, "[") {
-		var arr []OrderBy
-		if err := json.Unmarshal(b, &arr); err != nil {
-			return err
-		}
-		*o = arr
-		return nil
-	}
-	var single OrderBy
-	if err := json.Unmarshal(b, &single); err != nil {
-		return err
-	}
-	*o = []OrderBy{single}
-	return nil
-}
-
-// wirePayload is the compact JSON the frontend base64url-encodes. `c` is the
-// legacy alias for select column names; `s` is the current select (tuples).
-type wirePayload struct {
-	Select json.RawMessage `json:"s,omitempty"` // [field] | [field,width] tuples, or legacy string[]
-	Legacy json.RawMessage `json:"c,omitempty"` // legacy string[]
-	Where  []WhereTerm     `json:"w,omitempty"`
-	Order  OrderBys        `json:"o,omitempty"`
-	Limit  int             `json:"l,omitempty"`
-	Offset int             `json:"f,omitempty"`
-	Aggs   []AggSpec       `json:"g,omitempty"`
-}
-
-// DecodeWireQuery decodes the base64url-encoded JSON `?q=` token produced by
-// @pythia-software/query-table-core encodeQuery. The select tuples carry widths the server
-// ignores; only the field names are extracted. Mirrors the charset/padding
-// fix-ups so a bookmark round-trips bit-for-bit.
-func DecodeWireQuery(token string) (WireQuery, error) {
-	var q WireQuery
-	if token == "" {
-		return q, nil
-	}
-	if len(token) > maxQueryTokenBytes {
-		return q, fmt.Errorf("query token exceeds %d bytes", maxQueryTokenBytes)
-	}
-	s := strings.ReplaceAll(token, "-", "+")
-	s = strings.ReplaceAll(s, "_", "/")
-	if pad := len(s) % 4; pad != 0 {
-		s += strings.Repeat("=", 4-pad)
-	}
-	raw, err := base64.StdEncoding.DecodeString(s)
-	if err != nil {
-		return q, fmt.Errorf("base64: %w", err)
-	}
-	var p wirePayload
-	if err := json.Unmarshal(raw, &p); err != nil {
-		return q, fmt.Errorf("json: %w", err)
-	}
-	q.Where = p.Where
-	q.OrderBy = p.Order
-	q.Limit = p.Limit
-	q.Offset = p.Offset
-	q.Aggregations = p.Aggs
-	q.Select = decodeSelect(p.Select, p.Legacy)
-	if err := q.Validate(); err != nil {
-		return WireQuery{}, fmt.Errorf("query: %w", err)
-	}
-	return q, nil
-}
-
-// decodeSelect pulls field names from the `s` tuples (or legacy `c`/`s` string[]).
-func decodeSelect(s, legacy json.RawMessage) []string {
-	for _, raw := range []json.RawMessage{s, legacy} {
-		if len(raw) == 0 {
-			continue
-		}
-		// Try string[] first (legacy), then tuple form.
-		var names []string
-		if err := json.Unmarshal(raw, &names); err == nil {
-			return names
-		}
-		var tuples [][]json.RawMessage
-		if err := json.Unmarshal(raw, &tuples); err == nil {
-			out := make([]string, 0, len(tuples))
-			for _, t := range tuples {
-				if len(t) == 0 {
-					continue
-				}
-				var name string
-				if err := json.Unmarshal(t[0], &name); err == nil {
-					out = append(out, name)
-				}
-			}
-			return out
 		}
 	}
 	return nil

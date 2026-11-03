@@ -8,8 +8,8 @@ const schema: FieldSchema<Row> = { name:"grouped",idField:"id",fields:[
   {name:"at",type:"datetime",label:"Time",source:{kind:"backend"},aggregate:{groupable:true}},
   {name:"label",type:"text",label:"Label",source:{kind:"backend"}}, {name:"flag",type:"bool",label:"Flag",source:{kind:"backend"}},
 ]};
-type Stage = QueryRequestV3["source"] & { w?:QueryState["where"]; o?:QueryState["orderBy"]; l?:number; f?:number };
-const state = (stage:Stage):QueryState => ({...EMPTY_QUERY,select:(stage.select??[]).map(field=>({field})),where:stage.where??stage.w??[],orderBy:stage.orderBy??stage.o??[],limit:stage.limit??stage.l??10000,offset:stage.offset??stage.f??0});
+type Stage = QueryRequestV3["source"];
+const state = (stage:Stage):QueryState => ({...EMPTY_QUERY,select:(stage.select??[]).map(field=>({field})),where:stage.where??[],orderBy:stage.orderBy??[],limit:stage.limit??10000,offset:stage.offset??0});
 it("matches local grouped rows, representatives and calendar metrics with the real SQLite executor",()=>{
   const output=execFileSync("go",["test","-run","^TestV3FrontendParity$","-count=1","-v"],{cwd:new URL("./",import.meta.url),encoding:"utf8",timeout:120000,maxBuffer:8*1024*1024});
   const line=output.split("\n").find(line=>line.includes("V3_FIXTURES "));expect(line).toBeDefined();
