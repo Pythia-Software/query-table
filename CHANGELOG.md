@@ -11,6 +11,11 @@
   undo history. Loading keeps the previous widths, scrolling never refits, and
   a refresh of the same query only grows columns. In this mode the table is
   as wide as its columns rather than stretching them across the viewport.
+- `DataTable` takes an optional `grouping` prop (`api.grouping`). With it, the
+  column header menu offers Group By for groupable columns, and on a grouped
+  table Remove from Group By (on a key column, when there are several keys)
+  and Ungroup. The actions go through the grouping controller, so validation,
+  undo and restoring the previous grouped layout behave as in the query editor.
 
 ### Changed
 
