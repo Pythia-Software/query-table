@@ -91,34 +91,34 @@ final class CoreTests: XCTestCase {
     let query = ServerQuery(whereTerms: [
       .predicate(.init(field: "name", op: "contains", value: "Alpha", negated: true))
     ])
-    let result = try await adapter.fetchRows(query: query)
+    let result = try await adapter.rows(query)
     XCTAssertEqual(result.rows.map { $0["id"] }, [.number(2)])
-    let page = try await adapter.fetchRows(
-      query: ServerQuery(orderBy: [.init(field: "amount", dir: "desc")], limit: 1, offset: 1))
+    let page = try await adapter.rows(
+      ServerQuery(orderBy: [.init(field: "amount", dir: "desc")], limit: 1, offset: 1))
     XCTAssertEqual(page.total, 3)
     XCTAssertEqual(page.rows.first?["id"], .number(1))
-    let empty = try await adapter.fetchRows(
-      query: ServerQuery(whereTerms: [.predicate(.init(field: "tags", op: "is_null"))]))
+    let empty = try await adapter.rows(
+      ServerQuery(whereTerms: [.predicate(.init(field: "tags", op: "is_null"))]))
     XCTAssertEqual(empty.total, 2)
   }
   func testLocalStringLengthFilters() async throws {
     let adapter = LocalQueryTransport(schema: schema, rows: rows)
-    let longer = try await adapter.fetchRows(query: ServerQuery(whereTerms: [
+    let longer = try await adapter.rows(ServerQuery(whereTerms: [
       .predicate(.init(field: "name", op: "length_gt", value: "4"))
     ]))
     XCTAssertEqual(longer.rows.map { $0["id"] }, [.number(1)])
-    let shorter = try await adapter.fetchRows(query: ServerQuery(whereTerms: [
+    let shorter = try await adapter.rows(ServerQuery(whereTerms: [
       .predicate(.init(field: "name", op: "length_lt", value: "5"))
     ]))
     XCTAssertEqual(shorter.rows.map { $0["id"] }, [.number(2)])
     let withEmpty = LocalQueryTransport(schema: schema, rows: rows + [
       ["id": .number(4), "name": .string("")]
     ])
-    let negated = try await withEmpty.fetchRows(query: ServerQuery(whereTerms: [
+    let negated = try await withEmpty.rows(ServerQuery(whereTerms: [
       .predicate(.init(field: "name", op: "length_gt", value: "5", negated: true))
     ]))
     XCTAssertEqual(negated.rows.map { $0["id"] }, [.number(1), .number(2)])
-    let emptyOnly = try await withEmpty.fetchRows(query: ServerQuery(whereTerms: [
+    let emptyOnly = try await withEmpty.rows(ServerQuery(whereTerms: [
       .predicate(.init(field: "name", op: "length_eq", value: "0"))
     ]))
     XCTAssertEqual(emptyOnly.rows.map { $0["id"] }, [.number(4)])
@@ -126,14 +126,87 @@ final class CoreTests: XCTestCase {
   func testMetricsUseEntireFilteredSet() async throws {
     let adapter = LocalQueryTransport(schema: schema, rows: rows)
     let q = QueryState(limit: 1, aggregations: [.init(id: "total", op: "sum", field: "amount")])
-    let result = try await adapter.fetchAggregations(query: q.aggregationQuery(schema: schema))
+    let request = q.queryRequestV3(
+      schema: schema, capabilities: adapter.queryCapabilities, rows: false)
+    XCTAssertEqual(request.diagnostics, [])
+    XCTAssertEqual(request.source, request.result)
+    let result = try await adapter.fetchQueryV3(request)
+    try result.validate(for: request, schema: schema)
+    XCTAssertTrue(result.rows.isEmpty)
+    XCTAssertEqual(result.total, 3)
     XCTAssertEqual(result.metrics.first?.buckets.first?.value, .number(30))
     XCTAssertEqual(result.metrics.first?.buckets.first?.count, 3)
-    let distinct = try await adapter.fetchDistinctValues(
-      query: .init(field: "name", search: "a", limit: 1))
-    XCTAssertEqual(distinct.values.count, 1)
+    let distinctRequest = QueryRequestV3.distinctValues(
+      field: "name", search: "a", limit: 1, schema: schema,
+      capabilities: adapter.queryCapabilities)
+    let distinctResult = try await adapter.fetchQueryV3(distinctRequest)
+    try distinctResult.validate(for: distinctRequest, schema: schema)
+    let distinct = try XCTUnwrap(distinctResult.distinct)
+    XCTAssertEqual(distinct.values, ["Alpha"])
     XCTAssertTrue(distinct.hasMore)
     XCTAssertEqual(distinct.hasNull, true)
+  }
+  func testDistinctOrdersByCountThenValueAndUnnestsArrays() async throws {
+    let adapter = LocalQueryTransport(
+      schema: schema,
+      rows: rows + [["id": .number(4), "name": .string("Beta"), "tags": .array([.string("y"), .string("x")])]])
+    func values(_ field: String) async throws -> DistinctResultV3 {
+      let result = try await adapter.fetchQueryV3(
+        .distinctValues(field: field, schema: schema, capabilities: adapter.queryCapabilities))
+      return try XCTUnwrap(result.distinct)
+    }
+    let names = try await values("name")
+    XCTAssertEqual(names.values, ["Beta", "Alpha"])
+    let tags = try await values("tags")
+    XCTAssertEqual(tags.values, ["x", "y"])
+    XCTAssertTrue(tags.hasNull)
+    var invalid = QueryRequestV3.distinctValues(
+      field: "name", schema: schema, capabilities: adapter.queryCapabilities)
+    invalid.rows = true
+    do {
+      _ = try await adapter.fetchQueryV3(invalid)
+      XCTFail("Distinct requests cannot also request rows")
+    } catch {}
+  }
+  func testRequestEncodingMatchesGoDecoder() throws {
+    let q = QueryState(
+      whereTerms: [.predicate(.init(field: "name", op: "=", value: "a"))],
+      aggregations: [.init(id: "n", op: "count", label: "Rows")])
+    let request = q.queryRequestV3(
+      schema: schema, capabilities: QueryCapabilitiesV3(profile: "qt-sqlite-v1"),
+      now: Date(timeIntervalSince1970: 1_772_964_000.5))
+    let json = try XCTUnwrap(
+      JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])
+    XCTAssertEqual(
+      Set(json.keys),
+      ["version", "profile", "now", "expectedRevisions", "source", "result", "rows", "metrics",
+       "diagnostics"])
+    XCTAssertEqual(json["now"] as? Int, 1_772_964_000_500)
+    let stage = try XCTUnwrap(json["source"] as? [String: Any])
+    XCTAssertEqual(Set(stage.keys), ["select", "where", "orderBy", "limit", "offset"])
+    let metric = try XCTUnwrap((json["metrics"] as? [[String: Any]])?.first)
+    XCTAssertEqual(Set(metric.keys), ["id", "op", "groupBy"])
+  }
+  func testResultValidationMirrorsTypeScript() throws {
+    let request = QueryState().queryRequestV3(
+      schema: schema, capabilities: QueryCapabilitiesV3(profile: "p"))
+    var result = QueryResultV3(
+      answering: request, schema: schema, rows: [["id": .number(1)], ["id": .number(2)]], total: 2)
+    XCTAssertNoThrow(try result.validate(for: request, schema: schema))
+    var stale = result
+    stale.now += 1
+    XCTAssertThrowsError(try stale.validate(for: request, schema: schema))
+    var other = result
+    other.execution.profile = "q"
+    XCTAssertThrowsError(try other.validate(for: request))
+    result.rows.append(["id": .number(1)])
+    XCTAssertThrowsError(try result.validate(for: request))
+    var negative = QueryResultV3(answering: request, schema: schema)
+    negative.total = -1
+    XCTAssertThrowsError(try negative.validate(for: request))
+    var projected = QueryResultV3(answering: request, schema: schema)
+    projected.schema.fields = [.init(name: "name", type: "number")]
+    XCTAssertThrowsError(try projected.validate(for: request, schema: schema))
   }
   func testExactArrayMembership() async throws {
     var exactSchema = schema
@@ -142,28 +215,30 @@ final class CoreTests: XCTestCase {
     let encoded = try JSONEncoder().encode(exactSchema)
     let decoded = try JSONDecoder().decode(FieldSchema.self, from: encoded)
     let adapter = LocalQueryTransport(schema: decoded, rows: rows)
-    let upper = try await adapter.fetchRows(
-      query: .init(whereTerms: [.predicate(.init(field: "tags", op: "includes", value: "X"))]))
-    let lower = try await adapter.fetchRows(
-      query: .init(whereTerms: [.predicate(.init(field: "tags", op: "includes", value: "x"))]))
+    let upper = try await adapter.rows(
+      .init(whereTerms: [.predicate(.init(field: "tags", op: "includes", value: "X"))]))
+    let lower = try await adapter.rows(
+      .init(whereTerms: [.predicate(.init(field: "tags", op: "includes", value: "x"))]))
     XCTAssertEqual(upper.total, 0)
     XCTAssertEqual(lower.total, 1)
   }
   func testLocalCaseSemanticsEmptyDraftAndCountMeasure() async throws {
     let adapter = LocalQueryTransport(schema: schema, rows: rows)
-    let exact = try await adapter.fetchRows(
-      query: .init(whereTerms: [.predicate(.init(field: "name", op: "=", value: "alpha"))]))
+    let exact = try await adapter.rows(
+      .init(whereTerms: [.predicate(.init(field: "name", op: "=", value: "alpha"))]))
     XCTAssertEqual(exact.total, 0)
-    let membership = try await adapter.fetchRows(
-      query: .init(whereTerms: [.predicate(.init(field: "tags", op: "includes", value: "X"))]))
+    let membership = try await adapter.rows(
+      .init(whereTerms: [.predicate(.init(field: "tags", op: "includes", value: "X"))]))
     XCTAssertEqual(membership.total, 1)
-    let draft = try await adapter.fetchRows(
-      query: .init(whereTerms: [
+    let draft = try await adapter.rows(
+      .init(whereTerms: [
         .predicate(.init(field: "name", op: "contains", value: "", negated: true))
       ]))
     XCTAssertEqual(draft.total, 3)
-    let metric = try await adapter.fetchAggregations(
-      query: .init(aggregations: [.init(id: "c", op: "count", field: "amount")]))
+    let metric = try await adapter.fetchQueryV3(
+      QueryRequestV3(
+        profile: adapter.queryCapabilities.profile, now: 0, source: ServerQuery(), rows: false,
+        metrics: [.init(id: "c", op: "count", field: "amount")]))
     XCTAssertEqual(metric.metrics[0].buckets[0].value, .number(2))
   }
 
@@ -185,7 +260,7 @@ final class CoreTests: XCTestCase {
     let rows: [QueryRow] = [
       ["id": .number(1), "amount": .number(5)], ["id": .number(2), "amount": .number(5)],
     ]
-    let result = try await LocalQueryTransport(schema: s, rows: rows).fetchRows(query: .init())
+    let result = try await LocalQueryTransport(schema: s, rows: rows).rows(.init())
     XCTAssertEqual(result.rows.first?["id"], .number(2))
     XCTAssertTrue(QueryState().serverQuery(schema: s).orderBy.isEmpty)
     XCTAssertEqual(
@@ -202,5 +277,15 @@ final class CoreTests: XCTestCase {
       FieldDefinition(name: "x", label: "X", type: "text", filter: .init(ops: ["contains"]))
         .filterOperators, ["contains"])
   }
+}
 
+extension LocalQueryTransport {
+  fileprivate func rows(_ stage: ServerQuery) async throws -> QueryResultV3 {
+    let request = QueryRequestV3(
+      profile: queryCapabilities.profile, now: QueryRequestV3.epochMilliseconds(Date()),
+      source: stage)
+    let result = try await fetchQueryV3(request)
+    try result.validate(for: request)
+    return result
+  }
 }
