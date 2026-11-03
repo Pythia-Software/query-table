@@ -20,7 +20,7 @@
       "type": "number",
       "render": "link_run",
       "select": { "default": false },
-      "bindings": { "postgres": { "expr": "r.id" } }
+      "bindings": { "postgres": { "expr": "r.id", "expressionNumeric": true } }
     },
     {
       "name": "job_name",
@@ -57,7 +57,7 @@
       "group": "core",
       "render": "duration_ms",
       "select": { "default": true, "align": "right" },
-      "bindings": { "postgres": { "expr": "r.total_ms" } }
+      "bindings": { "postgres": { "expr": "r.total_ms", "expressionNumeric": true } }
     },
     {
       "name": "worker",

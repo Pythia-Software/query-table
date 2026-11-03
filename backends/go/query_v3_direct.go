@@ -169,6 +169,11 @@ func (d QueryDatasetV3) executeUngrouped(ctx context.Context, tx *sql.Tx, q Quer
 	out.Metrics = append(out.Metrics, metrics...)
 	return out, ctx.Err()
 }
+// metricSampled reports whether a metric retains per-group samples, which
+// MaxSamplesPerGroup bounds. Histograms keep only bin counters.
 func metricSampled(spec AggSpec) bool {
-	return spec.Distribution != nil || sampledExpression(metricExpression(spec)) || sampledExpression(spec.ExpressionY)
+	if spec.Distribution != nil && (spec.Distribution.Kind != "histogram" || sampledExpression(spec.Distribution.Input)) {
+		return true
+	}
+	return sampledExpression(metricExpression(spec)) || sampledExpression(spec.ExpressionY)
 }
