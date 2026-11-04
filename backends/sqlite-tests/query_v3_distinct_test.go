@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -81,6 +82,26 @@ func TestV3Distinct(t *testing.T) {
 	if got := run(distinct("n", "1", 50, qt.WhereTerm{Field: "@computed/double", Op: ">", Value: "10"})).Distinct; !sameSet(got.Values, "10.0", "11.0", "12.0", "13.0") || got.HasNull {
 		t.Fatalf("numbers over a computed filter: %#v", got)
 	}
+	// A host-filterable computed field suggests its canonical values ([n]*2).
+	numbers := map[float64]bool{}
+	for _, value := range run(distinct("n", "", 500)).Distinct.Values {
+		n, _ := strconv.ParseFloat(value, 64)
+		numbers[2*n] = true
+	}
+	doubled := run(distinct("@computed/double", "", 500)).Distinct
+	for _, value := range doubled.Values {
+		n, err := strconv.ParseFloat(value, 64)
+		if err != nil || !numbers[n] {
+			t.Fatalf("computed value %q: %#v", value, doubled)
+		}
+	}
+	if len(doubled.Values) != len(numbers) || !doubled.HasNull {
+		t.Fatalf("computed suggestions: %#v %v", doubled, numbers)
+	}
+	// Computed booleans read like stored ones.
+	if got := run(distinct("@computed/big", "", 10)).Distinct; !sameSet(got.Values, run(distinct("flag", "", 10)).Distinct.Values...) {
+		t.Fatalf("computed booleans: %#v", got)
+	}
 	// Requests are validated as a whole and decode strictly.
 	bad := []qt.QueryRequestV3{distinct("note", "", 0), distinct("note", "", 501), distinct("note", strings.Repeat("x", 2001), 5), distinct("", "", 5)}
 	withRows := distinct("note", "", 5)
@@ -104,6 +125,10 @@ func TestV3Distinct(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
+	// inv is a computed field without host filter policy.
+	if _, err = d.ExecuteIn(context.Background(), tx, distinct("@computed/inv", "", 5), o); !errors.As(err, &diag) || diag.Code != "query" {
+		t.Fatalf("computed field without filter policy: %v", err)
+	}
 	for _, q := range []qt.QueryRequestV3{distinct("note", "", 5), distinct("secret", "", 5)} {
 		if _, err = hidden.ExecuteIn(context.Background(), tx, q, o); !errors.As(err, &diag) || diag.Code != "query" {
 			t.Fatalf("unfilterable field: %v", err)

@@ -3,6 +3,7 @@ package postgrestests
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -80,6 +81,15 @@ func TestPostgresDistinct(t *testing.T) {
 	}
 	if got := run(distinct("flag", "", 5)); !sameSet(got.Values, "true", "false") || !got.HasNull {
 		t.Fatalf("booleans: %#v", got)
+	}
+	// A host-filterable computed field suggests its canonical values ([n]*2).
+	doubled := []string{}
+	for _, value := range run(distinct("n", "", 500)).Values {
+		n, _ := strconv.ParseFloat(value, 64)
+		doubled = append(doubled, strconv.FormatFloat(2*n, 'f', -1, 64))
+	}
+	if got := run(distinct("@computed/double", "", 500)); !sameSet(got.Values, doubled...) {
+		t.Fatalf("computed values: %#v %v", got, doubled)
 	}
 	hidden := d
 	field := hidden.Schema.Fields["note"]

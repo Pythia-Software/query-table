@@ -13,12 +13,22 @@ func (d QueryDatasetV3) executeDistinct(ctx context.Context, tx *sql.Tx, q Query
 	out := QueryResultV3{Version: 3, Now: q.Now, Rows: []map[string]any{}, Metrics: []MetricResult{}, Schema: ProjectedSchema{Name: d.Schema.Name, IDField: d.Schema.IDField, Fields: []ProjectedField{}}}
 	request := *q.Distinct
 	field, ok := d.Schema.Fields[request.Field]
-	if !ok || !field.ServerFilter || strings.TrimSpace(field.Expr) == "" {
+	computed := strings.HasPrefix(request.Field, "@computed/")
+	if computed {
+		// Canonical computed values, as host-approved computed filters read them.
+		ok = d.ComputedFilterable[strings.TrimPrefix(request.Field, "@computed/")]
+	} else if !field.ServerFilter || strings.TrimSpace(field.Expr) == "" {
+		ok = false
+	}
+	if !ok {
 		return out, diagnostic("query", "distinct needs a server-filterable field")
 	}
 	population := q
 	population.Distinct = nil
 	population.Result = WireQuery{Where: q.Source.Where, Limit: 1}
+	if computed {
+		population.Source.Select = append(append([]string{}, q.Source.Select...), request.Field)
+	}
 	plan, err := d.SourcePlan(ctx, population, o)
 	if err != nil {
 		return out, err
@@ -31,28 +41,31 @@ func (d QueryDatasetV3) executeDistinct(ctx context.Context, tx *sql.Tx, q Query
 	if err != nil {
 		return out, err
 	}
-	bound := field
-	bound.Expr = b.fields[request.Field].Value
+	bound, err := distinctField(b, field, request.Field, computed)
+	if err != nil {
+		return out, err
+	}
 	value, from := "CAST("+bound.Expr+" AS text)", b.rel
 	order := `qt_value COLLATE "C"`
 	if sqlite {
 		order = "qt_value COLLATE BINARY"
-		if field.Kind == FieldText || field.Kind == FieldEnum || field.Kind == FieldDatetime {
+		// Storage conventions apply to base bindings; computed values are canonical.
+		if !computed && (bound.Kind == FieldText || bound.Kind == FieldEnum || bound.Kind == FieldDatetime) {
 			// SQLite text storage reads '' as NULL, as sqliteNull does.
 			bound.Expr = "NULLIF(" + bound.Expr + ",'')"
 			value = "CAST(" + bound.Expr + " AS text)"
 		}
-		if field.Kind == FieldDatetime {
+		if !computed && bound.Kind == FieldDatetime {
 			value = sqliteDateText(bound)
 		}
-		if field.Kind == FieldTextArray {
+		if bound.Kind == FieldTextArray {
 			value, from = "CAST(qt_distinct.value AS TEXT)", b.rel+" CROSS JOIN json_each("+sqliteArray(bound)+") AS qt_distinct"
 		}
 	} else {
-		if field.Kind == FieldDatetime {
+		if bound.Kind == FieldDatetime {
 			value = `to_char((` + bound.Expr + `) AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`
 		}
-		if field.Kind == FieldTextArray {
+		if bound.Kind == FieldTextArray {
 			value, from = "qt_distinct.qt_element", b.rel+" CROSS JOIN LATERAL unnest("+bound.Expr+") AS qt_distinct(qt_element)"
 		}
 	}
@@ -91,11 +104,13 @@ func (d QueryDatasetV3) executeDistinct(ctx context.Context, tx *sql.Tx, q Query
 	if err != nil {
 		return out, err
 	}
-	bound.Expr = b.fields[request.Field].Value
+	if bound, err = distinctField(b, field, request.Field, computed); err != nil {
+		return out, err
+	}
 	null := bound.Expr + " IS NULL"
-	if sqlite {
+	if sqlite && !computed {
 		null = sqliteNull(bound)
-	} else if field.Kind == FieldTextArray {
+	} else if bound.Kind == FieldTextArray {
 		null = "COALESCE(cardinality(" + bound.Expr + "),0)=0"
 	}
 	nulls := b.finish("SELECT EXISTS(SELECT 1 FROM "+b.rel+" WHERE "+null+")", "allMatching", nil)
@@ -105,4 +120,19 @@ func (d QueryDatasetV3) executeDistinct(ctx context.Context, tx *sql.Tx, q Query
 	out.Execution = queryExecution(q, plan)
 	out.Distinct = result
 	return out, ctx.Err()
+}
+
+// distinctField binds the suggested field in the population relation: a base
+// binding's projected value, or a computed field's canonical value.
+func distinctField(b *planBuilder, field FieldSpec, name string, computed bool) (FieldSpec, error) {
+	if !computed {
+		field.Expr = b.fields[name].Value
+		return field, nil
+	}
+	v, err := b.field(name)
+	if err != nil {
+		return FieldSpec{}, err
+	}
+	v = b.key(v)
+	return resultField(name, v.Type, v.Value, false), nil
 }
