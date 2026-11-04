@@ -302,8 +302,32 @@ public struct QueryState: Codable, Equatable, Sendable {
     if case .array(let terms) = c["w"] {
       q.whereTerms = terms.compactMap { term in
         if case .object(let object) = term, case .array(let members) = object["any"] {
-          let predicates = members.compactMap(predicate)
-          return predicates.isEmpty ? nil : .any(predicates)
+          let conjunctions = members.contains {
+            if case .object(let member) = $0, member["all"] != nil { return true }
+            return false
+          }
+          guard conjunctions else {
+            let predicates = members.compactMap(predicate)
+            return predicates.isEmpty ? nil : .any(predicates)
+          }
+          // Dropping one literal of a conjunction would widen the term, so a
+          // group with conjunction branches is kept whole or not at all.
+          var branches: [WhereBranch] = []
+          for member in members {
+            if case .object(let branch) = member, case .array(let all) = branch["all"] {
+              let literals = all.compactMap(predicate)
+              guard !literals.isEmpty, literals.count == all.count else { return nil }
+              branches.append(literals.count == 1 ? .literal(literals[0]) : .all(WhereConjunction(all: literals)))
+            } else {
+              guard let literal = predicate(member) else { return nil }
+              branches.append(.literal(literal))
+            }
+          }
+          let literals = branches.compactMap { branch -> WhereClause? in
+            if case .literal(let v) = branch { return v }
+            return nil
+          }
+          return literals.count == branches.count ? .any(literals) : .group(OrGroup(any: branches))
         }
         return predicate(term).map(WhereTerm.predicate)
       }

@@ -86,6 +86,21 @@ struct QueryTableChecks {
     )
     try check(
       QueryState.decodeToken(try query.encodedToken()) == query, "Compact query token round trip")
+    // (status = PASS AND amount > 10) OR name = Beta selects rows 1 and 2.
+    let conjunctions = QueryState(whereTerms: [
+      .group(OrGroup(any: [
+        .all(WhereConjunction(all: [
+          .init(field: "status", op: "=", value: "PASS"), .init(field: "amount", op: ">", value: "10"),
+        ])),
+        .literal(.init(field: "name", op: "=", value: "Beta")),
+      ]))
+    ])
+    let branchToken = QueryState.decodeToken(try conjunctions.encodedToken())
+    let restoredRows = try await local.rows(branchToken.serverQuery(schema: schema))
+    try check(
+      branchToken.whereTerms == conjunctions.whereTerms
+        && restoredRows.rows.map { $0["id"] } == [.number(1), .number(2)],
+      "Query tokens keep OR groups with AND branches")
     let server = query.serverQuery(schema: schema)
     try check(server.select == ["id", "name"], "Projection retains stable row ID")
     let first = try await local.rows(server)
