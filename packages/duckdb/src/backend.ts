@@ -23,6 +23,7 @@ import {
   groupKeyFields,
   isCalendarGroupKey,
   type AggregationClause,
+  type GroupingDefinition,
   type AggregationResult,
   type AggregationResultEntry,
   type ComputedColumn,
@@ -449,9 +450,9 @@ export class DuckDBBackend {
       throw Error("At most 20 metrics are allowed.");
     this.window(request.result);
     const model = createGroupingModel(this.schema);
-    if (request.grouping) model.validate(request.grouping);
+    if (request.grouping) model.validate(request.grouping as GroupingDefinition);
     const resultSchema = request.grouping
-      ? model.resultSchema(request.grouping.keys, request.grouping.summaries)
+      ? model.resultSchema(request.grouping.keys, request.grouping.summaries as GroupingDefinition["summaries"])
       : this.schema;
     this.builder(this.schema, request.now).where(request.source.where);
     const result = this.builder(resultSchema, request.now);
@@ -475,7 +476,7 @@ export class DuckDBBackend {
       let relation = source.name,
         schema = this.schema;
       if (request.grouping) {
-        const grouping = request.grouping,
+        const grouping = request.grouping as GroupingDefinition,
           model = createGroupingModel(schema),
           builder = this.builder(schema, request.now);
         // A calendar key reads the interval start mapped from its field.

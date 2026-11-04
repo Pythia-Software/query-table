@@ -11,22 +11,6 @@ import (
 	"time"
 )
 
-// MetricDateGrouping mirrors the TypeScript MetricDateGrouping. Calendar
-// intervals (hour, day, week, month, year) key each bucket by its start
-// instant. The cyclic intervals key a slot by number: hourOfDay is the local
-// hour 0–23 and dayOfWeek the ISO weekday, 1 (Monday) to 7, in TimeZone.
-// Whole intervals and per-occurrence statistics are planned by the
-// TypeScript client into plain calendar metrics, so they are not fields here.
-type MetricDateGrouping struct {
-	Field        string `json:"field"`
-	Interval     string `json:"interval"`
-	TimeZone     string `json:"timeZone,omitempty"`
-	IncludeEmpty bool   `json:"includeEmpty"`
-	Range        string `json:"range"`
-	Start        string `json:"start,omitempty"`
-	End          string `json:"end,omitempty"`
-}
-
 var calendarDatePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2}))?$`)
 
 func calendarLocation(config MetricDateGrouping) (*time.Location, error) {

@@ -114,10 +114,17 @@ public struct LocalQueryTransport: QueryTransport {
         $0 == .null || (field.type == "textarray" && $0 == .array([]))
       })
   }
-  private func aggregations(_ clauses: [AggregationClause], over matching: [QueryRow]) throws
+  private func aggregations(_ clauses: [MetricSpecV3], over matching: [QueryRow]) throws
     -> [AggregationResultEntry]
   {
     try clauses.map { a -> AggregationResultEntry in
+      guard
+        a.expression == nil && a.expressionY == nil && a.whereTerms == nil && a.minCount == nil
+          && a.distribution == nil && a.dateGrouping == nil && (a.sort ?? []).isEmpty
+          && a.groupLimit == nil && (a.scope ?? "allMatching") == "allMatching"
+      else {
+        throw QueryTableError.unsupported("The local transport executes plain metrics only")
+      }
       guard ["count", "count_distinct", "sum", "avg", "min", "max"].contains(a.op) else {
         throw QueryTableError.invalidQuery("Unknown aggregation: \(a.op)")
       }
@@ -152,9 +159,9 @@ public struct LocalQueryTransport: QueryTransport {
         default: value = .null
         }
         return AggregationBucket(
-          keys: keys.map { $0 == .null ? nil : $0.displayString }, value: value,
+          keys: keys, value: value,
           count: records.count)
-      }.sorted { $0.keys.map { $0 ?? "" }.lexicographicallyPrecedes($1.keys.map { $0 ?? "" }) }
+      }.sorted { $0.keyLabels.map { $0 ?? "" }.lexicographicallyPrecedes($1.keyLabels.map { $0 ?? "" }) }
       return AggregationResultEntry(
         id: a.id, buckets: buckets, scope: "allMatching", processedRows: matching.count,
         groupCount: buckets.count)

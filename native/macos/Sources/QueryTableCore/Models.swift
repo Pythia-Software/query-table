@@ -68,26 +68,27 @@ public struct SelectColumn: Codable, Equatable, Sendable {
     self.width = width
   }
 }
-public struct WhereClause: Codable, Equatable, Sendable {
-  public var field: String
-  public var op: String
-  public var value: String
-  public var negated: Bool?
-  public init(field: String, op: String, value: String = "", negated: Bool? = nil) {
-    self.field = field
-    self.op = op
-    self.value = value
-    self.negated = negated
-  }
-}
+// WhereClause, OrderByClause and RegexExtraction are generated into
+// Wire.generated.swift. WhereTerm is the schema's escape hatch (x-swift-type):
+// the native client edits flat OR groups, so it keeps `.predicate`/`.any`.
+
+/// One conjunct of a WHERE: a literal, a flat OR group, or an OR group with
+/// conjunction branches (`(a AND b) OR c`), which the native editor does not
+/// build but must carry through unchanged.
 public enum WhereTerm: Codable, Equatable, Sendable {
   case predicate(WhereClause)
   case any([WhereClause])
+  case group(OrGroup)
   private enum CodingKeys: String, CodingKey { case any }
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     if c.contains(.any) {
-      self = .any(try c.decode([WhereClause].self, forKey: .any))
+      let group = try OrGroup(from: decoder)
+      let literals = group.any.compactMap { branch -> WhereClause? in
+        if case .literal(let v) = branch { return v }
+        return nil
+      }
+      self = literals.count == group.any.count ? .any(literals) : .group(group)
     } else {
       self = .predicate(try WhereClause(from: decoder))
     }
@@ -95,34 +96,23 @@ public enum WhereTerm: Codable, Equatable, Sendable {
   public func encode(to encoder: Encoder) throws {
     switch self {
     case .predicate(let v): try v.encode(to: encoder)
-    case .any(let v):
-      var c = encoder.container(keyedBy: CodingKeys.self)
-      try c.encode(v, forKey: .any)
+    case .any(let v): try OrGroup(any: v.map(WhereBranch.literal)).encode(to: encoder)
+    case .group(let v): try v.encode(to: encoder)
     }
   }
+  /// Every literal of the term (each counts against the predicate budget).
   public var predicates: [WhereClause] {
     switch self {
     case .predicate(let v): return [v]
     case .any(let v): return v
+    case .group(let v):
+      return v.any.flatMap { branch -> [WhereClause] in
+        switch branch {
+        case .literal(let v): return [v]
+        case .all(let v): return v.all
+        }
+      }
     }
-  }
-}
-public struct RegexExtraction: Codable, Equatable, Sendable {
-  public var regex: String
-  public init(regex: String) { self.regex = regex }
-}
-public struct OrderByClause: Codable, Equatable, Sendable {
-  public var field: String
-  public var dir: String
-  public var nulls: String?
-  public var extract: RegexExtraction?
-  public init(
-    field: String, dir: String = "asc", nulls: String? = nil, extract: RegexExtraction? = nil
-  ) {
-    self.field = field
-    self.dir = dir
-    self.nulls = nulls
-    self.extract = extract
   }
 }
 public struct AggregationClause: Codable, Equatable, Sendable {
@@ -189,10 +179,19 @@ public struct QueryState: Codable, Equatable, Sendable {
     var predicateBudget = 100
     q.whereTerms = whereTerms.prefix(100).compactMap { term in
       guard predicateBudget > 0 else { return nil }
-      let clauses = term.predicates.prefix(predicateBudget).filter {
-        !$0.field.isEmpty && $0.field.count <= 256 && !$0.field.hasPrefix("@computed/")
-          && $0.value.count <= 10000 && Self.filterOps.contains($0.op)
+      let valid = { (p: WhereClause) in
+        !p.field.isEmpty && p.field.count <= 256 && !p.field.hasPrefix("@computed/")
+          && p.value.count <= 10000 && Self.filterOps.contains(p.op)
       }
+      if case .group = term {
+        // Dropping one literal of a conjunction would widen the term, so a
+        // group is kept whole or not at all.
+        let all = term.predicates
+        guard all.count <= predicateBudget, all.allSatisfy(valid) else { return nil }
+        predicateBudget -= all.count
+        return term
+      }
+      let clauses = term.predicates.prefix(predicateBudget).filter(valid)
       guard !clauses.isEmpty else { return nil }
       predicateBudget -= clauses.count
       return clauses.count == 1 ? .predicate(clauses[0]) : .any(Array(clauses))

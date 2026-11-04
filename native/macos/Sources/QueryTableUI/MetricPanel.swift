@@ -30,8 +30,8 @@ struct MetricPanel: View {
   private var ranked: [AggregationBucket] {
     metric.buckets.sorted { a, b in
       if let av = number(a.value), let bv = number(b.value), av != bv { return av > bv }
-      let aKey: String = a.keys.first.flatMap { $0 } ?? ""
-      let bKey: String = b.keys.first.flatMap { $0 } ?? ""
+      let aKey: String = a.keyLabels.first.flatMap { $0 } ?? ""
+      let bKey: String = b.keyLabels.first.flatMap { $0 } ?? ""
       return aKey.localizedStandardCompare(bKey) == .orderedAscending
     }
   }
@@ -71,8 +71,8 @@ struct MetricPanel: View {
           ForEach(Array(buckets.enumerated()), id: \.offset) { _, bucket in
             VStack(alignment: .leading, spacing: 3) {
               HStack {
-                Text(label(bucket.keys.first ?? nil)).lineLimit(1).help(
-                  label(bucket.keys.first ?? nil))
+                Text(label(bucket.keyLabels.first ?? nil)).lineLimit(1).help(
+                  label(bucket.keyLabels.first ?? nil))
                 Spacer()
                 Text(display(bucket.value)).monospacedDigit().bold()
                 Text("n=\(formatRowCount(bucket.count))").foregroundStyle(.secondary)
@@ -107,10 +107,10 @@ struct MetricPanel: View {
   private func axisValues(_ index: Int) -> [String?] {
     var seen = Set<String?>()
     return metric.buckets.compactMap { bucket -> [String?]? in
-      guard bucket.keys.indices.contains(index), seen.insert(bucket.keys[index]).inserted else {
+      guard bucket.keyLabels.indices.contains(index), seen.insert(bucket.keyLabels[index]).inserted else {
         return nil
       }
-      return [bucket.keys[index]]
+      return [bucket.keyLabels[index]]
     }.flatMap { $0 }.sorted { label($0).localizedStandardCompare(label($1)) == .orderedAscending }
   }
   private var pivot: some View {
@@ -119,7 +119,7 @@ struct MetricPanel: View {
     let rowValues = Array(allRows.prefix(100))
     let columnValues = Array(allColumns.prefix(20))
     let lookup = Dictionary(
-      metric.buckets.filter { $0.keys.count == 2 }.map { ($0.keys, $0) },
+      metric.buckets.filter { $0.keyLabels.count == 2 }.map { ($0.keyLabels, $0) },
       uniquingKeysWith: { first, _ in first })
     return VStack(alignment: .leading, spacing: 4) {
       Text(
@@ -170,7 +170,7 @@ struct MetricPanel: View {
             ForEach(Array(buckets.enumerated()), id: \.offset) { _, bucket in
               HStack(spacing: 0) {
                 ForEach(Array(axes.enumerated()), id: \.offset) { index, _ in
-                  Text(label(bucket.keys.indices.contains(index) ? bucket.keys[index] : nil)).frame(
+                  Text(label(bucket.keyLabels.indices.contains(index) ? bucket.keyLabels[index] : nil)).frame(
                     width: 120, alignment: .leading
                   ).padding(5)
                 }

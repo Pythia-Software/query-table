@@ -98,6 +98,25 @@ type WhereTerm struct {
 	SetFilter *SetFilterMetadata `json:"setFilter,omitempty"`
 }
 
+// MarshalJSON writes a group as {"any": [...]} and a literal as
+// field/op/value(/negated), keeping an empty value as the TypeScript and
+// Swift encoders do.
+func (t WhereTerm) MarshalJSON() ([]byte, error) {
+	if t.IsGroup() {
+		return json.Marshal(struct {
+			Any       []WhereClause      `json:"any"`
+			SetFilter *SetFilterMetadata `json:"setFilter,omitempty"`
+		}{t.Any, t.SetFilter})
+	}
+	return json.Marshal(struct {
+		Field     string             `json:"field"`
+		Op        string             `json:"op"`
+		Value     string             `json:"value"`
+		Negated   bool               `json:"negated,omitempty"`
+		SetFilter *SetFilterMetadata `json:"setFilter,omitempty"`
+	}{t.Field, t.Op, t.Value, t.Negated, t.SetFilter})
+}
+
 // IsGroup reports whether the term is a group (an OR of literals or of
 // conjunction branches) rather than a single predicate.
 func (t WhereTerm) IsGroup() bool { return t.Any != nil }
@@ -163,59 +182,6 @@ func validateWhereShape(t WhereTerm) error {
 		}
 	}
 	return nil
-}
-
-// OrderBy mirrors @pythia-software/query-table-core OrderByClause.
-type OrderBy struct {
-	Field   string        `json:"field"`
-	Dir     string        `json:"dir"`             // "asc" | "desc"
-	Nulls   string        `json:"nulls,omitempty"` // "first" | "last" | "" (default last)
-	Extract *RegexExtract `json:"extract,omitempty"`
-}
-
-// RegexExtract transforms a sort value before comparison. PostgreSQL's
-// substring(text FROM regex) returns the first capture group when present and
-// the whole match otherwise; a non-match is NULL.
-type RegexExtract struct {
-	Regex string `json:"regex"`
-}
-
-// AggSpec mirrors @pythia-software/query-table-core AggregationClause: one aggregate op over one
-// measure column (Field; empty ⇒ COUNT(*)), broken down by zero or more group
-// columns. A QueryRequestV3 runs one per metric over the matching population
-// (or the shown page, for Scope "shownRows").
-type AggSpec struct {
-	DateGrouping *MetricDateGrouping `json:"dateGrouping,omitempty"`
-	Diagnostics  []string            `json:"diagnostics,omitempty"`
-	Display      *MetricDisplayHint  `json:"display,omitempty"`
-	Expression   string              `json:"expression,omitempty"`
-	ExpressionY  string              `json:"expressionY,omitempty"`
-	Scope        string              `json:"scope,omitempty"`
-	Sort         []MetricSort        `json:"sort,omitempty"`
-	GroupLimit   int                 `json:"groupLimit,omitempty"`
-	Distribution *MetricDistribution `json:"distribution,omitempty"`
-	ID           string              `json:"id"`
-	Op           string              `json:"op"`
-	Field        string              `json:"field,omitempty"`
-	GroupBy      []string            `json:"groupBy,omitempty"`
-	// Where is this metric's own predicate, ANDed with the table WHERE before
-	// grouping (inside the page for shownRows). It never changes table rows.
-	Where []WhereTerm `json:"where,omitempty"`
-	// MinCount drops groups with fewer rows (after Where), or fewer distinct
-	// values or a smaller sum of a field, before ordering, GroupLimit and Other;
-	// removed groups are reported as hidden_groups.
-	MinCount MetricMinCount `json:"minCount,omitzero"`
-}
-
-// WireQuery is one stage (source or result) of a QueryRequestV3: the TS
-// ServerQuery. On the wire it has exactly select, where, orderBy, limit and
-// offset; view-only state (column widths) never arrives.
-type WireQuery struct {
-	Select  []string    `json:"select,omitempty"`
-	Where   []WhereTerm `json:"where,omitempty"`
-	OrderBy []OrderBy   `json:"orderBy,omitempty"`
-	Limit   int         `json:"limit,omitempty"`
-	Offset  int         `json:"offset,omitempty"`
 }
 
 // UnmarshalJSON rejects unknown stage properties and validates resource

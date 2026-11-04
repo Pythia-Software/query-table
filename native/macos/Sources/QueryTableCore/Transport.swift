@@ -11,51 +11,14 @@ public enum QueryTableError: Error, LocalizedError, Sendable {
   }
 }
 
-/// One query stage of a v3 request (`source` or `result`); the TypeScript
-/// `ServerQuery`. It encodes only the readable keys the Go decoder accepts.
-public struct ServerQuery: Codable, Equatable, Sendable {
-  public var select: [String]
-  public var whereTerms: [WhereTerm]
-  public var orderBy: [OrderByClause]
-  public var limit: Int
-  public var offset: Int
-  enum CodingKeys: String, CodingKey {
-    case select
-    case whereTerms = "where"
-    case orderBy, limit, offset
-  }
-  public init(
-    select: [String] = [], whereTerms: [WhereTerm] = [], orderBy: [OrderByClause] = [],
-    limit: Int = 100, offset: Int = 0
-  ) {
-    self.select = select
-    self.whereTerms = whereTerms
-    self.orderBy = orderBy
-    self.limit = limit
-    self.offset = offset
-  }
-}
-
 // MARK: - v3 protocol
+//
+// The wire structs (ServerQuery, QueryCapabilitiesV3, QueryRequestV3,
+// QueryResultV3, ...) are generated into Wire.generated.swift from
+// schema/query-wire.schema.json. The extensions below add the hand-written
+// conveniences: initializers with defaults, request builders and validation.
 
-/// The server's query handshake (TypeScript `QueryCapabilitiesV3`).
-public struct QueryCapabilitiesV3: Codable, Equatable, Sendable {
-  public var version: Int
-  public var groupedRows: Bool
-  public var calendarGrouping: Bool
-  public var calendarCycles: Bool?
-  public var calendarGroupKeys: Bool?
-  public var computedSourceFilters: Bool
-  public var regex: Bool
-  public var regexSourceFilters: Bool?
-  public var regexAggregateExpressions: Bool?
-  public var metricFilters: Bool?
-  public var metricMinCount: Bool?
-  public var metricMinCountMeasures: Bool?
-  public var maxRows: Int
-  public var maxGroups: Int
-  public var maxPopulation: Int
-  public var profile: String
+extension QueryCapabilitiesV3 {
   public init(
     profile: String, version: Int = 3, groupedRows: Bool = false, calendarGrouping: Bool = false,
     calendarCycles: Bool? = nil, calendarGroupKeys: Bool? = nil,
@@ -83,65 +46,33 @@ public struct QueryCapabilitiesV3: Codable, Equatable, Sendable {
   }
 }
 
-/// Filter autocomplete over `source.where` (TypeScript `DistinctRequestV3`).
-public struct DistinctRequestV3: Codable, Equatable, Sendable {
+extension DistinctRequestV3 {
   public static let maxLimit = 500
   public static let maxSearchLength = 2000
-  public var field: String
-  public var search: String
-  public var limit: Int
-  public init(field: String, search: String = "", limit: Int = 50) {
-    self.field = field
-    self.search = search
-    self.limit = limit
-  }
 }
-public struct DistinctResultV3: Codable, Equatable, Sendable {
-  public var values: [String]
-  public var hasMore: Bool
-  public var hasNull: Bool
-  public init(values: [String], hasMore: Bool = false, hasNull: Bool = false) {
-    self.values = values
-    self.hasMore = hasMore
-    self.hasNull = hasNull
-  }
+
+extension AggregationClause {
+  /// The metric as sent: `label` is presentation-only and never crosses the wire.
+  public var wireSpec: MetricSpecV3 { MetricSpecV3(id: id, op: op, field: field, groupBy: groupBy) }
 }
 
 /// One v3 query: rows, metrics or distinct values over a source stage. Ungrouped
 /// requests use the same stage for `source` and `result`. Grouping is not
-/// modelled by the native client.
-public struct QueryRequestV3: Codable, Equatable, Sendable {
-  /// Host-owned query state, passed through uninterpreted.
-  public var hostState: JSONValue?
-  public var version: Int
-  public var profile: String
-  /// The evaluation clock (epoch milliseconds) for relative datetime operands.
-  public var now: Int64
-  public var expectedRevisions: [String: String]
-  public var planToken: String?
-  public var snapshot: String?
-  public var source: ServerQuery
-  public var result: ServerQuery
-  public var rows: Bool
-  /// Encoded without `label`, which is presentation-only.
-  public var metrics: [AggregationClause]
-  public var distinct: DistinctRequestV3?
-  public var diagnostics: [String]
-  enum CodingKeys: String, CodingKey {
-    case hostState, version, profile, now, expectedRevisions, planToken, snapshot, source, result,
-      rows, metrics, distinct, diagnostics
-  }
+/// built by the native client.
+extension QueryRequestV3 {
   public init(
     profile: String, now: Int64, source: ServerQuery, result: ServerQuery? = nil,
-    rows: Bool = true, metrics: [AggregationClause] = [], distinct: DistinctRequestV3? = nil,
+    rows: Bool = true, metrics: [MetricSpecV3] = [], distinct: DistinctRequestV3? = nil,
     expectedRevisions: [String: String] = [:], planToken: String? = nil,
-    snapshot: String? = nil, hostState: JSONValue? = nil, diagnostics: [String] = []
+    snapshot: String? = nil, hostState: JSONValue? = nil, diagnostics: [String] = [],
+    grouping: GroupingDefinition? = nil
   ) {
     self.version = 3
     self.profile = profile
     self.now = now
     self.source = source
     self.result = result ?? source
+    self.grouping = grouping
     self.rows = rows
     self.metrics = metrics
     self.distinct = distinct
@@ -151,26 +82,17 @@ public struct QueryRequestV3: Codable, Equatable, Sendable {
     self.hostState = hostState
     self.diagnostics = diagnostics
   }
-  public func encode(to encoder: Encoder) throws {
-    var c = encoder.container(keyedBy: CodingKeys.self)
-    try c.encodeIfPresent(hostState, forKey: .hostState)
-    try c.encode(version, forKey: .version)
-    try c.encode(profile, forKey: .profile)
-    try c.encode(now, forKey: .now)
-    try c.encode(expectedRevisions, forKey: .expectedRevisions)
-    try c.encodeIfPresent(planToken, forKey: .planToken)
-    try c.encodeIfPresent(snapshot, forKey: .snapshot)
-    try c.encode(source, forKey: .source)
-    try c.encode(result, forKey: .result)
-    try c.encode(rows, forKey: .rows)
-    try c.encode(
-      metrics.map {
-        var metric = $0
-        metric.label = nil
-        return metric
-      }, forKey: .metrics)
-    try c.encodeIfPresent(distinct, forKey: .distinct)
-    try c.encode(diagnostics, forKey: .diagnostics)
+  /// A request whose metrics are client aggregation clauses (sent without `label`).
+  public init(
+    profile: String, now: Int64, source: ServerQuery, result: ServerQuery? = nil,
+    rows: Bool = true, metrics: [AggregationClause], distinct: DistinctRequestV3? = nil,
+    expectedRevisions: [String: String] = [:], planToken: String? = nil,
+    snapshot: String? = nil, hostState: JSONValue? = nil, diagnostics: [String] = []
+  ) {
+    self.init(
+      profile: profile, now: now, source: source, result: result, rows: rows,
+      metrics: metrics.map(\.wireSpec), distinct: distinct, expectedRevisions: expectedRevisions,
+      planToken: planToken, snapshot: snapshot, hostState: hostState, diagnostics: diagnostics)
   }
 
   /// Epoch milliseconds for a request clock.
@@ -207,43 +129,31 @@ public struct QueryRequestV3: Codable, Equatable, Sendable {
   }
 }
 
-public struct AggregationBucket: Codable, Equatable, Sendable {
-  /// Group keys as display strings; NULL keys are nil.
-  public var keys: [String?]
-  public var value: JSONValue
-  public var count: Int
-  public var error: String?
-  enum CodingKeys: String, CodingKey { case keys, value, count, error }
-  public init(keys: [String?] = [], value: JSONValue, count: Int, error: String? = nil) {
+extension AggregationBucket {
+  public init(
+    keys: [JSONValue] = [], value: JSONValue, count: Int, error: String? = nil,
+    y: JSONValue? = nil, yError: String? = nil, distribution: MetricDistributionResult? = nil,
+    nullCount: Int? = nil, inputErrorCount: Int? = nil
+  ) {
     self.keys = keys
     self.value = value
     self.count = count
     self.error = error
+    self.y = y
+    self.yError = yError
+    self.distribution = distribution
+    self.nullCount = nullCount
+    self.inputErrorCount = inputErrorCount
   }
-  public init(from decoder: Decoder) throws {
-    let c = try decoder.container(keyedBy: CodingKeys.self)
-    // Servers may key buckets by numbers or booleans (TS MetricKey = MetricValue).
-    keys = try c.decode([JSONValue].self, forKey: .keys).map {
-      $0 == .null ? nil : $0.displayString
-    }
-    value = try c.decodeIfPresent(JSONValue.self, forKey: .value) ?? .null
-    count = try c.decode(Int.self, forKey: .count)
-    error = try c.decodeIfPresent(String.self, forKey: .error)
-  }
+  /// Group keys as display strings; NULL keys are nil. `keys` keeps the JSON
+  /// values (servers may key buckets by numbers or booleans).
+  public var keyLabels: [String?] { keys.map { $0 == .null ? nil : $0.displayString } }
 }
-public struct AggregationResultEntry: Codable, Equatable, Sendable {
-  public var id: String
-  public var buckets: [AggregationBucket]
-  public var error: String?
-  public var scope: String?
-  public var processedRows: Int?
-  public var groupCount: Int?
-  public var coverage: String?
-  public var hiddenGroups: Int?
+extension AggregationResultEntry {
   public init(
     id: String, buckets: [AggregationBucket], error: String? = nil, scope: String? = nil,
     processedRows: Int? = nil, groupCount: Int? = nil, coverage: String? = nil,
-    hiddenGroups: Int? = nil
+    hiddenGroups: Int? = nil, other: AggregationBucket? = nil
   ) {
     self.id = id
     self.buckets = buckets
@@ -253,19 +163,14 @@ public struct AggregationResultEntry: Codable, Equatable, Sendable {
     self.groupCount = groupCount
     self.coverage = coverage
     self.hiddenGroups = hiddenGroups
+    self.other = other
   }
 }
 
-public struct ComputedFieldCapabilityV3: Codable, Equatable, Sendable {
-  public var type: String
-  public var select: Bool
-  public var sort: Bool
-  public var measure: Bool
-  public var group: Bool
-  public var filter: Bool?
+extension ComputedFieldCapabilityV3 {
   public init(
     type: String, select: Bool = false, sort: Bool = false, measure: Bool = false,
-    group: Bool = false, filter: Bool? = nil
+    group: Bool = false, filter: Bool? = nil, reason: String? = nil
   ) {
     self.type = type
     self.select = select
@@ -273,73 +178,27 @@ public struct ComputedFieldCapabilityV3: Codable, Equatable, Sendable {
     self.measure = measure
     self.group = group
     self.filter = filter
+    self.reason = reason
   }
 }
-/// The execution envelope (TypeScript `ComputedExecution`).
-public struct QueryExecutionV3: Codable, Equatable, Sendable {
-  public var profile: String
-  public var planToken: String?
-  public var resolvedRevisions: [String: String]
-  public var fields: [String: ComputedFieldCapabilityV3]
-  public var fingerprint: String?
-  public var snapshot: String?
-  enum CodingKeys: String, CodingKey {
-    case profile, planToken, resolvedRevisions, fields, fingerprint, snapshot
-  }
+/// The execution envelope (TypeScript `ComputedExecution`). `planToken` is
+/// always on the wire; an empty token means none.
+extension QueryExecutionV3 {
   public init(
     profile: String, planToken: String? = nil, resolvedRevisions: [String: String] = [:],
     fields: [String: ComputedFieldCapabilityV3] = [:], fingerprint: String? = nil,
     snapshot: String? = nil
   ) {
     self.profile = profile
-    self.planToken = planToken
+    self.planToken = planToken ?? ""
     self.resolvedRevisions = resolvedRevisions
     self.fields = fields
     self.fingerprint = fingerprint
     self.snapshot = snapshot
   }
-  public init(from decoder: Decoder) throws {
-    let c = try decoder.container(keyedBy: CodingKeys.self)
-    profile = try c.decode(String.self, forKey: .profile)
-    planToken = try c.decodeIfPresent(String.self, forKey: .planToken)
-    // Go encodes empty maps as null.
-    resolvedRevisions =
-      try c.decodeIfPresent([String: String].self, forKey: .resolvedRevisions) ?? [:]
-    fields = try c.decodeIfPresent([String: ComputedFieldCapabilityV3].self, forKey: .fields) ?? [:]
-    fingerprint = try c.decodeIfPresent(String.self, forKey: .fingerprint)
-    snapshot = try c.decodeIfPresent(String.self, forKey: .snapshot)
-  }
 }
 
-public struct ProjectedFieldV3: Codable, Equatable, Sendable {
-  public var name: String
-  public var type: String
-  public init(name: String, type: String) {
-    self.name = name
-    self.type = type
-  }
-}
-public struct ProjectedSchemaV3: Codable, Equatable, Sendable {
-  public var name: String
-  public var idField: String
-  public var fields: [ProjectedFieldV3]
-  public init(name: String, idField: String, fields: [ProjectedFieldV3]) {
-    self.name = name
-    self.idField = idField
-    self.fields = fields
-  }
-}
-
-public struct QueryResultV3: Codable, Equatable, Sendable {
-  public var version: Int
-  public var now: Int64
-  public var sourceTotal: Int
-  public var rows: [QueryRow]
-  public var total: Int
-  public var schema: ProjectedSchemaV3
-  public var metrics: [AggregationResultEntry]
-  public var execution: QueryExecutionV3
-  public var distinct: DistinctResultV3?
+extension QueryResultV3 {
   public init(
     now: Int64, rows: [QueryRow], total: Int, sourceTotal: Int, schema: ProjectedSchemaV3,
     metrics: [AggregationResultEntry] = [], execution: QueryExecutionV3,
@@ -376,14 +235,13 @@ public struct QueryResultV3: Codable, Equatable, Sendable {
         resolvedRevisions: request.expectedRevisions, snapshot: request.snapshot),
       distinct: distinct)
   }
-
   /// Mirrors TypeScript `validateQueryResultV3`. Without `schema`, only the
   /// envelope, totals and identities (by the response's own `idField`) are checked.
   public func validate(for request: QueryRequestV3, schema: FieldSchema? = nil) throws {
     let safe = 9_007_199_254_740_991
     guard version == 3, now == request.now, total >= 0, total <= safe, sourceTotal >= 0,
       sourceTotal <= safe, execution.profile == request.profile,
-      (execution.planToken ?? "") == (request.planToken ?? ""),
+      execution.planToken == (request.planToken ?? ""),
       (execution.snapshot ?? "") == (request.snapshot ?? ""),
       schema == nil || self.schema.idField == schema!.idField,
       request.distinct == nil || distinct != nil
@@ -507,7 +365,7 @@ extension QueryState {
     return QueryRequestV3(
       profile: capabilities.profile, now: QueryRequestV3.epochMilliseconds(now), source: stage,
       rows: rows, metrics: metrics, expectedRevisions: revisions,
-      planToken: execution?.planToken.flatMap { $0.isEmpty ? nil : $0 },
+      planToken: execution.flatMap { $0.planToken.isEmpty ? nil : $0.planToken },
       snapshot: execution?.snapshot, hostState: hostState,
       diagnostics: diagnostics.filter { unique.insert($0).inserted })
   }

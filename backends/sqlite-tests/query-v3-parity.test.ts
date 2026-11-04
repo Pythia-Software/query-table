@@ -16,7 +16,8 @@ it("matches local grouped rows, representatives and calendar metrics with the re
   const fixtures=JSON.parse(line!.split("V3_FIXTURES ")[1]!) as {name:string;rows:Row[];request:QueryRequestV3;result:QueryResultV3}[];
   expect(fixtures.length).toBeGreaterThan(50);
   for(const {name,rows,request,result} of fixtures){
-    const query:QueryState={...state(request.result),aggregations:(request.metrics??[]).map(metric=>({...metric,op:metric.op||"count",groupBy:metric.groupBy??[]})),...(request.grouping?{grouping:{...request.grouping,source:state(request.source)}}:{})};
+    // The wire grouping leaves representative nulls optional; client state requires them.
+    const query:QueryState={...state(request.result),aggregations:(request.metrics??[]).map(metric=>({...metric,op:metric.op||"count",groupBy:metric.groupBy??[]})),...(request.grouping?{grouping:{...request.grouping,source:state(request.source)} as NonNullable<QueryState["grouping"]>}:{})};
     if(request.rows){const local=applyQuery(rows,query,schema,{now:request.now});
       // SQLite retains its existing exact-decimal AVG profile. Browser AVG
       // divides each sample before summing, so a final double can differ by an ULP.

@@ -1,7 +1,8 @@
 import type { FormulaDiagnostic } from "./formula";
-export type MetricValue = number | string | boolean | null;
+import type { MetricValue, WireMetricDateGrouping } from "./wire.generated";
+// Wire shapes are generated from schema/query-wire.schema.json.
+export type { MetricValue, MetricScope, MetricDistribution, MetricBoxSummary, MetricDistributionResult } from "./wire.generated";
 export type MetricKey = MetricValue;
-export type MetricScope = "allMatching" | "shownRows";
 /** Calendar intervals: each bucket is one interval on the timeline, keyed by
  * its start as an ISO instant. */
 export type MetricCalendarInterval = "hour" | "day" | "week" | "month" | "year";
@@ -18,20 +19,11 @@ export interface MetricDateOccurrence {
    * SUM metrics, no value for other expressions. false leaves them out. */
   includeEmpty: boolean;
 }
-/** Calendar grouping, currently executed over complete local populations. */
-export interface MetricDateGrouping {
-  field: string;
+/** Calendar grouping, currently executed over complete local populations.
+ * The wire subset is WireMetricDateGrouping; whole intervals and occurrences
+ * are planned on the client. */
+export interface MetricDateGrouping extends WireMetricDateGrouping {
   interval: MetricCalendarInterval | MetricCycleInterval;
-  /** IANA timezone identifier; omitted settings retain UTC behavior. */
-  timeZone?: string;
-  /** Add a bucket for every interval of the range, or for every slot of a
-   * cyclic interval. */
-  includeEmpty: boolean;
-  /** The calendar range empty intervals fill; for a cyclic interval, the range
-   * whose empty occurrences count. */
-  range: "query" | "observed" | "custom";
-  start?: string;
-  end?: string;
   /** "exclude" leaves out intervals the query's bounds cut, and intervals that
    * have not ended by the evaluation time; omitted includes them. A cyclic
    * interval's intervals are its hours or days. */
@@ -138,31 +130,10 @@ export interface MetricLayout {
   minWidthRem: number;
   minHeightRem: number;
 }
-export interface MetricDistribution {
-  kind: "box" | "histogram";
-  input: string;
-  whiskers?: "minmax" | "tukey";
-  bins?: number;
-}
 export interface MetricSort {
   key: "value" | "y" | "count" | "samples" | `group${number}`;
   dir: "asc" | "desc";
   nulls?: "first" | "last";
-}
-export interface MetricBoxSummary {
-  n: number;
-  min: number;
-  q1: number;
-  median: number;
-  q3: number;
-  max: number;
-  mean: number;
-  low: number;
-  high: number;
-  outliers: number[];
-  outlierCount: number;
-  whiskers: "minmax" | "tukey";
-  method: "exact-linear";
 }
 /** One histogram bin: `min <= value < max`, or `<= max` for the final bin. */
 export interface MetricHistogramBin {
@@ -170,9 +141,6 @@ export interface MetricHistogramBin {
   max: number;
   inclusiveMax: boolean;
 }
-export type MetricDistributionResult =
-  | { kind: "box"; summary: MetricBoxSummary | null }
-  | { kind: "histogram"; edges: number[]; counts: number[]; n: number };
 export interface MetricDiagnostic extends FormulaDiagnostic {
   metricId?: string;
   code?: string;

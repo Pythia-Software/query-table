@@ -1,6 +1,6 @@
 import { createGroupingModel, withoutGrouping, type GroupingDefinition } from "./grouping";
 import { MAX_AGGREGATIONS, normalizeQueryState, predicatesOf, type QueryState, type AggregationClause } from "./query";
-import { toServerQuery, type ServerQuery, type AggregationResult } from "./encode";
+import { toServerQuery } from "./encode";
 import { validateMetric, toMetricQuery } from "./metrics";
 import { isMetricCycle } from "./metricDates";
 import type { ComputedExecution } from "./computed";
@@ -13,75 +13,11 @@ import { evaluationTime } from "./relativeTime";
 import { withoutLinkSummaries } from "./groupLinks";
 import { isCalendarGroupKey } from "./groupKeys";
 
-export interface QueryCapabilitiesV3 {
-  version: 3;
-  groupedRows: boolean;
-  calendarGrouping: boolean;
-  /** Executes the cyclic `hourOfDay` and `dayOfWeek` date intervals. */
-  calendarCycles?: boolean;
-  /** Executes calendar grouping keys (`{ field, interval, timeZone }`) in a
-   * grouping stage. Requests using them are refused otherwise. */
-  calendarGroupKeys?: boolean;
-  computedSourceFilters: boolean;
-  regex: boolean;
-  regexSourceFilters?: boolean;
-  regexAggregateExpressions?: boolean;
-  /** Executes AggregationClause.where; clauses using it are refused otherwise. */
-  metricFilters?: boolean;
-  /** Executes AggregationClause.minCount and reports hiddenGroups. */
-  metricMinCount?: boolean;
-  /** Also executes an object minCount: distinct values or a sum per group. */
-  metricMinCountMeasures?: boolean;
-  maxRows: number;
-  maxGroups: number;
-  maxPopulation: number;
-  profile: string;
-}
-export interface QueryRequestV3 {
-  /** The table's host-owned state when `hostQuery` is configured. */
-  hostState?: import("./query").HostQueryState;
-  version: 3;
-  profile: string;
-  now: number;
-  expectedRevisions: Record<string, string>;
-  planToken?: string;
-  snapshot?: string;
-  source: ServerQuery;
-  result: ServerQuery;
-  grouping?: GroupingDefinition;
-  rows: boolean;
-  metrics: AggregationClause[];
-  /** Filter-value suggestions over `source.where`. Requires `rows: false`, no
-   * metrics and no grouping. */
-  distinct?: DistinctRequestV3;
-  diagnostics: string[];
-}
-/** Distinct values of one server-filterable field: a literal, case-insensitive
- * substring match on the value as text (empty matches all), ordered by count
- * desc then value asc. `textarray` fields contribute each element. */
-export interface DistinctRequestV3 { field: string; search: string; /** 1..500 */ limit: number }
-export interface DistinctResultV3 {
-  /** Non-NULL matches as text, at most `limit`. */
-  values: string[];
-  /** More than `limit` values match. */
-  hasMore: boolean;
-  /** The population has a NULL (textarray: NULL or empty), whatever the search. */
-  hasNull: boolean;
-}
+import type { QueryCapabilitiesV3, QueryRequestV3, DistinctRequestV3, DistinctResultV3, QueryResultV3, ServerQuery, MetricSpecV3, WireSummaryColumn } from "./wire.generated";
+// The wire types are generated from schema/query-wire.schema.json.
+export type { QueryCapabilitiesV3, QueryRequestV3, DistinctRequestV3, DistinctResultV3, QueryResultV3 };
 export const MAX_DISTINCT_LIMIT = 500;
 export const MAX_DISTINCT_SEARCH_LENGTH = 2000;
-export interface QueryResultV3 {
-  version: 3;
-  now: number;
-  sourceTotal: number;
-  rows: Record<string, unknown>[];
-  total: number;
-  schema: { name: string; idField: string; fields: { name: string; type: string }[] };
-  metrics: AggregationResult["metrics"];
-  /** Present exactly when the request has `distinct`. */
-  distinct?: DistinctResultV3;
-  execution: ComputedExecution;
-}
 /** The handshake supplies authority, including capabilities for computed keys
  * absent from the base schema. Labels may be supplied by the editable catalogue. */
 export function sourceExecutionSchema<Row>(schema: FieldSchema<Row>, execution?: ComputedExecution, catalogue: readonly { id: string; label: string; revision: string }[] = []): FieldSchema<Row> {
@@ -138,12 +74,14 @@ export function toQueryRequestV3<Row>(query: QueryState, baseSchema: FieldSchema
   // narrowed population silently. (Its other diagnostics, such as calendar
   // grouping, describe the v2 transport and do not apply here.)
   diagnostics.push(...metricQuery.diagnostics.filter(issue => issue.code === "residual_metric_filter" || issue.code === "unexpanded_series").map(issue => issue.message));
-  const metrics = metricQuery.metrics.map(metric => {
+  // unsupportedOp is client state; the request is refused by its diagnostic.
+  const metrics: MetricSpecV3[] = metricQuery.metrics.map(({ unsupportedOp: _unsupported, ...metric }) => {
     const dateGrouping = q.aggregations?.find(clause => clause.id === metric.id)?.dateGrouping;
-    return dateGrouping ? { ...metric, dateGrouping } : metric;
+    // The projection keeps only the scatter display hint.
+    return (dateGrouping ? { ...metric, dateGrouping } : metric) as MetricSpecV3;
   });
   for (const metric of metrics) {
-    diagnostics.push(...validateMetric(metric, resultSchema).map(issue => issue.message));
+    diagnostics.push(...validateMetric(metric as AggregationClause, resultSchema).map(issue => issue.message));
     if (metric.dateGrouping && !capabilities.calendarGrouping) diagnostics.push("This server does not support calendar grouping.");
     else if (isMetricCycle(metric.dateGrouping?.interval) && !capabilities.calendarCycles)
       diagnostics.push("This server does not support hour-of-day or day-of-week grouping.");
@@ -152,7 +90,7 @@ export function toQueryRequestV3<Row>(query: QueryState, baseSchema: FieldSchema
     source: sourceRequest, result, ...(q.grouping ? { grouping: { keys: q.grouping.keys,
       // Summary display is presentation only and link columns are computed on
       // the client; the wire contract is unchanged.
-      summaries: withoutLinkSummaries(q.grouping.summaries).map(({ display: _display, ...summary }) => summary), representative: q.grouping.representative,
+      summaries: withoutLinkSummaries(q.grouping.summaries).map(({ display: _display, link: _link, ...summary }) => summary as WireSummaryColumn), representative: q.grouping.representative,
       ...(q.grouping.diagnostics ? { diagnostics: q.grouping.diagnostics } : {}) } } : {}), rows: options.rows !== false, metrics, diagnostics: [...new Set(diagnostics)] };
 }
 export function validateQueryResultV3(result: QueryResultV3, request: QueryRequestV3, schema: FieldSchema): void {
@@ -191,9 +129,10 @@ const emptyStage = (where: WhereTerm[] = []): ServerQuery => ({ select: [], wher
 function auxiliaryRequest(capabilities: QueryCapabilitiesV3, source: ServerQuery, result: ServerQuery, options: AuxiliaryRequestOptions,
   part: Pick<QueryRequestV3, "rows" | "metrics"> & { distinct?: DistinctRequestV3 }, diagnostics: string[] = []): QueryRequestV3 {
   if (profileUnavailable(capabilities, options.execution)) diagnostics.unshift("The negotiated query profile is unavailable.");
-  return { ...(options.hostState ? { hostState: options.hostState } : {}),
-    ...requestEnvelope(capabilities, options.execution, evaluationTime(options), diagnostics),
-    source, result, ...part, diagnostics: [...new Set(diagnostics)] };
+  // Keys follow the schema's property order, the order Go encodes.
+  return { ...requestEnvelope(capabilities, options.execution, evaluationTime(options), diagnostics),
+    source, result, ...part, diagnostics: [...new Set(diagnostics)],
+    ...(options.hostState ? { hostState: options.hostState } : {}) };
 }
 async function execute(transport: Transport, request: QueryRequestV3, signal?: AbortSignal): Promise<QueryResultV3> {
   if (request.diagnostics.length) throw Error(request.diagnostics.join(" "));
@@ -258,7 +197,7 @@ const STAT_OPS: { op: AggOp; key: keyof FieldStats }[] = [{ op: "count_distinct"
  * measurable backend source are left out. */
 export function toFieldStatsRequestV3(schema: FieldSchema, fields: string[], capabilities: QueryCapabilitiesV3,
   options: AuxiliaryRequestOptions = {}): QueryRequestV3 {
-  const metrics: AggregationClause[] = [];
+  const metrics: MetricSpecV3[] = [];
   for (const name of new Set(fields)) {
     const field = schema.fields.find(f => f.name === name);
     if (!field || field.source.kind !== "backend" || !isMeasurable(field)) continue;

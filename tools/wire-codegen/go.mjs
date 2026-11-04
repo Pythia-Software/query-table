@@ -1,0 +1,67 @@
+// Go emitter: structs whose field order and json tags are the wire encoding.
+import { execFileSync } from "node:child_process";
+import { banner, escapeHatch, isObject, isStringEnum, nullable, pascal, properties, refName, scalarUnion, typeName, variants } from "./model.mjs";
+
+const wrap = (text, indent) => {
+  const lines = [];
+  let line = "";
+  for (const word of text.split(/\s+/)) {
+    if (line && line.length + word.length > 76 - indent.length) { lines.push(line); line = word; }
+    else line = line ? `${line} ${word}` : word;
+  }
+  if (line) lines.push(line);
+  return lines.map((l) => `${indent}// ${l}\n`).join("");
+};
+
+export function emitGo(defs) {
+  const type = (node, optional) => {
+    if (node["x-go-type"]) return node["x-go-type"];
+    if (node["x-go-repr"]) return node["x-go-repr"];
+    if (node.$ref) {
+      const name = refName(node), def = defs[name];
+      if (escapeHatch(def, "go")) return (optional && isObject(def) ? "*" : "") + escapeHatch(def, "go");
+      if (isObject(def)) return (optional ? "*" : "") + typeName(defs, name, "go");
+      if (def.type === "string") return "string";
+      if (scalarUnion(defs, def)) return "any";
+      throw Error(`${name}: a union referenced from Go needs x-go-type.`);
+    }
+    if (node.const !== undefined) return typeof node.const === "number" ? "int" : "string";
+    const inner = nullable(node);
+    if (inner) return type(inner, true);
+    if (variants(node)) {
+      if (scalarUnion(defs, node)) return "any";
+      throw Error("An inline union referenced from Go needs x-go-type.");
+    }
+    switch (node.type) {
+      case "string": return "string";
+      case "integer": return "int";
+      case "number": return "float64";
+      case "boolean": return "bool";
+      case "array": return `[]${type(node.items)}`;
+      case "object": return `map[string]${node.additionalProperties && Object.keys(node.additionalProperties).length ? type(node.additionalProperties) : "any"}`;
+    }
+    return "any";
+  };
+  let out = `${banner("//")}\n\npackage querytable\n\nimport "encoding/json"\n`;
+  for (const [name, def] of Object.entries(defs)) {
+    if (!isObject(def) || escapeHatch(def, "go") || isStringEnum(def)) continue;
+    const go = typeName(defs, name, "go");
+    out += "\n" + (def.description ? wrap(`${go}: ${def.description}`, "") : "") + `type ${go} struct {\n`;
+    for (const { json, node, required } of properties(def)) {
+      const omit = node["x-go-omit"] ?? (required ? "none" : "omitempty");
+      if (node.description) out += wrap(node.description, "\t");
+      out += `\t${node["x-go-name"] ?? pascal(json)} ${type(node, !required)} \`json:"${json}${omit === "none" ? "" : "," + omit}"\`\n`;
+    }
+    for (const line of def["x-go-extra"] ?? []) out += `\t${line}\n`;
+    out += "}\n";
+    // A required list or map is never null on the wire, even when Go's is nil.
+    const empties = properties(def).filter(({ node, required }) => required && !nullable(node)).map(({ json, node }) =>
+      ({ field: node["x-go-name"] ?? pascal(json), type: type(node, false) })).filter(({ type }) => /^(\[\]|map\[)/.test(type));
+    if (empties.length) {
+      out += `\n// MarshalJSON writes nil required lists and maps as empty.\nfunc (v ${go}) MarshalJSON() ([]byte, error) {\n\ttype wire ${go}\n`;
+      for (const { field, type: t } of empties) out += `\tif v.${field} == nil {\n\t\tv.${field} = ${t}{}\n\t}\n`;
+      out += "\treturn json.Marshal(wire(v))\n}\n";
+    }
+  }
+  return execFileSync("gofmt", [], { input: out, encoding: "utf8" });
+}

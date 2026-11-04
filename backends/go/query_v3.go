@@ -13,16 +13,6 @@ import (
 
 const GroupIdentityField = "__qt_group_id__"
 
-type SummaryColumn struct {
-	ID         string `json:"id"`
-	Op         string `json:"op"`
-	Field      string `json:"field,omitempty"`
-	Expression string `json:"expression,omitempty"`
-	Label      string `json:"label,omitempty"`
-}
-type RepresentativeRow struct {
-	OrderBy []OrderBy `json:"orderBy"`
-}
 type GroupingDefinition struct {
 	// Keys names the source field of each key, in order. Each is also the
 	// key's result column.
@@ -51,11 +41,6 @@ type groupingDefinitionJSON struct {
 	Representative *RepresentativeRow `json:"representative"`
 	Diagnostics    []string           `json:"diagnostics,omitempty"`
 }
-type calendarGroupKeyJSON struct {
-	Field    string `json:"field"`
-	Interval string `json:"interval"`
-	TimeZone string `json:"timeZone,omitempty"`
-}
 
 // MarshalJSON writes a key with an interval as {"field","interval","timeZone"}.
 func (g GroupingDefinition) MarshalJSON() ([]byte, error) {
@@ -66,7 +51,7 @@ func (g GroupingDefinition) MarshalJSON() ([]byte, error) {
 	for _, key := range g.Keys {
 		var value any = key
 		if interval, ok := g.KeyIntervals[key]; ok {
-			value = calendarGroupKeyJSON{key, interval.Interval, interval.TimeZone}
+			value = CalendarGroupKey{key, interval.Interval, interval.TimeZone}
 		}
 		raw, err := json.Marshal(value)
 		if err != nil {
@@ -93,7 +78,7 @@ func (g *GroupingDefinition) UnmarshalJSON(data []byte) error {
 			g.Keys = append(g.Keys, name)
 			continue
 		}
-		var key calendarGroupKeyJSON
+		var key CalendarGroupKey
 		keyDecoder := json.NewDecoder(bytes.NewReader(raw))
 		keyDecoder.DisallowUnknownFields()
 		if err := keyDecoder.Decode(&key); err != nil {
@@ -126,46 +111,6 @@ func groupKeyLocation(typ, field string, interval GroupKeyInterval) (*time.Locat
 	return calendarLocation(MetricDateGrouping{Field: field, Interval: interval.Interval, TimeZone: interval.TimeZone, Range: "query"})
 }
 
-// QueryRequestV3 separates source WHERE from result HAVING. Source paging never
-// changes group membership. SourceSQL, authorization, budgets and transactions
-// are supplied by the host, never by this request.
-type QueryRequestV3 struct {
-	Version           int                 `json:"version"`
-	Profile           string              `json:"profile"`
-	ExpectedRevisions map[string]string   `json:"expectedRevisions"`
-	PlanToken         string              `json:"planToken,omitempty"`
-	Snapshot          string              `json:"snapshot,omitempty"`
-	Now               int64               `json:"now"`
-	Source            WireQuery           `json:"source"`
-	Result            WireQuery           `json:"result"`
-	Grouping          *GroupingDefinition `json:"grouping,omitempty"`
-	Rows              bool                `json:"rows"`
-	Metrics           []AggSpec           `json:"metrics"`
-	Diagnostics       []string            `json:"diagnostics,omitempty"`
-	// HostState is the table's host-owned query state (TS HostQueryState).
-	// Query Table never interprets it; hosts run their own clauses from it.
-	HostState json.RawMessage `json:"hostState,omitempty"`
-	// Distinct requests filter-value suggestions over the source.where
-	// population instead of rows, metrics or groups.
-	Distinct *DistinctRequestV3 `json:"distinct,omitempty"`
-}
-
-// DistinctRequestV3 matches a literal, case-insensitive substring of each
-// value cast to text; an empty search matches every value.
-type DistinctRequestV3 struct {
-	Field  string `json:"field"`
-	Search string `json:"search"`
-	Limit  int    `json:"limit"`
-}
-
-// DistinctResultV3 orders values by count descending, then value. HasNull
-// reports a NULL (or empty text array) in the population, whatever the search.
-type DistinctResultV3 struct {
-	Values  []string `json:"values"`
-	HasMore bool     `json:"hasMore"`
-	HasNull bool     `json:"hasNull"`
-}
-
 // Validate classifies malformed wire stages and metrics as request diagnostics,
 // including for hosts that construct requests directly instead of decoding JSON.
 func (q QueryRequestV3) Validate() error {
@@ -192,48 +137,6 @@ func (q QueryRequestV3) Validate() error {
 		}
 	}
 	return nil
-}
-
-type ProjectedField struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-}
-type ProjectedSchema struct {
-	Name    string           `json:"name"`
-	IDField string           `json:"idField"`
-	Fields  []ProjectedField `json:"fields"`
-}
-type QueryResultV3 struct {
-	SourceTotal int64             `json:"sourceTotal"`
-	Version     int               `json:"version"`
-	Now         int64             `json:"now"`
-	Rows        []map[string]any  `json:"rows"`
-	Total       int64             `json:"total"`
-	Schema      ProjectedSchema   `json:"schema"`
-	Metrics     []MetricResult    `json:"metrics"`
-	Execution   ComputedExecution `json:"execution"`
-	Distinct    *DistinctResultV3 `json:"distinct,omitempty"`
-}
-type QueryCapabilitiesV3 struct {
-	RegexSourceFilters        bool `json:"regexSourceFilters"`
-	RegexAggregateExpressions bool `json:"regexAggregateExpressions"`
-	MetricFilters             bool `json:"metricFilters"`
-	MetricMinCount            bool `json:"metricMinCount"`
-	// MetricMinCountMeasures: a minCount of distinct values or of a summed field.
-	MetricMinCountMeasures bool `json:"metricMinCountMeasures"`
-	Version                int  `json:"version"`
-	GroupedRows            bool `json:"groupedRows"`
-	CalendarGrouping       bool `json:"calendarGrouping"`
-	// CalendarCycles executes the hourOfDay and dayOfWeek date intervals.
-	CalendarCycles bool `json:"calendarCycles"`
-	// CalendarGroupKeys executes grouping keys with a calendar interval.
-	CalendarGroupKeys     bool   `json:"calendarGroupKeys"`
-	ComputedSourceFilters bool   `json:"computedSourceFilters"`
-	Regex                 bool   `json:"regex"`
-	MaxRows               int    `json:"maxRows"`
-	MaxGroups             int    `json:"maxGroups"`
-	MaxPopulation         int    `json:"maxPopulation"`
-	Profile               string `json:"profile"`
 }
 
 // QueryDatasetV3 works with SQLite and PostgreSQL. SQLite hosts register the

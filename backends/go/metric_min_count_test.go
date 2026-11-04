@@ -30,10 +30,10 @@ func TestMetricMinCountJSON(t *testing.T) {
 		}
 	}
 	for want, spec := range map[string]AggSpec{
-		`{"id":"m","op":"count"}`:                                     {ID: "m", Op: "count"},
-		`{"id":"m","op":"count","minCount":4}`:                        {ID: "m", Op: "count", MinCount: MetricMinCount{Min: 4}},
-		`{"id":"m","op":"count","minCount":{"min":5,"distinct":"g"}}`: {ID: "m", Op: "count", MinCount: MetricMinCount{Min: 5, Distinct: "g"}},
-		`{"id":"m","op":"count","minCount":{"min":10,"sum":"x"}}`:     {ID: "m", Op: "count", MinCount: MetricMinCount{Min: 10, Sum: "x"}},
+		`{"id":"m","op":"count","groupBy":[]}`:                                     {ID: "m", Op: "count"},
+		`{"id":"m","op":"count","groupBy":[],"minCount":4}`:                        {ID: "m", Op: "count", MinCount: MetricMinCount{Min: 4}},
+		`{"id":"m","op":"count","groupBy":[],"minCount":{"min":5,"distinct":"g"}}`: {ID: "m", Op: "count", MinCount: MetricMinCount{Min: 5, Distinct: "g"}},
+		`{"id":"m","op":"count","groupBy":[],"minCount":{"min":10,"sum":"x"}}`:     {ID: "m", Op: "count", MinCount: MetricMinCount{Min: 10, Sum: "x"}},
 	} {
 		if got, err := json.Marshal(spec); err != nil || string(got) != want {
 			t.Errorf("marshal %+v: %s, %v", spec, got, err)

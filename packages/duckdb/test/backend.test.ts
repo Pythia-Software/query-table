@@ -10,6 +10,7 @@ import {
   formulaRuntime,
   normalizeQueryState,
   toQueryRequestV3,
+  type MetricSpecV3,
   toServerQuery,
   validateQueryResultV3,
   fetchDistinctValuesV3,
@@ -444,7 +445,7 @@ describe("DuckDB native conformance", () => {
     expect(await fetchDistinctValuesV3(transport, schema, "category", "", { where: [{ field: "amount", op: ">", value: "15" }] }))
       .toEqual({ values: ["b", "a"], hasMore: false, hasNull: false });
     const request = toDistinctRequestV3("category", "", backend.capabilities, { now: Date.now() });
-    for (const invalid of [{ rows: true }, { metrics: [metric("COUNT()")] }])
+    for (const invalid of [{ rows: true }, { metrics: [metric("COUNT()") as MetricSpecV3] }])
       await expect(backend.execute({ ...request, ...invalid })).rejects.toThrow("no rows, metrics or grouping");
     await expect(backend.execute({ ...request, distinct: { ...request.distinct!, limit: 501 } })).rejects.toThrow("budget");
     expect(await fetchRowV3(transport, schema, "3")).toMatchObject({

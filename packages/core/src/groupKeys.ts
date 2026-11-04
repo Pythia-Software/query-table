@@ -11,19 +11,12 @@ import { metricDateFloor, metricDateNext, metricDateTime } from "./metricDates";
 /** Calendar intervals a grouping key can bucket a datetime field by. */
 export const GROUP_KEY_INTERVALS: readonly MetricCalendarInterval[] = ["hour", "day", "week", "month", "year"];
 
-/** A grouping key that buckets a datetime field by calendar interval: one
- * group per interval, keyed by the interval's start as an ISO instant. The
- * result column is named after the field. Intervals follow the metric
- * calendar (`dateGrouping`), including daylight-saving changes; weeks start
- * on Monday. */
-export interface CalendarGroupKey {
-  field: string;
-  interval: MetricCalendarInterval;
-  /** IANA timezone identifier; omitted means UTC. */
-  timeZone?: string;
-}
-/** A field name (group by its exact value) or a calendar key. */
-export type GroupKey = string | CalendarGroupKey;
+/** A grouping key buckets a datetime field by calendar interval (one group
+ * per interval, keyed by its start as an ISO instant, weeks from Monday), or
+ * is a field name. The result column is named after the field. Generated from
+ * the wire schema. */
+export type { CalendarGroupKey, GroupKey } from "./wire.generated";
+import type { CalendarGroupKey, GroupKey } from "./wire.generated";
 
 export function isCalendarGroupKey(key: GroupKey): key is CalendarGroupKey {
   return typeof key === "object" && key !== null;
