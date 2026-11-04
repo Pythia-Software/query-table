@@ -456,6 +456,16 @@ describe("metric population capability negotiation", () => {
       ["plain", null],
       ["page", "The query contains unsupported result ordering."],
     ]);
+    // An invalid shown-row metric is refused with the page; it never blocks
+    // the all-matching metrics.
+    transport.fetchQueryV3.mockClear();
+    const invalid = await executeMetrics({ ...query, aggregations: [plain, { id: "bad", op: "sum" as const, field: "name", groupBy: [], scope: "shownRows" as const }] },
+      { schema: local, transport });
+    expect(transport.fetchQueryV3.mock.calls.map(([request]) => request.metrics.map((m) => m.id))).toEqual([["plain"]]);
+    expect(invalid.metrics.map((m) => [m.id, m.error ?? null])).toEqual([
+      ["plain", null],
+      ["bad", "The query contains unsupported result ordering."],
+    ]);
   });
   it("fails only the card whose operation this client cannot read", async () => {
     const transport = v3Transport(request => request.metrics.map((m) => ({ id: m.id, buckets: [{ keys: [], value: 2, count: 2 }] })));

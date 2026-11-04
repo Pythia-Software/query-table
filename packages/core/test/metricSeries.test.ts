@@ -167,6 +167,16 @@ describe("metric shares", () => {
     expect(a).toEqual([null, 110 / 210, 10 / 10, 50 / 70]);
   });
 
+  it("keeps an engine part's error code", () => {
+    const clause: AggregationClause = { id: "models", op: "sum", field: "input", groupBy: ["model"], share: "total" };
+    const plan = planMetricSeries(query(clause), schema, { now })!;
+    const parts = plan.queries.flatMap((q) => q.aggregations ?? []);
+    const [entry] = plan.combine(parts.map((part, i) => i === 1
+      ? { id: part.id, buckets: [], error: "Too many groups.", errorCode: "resource_limit" as const }
+      : { id: part.id, buckets: [{ keys: ["a"], value: 1, count: 1 }], groupCount: 1, coverage: "exact" as const }));
+    expect(entry).toEqual({ id: "models", buckets: [], error: "Too many groups.", errorCode: "resource_limit" });
+  });
+
   it("divides by the grand total without calendar grouping, keeping legacy operations", () => {
     const clause: AggregationClause = { id: "models", op: "sum", field: "input", groupBy: ["model"], share: "total" };
     const plan = planMetricSeries(query(clause), schema, { now })!;

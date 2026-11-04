@@ -109,8 +109,10 @@ export async function executeV3Metrics<Row>(
   // window, so an order only the client can evaluate never refuses them.
   const unpaged = { ...query, orderBy: [], offset: 0 };
   const shown = runnable.filter(clause => clause.scope === "shownRows");
-  const page = shown.length ? refusal({ ...query, aggregations: shown }) : undefined;
-  if (page && !refusal({ ...unpaged, aggregations: shown })) {
+  // Probe the page without metrics, so an invalid metric is never mistaken
+  // for an order the server cannot run (and never blocks the others).
+  const page = shown.length ? refusal({ ...query, aggregations: [] }) : undefined;
+  if (page && !refusal({ ...unpaged, aggregations: [] })) {
     for (const clause of shown) refused.set(clause.id, page);
     runnable = runnable.filter(clause => clause.scope !== "shownRows");
   }

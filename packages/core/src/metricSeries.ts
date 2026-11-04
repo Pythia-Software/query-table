@@ -528,6 +528,10 @@ export function planMetricSeries(
             },
         );
         if (item.kind === "plain") return { ...entries[0]!, id: c.id };
+        // A failed part fails the metric with the engine's message and code.
+        const failed = entries.find((entry) => entry.error);
+        if (failed)
+          return { id: c.id, buckets: [], error: failed.error!, ...(failed.errorCode ? { errorCode: failed.errorCode } : {}) };
         try {
           if (item.kind === "occurrence")
             return combineOccurrences(c, entries[0]!);
