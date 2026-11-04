@@ -208,6 +208,17 @@ struct QueryTableChecks {
     var groupedRefusal: Error?
     do { _ = try await local.fetchQueryV3(groupedRequest) } catch { groupedRefusal = error }
     try check(groupedRefusal != nil, "The local transport refuses grouped requests instead of returning rows")
+    var emptyBranch: Error?
+    do {
+      _ = try await local.fetchQueryV3(QueryRequestV3(
+        profile: local.queryCapabilities.profile, now: 0,
+        source: ServerQuery(whereTerms: [.group(OrGroup(any: [.all(WhereConjunction(all: [])), .literal(.init(field: "name", op: "=", value: "Alpha"))]))], limit: 5)))
+    } catch { emptyBranch = error }
+    try check(emptyBranch != nil, "An empty conjunction is refused instead of matching every row")
+    let emptyWhere = MetricSpecV3(id: "rows", op: "count", groupBy: [], whereTerms: [])
+    let plainMetric = try await local.fetchQueryV3(QueryRequestV3(
+      profile: local.queryCapabilities.profile, now: 0, source: ServerQuery(limit: 1), rows: false, metrics: [emptyWhere]))
+    try check(plainMetric.metrics.first?.buckets.first?.count == rows.count, "An empty metric filter runs as a plain metric")
     let lenient = try JSONDecoder().decode(
       AggregationBucket.self, from: Data(#"{"keys":[],"count":2}"#.utf8))
     let envelope = try JSONDecoder().decode(

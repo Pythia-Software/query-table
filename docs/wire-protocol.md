@@ -44,7 +44,7 @@ the generated types: `toQueryRequestV3` and friends in TypeScript,
 - **Optional properties are omitted** when unset, except the capability flags
   and `MetricResult.scope`/`processedRows`/`groupCount`, which Go always writes
   (`x-go-omit: none`).
-- Go escapes `<`, `>` and `&` in strings as `<`, `>` and `&`
+- Go escapes `<`, `>` and `&` in strings as `\u003c`, `\u003e` and `\u0026`
   (the default of `encoding/json`). This is the same JSON string; it is the
   only byte difference between the encoders, and the Go conformance test
   undoes it before comparing.
@@ -107,7 +107,7 @@ possible:
 | `MetricMinCount` | Go | `MetricMinCount` | A number (rows) or `{min, distinct}` / `{min, sum}`. |
 | `GroupingDefinition` | Go | `GroupingDefinition` | `keys` mixes field names and calendar keys; Go stores names plus a `KeyIntervals` map. |
 | `MetricDistributionResult` | Go | `MetricDistributionResult` | A box or histogram union discriminated by `kind`. |
-| `hostState` | Go, Swift, TypeScript | `json.RawMessage`, `JSONValue`, `HostQueryState` | Host-owned state, passed through uninterpreted: the schema accepts any JSON object, and Go rejects anything else. The TypeScript client sends a `HostQueryState` (`{ version, params }`). |
+| `hostState` | Go, Swift, TypeScript | `json.RawMessage`, `[String: JSONValue]`, `HostQueryState` | Host-owned state, passed through uninterpreted: the schema accepts any JSON object, and Go rejects anything else. The TypeScript client sends a `HostQueryState` (`{ version, params }`). |
 | `MetricSort.key` | TypeScript | `` "value" \| "y" \| "count" \| "samples" \| `group${number}` `` | A template literal type is more precise than `string`. |
 
 Scalar unions such as `MetricValue` (number, string, boolean or null) are not

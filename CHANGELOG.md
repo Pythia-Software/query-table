@@ -24,8 +24,9 @@
   validated with ajv and decoded and re-encoded identically by Go and Swift.
   See [the wire protocol guide](docs/wire-protocol.md). Public TypeScript
   names (`QueryRequestV3`, `QueryResultV3`, `QueryCapabilitiesV3`,
-  `ServerQuery`, `ComputedExecution`, ...) are unchanged re-exports; the
-  wire-only shapes are also exported (`MetricSpecV3`, `MetricBucketV3`,
+  `ServerQuery`, `ComputedExecution`, ...) are kept as re-exports of the
+  generated types (see the breaking shape changes below); the wire-only
+  shapes are also exported (`MetricSpecV3`, `MetricBucketV3`,
   `MetricResultV3`, `ProjectedSchemaV3`, `WireWhereTerm`, ...).
 
 ### Fixed
@@ -58,6 +59,12 @@
 - **Breaking (TypeScript):** `ServerQuery` no longer declares `hostState`.
   No builder set it and the Go decoder rejects it on a stage; host state is
   `QueryRequestV3.hostState`.
+- **Breaking (TypeScript):** the wire types now describe the wire, not
+  client state. `QueryRequestV3.metrics` is `MetricSpecV3[]` (an
+  `AggregationClause` without presentation), `QueryRequestV3.grouping` is a
+  `WireGroupingDefinition` (nullable `representative`, `WireSummaryColumn`
+  summaries) and `QueryResultV3.metrics` is `MetricResultV3[]`. Code that
+  turns a request back into client state needs a conversion or cast.
 - **Breaking (Swift):** the wire structs are generated. `AggregationBucket.keys`
   is `[JSONValue]` (the display strings are `keyLabels`),
   `QueryExecutionV3.planToken` is a `String` (empty for none; an omitted

@@ -122,7 +122,7 @@ public struct LocalQueryTransport: QueryTransport {
   {
     try clauses.map { a -> AggregationResultEntry in
       guard
-        a.expression == nil && a.expressionY == nil && a.whereTerms == nil && a.minCount == nil
+        a.expression == nil && a.expressionY == nil && (a.whereTerms ?? []).isEmpty && a.minCount == nil
           && a.distribution == nil && a.dateGrouping == nil && (a.sort ?? []).isEmpty
           && a.groupLimit == nil && (a.scope ?? "allMatching") == "allMatching"
       else {
@@ -177,6 +177,11 @@ public struct LocalQueryTransport: QueryTransport {
     // filters also fail on an empty dataset and under negation/OR.
     var times: [TimeKey: Date] = [:]
     func key(_ p: WhereClause) -> TimeKey { TimeKey(field: p.field, op: p.op, value: p.value) }
+    // The wire schema requires a branch in every OR group and a literal in every
+    // conjunction; an empty one would otherwise match every row.
+    guard terms.allSatisfy({ term in !term.branches.isEmpty && term.branches.allSatisfy { !$0.isEmpty } }) else {
+      throw QueryTableError.invalidQuery("An OR group or conjunction is empty")
+    }
     for p in terms.flatMap(\.predicates) {
       guard let f = schema.field(named: p.field), f.filterOperators.contains(p.op) else {
         throw QueryTableError.invalidQuery("Unsupported field or operator: \(p.field) \(p.op)")
