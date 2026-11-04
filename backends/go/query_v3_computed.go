@@ -17,7 +17,7 @@ func (d QueryDatasetV3) DescribeComputedPartialIn(ctx context.Context, tx *sql.T
 		return out, err
 	}
 	if len(ids) > 64 {
-		return out, diagnostic("dependency_limit", "too many computed fields")
+		return out, diagnostic(ErrorCodeDependencyLimit, "too many computed fields")
 	}
 	q := QueryRequestV3{Version: 3, Profile: out.Execution.Profile, Now: time.Now().UnixMilli()}
 	options, err := d.options(ctx, tx, q, o)
@@ -33,7 +33,7 @@ func (d QueryDatasetV3) DescribeComputedPartialIn(ctx context.Context, tx *sql.T
 		}
 		id = strings.TrimPrefix(id, "@computed/")
 		if !computedID.MatchString(id) {
-			return out, diagnostic("definition_invalid", "invalid computed ID")
+			return out, diagnostic(ErrorCodeDefinitionInvalid, "invalid computed ID")
 		}
 		revisions := map[string]string{}
 		current := options

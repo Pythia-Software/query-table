@@ -38,7 +38,7 @@ func TestMetricPopulationRefusals(t *testing.T) {
 	code := func(err error) string {
 		var d *PlanDiagnostic
 		if errors.As(err, &d) {
-			return d.Code
+			return string(d.Code)
 		}
 		return ""
 	}

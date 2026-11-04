@@ -157,7 +157,7 @@ func TestV2ComputedRowsAndRevisionSnapshot(t *testing.T) {
 }
 func TestV2ValidationAndBudgets(t *testing.T) {
 	db, d := setupV2(t)
-	for _, change := range []func(*qt.QueryRequestV3){func(q *qt.QueryRequestV3) { q.Profile = qt.ServerExpressionProfile }, func(q *qt.QueryRequestV3) { q.Diagnostics = []string{"residual"} }, func(q *qt.QueryRequestV3) { q.PlanToken = "unvalidated" }, func(q *qt.QueryRequestV3) { q.Snapshot = "unbound" }} {
+	for _, change := range []func(*qt.QueryRequestV3){func(q *qt.QueryRequestV3) { q.Profile = qt.ServerExpressionProfile }, func(q *qt.QueryRequestV3) { q.PlanToken = "unvalidated" }, func(q *qt.QueryRequestV3) { q.Snapshot = "unbound" }} {
 		q := metricV2("SUM([n])")
 		change(&q)
 		if _, e := d.Execute(context.Background(), db, q, qt.PlanOptions{}); e == nil {

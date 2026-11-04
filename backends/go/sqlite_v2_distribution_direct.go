@@ -113,7 +113,7 @@ func (d sqliteV2Dataset) directDistributions(ctx context.Context, tx *sql.Tx, q 
 		}
 		total++
 		if total > int64(maxPopulation) {
-			return nil, 0, false, diagnostic("resource_limit", "matching population exceeds host budget")
+			return nil, 0, false, diagnostic(ErrorCodeResourceLimit, "matching population exceeds host budget")
 		}
 		for i, name := range names {
 			row[name] = values[i]

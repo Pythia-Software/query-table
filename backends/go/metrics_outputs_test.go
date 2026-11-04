@@ -33,7 +33,7 @@ func TestMetricOutputsShareOneScalarReduction(t *testing.T) {
 	for name, c := range map[string]struct {
 		spec  AggSpec
 		extra []summaryOutput
-		code  string
+		code  ErrorCode
 	}{
 		"sampled":      {count, []summaryOutput{{ID: "median", Expression: "MEDIAN([x])"}}, "invalid_metric"},
 		"nested":       {count, []summaryOutput{{ID: "median", Expression: "SUM([x])+MEDIAN([y])"}}, "invalid_metric"},

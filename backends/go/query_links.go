@@ -23,13 +23,14 @@ const (
 	MaxQueryTokenLength = 2 * 1024 * 1024
 )
 
-// QueryLinkErrorCode is the code of the matching TypeScript QueryDecodeError.
-type QueryLinkErrorCode string
+// QueryLinkErrorCode is the code of the matching TypeScript QueryDecodeError:
+// one of the query-link ErrorCode values.
+type QueryLinkErrorCode = ErrorCode
 
 const (
-	QueryLinkInvalid            QueryLinkErrorCode = "invalid"
-	QueryLinkTooLarge           QueryLinkErrorCode = "too_large"
-	QueryLinkUnsupportedVersion QueryLinkErrorCode = "unsupported_version"
+	QueryLinkInvalid            = ErrorCodeInvalid
+	QueryLinkTooLarge           = ErrorCodeTooLarge
+	QueryLinkUnsupportedVersion = ErrorCodeUnsupportedVersion
 )
 
 // QueryLinkError is returned by EncodeQueryLink and DecodeQueryLink. Code maps

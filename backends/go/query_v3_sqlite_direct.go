@@ -62,13 +62,13 @@ func (d QueryDatasetV3) sqliteDirectGroups(ctx context.Context, tx *sql.Tx, q Qu
 				return nil, 0, err
 			}
 			if population > int64(maxPop) {
-				return nil, 0, diagnostic("resource_limit", "matching population exceeds host budget")
+				return nil, 0, diagnostic(ErrorCodeResourceLimit, "matching population exceeds host budget")
 			}
 			if bytes > maxBytes {
-				return nil, 0, diagnostic("resource_limit", "source staging exceeds host byte budget")
+				return nil, 0, diagnostic(ErrorCodeResourceLimit, "source staging exceeds host byte budget")
 			}
 			if groups > int64(maxGroups) {
-				return nil, 0, diagnostic("resource_limit", "group population exceeds host budget")
+				return nil, 0, diagnostic(ErrorCodeResourceLimit, "group population exceeds host budget")
 			}
 			prepared, err := sqliteReplaceStage(metricSQLPlan{SQLPlan: combined}, combined.SQLiteReductionStage, "SELECT * FROM "+queryIdent(table))
 			return &prepared.SQLPlan, population, err

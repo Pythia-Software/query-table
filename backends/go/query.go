@@ -22,7 +22,6 @@ package querytable
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 )
 
 // Structural limits mirror @pythia-software/query-table-core. Every query stage
@@ -170,14 +169,14 @@ func validateWhereShape(t WhereTerm) error {
 			continue
 		}
 		if member.Field != "" || member.Op != "" || member.Value != "" || member.Negated {
-			return fmt.Errorf("invalid filter branch: a branch is either a literal or {\"all\": [...]}")
+			return diagnosticf(ErrorCodeInvalidQuery, "invalid filter branch: a branch is either a literal or {\"all\": [...]}")
 		}
 		if len(member.All) == 0 {
-			return fmt.Errorf("filter group has an empty AND branch")
+			return diagnosticf(ErrorCodeInvalidQuery, "filter group has an empty AND branch")
 		}
 		for _, literal := range member.All {
 			if literal.IsConjunction() {
-				return fmt.Errorf("filter AND branches cannot nest")
+				return diagnosticf(ErrorCodeInvalidQuery, "filter AND branches cannot nest")
 			}
 		}
 	}
@@ -204,23 +203,23 @@ func (q *WireQuery) UnmarshalJSON(data []byte) error {
 // never allowed. Values too large for the platform fail during JSON decoding.
 func (q WireQuery) Validate() error {
 	if q.Limit < 0 || q.Limit > MaxQueryLimit {
-		return fmt.Errorf("limit must be between 0 and %d", MaxQueryLimit)
+		return diagnosticf(ErrorCodeInvalidQuery, "limit must be between 0 and %d", MaxQueryLimit)
 	}
 	if q.Offset < 0 || q.Offset > MaxQueryOffset {
-		return fmt.Errorf("offset must be between 0 and %d", MaxQueryOffset)
+		return diagnosticf(ErrorCodeInvalidQuery, "offset must be between 0 and %d", MaxQueryOffset)
 	}
 	if len(q.Select) > MaxSelectColumns {
-		return fmt.Errorf("select has %d fields; maximum is %d", len(q.Select), MaxSelectColumns)
+		return diagnosticf(ErrorCodeInvalidQuery, "select has %d fields; maximum is %d", len(q.Select), MaxSelectColumns)
 	}
 	if len(q.Where) > MaxWhereClauses {
-		return fmt.Errorf("where has %d terms; maximum is %d", len(q.Where), MaxWhereClauses)
+		return diagnosticf(ErrorCodeInvalidQuery, "where has %d terms; maximum is %d", len(q.Where), MaxWhereClauses)
 	}
 	if len(q.OrderBy) > MaxOrderByTerms {
-		return fmt.Errorf("orderBy has %d terms; maximum is %d", len(q.OrderBy), MaxOrderByTerms)
+		return diagnosticf(ErrorCodeInvalidQuery, "orderBy has %d terms; maximum is %d", len(q.OrderBy), MaxOrderByTerms)
 	}
 	for _, field := range q.Select {
 		if field == "" || len(field) > maxFieldNameLength {
-			return fmt.Errorf("invalid select field name")
+			return diagnosticf(ErrorCodeInvalidQuery, "invalid select field name")
 		}
 	}
 	whereLiterals := 0
@@ -230,23 +229,23 @@ func (q WireQuery) Validate() error {
 		}
 		for _, clause := range term.Predicates() {
 			if clause.Field == "" || len(clause.Field) > maxFieldNameLength {
-				return fmt.Errorf("invalid filter field name")
+				return diagnosticf(ErrorCodeInvalidQuery, "invalid filter field name")
 			}
 			if len(clause.Value) > maxFilterValueBytes {
-				return fmt.Errorf("filter value for %q exceeds %d bytes", clause.Field, maxFilterValueBytes)
+				return diagnosticf(ErrorCodeInvalidQuery, "filter value for %q exceeds %d bytes", clause.Field, maxFilterValueBytes)
 			}
 			whereLiterals++
 		}
 	}
 	if whereLiterals > MaxWhereClauses {
-		return fmt.Errorf("where has %d clauses; maximum is %d", whereLiterals, MaxWhereClauses)
+		return diagnosticf(ErrorCodeInvalidQuery, "where has %d clauses; maximum is %d", whereLiterals, MaxWhereClauses)
 	}
 	for _, term := range q.OrderBy {
 		if term.Field == "" || len(term.Field) > maxFieldNameLength {
-			return fmt.Errorf("invalid sort field name")
+			return diagnosticf(ErrorCodeInvalidQuery, "invalid sort field name")
 		}
 		if term.Extract != nil && len(term.Extract.Regex) > maxRegexBytes {
-			return fmt.Errorf("sort regex for %q exceeds %d bytes", term.Field, maxRegexBytes)
+			return diagnosticf(ErrorCodeInvalidQuery, "sort regex for %q exceeds %d bytes", term.Field, maxRegexBytes)
 		}
 	}
 	return nil
@@ -255,39 +254,46 @@ func (q WireQuery) Validate() error {
 // validateMetricSpecs rejects malformed metric shapes before compilation.
 func validateMetricSpecs(specs []AggSpec) error {
 	if len(specs) > MaxAggregations {
-		return fmt.Errorf("aggregations has %d items; maximum is %d", len(specs), MaxAggregations)
+		return diagnosticf(ErrorCodeInvalidQuery, "aggregations has %d items; maximum is %d", len(specs), MaxAggregations)
 	}
 	for _, aggregation := range specs {
-		if aggregation.ID == "" || len(aggregation.ID) > maxFieldNameLength {
-			return fmt.Errorf("invalid aggregation id")
+		if err := validateMetricSpec(aggregation); err != nil {
+			return withMetric(err, aggregation.ID)
 		}
-		if len(aggregation.GroupBy) > MaxGroupByFields {
-			return fmt.Errorf("aggregation %q has %d group fields; maximum is %d", aggregation.ID, len(aggregation.GroupBy), MaxGroupByFields)
+	}
+	return nil
+}
+
+func validateMetricSpec(aggregation AggSpec) error {
+	if aggregation.ID == "" || len(aggregation.ID) > maxFieldNameLength {
+		return diagnosticf(ErrorCodeInvalidMetric, "invalid aggregation id")
+	}
+	if len(aggregation.GroupBy) > MaxGroupByFields {
+		return diagnosticf(ErrorCodeInvalidMetric, "aggregation %q has %d group fields; maximum is %d", aggregation.ID, len(aggregation.GroupBy), MaxGroupByFields)
+	}
+	if err := aggregation.MinCount.validate(aggregation.ID); err != nil {
+		return err
+	}
+	metricLiterals := 0
+	for _, term := range aggregation.Where {
+		if term.IsGroup() && len(term.Any) == 0 {
+			return diagnosticf(ErrorCodeInvalidMetric, "aggregation %q has an empty filter group", aggregation.ID)
 		}
-		if err := aggregation.MinCount.validate(aggregation.ID); err != nil {
+		if err := validateWhereShape(term); err != nil {
 			return err
 		}
-		metricLiterals := 0
-		for _, term := range aggregation.Where {
-			if term.IsGroup() && len(term.Any) == 0 {
-				return fmt.Errorf("aggregation %q has an empty filter group", aggregation.ID)
+		for _, clause := range term.Predicates() {
+			if clause.Field == "" || len(clause.Field) > maxFieldNameLength {
+				return diagnosticf(ErrorCodeInvalidMetric, "invalid metric filter field name")
 			}
-			if err := validateWhereShape(term); err != nil {
-				return fmt.Errorf("aggregation %q: %w", aggregation.ID, err)
+			if len(clause.Value) > maxFilterValueBytes {
+				return diagnosticf(ErrorCodeInvalidMetric, "metric filter value for %q exceeds %d bytes", clause.Field, maxFilterValueBytes)
 			}
-			for _, clause := range term.Predicates() {
-				if clause.Field == "" || len(clause.Field) > maxFieldNameLength {
-					return fmt.Errorf("invalid metric filter field name")
-				}
-				if len(clause.Value) > maxFilterValueBytes {
-					return fmt.Errorf("metric filter value for %q exceeds %d bytes", clause.Field, maxFilterValueBytes)
-				}
-				metricLiterals++
-			}
+			metricLiterals++
 		}
-		if metricLiterals > MaxWhereClauses {
-			return fmt.Errorf("aggregation %q filter has %d clauses; maximum is %d", aggregation.ID, metricLiterals, MaxWhereClauses)
-		}
+	}
+	if metricLiterals > MaxWhereClauses {
+		return diagnosticf(ErrorCodeInvalidMetric, "aggregation %q filter has %d clauses; maximum is %d", aggregation.ID, metricLiterals, MaxWhereClauses)
 	}
 	return nil
 }

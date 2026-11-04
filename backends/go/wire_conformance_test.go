@@ -3,6 +3,7 @@ package querytable
 import (
 	"bytes"
 	"encoding/json"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,6 +59,40 @@ func TestWireRequestFixturesRoundTrip(t *testing.T) {
 			}
 			if !bytes.Equal(got, fixture) {
 				t.Fatalf("re-marshal differs\n got: %s\nwant: %s", got, fixture)
+			}
+		})
+	}
+}
+
+// Error bodies decode into QueryErrorBody, carry a known code and re-marshal
+// identically, the shape WriteQueryError writes.
+func TestWireErrorFixturesRoundTrip(t *testing.T) {
+	known := map[ErrorCode]bool{}
+	for _, code := range ErrorCodes() {
+		known[code] = true
+	}
+	for name, fixture := range wireFixtures(t, "errors") {
+		t.Run(name, func(t *testing.T) {
+			decoder := json.NewDecoder(bytes.NewReader(fixture))
+			decoder.DisallowUnknownFields()
+			var body QueryErrorBody
+			if err := decoder.Decode(&body); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if !known[body.Error.Code] {
+				t.Fatalf("unknown code %q", body.Error.Code)
+			}
+			got, err := marshalWire(body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(got, fixture) {
+				t.Fatalf("re-marshal differs\n got: %s\nwant: %s", got, fixture)
+			}
+			w := httptest.NewRecorder()
+			WriteQueryError(w, &PlanDiagnostic{Code: body.Error.Code, Message: body.Error.Message, Field: body.Error.Field, Offset: body.Error.Offset, MetricID: body.Error.MetricID})
+			if written := bytes.TrimSpace(w.Body.Bytes()); body.Error.Code != ErrorCodeInternal && !bytes.Equal(written, fixture) || w.Code != body.Error.Code.HTTPStatus() {
+				t.Fatalf("WriteQueryError wrote %d %s", w.Code, written)
 			}
 		})
 	}

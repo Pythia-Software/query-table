@@ -32,10 +32,10 @@ func compileSQLiteRowExpression(ctx context.Context, source string, s Schema, o 
 func (b *planBuilder) sqliteField(name string, v ValueSQL) (ValueSQL, error) {
 	f := b.schema.Fields[name]
 	if v.Type == "number" && !f.ExpressionNumeric {
-		return v, &PlanDiagnostic{Code: "numeric_domain_required", Message: "numeric binding must opt into bounded arithmetic", Field: name}
+		return v, &PlanDiagnostic{Code: ErrorCodeNumericDomainRequired, Message: "numeric binding must opt into bounded arithmetic", Field: name}
 	}
 	if v.Type == "unsupported" {
-		return v, diagnostic("unsupported_type", "arrays are outside the expression profile")
+		return v, diagnostic(ErrorCodeUnsupportedType, "arrays are outside the expression profile")
 	}
 	raw := v.Value
 	if f.typedValue {
@@ -108,7 +108,7 @@ func (b *planBuilder) sqliteFilter(where []WhereTerm) error {
 		if errors.As(e, &relationErr) {
 			return e
 		}
-		return diagnostic("filter", e.Error())
+		return diagnostic(ErrorCodeFilter, e.Error())
 	}
 	for _, key := range keys {
 		b.dependencies[key] = true
@@ -160,29 +160,29 @@ func (b *planBuilder) sqliteOrder(terms []OrderBy) (string, error) {
 	}
 	terms = append(append([]OrderBy{}, terms...), b.schema.TiebreakSort...)
 	if b.schema.IDField == "" {
-		return "", diagnostic("identity_required", "stable ID field required for row windows")
+		return "", diagnostic(ErrorCodeIdentityRequired, "stable ID field required for row windows")
 	}
 	terms = append(terms, OrderBy{Field: b.schema.IDField, Dir: "asc"})
 	out := []string{}
 	for _, term := range terms {
 		if term.Dir != "asc" && term.Dir != "desc" {
-			return "", diagnostic("sort", "direction must be asc or desc")
+			return "", diagnostic(ErrorCodeSort, "direction must be asc or desc")
 		}
 		name := term.Field
 		if !strings.HasPrefix(name, "@computed/") {
 			f, ok := b.schema.Fields[name]
 			if !ok || !f.Sortable {
-				return "", diagnostic("sort", "field is not sortable: "+name)
+				return "", diagnostic(ErrorCodeSort, "field is not sortable: "+name)
 			}
 			if f.SQLiteSortField != "" || f.SortExpr != "" && f.SortExpr != f.Expr {
 				target, ok := b.schema.Fields[f.SQLiteSortField]
 				if !ok || target.Expr != f.SortExpr {
-					return "", diagnostic("sort", "alternate sort binding requires SQLiteSortField naming a bound schema field")
+					return "", diagnostic(ErrorCodeSort, "alternate sort binding requires SQLiteSortField naming a bound schema field")
 				}
 				name = f.SQLiteSortField
 			}
 		} else if term.Extract != nil {
-			return "", diagnostic("unsupported_regex", "computed sorts do not support extraction")
+			return "", diagnostic(ErrorCodeUnsupportedRegex, "computed sorts do not support extraction")
 		}
 		// IDs are guaranteed scalar and canonical utc-millis is trusted host
 		// storage. Their raw BINARY keys preserve indexes; selected values and

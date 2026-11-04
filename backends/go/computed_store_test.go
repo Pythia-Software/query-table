@@ -16,12 +16,13 @@ type fakeComputedRepo struct {
 	saved          int
 	conflict       bool
 	saveError      error
+	listError      error
 }
 
 func (f *fakeComputedRepo) List(_ context.Context, scope, dataset string) ([]ComputedColumn, error) {
 	f.scope = scope
 	f.dataset = dataset
-	return nil, nil
+	return nil, f.listError
 }
 func (f *fakeComputedRepo) Save(_ context.Context, scope, dataset string, r SaveComputedColumnRequest) (ComputedColumn, error) {
 	f.saved++

@@ -58,7 +58,7 @@ func (d QueryDatasetV3) Execute(ctx context.Context, db *sql.DB, q QueryRequestV
 		return QueryResultV3{}, fmt.Errorf("nil query database")
 	}
 	if q.Snapshot != "" {
-		return QueryResultV3{}, diagnostic("snapshot_transaction_required", "snapshot requests require caller-owned ExecuteIn")
+		return QueryResultV3{}, diagnostic(ErrorCodeSnapshotTransactionRequired, "snapshot requests require caller-owned ExecuteIn")
 	}
 	level := sql.LevelDefault
 	if d.Dialect == "postgres" {
@@ -102,7 +102,7 @@ func (d QueryDatasetV3) ExecuteIn(ctx context.Context, tx *sql.Tx, q QueryReques
 		return d.executeDistinct(ctx, tx, q, o)
 	}
 	if q.Result.Limit < 1 || q.Result.Limit > maxRows || len(q.Metrics) > 20 {
-		return out, diagnostic("resource_limit", "invalid result window or metric budget")
+		return out, diagnostic(ErrorCodeResourceLimit, "invalid result window or metric budget")
 	}
 	o, err = d.options(ctx, tx, q, o)
 	if err != nil {
@@ -140,10 +140,10 @@ func (d QueryDatasetV3) ExecuteIn(ctx context.Context, tx *sql.Tx, q QueryReques
 			return out, err
 		}
 		if count > int64(maxPop) {
-			return out, diagnostic("resource_limit", "matching population exceeds host budget")
+			return out, diagnostic(ErrorCodeResourceLimit, "matching population exceeds host budget")
 		}
 		if bytes > maxBytes {
-			return out, diagnostic("resource_limit", "source staging exceeds host byte budget")
+			return out, diagnostic(ErrorCodeResourceLimit, "source staging exceeds host byte budget")
 		}
 		source := queryTableName()
 		tables = append(tables, source)
@@ -162,10 +162,10 @@ func (d QueryDatasetV3) ExecuteIn(ctx context.Context, tx *sql.Tx, q QueryReques
 			return out, err
 		}
 		if count > int64(maxPop) {
-			return out, diagnostic("resource_limit", "matching population exceeds host budget")
+			return out, diagnostic(ErrorCodeResourceLimit, "matching population exceeds host budget")
 		}
 		if bytes > maxBytes {
-			return out, diagnostic("resource_limit", "source staging exceeds host byte budget")
+			return out, diagnostic(ErrorCodeResourceLimit, "source staging exceeds host byte budget")
 		}
 		out.SourceTotal = count
 		staged = Schema{Name: d.Schema.Name, IDField: d.Schema.IDField, Fields: map[string]FieldSpec{}}
@@ -209,7 +209,7 @@ func (d QueryDatasetV3) ExecuteIn(ctx context.Context, tx *sql.Tx, q QueryReques
 				return out, err
 			}
 			if invalid > 0 {
-				return out, diagnostic("invalid_source_value", "source contains invalid typed values")
+				return out, diagnostic(ErrorCodeInvalidSourceValue, "source contains invalid typed values")
 			}
 		}
 		if calendarKeys {
@@ -299,10 +299,10 @@ func validateQueryMetrics(q QueryRequestV3) error {
 			return err
 		}
 		if spec.Scope != "" && spec.Scope != "allMatching" && spec.Scope != "shownRows" {
-			return diagnostic("scope", "invalid metric scope")
+			return diagnostic(ErrorCodeScope, "invalid metric scope")
 		}
 		if ids[spec.ID] {
-			return diagnostic("duplicate_metric", "duplicate metric ID")
+			return diagnostic(ErrorCodeDuplicateMetric, "duplicate metric ID")
 		}
 		ids[spec.ID] = true
 	}
@@ -388,7 +388,7 @@ func readQueryRows(ctx context.Context, tx *sql.Tx, p SQLPlan, grouped bool, dia
 			code := sqliteErrorCode(values[2*i+1])
 			if code != "" {
 				if !grouped && !strings.HasPrefix(column.Field, "@computed/") {
-					return out, diagnostic("invalid_source_value", "invalid source value for "+column.Field)
+					return out, diagnostic(ErrorCodeInvalidSourceValue, "invalid source value for "+column.Field)
 				}
 				value = map[string]any{"computedError": code}
 			}
@@ -426,7 +426,7 @@ func (d QueryDatasetV3) keyCalendarGroups(ctx context.Context, tx *sql.Tx, table
 		}
 		name := calendarGroupField(i)
 		if alias == "" || staged.Fields[name].Name != "" {
-			return diagnostic("schema", "reserved calendar field collision")
+			return diagnostic(ErrorCodeSchema, "reserved calendar field collision")
 		}
 		bucket := fmt.Sprintf("qt_calendar_key%d", i)
 		if _, err = tx.ExecContext(ctx, "ALTER TABLE "+queryIdent(table)+" ADD COLUMN "+queryIdent(bucket)+" "+d.valueType("datetime")); err != nil {
@@ -499,7 +499,7 @@ func (d QueryDatasetV3) stageGroups(ctx context.Context, tx *sql.Tx, table strin
 		return result, err
 	}
 	if count > int64(maxGroups) {
-		return result, diagnostic("resource_limit", "group population exceeds host budget")
+		return result, diagnostic(ErrorCodeResourceLimit, "group population exceeds host budget")
 	}
 	if _, err = tx.ExecContext(ctx, "ALTER TABLE "+queryIdent(table)+" ADD COLUMN identity TEXT"); err != nil {
 		return result, err
@@ -518,7 +518,7 @@ func (d QueryDatasetV3) stageGroups(ctx context.Context, tx *sql.Tx, table strin
 				return result, err
 			}
 			if excessive > 0 {
-				return result, diagnostic("resource_limit", "Summary "+summary.ID+": "+sampleBudgetMessage(summarySpec(summary, g.Keys), limit))
+				return result, diagnostic(ErrorCodeResourceLimit, "Summary "+summary.ID+": "+sampleBudgetMessage(summarySpec(summary, g.Keys), limit))
 			}
 			break
 		}
@@ -599,7 +599,7 @@ func (d QueryDatasetV3) stageGroups(ctx context.Context, tx *sql.Tx, table strin
 			return result, err
 		}
 		if invalid > 0 {
-			return result, diagnostic("duplicate_identity", "representative rows require unique nonnull source IDs within every group")
+			return result, diagnostic(ErrorCodeDuplicateIdentity, "representative rows require unique nonnull source IDs within every group")
 		}
 		assignments := []string{}
 		for i, column := range g.Summaries {
@@ -725,14 +725,14 @@ func (d QueryDatasetV3) assignGroupIdentities(ctx context.Context, tx *sql.Tx, t
 			}
 			if utf16Length(key)+utf16Length(fmt.Sprint(v)) > 10000 {
 				rows.Close()
-				return diagnostic("resource_limit", "grouping key length budget exceeded")
+				return diagnostic(ErrorCodeResourceLimit, "grouping key length budget exceeded")
 			}
 			tuple = append(tuple, []any{key, v})
 		}
 		code := jsonTuple(tuple)
 		if utf16Length(code) > 65536 {
 			rows.Close()
-			return diagnostic("resource_limit", "grouping key length budget exceeded")
+			return diagnostic(ErrorCodeResourceLimit, "grouping key length budget exceeded")
 		}
 		ids = append(ids, identity{code, ordinal})
 	}

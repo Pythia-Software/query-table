@@ -170,7 +170,7 @@ func TestRowsDistributionBoxSampleBudget(t *testing.T) {
 	got := executeV3Tx(t, tx, d, q, qt.PlanOptions{})
 	// v3 checks MaxSamplesPerGroup (default 100000) before reducing and fails
 	// the over-budget metric; v2 reported resource_limit on its bucket.
-	if got.Metrics[0].Error != "The box distribution exceeded the 100,000-sample budget" || got.Metrics[1].Error != "" || got.Metrics[1].Buckets[0].Error != "" {
+	if got.Metrics[0].Error != "The box distribution exceeded the 100,000-sample budget" || got.Metrics[0].ErrorCode != qt.ErrorCodeResourceLimit || got.Metrics[1].ErrorCode != "" || got.Metrics[1].Error != "" || got.Metrics[1].Buckets[0].Error != "" {
 		t.Fatal(mustJSON(t, got.Metrics))
 	}
 }

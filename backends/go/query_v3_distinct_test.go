@@ -25,7 +25,7 @@ func TestDecodeQueryRequestV3Distinct(t *testing.T) {
 		"array host":    {`{"tenant":"one"}`, `["one"]`},
 		"null host":     {`{"tenant":"one"}`, `null`},
 	} {
-		if _, err := DecodeQueryRequestV3([]byte(strings.Replace(body, replace[0], replace[1], 1))); !errors.As(err, &diag) || diag.Code != "query" {
+		if _, err := DecodeQueryRequestV3([]byte(strings.Replace(body, replace[0], replace[1], 1))); !errors.As(err, &diag) || diag.Code != ErrorCodeInvalidQuery {
 			t.Errorf("%s: %v", name, err)
 		}
 	}

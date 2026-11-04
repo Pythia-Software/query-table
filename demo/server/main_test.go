@@ -124,7 +124,7 @@ func TestServerDeadlineRespondsInsteadOfEmptySuccess(t *testing.T) {
 	defer cancel()
 	w := httptest.NewRecorder()
 	server.requestCanceled(w, httptest.NewRequest("POST", "/", nil), ctx)
-	if w.Code != http.StatusGatewayTimeout || !strings.Contains(w.Body.String(), "deadline exceeded") || server.canceled.Load() != 0 {
+	if w.Code != http.StatusGatewayTimeout || !strings.Contains(w.Body.String(), `"code":"timeout"`) || server.canceled.Load() != 0 {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	clientCtx, disconnect := context.WithCancel(context.Background())

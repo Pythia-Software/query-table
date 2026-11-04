@@ -67,8 +67,8 @@ func newRowMetrics(ctx context.Context, q metricRequest, s Schema, o PlanOptions
 			continue
 		}
 		if failures[i] != nil {
-			message, _ := metricClauseError(ctx, failures[i])
-			r.result.Metrics[i] = failedMetric(spec.ID, spec.Scope, message)
+			code, message, _ := metricClauseError(ctx, failures[i])
+			r.result.Metrics[i] = failedMetric(spec.ID, spec.Scope, code, message)
 			continue
 		}
 		m, e := rowMetricShape(spec, s, options.bound)
@@ -215,7 +215,7 @@ func (r *rowMetrics) finish(total int64) (sqliteMetricsV2Result, error) {
 		}
 		for _, m := range c.metrics {
 			if c.overflow {
-				result.Metrics[m.index] = failedMetric(m.spec.ID, m.spec.Scope, "group population exceeds host budget")
+				result.Metrics[m.index] = failedMetric(m.spec.ID, m.spec.Scope, ErrorCodeResourceLimit, "group population exceeds host budget")
 				continue
 			}
 			metric := MetricResult{ID: m.spec.ID, Scope: "allMatching", ProcessedRows: total, Coverage: "exact", Buckets: []MetricBucket{}}

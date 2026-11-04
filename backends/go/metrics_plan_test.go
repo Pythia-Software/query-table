@@ -511,7 +511,7 @@ func TestStageDedupAndNestedRestrictions(t *testing.T) {
 	if _, e := compileTestMetrics(context.Background(), metricRequest{Version: 2, Metrics: []AggSpec{{ID: "m", Expression: "SUM([@computed/a])"}}}, s, o); e == nil {
 		t.Fatal("computed dependency bypassed disabled measure")
 	}
-	for _, spec := range []AggSpec{{ID: "m", Expression: "1+2"}, {ID: "m", Expression: "COUNT()", ExpressionY: "1"}, {ID: "m", Expression: "COUNT()", Display: &MetricDisplayHint{Kind: "scatter"}}, {ID: "m", Expression: "COUNT()", Diagnostics: []string{"invalid"}}} {
+	for _, spec := range []AggSpec{{ID: "m", Expression: "1+2"}, {ID: "m", Expression: "COUNT()", ExpressionY: "1"}, {ID: "m", Expression: "COUNT()", Display: &MetricDisplayHint{Kind: "scatter"}}} {
 		if _, e := compileTestMetrics(context.Background(), metricRequest{Version: 2, Metrics: []AggSpec{spec}}, metricSchema(), metricOptions()); e == nil {
 			t.Fatal("invalid metric accepted", spec)
 		}

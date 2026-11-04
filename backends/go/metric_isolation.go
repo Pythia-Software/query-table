@@ -10,41 +10,42 @@ import (
 
 // Request-level diagnostics describe the request, handshake, view or host
 // configuration rather than one metric clause. They still fail the batch.
-var requestDiagnostics = map[string]bool{
-	"version": true, "query": true, "query_required": true, "residual_query": true, "profile_required": true, "profile_mismatch": true,
-	"scope": true, "duplicate_metric": true, "view_mismatch": true, "filter": true, "sort": true, "window_required": true,
-	"definition_changed": true, "resolver_required": true, "resolver_scope": true, "dataset": true,
-	"snapshot_transaction_required": true, "snapshot_validation_required": true, "plan_token_validation_required": true,
-	"source_required": true, "schema": true, "schema_limit": true, "identity_required": true, "duplicate_identity": true,
+var requestDiagnostics = map[ErrorCode]bool{
+	ErrorCodeVersion: true, ErrorCodeInvalidQuery: true, ErrorCodeResidualQuery: true, ErrorCodeProfileMismatch: true,
+	ErrorCodeScope: true, ErrorCodeDuplicateMetric: true, ErrorCodeFilter: true, ErrorCodeSort: true, ErrorCodeWindowRequired: true,
+	ErrorCodeDefinitionChanged: true, ErrorCodeResolverRequired: true, ErrorCodeResolverScope: true, ErrorCodeDataset: true,
+	ErrorCodeSnapshotTransactionRequired: true, ErrorCodeSnapshotValidationRequired: true, ErrorCodePlanTokenValidationRequired: true,
+	ErrorCodeSourceRequired: true, ErrorCodeSchema: true, ErrorCodeSchemaLimit: true, ErrorCodeIdentityRequired: true, ErrorCodeDuplicateIdentity: true,
 }
 
 // metricClauseError reports whether err belongs to one metric clause, and the
-// message to return for it. Cancellation and request-level diagnostics fail the
-// request. Statement failures (for example a host statement timeout) are
-// isolated but not exposed verbatim, matching the v3 HTTP handler.
-func metricClauseError(ctx context.Context, err error) (string, bool) {
+// code and message to return for it. Cancellation and request-level
+// diagnostics fail the request. Statement failures (for example a host
+// statement timeout) are isolated as internal errors and not exposed
+// verbatim, matching the v3 HTTP handler.
+func metricClauseError(ctx context.Context, err error) (ErrorCode, string, bool) {
 	if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return "", false
+		return "", "", false
 	}
 	var relationErr *sqliteRelationError
 	if errors.As(err, &relationErr) {
-		return "", false // a host predicate relation failed, not this clause
+		return "", "", false // a host predicate relation failed, not this clause
 	}
 	var issue *PlanDiagnostic
 	if errors.As(err, &issue) {
 		if requestDiagnostics[issue.Code] {
-			return "", false
+			return "", "", false
 		}
-		return issue.Message, true
+		return issue.Code, issue.Message, true
 	}
-	return "could not execute metric", true
+	return ErrorCodeInternal, "could not execute metric", true
 }
 
-func failedMetric(id, scope, message string) MetricResult {
+func failedMetric(id, scope string, code ErrorCode, message string) MetricResult {
 	if scope == "" {
 		scope = "allMatching"
 	}
-	return MetricResult{ID: id, Scope: scope, Buckets: []MetricBucket{}, Error: message}
+	return MetricResult{ID: id, Scope: scope, Buckets: []MetricBucket{}, Error: message, ErrorCode: code}
 }
 
 // isolateMetric runs one metric inside a savepoint so a failed PostgreSQL
@@ -62,7 +63,7 @@ func isolateMetric(ctx context.Context, tx *sql.Tx, id, scope string, run func()
 		}
 		return metric, nil
 	}
-	message, clause := metricClauseError(ctx, err)
+	code, message, clause := metricClauseError(ctx, err)
 	if !clause {
 		return MetricResult{}, err
 	}
@@ -72,7 +73,7 @@ func isolateMetric(ctx context.Context, tx *sql.Tx, id, scope string, run func()
 	if _, release := tx.ExecContext(ctx, "RELEASE SAVEPOINT qt_metric"); release != nil {
 		return MetricResult{}, errors.Join(err, release)
 	}
-	return failedMetric(id, scope, message), nil
+	return failedMetric(id, scope, code, message), nil
 }
 
 // sampleBudgetMessage names the sampled reduction and the host budget.

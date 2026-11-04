@@ -29,23 +29,17 @@ func TestV2SortTargetWithSameSQLExpression(t *testing.T) {
 	}
 }
 
-func TestSQLiteAggregationRejectsResidualDiagnostics(t *testing.T) {
+func TestSQLiteAggregationRejectsRequestDiagnostics(t *testing.T) {
 	db, d := setup(t)
-	// v3 carries residual diagnostics as strings and rejects any as a version
-	// diagnostic; v1 used objects and the residual_query code.
+	// Clients refuse queries locally; v3 requests no longer carry diagnostics,
+	// so the key is unknown and rejected as an invalid query.
 	body := []byte(`{"version":3,"profile":"` + qt.SQLiteExpressionProfile + `","now":0,"source":{},"result":{"where":[],"limit":1},"rows":false,"metrics":[{"id":"count","op":"count"}],"diagnostics":["residual_filter"]}`)
 	request, err := qt.DecodeQueryRequestV3(body)
 	var diagnostic *qt.PlanDiagnostic
-	if !errors.As(err, &diagnostic) || diagnostic.Code != "version" {
-		t.Fatalf("expected residual diagnostic at JSON boundary, got %v", err)
+	if !errors.As(err, &diagnostic) || diagnostic.Code != qt.ErrorCodeInvalidQuery {
+		t.Fatalf("expected an invalid_query diagnostic at the JSON boundary, got %v", err)
 	}
-	// A caller that builds requests directly must receive the same rejection.
-	request = metricsV3(nil, nil, 0, 0, qt.AggSpec{ID: "count", Op: "count"})
-	request.Diagnostics = []string{"residual_filter"}
-	if _, err = d.Execute(context.Background(), db, request, qt.PlanOptions{}); !errors.As(err, &diagnostic) || diagnostic.Code != "version" {
-		t.Fatalf("expected residual diagnostic at execution boundary, got %v", err)
-	}
-	body = []byte(`{"version":3,"profile":"` + qt.SQLiteExpressionProfile + `","now":0,"source":{},"result":{"where":[],"limit":1},"rows":false,"metrics":[{"id":"count","op":"count"}],"diagnostics":[]}`)
+	body = []byte(`{"version":3,"profile":"` + qt.SQLiteExpressionProfile + `","now":0,"source":{},"result":{"where":[],"limit":1},"rows":false,"metrics":[{"id":"count","op":"count"}]}`)
 	if request, err = qt.DecodeQueryRequestV3(body); err != nil {
 		t.Fatal(err)
 	}

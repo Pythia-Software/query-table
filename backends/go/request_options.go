@@ -10,11 +10,11 @@ func requestOptionsDialect(ctx context.Context, sqlite bool, profile, token, sna
 		expected = SQLiteExpressionProfile
 	}
 	if profile != "" && profile != expected {
-		return o, diagnostic("profile_mismatch", "requested execution profile is unavailable")
+		return o, diagnostic(ErrorCodeProfileMismatch, "requested execution profile is unavailable")
 	}
 	if snapshot != "" {
 		if len(snapshot) > 10000 || o.ValidateSnapshot == nil {
-			return o, diagnostic("snapshot_validation_required", "host must validate and bind the requested data snapshot")
+			return o, diagnostic(ErrorCodeSnapshotValidationRequired, "host must validate and bind the requested data snapshot")
 		}
 		if err := o.ValidateSnapshot(ctx, snapshot); err != nil {
 			return o, err
@@ -22,7 +22,7 @@ func requestOptionsDialect(ctx context.Context, sqlite bool, profile, token, sna
 	}
 	if token != "" {
 		if o.ValidatePlanToken == nil {
-			return o, diagnostic("plan_token_validation_required", "host must validate actor/dataset/profile/expiry-bound plan token")
+			return o, diagnostic(ErrorCodePlanTokenValidationRequired, "host must validate actor/dataset/profile/expiry-bound plan token")
 		}
 		if err := o.ValidatePlanToken(ctx, token); err != nil {
 			return o, err
