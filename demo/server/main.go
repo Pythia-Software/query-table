@@ -343,7 +343,10 @@ func (s *demoServer) withTransaction(run handler) http.Handler {
 			writeError(w, errors.New("snapshot refresh failed; reconnect to retry"), 503)
 			return
 		}
-		tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+		// Read-write only for the executor's temporary tables (grouped rows and
+		// calendar metrics). No request SQL is accepted, and it never commits
+		// changes to base records.
+		tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
 		if err != nil {
 			writeError(w, err, 503)
 			return

@@ -41,7 +41,7 @@ const storage: StorageAdapter = {
   deleteSaved: async () => {},
 };
 
-function renderQueryTable(options: { clientRows?: Row[]; transport?: Transport<Row> }) {
+function renderQueryTable(options: { clientRows?: Row[]; transport?: Transport<Row>; remoteFieldStats?: boolean }) {
   const result = { current: undefined as unknown as QueryTableApi<Row> };
   function Probe() {
     result.current = useQueryTable<Row>({ schema, storage, debounceMs: 20, ...options });
@@ -80,7 +80,12 @@ describe("useQueryTable row pipeline", () => {
 
     const transport = memoryV3Transport<Row>(
       Array.from({ length: 7 }, (_, i) => ({ id: i, name: "n", status: `s${i}` })), schema);
-    const remote = renderQueryTable({ transport });
+    // Remote statistics reduce the whole dataset, so hosts opt in.
+    const quiet = renderQueryTable({ transport });
+    await expect(quiet.result.current.fieldStats(["status"])).resolves.toEqual({});
+    expect(metricRequests(transport)).toEqual([]);
+    quiet.unmount();
+    const remote = renderQueryTable({ transport, remoteFieldStats: true });
     await expect(
       remote.result.current.fieldStats(["status", "missing"]),
     ).resolves.toEqual({ status: { distinct: 7, min: "s0", max: "s6" } });

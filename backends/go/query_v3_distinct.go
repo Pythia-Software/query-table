@@ -37,6 +37,11 @@ func (d QueryDatasetV3) executeDistinct(ctx context.Context, tx *sql.Tx, q Query
 	order := `qt_value COLLATE "C"`
 	if sqlite {
 		order = "qt_value COLLATE BINARY"
+		if field.Kind == FieldText || field.Kind == FieldEnum || field.Kind == FieldDatetime {
+			// SQLite text storage reads '' as NULL, as sqliteNull does.
+			bound.Expr = "NULLIF(" + bound.Expr + ",'')"
+			value = "CAST(" + bound.Expr + " AS text)"
+		}
 		if field.Kind == FieldDatetime {
 			value = sqliteDateText(bound)
 		}

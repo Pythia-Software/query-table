@@ -180,8 +180,9 @@ export function useItemDetails<Row>({
       return row ? { row } : null;
     }
     if (fetchRow) {
+      // A lookup projects the selectable backend fields; the rest are not loaded.
       const row = await fetchRow(id, signal);
-      return row ? { row } : null;
+      return row ? { row, loadedFields: Object.keys(row as object) } : null;
     }
     const row = rows.find((row) => rowId(row) === id);
     return row ? { row, loadedFields: Object.keys(row as object) } : null;

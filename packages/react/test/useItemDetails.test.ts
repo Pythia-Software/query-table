@@ -201,6 +201,16 @@ describe("built-in item details", () => {
     expect(probe.api().active).toBeNull();
     probe.unmount();
   });
+  it("records which fields an identity lookup loaded", async () => {
+    const hidden: FieldSchema<Row> = { ...remoteSchema, fields: remoteSchema.fields.map(field =>
+      field.name === "secret" ? { ...field, select: { enabled: false } } : field) };
+    const transport = memoryV3Transport([{ id: "remote", name: "Remote", secret: "not projected" }], hidden, { project: true });
+    const probe = await mount({ modes: ["modal"] }, EMPTY_QUERY, (id, signal) => fetchRowV3<Row>(transport, hidden, id, {}, signal));
+    await act(async () => probe.api().open("remote", "modal"));
+    // A field outside the lookup's projection is not loaded, rather than empty.
+    expect(probe.api().record?.loadedFields).toEqual(["id", "name"]);
+    probe.unmount();
+  });
   it("does not restart complete-record loads for inline callbacks or new collection rows", async () => {
     const loader = vi.fn(async () => ({ row: rows[0]! }));
     let api!: ItemDetailsApi<Row>;

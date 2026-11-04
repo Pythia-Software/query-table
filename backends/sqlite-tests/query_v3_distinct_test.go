@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -36,7 +37,7 @@ func TestV3Distinct(t *testing.T) {
 	}
 	// The tenant 'one' rows cycle notes every 7 and keys every 6.
 	counts := map[string]int{}
-	rows, err := db.Query(`SELECT note FROM direct WHERE tenant='one' AND note IS NOT NULL`)
+	rows, err := db.Query(`SELECT note FROM direct WHERE tenant='one' AND note IS NOT NULL AND note <> ''`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,6 +73,10 @@ func TestV3Distinct(t *testing.T) {
 	}
 	if got := run(distinct("k", "", 10, qt.WhereTerm{Field: "k", Op: "is_not_null"}, qt.WhereTerm{Field: "k", Op: "!=", Value: ""})).Distinct; len(got.Values) != 4 || got.HasNull {
 		t.Fatalf("filtered population: %#v", got)
+	}
+	// SQLite text storage reads '' as NULL: never a value, always hasNull.
+	if got := run(distinct("k", "", 10)).Distinct; len(got.Values) != 4 || slices.Contains(got.Values, "") || !got.HasNull {
+		t.Fatalf("empty text: %#v", got)
 	}
 	if got := run(distinct("n", "1", 50, qt.WhereTerm{Field: "@computed/double", Op: ">", Value: "10"})).Distinct; !sameSet(got.Values, "10.0", "11.0", "12.0", "13.0") || got.HasNull {
 		t.Fatalf("numbers over a computed filter: %#v", got)

@@ -430,6 +430,21 @@ describe("metric population capability negotiation", () => {
       ["small", null],
     ]);
   });
+  it("omits a client-only table order from all-matching metrics and refuses only shown-row ones", async () => {
+    const local = { ...schema, fields: [...schema.fields, { name: "rank", label: "rank", type: "number" as const,
+      source: { kind: "derived" as const, accessor: (row: Row) => -row.x }, sort: { enabled: true } }] };
+    const transport = v3Transport(request => request.metrics.map((m) => ({ id: m.id, buckets: [{ keys: ["a"], value: 2, count: 2 }] })));
+    const query = { ...EMPTY_QUERY, orderBy: [{ field: "rank", dir: "asc" as const }], offset: 100,
+      aggregations: [plain, { ...plain, id: "page", scope: "shownRows" as const }] };
+    const result = await executeMetrics(query, { schema: local, transport });
+    expect(transport.fetchQueryV3).toHaveBeenCalledOnce();
+    const request = transport.fetchQueryV3.mock.calls[0]![0];
+    expect([request.metrics.map((m) => m.id), request.result.orderBy, request.result.offset]).toEqual([["plain"], [], 0]);
+    expect(result.metrics.map((m) => [m.id, m.error ?? null])).toEqual([
+      ["plain", null],
+      ["page", "The query contains unsupported result ordering."],
+    ]);
+  });
   it("sends a distinct or summed minimum only to servers that advertise it", async () => {
     const measured = { id: "measured", op: "count" as const, groupBy: ["group"], minCount: { min: 2, distinct: "name" } };
     const calls: QueryRequestV3[] = [];

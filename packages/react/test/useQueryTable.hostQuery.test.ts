@@ -72,7 +72,7 @@ afterEach(() => { unmount(); vi.useRealTimers(); });
 
 describe("hostQuery: one definition", () => {
   it("exposes the committed definition and sends its host state with every request", async () => {
-    const current = mount({ initialQuery: errors });
+    const current = mount({ initialQuery: errors, remoteFieldStats: true });
     await settle();
     expect(current.api.definition).toEqual({ query: expect.objectContaining({ where: errors.where }), hostState: none });
     expect(requests.at(-1)!.hostState).toEqual(none);

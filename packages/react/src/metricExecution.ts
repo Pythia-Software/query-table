@@ -85,10 +85,23 @@ export async function executeV3Metrics<Row>(
     const issue = metricPopulationError(clause, { filters: capabilities.metricFilters, minCount: capabilities.metricMinCount, minCountMeasures: capabilities.metricMinCountMeasures });
     if (issue) refused.set(clause.id, issue);
   }
-  const runnable = (query.aggregations ?? []).filter(clause => !refused.has(clause.id));
+  let runnable = (query.aggregations ?? []).filter(clause => !refused.has(clause.id));
+  // Only shown-row metrics depend on the page. The rest omit its order and
+  // window, so an order only the client can evaluate never refuses them.
+  const unpaged = { ...query, orderBy: [], offset: 0 };
+  const shown = runnable.filter(clause => clause.scope === "shownRows");
+  if (shown.length) {
+    const issues = toQueryRequestV3({ ...query, aggregations: shown }, baseSchema, capabilities, execution, { now, rows: false }).diagnostics;
+    const pageIssues = issues.filter(issue => !toQueryRequestV3({ ...unpaged, aggregations: shown }, baseSchema, capabilities, execution, { now, rows: false }).diagnostics.includes(issue));
+    if (pageIssues.length) {
+      for (const clause of shown) refused.set(clause.id, pageIssues.join(" "));
+      runnable = runnable.filter(clause => clause.scope !== "shownRows");
+    }
+  }
   let metrics: AggregationResult["metrics"] = [];
   if (runnable.length) {
-    const request = toQueryRequestV3({ ...query, aggregations: runnable }, baseSchema, capabilities, execution, { now, rows: false });
+    const paged = runnable.some(clause => clause.scope === "shownRows");
+    const request = toQueryRequestV3({ ...(paged ? query : unpaged), aggregations: runnable }, baseSchema, capabilities, execution, { now, rows: false });
     if (request.diagnostics.length) throw Error(request.diagnostics.join(" "));
     const result = await transport.fetchQueryV3(request, signal);
     validateQueryResultV3(result, request, resultSchema);

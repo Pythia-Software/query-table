@@ -173,8 +173,9 @@ func TestScopeDistinctAndStatistics(t *testing.T) {
 	if !reflect.DeepEqual(got.Values, []string{"école"}) || !got.HasNull {
 		t.Fatal(got)
 	}
+	// '' is NULL in SQLite text storage, never a suggestion.
 	got = distinct("text", "", 1)
-	if !got.HasMore || !got.HasNull || got.Values[0] != "" {
+	if !got.HasMore || !got.HasNull || got.Values[0] == "" {
 		t.Fatal(got)
 	}
 	// v1 FieldStats is v3 count_distinct/min/max metrics per field.

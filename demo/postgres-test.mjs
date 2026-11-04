@@ -200,6 +200,19 @@ try {
     "Fractional filters, both delay stages, proxy cancellation, and snapshot rejection passed",
   );
 
+  // Grouped rows stage the source in temporary tables inside the request
+  // transaction, so the host must not open it read-only.
+  const grouped = await post("query", {
+    ...withStage(rowQuery, { select: ["id"], where: [], orderBy: [], limit: 1, offset: 0 }),
+    result: { select: ["platform"], where: [], orderBy: [{ field: "platform", dir: "asc" }], limit: 10, offset: 0 },
+    grouping: { keys: ["platform"], summaries: [], representative: null },
+  });
+  assert.equal(grouped.data.total, 3);
+  assert.equal(grouped.data.sourceTotal, bootstrap.rows);
+  console.log(
+    `Grouped rows over ${bootstrap.rows} records: ${grouped.data.rows.map((row) => row.platform).join(", ")}`,
+  );
+
   await page.getByRole("button", { name: "Edit metrics", exact: true }).click();
   await page.waitForFunction(
     () =>

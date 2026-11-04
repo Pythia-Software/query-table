@@ -34,7 +34,11 @@
   `api.filterValues` takes an optional `AbortSignal`, and the DuckDB transport
   is v3-only. `clientRows`, `metricTransport` and `computedExecution` are
   unchanged. Remote tables refuse client-only (`pushdown: false`) filters
-  instead of paging the unfiltered server result.
+  instead of paging the unfiltered server result. Remote field statistics,
+  which reduce the whole dataset, are opt-in through
+  `useQueryTable({ remoteFieldStats: true })`. All-matching metrics leave out
+  the table's order and page, so a client-only sort no longer refuses them;
+  shown-row metrics that need such an order fail individually.
 - **Breaking (Go):** `QueryDatasetV3` (`Execute`, `ExecuteIn`, `Capabilities`,
   `DescribeComputedPartialIn`), `DecodeQueryRequestV3` and `NewQueryV3Handler`
   are the only query API. `Compile*`, `SQLiteDataset`, `SQLiteV2Dataset`,

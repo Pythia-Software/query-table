@@ -31,7 +31,7 @@ it("requests grouping source stats only for backend fields and forwards cancella
     {name:"double",label:"Double",type:"number",source:{kind:"derived",dependencies:["n"],accessor:row=>row.n*2}},
   ]};
   const transport=memoryV3Transport<Row>([1,2,3,4,5].map(n=>({id:String(n),k:"k",n,at:"2026-10-13T12:00:00Z"})),extended);
-  const api=mount({schema:extended,transport,debounceMs:0});await settle();
+  const api=mount({schema:extended,transport,debounceMs:0,remoteFieldStats:true});await settle();
   const controller=new AbortController();
   let stats:unknown;
   await act(async()=>{stats=await api().grouping!.source.fieldStats(["n","double","@computed/local","unknown","n"],controller.signal)});

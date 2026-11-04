@@ -110,7 +110,8 @@ api.setDefinition(previous => ({ query: { ...previous.query, offset: 0 }, hostSt
 `QueryState.hostState`, so history, saves, `encodeQuery` links and durable
 `@…` snapshots carry it with the query, within the existing size budgets.
 Every `QueryRequestV3` the table sends carries the `hostState` it runs with,
-including filter suggestions, row lookups and field statistics, so the host's
+including filter suggestions, row lookups and field statistics (opt-in with
+`remoteFieldStats: true`, since each reduces the whole dataset), so the host's
 transport never sees one definition's table query with another's host state;
 the Go request types accept and expose it without interpreting it.
 

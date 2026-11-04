@@ -141,6 +141,11 @@ export interface UseQueryTableOptions<Row> {
   links?: QueryLinkOptions;
   /** Enable schema-driven click popovers, item modals and row expansion. */
   itemDetails?: boolean | ItemDetailsOptions<Row>;
+  /** Ask the transport for field statistics (distinct count, min, max) when
+   * the column picker or a metric filter editor opens. Each request reduces
+   * the whole dataset, so it is off by default; complete clientRows always
+   * provide them. */
+  remoteFieldStats?: boolean;
   /** Debounce (ms) between a query change and the fetch it triggers. Default 200. */
   debounceMs?: number;
   /** Injected clock for deterministic saved-query timestamps. Default Date.now. */
@@ -1376,8 +1381,8 @@ export function useQueryTable<Row>(
     return fetchDistinctValuesV3(metadataTransport, sourceCatalogue, field, search.slice(0, 2000), { ...auxiliaryOptions(), limit: AUTOCOMPLETE_LIMIT }, signal);
   }, [metadataTransport, sourceCatalogue, auxiliaryOptions]);
   const remoteFieldStats = useCallback(async (fields: string[], signal?: AbortSignal): Promise<Record<string, FieldStats>> =>
-    metadataTransport ? fetchFieldStatsV3(metadataTransport, sourceCatalogue, fields, auxiliaryOptions(), signal) : {},
-  [metadataTransport, sourceCatalogue, auxiliaryOptions]);
+    metadataTransport && opts.remoteFieldStats ? fetchFieldStatsV3(metadataTransport, sourceCatalogue, fields, auxiliaryOptions(), signal) : {},
+  [metadataTransport, sourceCatalogue, auxiliaryOptions, opts.remoteFieldStats]);
 
   const filterValues = useCallback(
     async (field: string, search: string, signal?: AbortSignal): Promise<DistinctValuesResult> => {
