@@ -16,8 +16,53 @@
   table Remove from Group By (on a key column, when there are several keys)
   and Ungroup. The actions go through the grouping controller, so validation,
   undo and restoring the previous grouped layout behave as in the query editor.
+- One canonical wire schema for the v3 query protocol,
+  `schema/query-wire.schema.json` (JSON Schema 2020-12). The TypeScript, Go
+  and Swift wire types are generated from it (`npm run wire:generate`;
+  `npm run wire:check`, now part of `npm run check`, fails on stale output),
+  and golden request and result fixtures in `schema/fixtures/wire` are
+  validated with ajv and decoded and re-encoded identically by Go and Swift.
+  See [the wire protocol guide](docs/wire-protocol.md). Public TypeScript
+  names (`QueryRequestV3`, `QueryResultV3`, `QueryCapabilitiesV3`,
+  `ServerQuery`, `ComputedExecution`, ...) are unchanged re-exports; the
+  wire-only shapes are also exported (`MetricSpecV3`, `MetricBucketV3`,
+  `MetricResultV3`, `ProjectedSchemaV3`, `WireWhereTerm`, ...).
+
+### Fixed
+
+- Encoding drift between the three wire implementations, found while
+  unifying them on the schema:
+  - Go omitted empty `select`, `where` and `orderBy`, a zero `limit` or
+    `offset`, an empty metric `groupBy` and empty request `diagnostics`, and
+    an empty predicate `value` (such as on `is_null`), all of which are
+    required. Go now always writes them, as TypeScript and Swift do. Nil
+    required lists and maps encode as `[]`/`{}`, never `null`, and
+    `MetricResult` carries `other`, which TypeScript declares but Go could not
+    decode or re-encode.
+  - Swift decoded bucket keys as display strings, so numeric and boolean keys
+    (`dayOfWeek`, `hourOfDay`, booleans) re-encoded as strings, and it dropped
+    `y`, `yError`, `distribution`, `nullCount`, `inputErrorCount`, the
+    entry's `other` and a capability's `reason`.
+  - Swift could not decode OR groups with conjunction branches
+    (`{"any": [{"all": [...]}]}`).
+  - Swift results built with `QueryResultV3(answering:)` omitted
+    `execution.planToken` when the request had none; it is now always
+    written (empty for none), as Go does.
+  - Request keys follow one order (the schema's) in TypeScript and Go.
 
 ### Changed
+
+- **Breaking (TypeScript):** `ServerQuery` no longer declares `hostState`.
+  No builder set it and the Go decoder rejects it on a stage; host state is
+  `QueryRequestV3.hostState`.
+- **Breaking (Swift):** the wire structs are generated. `AggregationBucket.keys`
+  is `[JSONValue]` (the display strings are `keyLabels`),
+  `QueryExecutionV3.planToken` is a `String` (empty for none),
+  `QueryRequestV3.metrics` is `[MetricSpecV3]` (the initializer still accepts
+  `[AggregationClause]`, sent without `label`), `WhereTerm` gains a
+  `.group(OrGroup)` case for OR groups with conjunction branches, and the
+  local transport refuses metric features it does not execute (expressions,
+  `where`, `minCount`, distributions, calendar grouping, sorting and limits).
 
 - **Breaking:** v3 is the only query protocol. `Transport` is exactly
   `{ queryCapabilities, fetchQueryV3 }`, both required. `fetchRows`,

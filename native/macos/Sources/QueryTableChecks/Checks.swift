@@ -24,6 +24,7 @@ struct QueryTableChecks {
       print("PASS \(message)")
     }
     try await RelativeTimeCheck.run(check: check)
+    try WireFixtureCheck.run(check: check)
     let schema = FieldSchema(
       name: "checks", idField: "id",
       fields: [

@@ -1,0 +1,162 @@
+{
+  "version": 3,
+  "profile": "qt-fixture-v1",
+  "now": 1772964000123,
+  "expectedRevisions": {},
+  "source": {
+    "select": [
+      "id"
+    ],
+    "where": [],
+    "orderBy": [],
+    "limit": 25,
+    "offset": 0
+  },
+  "result": {
+    "select": [
+      "id"
+    ],
+    "where": [],
+    "orderBy": [],
+    "limit": 25,
+    "offset": 0
+  },
+  "rows": false,
+  "metrics": [
+    {
+      "dateGrouping": {
+        "field": "at",
+        "interval": "month",
+        "timeZone": "Europe/Berlin",
+        "includeEmpty": true,
+        "range": "custom",
+        "start": "2026-01-01T00:00:00.000Z",
+        "end": "2026-07-01T00:00:00.000Z"
+      },
+      "id": "monthly",
+      "op": "sum",
+      "field": "amount",
+      "groupBy": [
+        "at"
+      ],
+      "minCount": 3
+    },
+    {
+      "dateGrouping": {
+        "field": "at",
+        "interval": "dayOfWeek",
+        "includeEmpty": false,
+        "range": "observed"
+      },
+      "id": "weekday",
+      "op": "count",
+      "groupBy": [
+        "at"
+      ]
+    },
+    {
+      "scope": "allMatching",
+      "sort": [
+        {
+          "key": "value",
+          "dir": "desc"
+        },
+        {
+          "key": "group0",
+          "dir": "asc",
+          "nulls": "last"
+        }
+      ],
+      "groupLimit": 5,
+      "id": "filtered",
+      "op": "count",
+      "groupBy": [
+        "status"
+      ],
+      "where": [
+        {
+          "field": "amount",
+          "op": ">",
+          "value": "5"
+        },
+        {
+          "any": [
+            {
+              "field": "name",
+              "op": "starts_with",
+              "value": "a"
+            },
+            {
+              "all": [
+                {
+                  "field": "status",
+                  "op": "=",
+                  "value": "done"
+                },
+                {
+                  "field": "tags",
+                  "op": "includes",
+                  "value": "red",
+                  "negated": true
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "minCount": {
+        "min": 2,
+        "distinct": "name"
+      }
+    },
+    {
+      "id": "summed",
+      "op": "avg",
+      "field": "amount",
+      "groupBy": [
+        "status",
+        "name"
+      ],
+      "minCount": {
+        "min": 10,
+        "sum": "amount"
+      }
+    },
+    {
+      "scope": "shownRows",
+      "distribution": {
+        "kind": "box",
+        "input": "amount",
+        "whiskers": "tukey"
+      },
+      "id": "box",
+      "op": "count",
+      "groupBy": [
+        "status"
+      ]
+    },
+    {
+      "distribution": {
+        "kind": "histogram",
+        "input": "amount",
+        "bins": 12
+      },
+      "id": "histogram",
+      "op": "count",
+      "groupBy": []
+    },
+    {
+      "display": {
+        "kind": "scatter"
+      },
+      "expression": "sum(amount)",
+      "expressionY": "count()",
+      "id": "scatter",
+      "op": "count",
+      "groupBy": [
+        "name"
+      ]
+    }
+  ],
+  "diagnostics": []
+}

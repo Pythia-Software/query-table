@@ -1,0 +1,90 @@
+{
+  "version": 3,
+  "profile": "qt-fixture-v1",
+  "now": 1772964000123,
+  "expectedRevisions": {},
+  "source": {
+    "select": [
+      "amount",
+      "at",
+      "id",
+      "name",
+      "status"
+    ],
+    "where": [
+      {
+        "field": "amount",
+        "op": ">",
+        "value": "0"
+      }
+    ],
+    "orderBy": [],
+    "limit": 100,
+    "offset": 0
+  },
+  "result": {
+    "select": [
+      "__qt_group_id__",
+      "at",
+      "status",
+      "total",
+      "first_name",
+      "margin"
+    ],
+    "where": [
+      {
+        "field": "total",
+        "op": ">=",
+        "value": "100"
+      }
+    ],
+    "orderBy": [
+      {
+        "field": "total",
+        "dir": "desc"
+      }
+    ],
+    "limit": 25,
+    "offset": 0
+  },
+  "grouping": {
+    "keys": [
+      "status",
+      {
+        "field": "at",
+        "interval": "month",
+        "timeZone": "Europe/Berlin"
+      }
+    ],
+    "summaries": [
+      {
+        "id": "total",
+        "op": "sum",
+        "field": "amount",
+        "label": "Total"
+      },
+      {
+        "id": "first_name",
+        "op": "row",
+        "field": "name"
+      },
+      {
+        "id": "margin",
+        "op": "formula",
+        "expression": "sum(amount) / count()"
+      }
+    ],
+    "representative": {
+      "orderBy": [
+        {
+          "field": "at",
+          "dir": "asc",
+          "nulls": "last"
+        }
+      ]
+    }
+  },
+  "rows": true,
+  "metrics": [],
+  "diagnostics": []
+}

@@ -1,0 +1,115 @@
+{
+  "version": 3,
+  "profile": "qt-fixture-v1",
+  "now": 1772964000123,
+  "expectedRevisions": {
+    "margin": "r3"
+  },
+  "planToken": "plan-7",
+  "snapshot": "s-42",
+  "source": {
+    "select": [
+      "amount",
+      "id",
+      "name",
+      "status"
+    ],
+    "where": [
+      {
+        "field": "status",
+        "op": "=",
+        "value": "done"
+      },
+      {
+        "field": "name",
+        "op": "contains",
+        "value": "caf",
+        "negated": true
+      },
+      {
+        "any": [
+          {
+            "field": "amount",
+            "op": ">=",
+            "value": "10"
+          },
+          {
+            "field": "at",
+            "op": ">=",
+            "value": "-7d"
+          }
+        ]
+      }
+    ],
+    "orderBy": [
+      {
+        "field": "amount",
+        "dir": "desc",
+        "nulls": "first"
+      },
+      {
+        "field": "name",
+        "dir": "asc",
+        "extract": {
+          "regex": "^(\\w+)"
+        }
+      }
+    ],
+    "limit": 50,
+    "offset": 100
+  },
+  "result": {
+    "select": [
+      "amount",
+      "id",
+      "name",
+      "status"
+    ],
+    "where": [
+      {
+        "field": "status",
+        "op": "=",
+        "value": "done"
+      },
+      {
+        "field": "name",
+        "op": "contains",
+        "value": "caf",
+        "negated": true
+      },
+      {
+        "any": [
+          {
+            "field": "amount",
+            "op": ">=",
+            "value": "10"
+          },
+          {
+            "field": "at",
+            "op": ">=",
+            "value": "-7d"
+          }
+        ]
+      }
+    ],
+    "orderBy": [
+      {
+        "field": "amount",
+        "dir": "desc",
+        "nulls": "first"
+      },
+      {
+        "field": "name",
+        "dir": "asc",
+        "extract": {
+          "regex": "^(\\w+)"
+        }
+      }
+    ],
+    "limit": 50,
+    "offset": 100
+  },
+  "rows": true,
+  "metrics": [],
+  "diagnostics": []
+}

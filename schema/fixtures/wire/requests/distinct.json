@@ -1,0 +1,42 @@
+{
+  "version": 3,
+  "profile": "qt-fixture-v1",
+  "now": 1772964000123,
+  "expectedRevisions": {},
+  "source": {
+    "select": [],
+    "where": [
+      {
+        "field": "amount",
+        "op": ">",
+        "value": "0"
+      }
+    ],
+    "orderBy": [],
+    "limit": 1,
+    "offset": 0
+  },
+  "result": {
+    "select": [],
+    "where": [],
+    "orderBy": [],
+    "limit": 1,
+    "offset": 0
+  },
+  "rows": false,
+  "metrics": [],
+  "distinct": {
+    "field": "status",
+    "search": "do",
+    "limit": 30
+  },
+  "diagnostics": [],
+  "hostState": {
+    "version": 1,
+    "params": {
+      "keyword": [
+        "cache"
+      ]
+    }
+  }
+}
