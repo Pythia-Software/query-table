@@ -191,7 +191,7 @@ public struct QueryRequestV3: Codable, Equatable, Sendable {
       hostState: hostState)
   }
 
-  /// Row refresh by identity. A response with two rows is a non-unique identity.
+  /// Row refresh by identity. A total above one is a non-unique identity.
   public static func rowLookup(
     id: JSONValue, select: [String], schema: FieldSchema, capabilities: QueryCapabilitiesV3,
     now: Date = Date(), hostState: JSONValue? = nil
@@ -199,7 +199,8 @@ public struct QueryRequestV3: Codable, Equatable, Sendable {
     let stage = ServerQuery(
       select: Array(Set(select + [schema.idField])).sorted(),
       whereTerms: [.predicate(.init(field: schema.idField, op: "=", value: id.displayString))],
-      limit: 2)
+      // Two rows within the server's budget; the total reports a duplicate either way.
+      limit: max(1, min(2, capabilities.maxRows)))
     return QueryRequestV3(
       profile: capabilities.profile, now: epochMilliseconds(now), source: stage,
       hostState: hostState)

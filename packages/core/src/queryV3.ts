@@ -228,16 +228,18 @@ export function rowLookupFields(schema: FieldSchema): string[] {
   return [...new Set([schema.idField, ...schema.fields.filter(field => field.source.kind === "backend" && isSelectable(field) &&
     !field.name.startsWith("@computed/")).map(field => field.name)])].sort();
 }
-/** One row by identity (a refresh after a mutation, or an item lookup). */
+/** One row by identity (a refresh after a mutation, or an item lookup). It
+ * asks for two rows, within the server's row budget; the total reports a
+ * duplicate identity either way. */
 export function toRowRequestV3(schema: FieldSchema, id: RowId, capabilities: QueryCapabilitiesV3,
   options: AuxiliaryRequestOptions & { select?: string[] } = {}): QueryRequestV3 {
   const stage: ServerQuery = { select: options.select ? [...new Set([schema.idField, ...options.select])].sort() : rowLookupFields(schema),
-    where: [{ field: schema.idField, op: "=", value: String(id) }], orderBy: [], limit: 2, offset: 0 };
+    where: [{ field: schema.idField, op: "=", value: String(id) }], orderBy: [], limit: Math.max(1, Math.min(2, capabilities.maxRows)), offset: 0 };
   return auxiliaryRequest(capabilities, stage, stage, options, { rows: true, metrics: [] });
 }
 /** The matching row, or null when none matches. Two matches are an error. */
 export function readRowResultV3<Row = Record<string, unknown>>(result: QueryResultV3, request: QueryRequestV3, schema: FieldSchema): Row | null {
-  if (Array.isArray(result?.rows) && result.rows.length > 1) throw Error("Row identity must be unique.");
+  if (Array.isArray(result?.rows) && result.rows.length > 1 || result?.total > 1) throw Error("Row identity must be unique.");
   validateQueryResultV3(result, request, schema);
   const row = result.rows[0];
   if (row && String(row[schema.idField]) !== (request.result.where[0] as WhereClause | undefined)?.value)
@@ -268,24 +270,27 @@ export function toFieldStatsRequestV3(schema: FieldSchema, fields: string[], cap
 export function readFieldStatsResultV3(result: QueryResultV3, request: QueryRequestV3, schema: FieldSchema): Record<string, FieldStats> {
   validateQueryResultV3(result, request, schema);
   const byId = new Map(result.metrics.map(metric => [metric.id, metric]));
-  const stats: Record<string, FieldStats> = {};
+  // Field names are data: a Map never resolves one such as __proto__ to a prototype.
+  const stats = new Map<string, FieldStats>();
   for (const metric of request.metrics) {
     const entry = byId.get(metric.id), value = entry && !entry.error ? entry.buckets[0]?.value : undefined;
-    const key = metric.id.slice(metric.field!.length + 1) as keyof FieldStats, item = stats[metric.field!] ??= {};
+    const key = metric.id.slice(metric.field!.length + 1) as keyof FieldStats;
+    const item = stats.get(metric.field!) ?? {};
+    stats.set(metric.field!, item);
     if (key === "distinct" ? typeof value === "number" : typeof value === "number" || typeof value === "string") item[key] = value as never;
   }
-  return stats;
+  return Object.fromEntries(stats);
 }
 /** Requests run in batches of at most MAX_AGGREGATIONS metrics. */
 export async function fetchFieldStatsV3(transport: Transport, schema: FieldSchema, fields: string[],
   options: AuxiliaryRequestOptions = {}, signal?: AbortSignal): Promise<Record<string, FieldStats>> {
   const all = toFieldStatsRequestV3(schema, fields, transport.queryCapabilities, options);
   if (all.diagnostics.length) throw Error(all.diagnostics.join(" "));
-  const stats: Record<string, FieldStats> = {};
+  const stats = new Map<string, FieldStats>();
   for (let i = 0; i < all.metrics.length; i += MAX_AGGREGATIONS) {
     const request = { ...all, metrics: all.metrics.slice(i, i + MAX_AGGREGATIONS) };
     for (const [name, item] of Object.entries(readFieldStatsResultV3(await execute(transport, request, signal), request, schema)))
-      stats[name] = { ...stats[name], ...item };
+      stats.set(name, { ...stats.get(name), ...item });
   }
-  return stats;
+  return Object.fromEntries(stats);
 }

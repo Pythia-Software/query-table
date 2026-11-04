@@ -85,7 +85,9 @@ func (d sqliteV2Dataset) directDistributions(ctx context.Context, tx *sql.Tx, q 
 	}
 	filter, _, err := compileSQLiteWhere(q.Where, d.Schema, sqliteOptions{Now: o.Now}, o.relations)
 	if err != nil {
-		return nil, 0, false, err
+		// Like a metric filter, a population filter the stored-field scan cannot
+		// read (such as a computed field) leaves every metric to its compiled plan.
+		return nil, 0, false, ctx.Err()
 	}
 	statement += strings.Join(projections, ",") + " FROM " + sourceName + " AS r"
 	if filter.SQL != "" {

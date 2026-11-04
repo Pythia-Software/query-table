@@ -97,6 +97,11 @@ func ungroupedCases() map[string]qt.QueryRequestV3 {
 		"nulls and negation":          ungroupedRequest(page([]qt.WhereTerm{{Field: "k", Op: "is_null"}, {Field: "note", Op: "contains", Value: "o", Negated: true}})),
 		"datetime filter":             ungroupedRequest(page([]qt.WhereTerm{{Field: "at", Op: ">=", Value: "2026-10-20T00:00:00Z"}, {Field: "secs", Op: "<", Value: "2026-10-01T00:00:00Z"}})),
 		"computed select sort filter": ungroupedRequest(qt.WireQuery{Select: []string{"id", "@computed/double", "@computed/inv", "@computed/big"}, Where: []qt.WhereTerm{{Field: "@computed/double", Op: ">", Value: "2"}}, OrderBy: []qt.OrderBy{{Field: "@computed/inv", Dir: "desc", Nulls: "last"}}, Limit: 30}),
+		// The stored-field distribution scan cannot read a computed filter; it
+		// declines to the compiled plans instead of failing the request.
+		"distributions over a computed filter": ungroupedRequest(page([]qt.WhereTerm{{Field: "@computed/double", Op: ">", Value: "10"}}),
+			qt.AggSpec{ID: "box", Op: "count", GroupBy: []string{"e"}, Distribution: &qt.MetricDistribution{Kind: "box", Input: "[n]"}},
+			qt.AggSpec{ID: "histogram", Op: "count", Distribution: &qt.MetricDistribution{Kind: "histogram", Input: "[n]", Bins: 6}}),
 		"empty": ungroupedRequest(page([]qt.WhereTerm{{Field: "k", Op: "=", Value: "missing"}}),
 			qt.AggSpec{ID: "count", Op: "count"}, qt.AggSpec{ID: "sum", Op: "sum", Field: "n", GroupBy: byK}, qt.AggSpec{ID: "median", Expression: "MEDIAN([n])"}, qt.AggSpec{ID: "shown", Op: "count", Scope: "shownRows"}),
 		"metrics": ungroupedRequest(page([]qt.WhereTerm{{Field: "m", Op: "!=", Value: "4"}}, qt.OrderBy{Field: "n", Dir: "asc"}),

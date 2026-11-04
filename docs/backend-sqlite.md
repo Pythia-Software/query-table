@@ -157,7 +157,8 @@ A request selects its work:
   in the population independent of the search. The field must be
   server-filterable.
 - **Row lookup and field statistics** are ordinary requests: an identity filter
-  with `limit: 2`, or `rows: false` with `count_distinct`/`min`/`max` metrics.
+  with `limit: 2` (1 when `MaxRows` is 1; a `total` above 1 is a duplicate
+  identity), or `rows: false` with `count_distinct`/`min`/`max` metrics.
   The TypeScript builders are `toRowRequestV3` and `toFieldStatsRequestV3`.
 
 A request without `grouping` reads `SourceSQL` directly: it counts the matching

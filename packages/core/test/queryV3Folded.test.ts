@@ -120,3 +120,26 @@ describe("field statistics", () => {
     expect(fetchQueryV3).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("field statistics keyed by data", () => {
+  it("keeps a field named __proto__ an own key without touching Object.prototype", () => {
+    const schema = { ...runsSchema, fields: [...runsSchema.fields, { name: "__proto__", label: "Proto", type: "number" as const, source: { kind: "backend" as const } }] };
+    const request = toFieldStatsRequestV3(schema, ["__proto__"], capabilities);
+    const stats = readFieldStatsResultV3(response(request, { metrics: request.metrics.map(metric => ({ id: metric.id, buckets: [{ keys: [], value: 3, count: 1 }] })) }), request, schema);
+    expect(Object.prototype.hasOwnProperty.call(stats, "__proto__")).toBe(true);
+    expect(Object.getOwnPropertyDescriptor(stats, "__proto__")?.value).toEqual({ distinct: 3, min: 3, max: 3 });
+    expect(({} as Record<string, unknown>).distinct).toBeUndefined();
+  });
+});
+
+describe("identity lookups under a one-row budget", () => {
+  it("stays within maxRows and still detects a duplicate identity by the total", () => {
+    const tight = { ...capabilities, maxRows: 1 };
+    const request = toRowRequestV3(runsSchema, "r1", tight);
+    expect(request.result.limit).toBe(1);
+    const row = { [runsSchema.idField]: "r1" };
+    const projected = { schema: { name: "runs", idField: "id", fields: request.result.select.map(name => ({ name, type: runsSchema.fields.find(f => f.name === name)!.type })) } };
+    expect(readRowResultV3(response(request, { ...projected, rows: [row], total: 1, sourceTotal: 1 }), request, runsSchema)).toEqual(row);
+    expect(() => readRowResultV3(response(request, { ...projected, rows: [row], total: 2, sourceTotal: 2 }), request, runsSchema)).toThrow("Row identity must be unique.");
+  });
+});

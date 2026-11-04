@@ -1412,7 +1412,8 @@ export function useQueryTable<Row>(
         return remoteFieldStats(requested.filter((name) => byName.get(name)?.source.kind === "backend"), signal);
       if (!clientRows) return {};
 
-      const result: Record<string, FieldStats> = {};
+      // Field names are data: entries keep one such as __proto__ an own key.
+      const result: [string, FieldStats][] = [];
       for (const name of requested) {
         if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
         const field = byName.get(name);
@@ -1422,9 +1423,9 @@ export function useQueryTable<Row>(
           const value = readFieldValue(field, row);
           if (value !== null) distinct.add(JSON.stringify(value));
         }
-        result[name] = { distinct: distinct.size };
+        result.push([name, { distinct: distinct.size }]);
       }
-      return result;
+      return Object.fromEntries(result);
     },
     [metadataTransport, remoteFieldStats, byName, clientRows, groupKey],
   );
@@ -1622,11 +1623,20 @@ export function useQueryTable<Row>(
     return typeof value === "string" || (typeof value === "number" && Number.isFinite(value)) ? value : null;
   }, [sourceSchema]);
 
+  // An item lookup reads the detail catalogue's properties too, including
+  // backend fields defined only in itemDetails.schema.
+  const detailCatalogue = typeof opts.itemDetails === "object" ? opts.itemDetails.schema : undefined;
+  const lookupCatalogue = useMemo(() => !detailCatalogue ? sourceCatalogue : { ...sourceCatalogue,
+    fields: [...sourceCatalogue.fields, ...detailCatalogue.fields.filter(field => !sourceCatalogue.fields.some(f => f.name === field.name))] },
+  [sourceCatalogue, detailCatalogue]);
+  const fetchItem = useCallback(async (id: RowId, signal?: AbortSignal) =>
+    fetchRowV3<Row>(metadataTransport!, lookupCatalogue, id, auxiliaryOptions(), signal),
+  [metadataTransport, lookupCatalogue, auxiliaryOptions]);
   const itemDetails = useItemDetails({
     schema: query.grouping ? sourceSchema : displaySchema,
     query: sourceQuery, setQuery: setSourceQuery, options: opts.itemDetails,
     rows: query.grouping ? sourceRows ?? [] : rows, clientRows: sourceRows,
-    rowId: sourceRowId, fetchRow: metadataTransport ? fetchRow : undefined, refreshKey: nonce, links, queryParameter: parameter,
+    rowId: sourceRowId, fetchRow: metadataTransport ? fetchItem : undefined, refreshKey: nonce, links, queryParameter: parameter,
     queryReady: storageReady && !restoration.loading && !restoration.error,
   });
 

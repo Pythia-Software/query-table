@@ -282,7 +282,7 @@ public final class QueryTableController: ObservableObject {
       id: id, select: select ?? QueryState().serverQuery(schema: schema).select, schema: schema,
       capabilities: adapter.queryCapabilities)
     let result = try await Self.execute(request, adapter: adapter, schema: schema)
-    guard result.rows.count < 2 else {
+    guard result.rows.count < 2, result.total < 2 else {
       throw QueryTableError.invalidResponse("identity must be unique")
     }
     if let row = result.rows.first, row[schema.idField]?.displayString != id.displayString {
