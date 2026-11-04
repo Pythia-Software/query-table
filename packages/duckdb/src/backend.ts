@@ -424,8 +424,7 @@ export class DuckDBBackend {
   private validateRequest(request: QueryRequestV3): void {
     if (
       request.version !== 3 ||
-      request.profile !== DUCKDB_PROFILE ||
-      request.diagnostics.length
+      request.profile !== DUCKDB_PROFILE
     )
       throw Error("Invalid DuckDB execution request or profile.");
     if (

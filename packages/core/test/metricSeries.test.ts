@@ -261,8 +261,8 @@ describe("planning and the wire", () => {
     const request = toMetricQuery(windowed, schema);
     expect(request.diagnostics.map((d) => d.code)).toContain("unexpanded_series");
     expect(request.metrics[0]).not.toHaveProperty("window");
-    const v3 = toQueryRequestV3(windowed, schema, { version: 3, profile: "test", calendarGrouping: true } as never);
-    expect(v3.diagnostics.join(" ")).toMatch(/planMetricSeries/);
+    expect(() => toQueryRequestV3(windowed, schema, { version: 3, profile: "test", calendarGrouping: true } as never))
+      .toThrow(expect.objectContaining({ code: "unexpanded_series", message: expect.stringMatching(/planMetricSeries/) }));
     const plan = planMetricSeries(windowed, schema, { now })!;
     expect(toMetricQuery(plan.queries[0]!, schema).diagnostics.map((d) => d.code)).not.toContain("unexpanded_series");
   });

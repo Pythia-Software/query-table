@@ -474,10 +474,10 @@ describe("metric population capability negotiation", () => {
     };
     const older = await run({ metricMinCount: true });
     expect(calls[0]!.metrics.map((m) => m.id)).toEqual(["small"]);
-    expect(older.metrics[1]).toEqual({ id: "measured", buckets: [], error: "This server does not support a minimum of distinct values or a sum per group." });
+    expect(older.metrics[1]).toEqual({ id: "measured", buckets: [], error: "This server does not support a minimum of distinct values or a sum per group.", errorCode: "capability_unsupported" });
     const none = await run({});
     expect(calls).toHaveLength(1);
-    expect(none.metrics[0]).toEqual({ id: "small", buckets: [], error: "This server does not support a minimum rows per group." });
+    expect(none.metrics[0]).toEqual({ id: "small", buckets: [], error: "This server does not support a minimum rows per group.", errorCode: "capability_unsupported" });
     const current = await run({ metricMinCount: true, metricMinCountMeasures: true });
     expect(calls[1]!.metrics).toEqual([
       expect.objectContaining({ id: "small", minCount: 2 }),
@@ -503,7 +503,6 @@ describe("metric series execution", () => {
     const sent: string[][] = [];
     const transport = v3Transport((request) => {
       sent.push(request.metrics.map((m) => `${m.expression ?? m.op}:${m.groupBy.join(",")}`));
-      expect(request.diagnostics).toEqual([]);
       return request.metrics.map((m) => ({
         id: m.id,
         buckets: m.groupBy.length

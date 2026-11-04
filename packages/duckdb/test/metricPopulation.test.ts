@@ -82,10 +82,14 @@ afterAll(() => native?.closeSync());
 describe("shared metric population fixture (DuckDB)", () => {
   for (const c of fixture.cases)
     it(c.name, async () => {
-      const request = toQueryRequestV3(queryFor(c), fixture.schema, backend.capabilities, undefined, { now, rows: false });
-      // The ungrouped minCount refusal is a client-side diagnostic as well;
-      // send the clause anyway so the backend's own validation is exercised.
-      const result = await backend.execute({ ...request, diagnostics: [] });
+      // The ungrouped minCount refusal is a client-side QueryError as well;
+      // build the request without minCount and put it back, so the backend's
+      // own validation is exercised.
+      const query = queryFor(c);
+      const request = toQueryRequestV3({ ...query, aggregations: query.aggregations!.map(({ minCount: _minCount, ...clause }) => clause) },
+        fixture.schema, backend.capabilities, undefined, { now, rows: false });
+      const minCount = query.aggregations![0]!.minCount;
+      const result = await backend.execute({ ...request, metrics: [{ ...request.metrics[0]!, ...(minCount !== undefined ? { minCount } : {}) }] });
       const entry = result.metrics[0]!;
       expect(project(entry, c.expected), entry.error).toEqual(c.expected);
     });

@@ -2,7 +2,7 @@ import { useQueryFilters } from "./useQueryFilters";
 import { useGroupingController, type GroupingApi, type GroupingSourceApi } from "./useGrouping";
 import { createGroupingModel, prepareGrouping, withoutGrouping, sourceExecutionSchema, toQueryRequestV3, validateQueryResultV3,
   fetchDistinctValuesV3, fetchFieldStatsV3, fetchRowV3, isPushdownFilter, type AuxiliaryRequestOptions } from "@pythia-software/query-table-core";
-import { ITEM_DETAILS_COLUMN, itemPageFields } from "@pythia-software/query-table-core";
+import { ITEM_DETAILS_COLUMN, itemPageFields, QueryError } from "@pythia-software/query-table-core";
 import { useItemDetails, initialDetailModes, type ItemDetailsApi, type ItemDetailsOptions } from "./useItemDetails";
 // useQueryTable — the one hook that owns everything.
 //
@@ -190,7 +190,8 @@ export interface AggregationsApi {
   /** Server (or client-mirror) results, one entry per clause; null when none. */
   results: AggregationResult | null;
   loading: boolean;
-  error: Error | null;
+  /** A QueryError (with a code from docs/errors.md) for server and client refusals. */
+  error: QueryError | Error | null;
   /** Append a metric. Defaults to "count all rows"; pass a partial to override.
    *  Returns the generated id. */
   add: (partial?: Partial<Omit<AggregationClause, "id">>) => string;
@@ -254,11 +255,12 @@ export interface QueryExecutionReceipt {
   /** "none" when the query has no metrics. A metric error fails the receipt. */
   metrics: "none" | "running" | "succeeded" | "failed";
   /** The row or metric error behind a failure. */
-  error: Error | null;
+  /** A QueryError (with a code from docs/errors.md) for server and client refusals. */
+  error: QueryError | Error | null;
 }
 export interface QueryTableApi<Row> {
   /** Dependent source fetches can use ready without parsing display errors. */
-  restoration: { status: "resolving" | "ready" | "error"; ready: boolean; error: Error | null };
+  restoration: { status: "resolving" | "ready" | "error"; ready: boolean; error: QueryError | Error | null };
   /** Execution of the current query, separate from restoration. Null while
    * restoring, after a restoration error and while the table is inactive, so
    * a cancelled or hidden table never publishes a stale receipt. */
@@ -302,7 +304,8 @@ export interface QueryTableApi<Row> {
   rows: Row[];
   total: number | null;
   loading: boolean;
-  error: Error | null;
+  /** A QueryError (with a code from docs/errors.md) for server and client refusals. */
+  error: QueryError | Error | null;
   refresh: () => void;
   autoRefresh: AutoRefreshApi;
   /** Refresh one row in place through a v3 identity lookup. A grouped page or
@@ -925,7 +928,7 @@ export function useQueryTable<Row>(
         resolveComputed,
       );
       if (diagnostics.length)
-        throw new Error(diagnostics.map((d) => d.message).join(" "));
+        throw new QueryError("invalid_metric", diagnostics.map((d) => d.message).join(" "), { metricId: clause.id });
       return metricPlans(clause, metricCompileSchema, resolveComputed);
     },
     [metricCompileSchema, resolveComputed],
@@ -1028,7 +1031,6 @@ export function useQueryTable<Row>(
           const request = toQueryRequestV3({ ...query, aggregations: [], select: [...query.select.filter(column => isComputedField(column.field)),
             ...serverRowQuery.select.map(field => ({ field }))] }, sourceSchema,
             transport.queryCapabilities, opts.computedExecution, { now: groupingNow ?? (opts.evaluationNow ?? Date.now)() });
-          if (request.diagnostics.length) throw Error(request.diagnostics.join(" "));
           // The server executes its own revision; never show values of a definition changed since the handshake.
           const executed = new Set([...request.result.select, ...request.result.orderBy.map(term => term.field),
             ...[...request.source.where, ...request.result.where].flatMap(term => predicatesOf(term).map(predicate => predicate.field))]);
@@ -1191,7 +1193,6 @@ export function useQueryTable<Row>(
     if (!transport?.queryCapabilities.groupedRows || !draft.grouping) throw Error("The server group preview is unavailable.");
     const request = toQueryRequestV3({ ...draft, aggregations: [] }, sourceSchema, transport.queryCapabilities,
       opts.computedExecution, { now: groupingNow ?? (opts.evaluationNow ?? Date.now)() });
-    if (request.diagnostics.length) throw Error(request.diagnostics.join(" "));
     const result = await transport.fetchQueryV3(request, signal);
     validateQueryResultV3(result, request, groupingModel.resultSchema(draft.grouping.keys, draft.grouping.summaries));
     return { rows: result.rows, total: result.total, sourceTotal: result.sourceTotal };

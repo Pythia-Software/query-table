@@ -2,7 +2,7 @@
 // This is the "does it compose?" test: it typechecks against the real packages
 // (see examples/tsconfig.json). Not shipped; not part of any package build.
 
-import { loadSchema, localStorageAdapter, type Transport, type QueryCapabilitiesV3, type QueryResultV3, type QueryState, type RowId } from "@pythia-software/query-table-core";
+import { loadSchema, localStorageAdapter, queryErrorFromResponse, type Transport, type QueryCapabilitiesV3, type QueryResultV3, type QueryState, type RowId } from "@pythia-software/query-table-core";
 import { useQueryTable } from "@pythia-software/query-table-react";
 import {
   DataTable,
@@ -44,7 +44,8 @@ const transport: Transport<Run> = {
       body: JSON.stringify(request),
       signal: signal ?? null,
     });
-    if (!res.ok) throw new Error(`Query failed with HTTP ${res.status}`);
+    // The Go handlers answer failures with a JSON QueryErrorBody; keep its code.
+    if (!res.ok) throw await queryErrorFromResponse(res);
     return res.json() as Promise<QueryResultV3>;
   },
 };

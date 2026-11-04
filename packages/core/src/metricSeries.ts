@@ -507,7 +507,7 @@ export function planMetricSeries(
       return prepared.map((item): AggregationResultEntry => {
         const c = item.clause;
         if (item.kind === "error")
-          return { id: c.id, buckets: [], error: item.error };
+          return { id: c.id, buckets: [], error: item.error, errorCode: "invalid_metric" };
         if (item.kind === "empty") {
           const none: AggregationResultEntry = {
             id: c.id,

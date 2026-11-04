@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import Ajv2020 from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
 import {
-  EMPTY_QUERY, loadSchema, toDistinctRequestV3, toFieldStatsRequestV3, toQueryRequestV3, toRowRequestV3,
+  ERROR_CODES, EMPTY_QUERY, isQueryError, loadSchema, queryErrorFromBody, toDistinctRequestV3, toFieldStatsRequestV3, toQueryRequestV3, toRowRequestV3,
   type QueryCapabilitiesV3, type QueryState,
 } from "../src/index";
 
@@ -18,7 +18,7 @@ const schemaDocument = JSON.parse(readFileSync(path.join(root, "schema/query-wir
 const ajv = new Ajv2020({ allErrors: true, strict: true, strictTypes: false });
 // The x- keywords configure the generators and are inert for validation.
 for (const keyword of ["x-ts-name", "x-ts-type", "x-go-name", "x-go-type", "x-go-repr", "x-go-omit", "x-go-extra",
-  "x-swift-name", "x-swift-type", "x-swift-repr", "x-swift-case", "x-swift-default", "x-swift-init", "x-swift-lenient"]) ajv.addKeyword(keyword);
+  "x-swift-name", "x-swift-type", "x-swift-repr", "x-swift-case", "x-swift-default", "x-swift-init", "x-swift-lenient", "x-codes"]) ajv.addKeyword(keyword);
 ajv.addSchema(schemaDocument);
 const validator = (def: string) => ajv.getSchema(`${schemaDocument.$id}#/$defs/${def}`)!;
 const validate = (def: string, value: unknown) => {
@@ -39,7 +39,7 @@ const schema = loadSchema({
   name: "runs", idField: "id", defaultLimit: 25,
   fields: [
     { name: "id", label: "ID", type: "number", source: "backend" },
-    { name: "at", label: "Time", type: "datetime", source: "backend" },
+    { name: "at", label: "Time", type: "datetime", source: "backend", aggregate: { groupable: true } },
     { name: "name", label: "Name", type: "text", source: "backend" },
     { name: "amount", label: "Amount", type: "number", source: "backend" },
     { name: "status", label: "Status", type: "enum", source: "backend", filter: { values: { source: "static", options: ["new", "done"] } } },
@@ -95,6 +95,20 @@ describe("wire schema conformance", () => {
     expect(serialize(JSON.parse(text))).toBe(text);
   });
 
+  it.each(list("errors"))("error fixture %s validates and reads as a QueryError", (name) => {
+    const text = read("errors", name), body = JSON.parse(text);
+    expect(validate("QueryErrorBody", body)).toEqual([]);
+    expect(serialize(body)).toBe(text);
+    const error = queryErrorFromBody(body, 400)!;
+    expect(isQueryError(error) && ERROR_CODES.includes(error.code)).toBe(true);
+    expect(error.toJSON()).toEqual(body.error);
+  });
+
+  it("knows every schema error code", () => {
+    expect([...ERROR_CODES]).toEqual(schemaDocument.$defs.ErrorCode.enum);
+    expect(validate("QueryErrorBody", { error: { code: "not_a_code", message: "x" } })).not.toEqual([]);
+  });
+
   it("validates the capabilities fixture", () => {
     expect(validate("QueryCapabilitiesV3", capabilities)).toEqual([]);
   });
@@ -107,10 +121,10 @@ describe("wire schema conformance", () => {
           dateGrouping: { field: "at", interval: "month", timeZone: "Europe/Berlin", includeEmpty: true, range: "observed" } },
         { id: "filtered", op: "count", groupBy: ["status"], where: [{ field: "amount", op: ">", value: "5" }],
           minCount: { min: 2, distinct: "name" } },
-        { id: "box", op: "count", groupBy: ["status"], distribution: { kind: "box", input: "amount", whiskers: "tukey" } },
+        { id: "box", op: "count", groupBy: ["status"], distribution: { kind: "box", input: "[amount]", whiskers: "tukey" } },
       ],
     };
-    const groupedQuery = toQueryRequestV3({ ...rowsQuery, grouping: {
+    const groupedQuery = toQueryRequestV3({ ...rowsQuery, select: [{ field: "status" }, { field: "total" }], where: [], orderBy: [{ field: "total", dir: "desc" }], grouping: {
       keys: ["status", { field: "at", interval: "month" }],
       summaries: [{ id: "total", op: "sum", field: "amount" }], representative: null,
       source: { ...rowsQuery },

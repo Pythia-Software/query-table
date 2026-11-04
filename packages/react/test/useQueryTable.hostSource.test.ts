@@ -285,6 +285,6 @@ it("refuses unsupported metric population controls per card on the v3 transport"
   const metrics=api().aggregations.results?.metrics??[];
   expect(metrics.map(metric=>metric.id)).toEqual(["big","filtered"]);
   expect(metrics[0]).toMatchObject({hiddenGroups:0,groupCount:2});
-  expect(metrics[1]).toEqual({id:"filtered",buckets:[],error:"This server does not support metric filters."});
+  expect(metrics[1]).toEqual({id:"filtered",buckets:[],error:"This server does not support metric filters.",errorCode:"capability_unsupported"});
   for(const [request] of fetchQueryV3.mock.calls) expect(request.metrics.some(metric=>metric.id==="filtered")).toBe(false);
 });

@@ -1,4 +1,4 @@
-import type { FieldSchema, QueryCapabilitiesV3, QueryResultV3, StorageAdapter, Transport } from "@pythia-software/query-table-core";
+import { queryErrorFromResponse, type FieldSchema, type QueryCapabilitiesV3, type QueryResultV3, type StorageAdapter, type Transport } from "@pythia-software/query-table-core";
 import { useQueryTable } from "@pythia-software/query-table-react";
 import { DataTable, QueryBuilder, MetricsPanel } from "@pythia-software/query-table-ui";
 
@@ -11,7 +11,8 @@ export function withServerExecution<Row>(endpoint: string, capabilities: QueryCa
     async fetchQueryV3(request, signal) {
       const response = await fetch(endpoint, { method: "POST", ...(signal ? { signal } : {}),
         headers: { "Content-Type": "application/json" }, body: JSON.stringify(request) });
-      if (!response.ok) throw Error(`Query execution failed (HTTP ${response.status}).`);
+      // A QueryError with the server's code (see docs/errors.md).
+      if (!response.ok) throw await queryErrorFromResponse(response);
       return await response.json() as QueryResultV3;
     },
   };

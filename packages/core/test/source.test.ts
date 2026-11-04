@@ -52,9 +52,9 @@ it("groups approved materialized computed keys and retains source predicates",()
   const unapproved=sourceExecutionSchema(schema,{...execution,fields:{"@computed/double":{...execution.fields["@computed/double"]!,filter:false}}});
   expect(()=>applyQuery(rows,grouped,unapproved)).toThrow("unavailable field");
   const capabilities:QueryCapabilitiesV3={version:3,profile:"qt-sqlite-v1",groupedRows:true,calendarGrouping:true,computedSourceFilters:true,regex:false,maxRows:10000,maxGroups:2000,maxPopulation:250000};
-  expect(toQueryRequestV3(grouped,schema,capabilities,execution,{now:1}).diagnostics).toEqual([]);
+  expect(()=>toQueryRequestV3(grouped,schema,capabilities,execution,{now:1})).not.toThrow();
   const regex={...grouped,grouping:{...grouped.grouping!,source:{...EMPTY_QUERY,where:[{field:"key",op:"matches_regex" as const,value:"a"}]}}};
-  expect(toQueryRequestV3(regex,schema,capabilities,execution).diagnostics.join(" ")).toContain("regex");
+  expect(()=>toQueryRequestV3(regex,schema,capabilities,execution)).toThrow(expect.objectContaining({code:"capability_unsupported",capability:"regexSourceFilters",field:"key"}));
   expect(()=>applyQuery(rows,regex,approved)).toThrow("isolated");
 });
 
