@@ -29,6 +29,24 @@
   shapes are also exported (`MetricSpecV3`, `MetricBucketV3`,
   `MetricResultV3`, `ProjectedSchemaV3`, `WireWhereTerm`, ...).
 
+- Machine-readable error codes, defined once as `ErrorCode` in the wire
+  schema and used by Go, the HTTP handlers, TypeScript and Swift. See
+  [Error codes](docs/errors.md) for every code, its HTTP status and whether a
+  retry can succeed. Go exports one constant per code
+  (`ErrorCodeResourceLimit`, ...), `ErrorCodes()`, `ErrorCode.HTTPStatus()`,
+  `ErrorDetail(err)` and `WriteQueryError(w, err)`. TypeScript exports
+  `ERROR_CODES`, `ErrorCode`, `QueryError` (`code`, `field`, `offset`,
+  `metricId`, `status`, `capability`), `isQueryError`, `queryErrorFromResponse`
+  for fetch-based transports, `queryErrorFromBody` and `errorCodeForStatus`;
+  `QueryDecodeError` is a `QueryError`. Swift has `ErrorCode` (unknown codes
+  decode as `.unknown`), `QueryErrorDetail`, `QueryErrorBody`, and
+  `QueryTableError.server(_:status:)`, `.refused(_:_:)` and `.code`;
+  `HTTPQueryTransport` decodes the error body of a non-2xx response. A metric
+  that fails alone has `errorCode` next to its `error`. React's row, metric and
+  restoration errors are the thrown `QueryError` instances
+  (`error: QueryError | Error | null`). Error-body fixtures are in
+  `schema/fixtures/wire/errors`.
+
 ### Fixed
 
 - Encoding drift between the three wire implementations, found while
@@ -56,6 +74,34 @@
 
 ### Changed
 
+- **Breaking:** requests no longer carry `diagnostics` (`QueryRequestV3`,
+  `MetricSpecV3` and the grouping definition). Before, the TypeScript client
+  put English sentences into the request and the server refused any non-empty
+  list with a misleading "a valid version 3 query is required". Now
+  `toQueryRequestV3`, `toDistinctRequestV3` and the other builders throw a
+  `QueryError` before anything is sent (`capability_unsupported`,
+  `residual_query`, `invalid_metric`, `grouping`, `profile_mismatch`, ...),
+  and Swift's `QueryState.queryRequestV3` throws
+  `QueryTableError.refused`. The Go server refuses unsupported features on its
+  own; a request that still has a `diagnostics` key is `invalid_query`.
+- **Breaking:** the Go HTTP handlers (`NewQueryV3Handler`,
+  `NewComputedColumnsHandler`, `NewQuerySnapshotsHandler`) answer every
+  failure with `Content-Type: application/json` and a `QueryErrorBody`
+  (`{"error": {"code", "message", "field"?, "offset"?, "metricId"?}}`)
+  instead of a plain-text body, keeping `field` and `offset`. Statuses follow
+  the code: a too-large body is 413 (was 400), `resource_limit` and the other
+  budget codes are 422 (were 400), `definition_changed` and
+  `profile_mismatch` are 409 (were 400), and host-configuration errors such as
+  `snapshot_transaction_required` are 500 (were 400).
+- **Breaking (Go):** `PlanDiagnostic.Code` is an `ErrorCode` (was `string`),
+  `PlanDiagnostic` gains `MetricID`, and `QueryLinkErrorCode` is an alias of
+  `ErrorCode`. The code `query` is renamed `invalid_query`. The plain-error
+  validation of stages, metrics and `minCount` (`WireQuery.Validate`,
+  `QueryRequestV3.Validate`, `MetricMinCount`) returns coded diagnostics
+  (`invalid_query`, `invalid_metric`), and JSON decode failures are
+  `invalid_json` or `invalid_query`.
+- The demo server writes `QueryErrorBody` too, and the demo and example
+  transports throw `queryErrorFromResponse(response)`.
 - **Breaking (TypeScript):** `ServerQuery` no longer declares `hostState`.
   No builder set it and the Go decoder rejects it on a stage; host state is
   `QueryRequestV3.hostState`.
