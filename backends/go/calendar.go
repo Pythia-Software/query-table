@@ -319,7 +319,7 @@ func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggS
 		}
 		p, err := compileMetricDialect(ctx, q, spec, s, o, d.Dialect == "sqlite")
 		if err == nil {
-			p, err = compileMetricDialect(ctx, q, spec, narrowSchema(s, p.Dependencies, q.Where, spec.Where), o, d.Dialect == "sqlite")
+			p, err = compileMetricDialect(ctx, q, spec, narrowSchema(s, p.Dependencies, q.OrderBy, q.Where, spec.Where), o, d.Dialect == "sqlite")
 		}
 		if err != nil {
 			return MetricResult{}, err

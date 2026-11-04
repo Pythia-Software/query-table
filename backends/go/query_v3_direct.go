@@ -47,10 +47,10 @@ func (d QueryDatasetV3) countPopulation(ctx context.Context, tx *sql.Tx, where [
 	return total, err
 }
 
-// narrowSchema keeps the bindings a compiled plan reaches, the filtered and
-// sort fields, and the identity. Recompiling against it keeps materialized
+// narrowSchema keeps the bindings a compiled plan reaches, the requested,
+// default and tiebreak sort fields, the filtered fields, and the identity. Recompiling against it keeps materialized
 // stages from carrying unrelated wide source columns.
-func narrowSchema(s Schema, dependencies []string, where ...[]WhereTerm) Schema {
+func narrowSchema(s Schema, dependencies []string, order []OrderBy, where ...[]WhereTerm) Schema {
 	names := map[string]bool{s.IDField: true}
 	for _, name := range dependencies {
 		names[name] = true
@@ -62,8 +62,8 @@ func narrowSchema(s Schema, dependencies []string, where ...[]WhereTerm) Schema 
 			}
 		}
 	}
-	for _, order := range append(append([]OrderBy{}, s.DefaultSort...), s.TiebreakSort...) {
-		names[order.Field] = true
+	for _, term := range append(append(append([]OrderBy{}, order...), s.DefaultSort...), s.TiebreakSort...) {
+		names[term.Field] = true
 	}
 	fields := map[string]FieldSpec{}
 	for name, field := range s.Fields {
@@ -118,7 +118,7 @@ func (d QueryDatasetV3) executeUngrouped(ctx context.Context, tx *sql.Tx, q Quer
 		resultQuery.Select = selected
 		rowsPlan, e := compileComputedRowsDialect(ctx, resultQuery, d.Schema, o, sqlite)
 		if e == nil {
-			rowsPlan, e = compileComputedRowsDialect(ctx, resultQuery, narrowSchema(d.Schema, rowsPlan.Dependencies, resultQuery.Where), o, sqlite)
+			rowsPlan, e = compileComputedRowsDialect(ctx, resultQuery, narrowSchema(d.Schema, rowsPlan.Dependencies, resultQuery.OrderBy, resultQuery.Where), o, sqlite)
 		}
 		if e != nil {
 			return out, e

@@ -164,7 +164,6 @@ func TestRowsDistributionBoxSampleBudget(t *testing.T) {
 	q := metricsV3(nil, nil, 0, 0,
 		qt.AggSpec{ID: "box", Op: "count", Distribution: &qt.MetricDistribution{Kind: "box", Input: "[n]"}},
 		qt.AggSpec{ID: "grouped", GroupBy: []string{"enum"}, Op: "count", Distribution: &qt.MetricDistribution{Kind: "box", Input: "[n]"}},
-		qt.AggSpec{ID: "histogram", Op: "count", Distribution: &qt.MetricDistribution{Kind: "histogram", Input: "[n]"}},
 	)
 	compareStaged(t, tx, d, q, qt.PlanOptions{})
 	compareDirect(t, tx, d, q)

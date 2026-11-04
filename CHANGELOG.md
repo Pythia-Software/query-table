@@ -33,7 +33,27 @@
   `fetchFieldStatsV3`. With a transport, every metric batch is one v3 request.
   `api.filterValues` takes an optional `AbortSignal`, and the DuckDB transport
   is v3-only. `clientRows`, `metricTransport` and `computedExecution` are
-  unchanged.
+  unchanged. Remote tables refuse client-only (`pushdown: false`) filters
+  instead of paging the unfiltered server result.
+- **Breaking (Go):** `QueryDatasetV3` (`Execute`, `ExecuteIn`, `Capabilities`,
+  `DescribeComputedPartialIn`), `DecodeQueryRequestV3` and `NewQueryV3Handler`
+  are the only query API. `Compile*`, `SQLiteDataset`, `SQLiteV2Dataset`,
+  `ServerQueryV2`, `MetricQuery`, `DecodeWireQuery`, `DecodeSQLiteQuery`, the
+  combined PostgreSQL metric statement and SQLite source proofs are removed.
+  `SQLiteMetricV2`, `SQLiteMetricV2Bucket`, `SQLiteComputedExecution` and
+  `SQLiteComputedFieldCapability` are renamed `MetricResult`, `MetricBucket`,
+  `ComputedExecution` and `ComputedFieldCapability` (JSON unchanged). Request
+  stages accept only `select`, `where`, `orderBy`, `limit` and `offset`.
+  Numeric bindings need `expressionNumeric: true` to be read by v3.
+- Go v3 executes ungrouped requests directly against `SourceSQL` instead of
+  staging the matching population, so `MaxPopulation` and `MaxStagingBytes`
+  bound only grouped execution and calendar scratch. Plans recompile against
+  the bindings they reach. Histograms no longer count against
+  `MaxSamplesPerGroup`.
+- **Breaking (Swift):** `QueryTransport` is `queryCapabilities` plus
+  `fetchQueryV3`; `HTTPQueryTransport` posts one v3 request to one endpoint
+  and validates the response, and `LocalQueryTransport` executes v3 requests
+  in process.
 - **Breaking:** `QueryState.fitToScreen` is replaced by `fit: "screen"`, and
   Go's `LinkQuery.FitToScreen` by `LinkQuery.Fit`. The compact link key is
   `ft`. Legacy `fitToScreen: true` (`fs`) links, saved queries and link
