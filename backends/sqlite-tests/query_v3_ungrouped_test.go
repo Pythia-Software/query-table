@@ -115,6 +115,10 @@ func ungroupedCases() map[string]qt.QueryRequestV3 {
 			qt.AggSpec{ID: "scatter", Expression: "SUM([n])", ExpressionY: "COUNT()", GroupBy: byK},
 			qt.AggSpec{ID: "computed", Op: "sum", Field: "@computed/double", GroupBy: []string{"@computed/big"}}, qt.AggSpec{ID: "computed_error", Op: "sum", Field: "@computed/inv"},
 			qt.AggSpec{ID: "invalid", Op: "sum", Field: "note"}),
+		// Calendar metrics stage computed inputs typed, as the staged executor does.
+		"calendar over computed": ungroupedRequest(qt.WireQuery{Select: []string{"id"}, Limit: 5},
+			qt.AggSpec{ID: "weekly_double", Op: "sum", Field: "@computed/double", GroupBy: []string{"at"}, DateGrouping: &qt.MetricDateGrouping{Field: "at", Interval: "week", TimeZone: "UTC", Range: "observed"}},
+			qt.AggSpec{ID: "weekly_big", Op: "count", GroupBy: []string{"at", "@computed/big"}, DateGrouping: &qt.MetricDateGrouping{Field: "at", Interval: "week", TimeZone: "UTC", Range: "observed"}}),
 		"calendar": ungroupedRequest(qt.WireQuery{Select: []string{"id"}, Where: []qt.WhereTerm{{Field: "at", Op: ">=", Value: "2026-10-05T00:00:00Z"}}, OrderBy: []qt.OrderBy{{Field: "at", Dir: "desc"}}, Limit: 15},
 			qt.AggSpec{ID: "days", Op: "count", GroupBy: []string{"at"}, DateGrouping: &qt.MetricDateGrouping{Field: "at", Interval: "week", TimeZone: "America/New_York", Range: "query"}},
 			qt.AggSpec{ID: "hours", Op: "sum", Field: "n", GroupBy: []string{"secs", "k"}, DateGrouping: &qt.MetricDateGrouping{Field: "secs", Interval: "hourOfDay", TimeZone: "UTC", Range: "observed"}},

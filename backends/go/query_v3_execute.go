@@ -283,7 +283,7 @@ func (d QueryDatasetV3) ExecuteIn(ctx context.Context, tx *sql.Tx, q QueryReques
 	metricQuery := metricRequest{Version: 2, Where: resultQuery.Where, OrderBy: []OrderBy(resultQuery.OrderBy), Limit: resultQuery.Limit, Offset: resultQuery.Offset}
 	for _, spec := range q.Metrics {
 		metric, e := isolateMetric(ctx, tx, spec.ID, spec.Scope, func() (MetricResult, error) {
-			return d.executeMetric(ctx, tx, spec, metricQuery, result, stageOptions, out.Total, maxGroups, &tables)
+			return d.executeMetric(ctx, tx, spec, metricQuery, result, nil, stageOptions, out.Total, maxGroups, &tables)
 		})
 		if e != nil {
 			return out, e

@@ -312,7 +312,9 @@ func calendarRange(config MetricDateGrouping, q metricRequest, observed []time.T
 	return start, end, true, err
 }
 
-func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggSpec, q metricRequest, s Schema, o PlanOptions, total int64, maxGroups int, tables *[]string) (MetricResult, error) {
+// computed types canonical computed fields absent from s, as staging does;
+// direct execution reads them from the source plan.
+func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggSpec, q metricRequest, s Schema, computed map[string]FieldSpec, o PlanOptions, total int64, maxGroups int, tables *[]string) (MetricResult, error) {
 	if spec.DateGrouping == nil {
 		if err := d.checkMetricSamples(ctx, tx, spec, q, s, o, maxGroups); err != nil {
 			return MetricResult{}, err
@@ -332,6 +334,9 @@ func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggS
 		return MetricResult{}, err
 	}
 	field, ok := s.Fields[config.Field]
+	if !ok {
+		field, ok = computed[config.Field]
+	}
 	if !ok || field.Kind != FieldDatetime || !fieldGroupable(field) || len(spec.GroupBy) == 0 || spec.GroupBy[0] != config.Field || spec.Distribution != nil {
 		return MetricResult{}, diagnostic("date_grouping", "calendar grouping requires the first datetime key and scalar metrics")
 	}
@@ -403,7 +408,10 @@ func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggS
 	}
 	calendarSchema := Schema{Name: s.Name, IDField: s.IDField, Fields: map[string]FieldSpec{}}
 	for _, column := range p.Columns {
-		original := s.Fields[column.Field]
+		original, ok := s.Fields[column.Field]
+		if !ok {
+			original = computed[column.Field]
+		}
 		original.Expr = "r." + queryIdent(column.ValueAlias)
 		original.ValueErrorExpr = "r." + queryIdent(column.ErrorAlias)
 		original.SortExpr = ""

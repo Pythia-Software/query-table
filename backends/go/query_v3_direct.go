@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"sort"
+	"strings"
 )
 
 // TestOnlyStageUngrouped returns d with ungrouped requests sent through the
@@ -128,6 +129,18 @@ func (d QueryDatasetV3) executeUngrouped(ctx context.Context, tx *sql.Tx, q Quer
 		}
 	}
 	metricQuery := metricRequest{Version: 2, Where: resultQuery.Where, OrderBy: []OrderBy(resultQuery.OrderBy), Limit: resultQuery.Limit, Offset: resultQuery.Offset}
+	// Calendar metrics stage their inputs; computed ones are typed as staging types them.
+	computed := map[string]FieldSpec{}
+	for _, column := range plan.Columns {
+		if _, ok := d.Schema.Fields[column.Field]; ok || !strings.HasPrefix(column.Field, "@computed/") {
+			continue
+		}
+		id := strings.TrimPrefix(column.Field, "@computed/")
+		f := resultField(column.Field, column.Type, "", d.ComputedGroupable[id])
+		f.AggregateOps = plan.ComputedPolicies[column.Field]
+		f.ServerFilter = d.ComputedFilterable[id]
+		computed[column.Field] = f
+	}
 	metrics := make([]MetricResult, len(q.Metrics))
 	batch, slots := []AggSpec{}, []int{}
 	for i, spec := range q.Metrics {
@@ -142,7 +155,7 @@ func (d QueryDatasetV3) executeUngrouped(ctx context.Context, tx *sql.Tx, q Quer
 			if batched {
 				return MetricResult{}, d.checkMetricSamples(ctx, tx, spec, metricQuery, d.Schema, o, maxGroups)
 			}
-			return d.executeMetric(ctx, tx, spec, metricQuery, d.Schema, o, total, maxGroups, tables)
+			return d.executeMetric(ctx, tx, spec, metricQuery, d.Schema, computed, o, total, maxGroups, tables)
 		})
 		if e != nil {
 			return out, e
