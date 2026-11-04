@@ -135,7 +135,7 @@ final class CoreTests: XCTestCase {
     XCTAssertEqual(result.total, 3)
     XCTAssertEqual(result.metrics.first?.buckets.first?.value, .number(30))
     XCTAssertEqual(result.metrics.first?.buckets.first?.count, 3)
-    let distinctRequest = QueryRequestV3.distinctValues(
+    let distinctRequest = try QueryRequestV3.distinctValues(
       field: "name", search: "a", limit: 1, schema: schema,
       capabilities: adapter.queryCapabilities)
     let distinctResult = try await adapter.fetchQueryV3(distinctRequest)
@@ -151,7 +151,7 @@ final class CoreTests: XCTestCase {
       rows: rows + [["id": .number(4), "name": .string("Beta"), "tags": .array([.string("y"), .string("x")])]])
     func values(_ field: String) async throws -> DistinctResultV3 {
       let result = try await adapter.fetchQueryV3(
-        .distinctValues(field: field, schema: schema, capabilities: adapter.queryCapabilities))
+        try .distinctValues(field: field, schema: schema, capabilities: adapter.queryCapabilities))
       return try XCTUnwrap(result.distinct)
     }
     let names = try await values("name")
@@ -159,7 +159,7 @@ final class CoreTests: XCTestCase {
     let tags = try await values("tags")
     XCTAssertEqual(tags.values, ["x", "y"])
     XCTAssertTrue(tags.hasNull)
-    var invalid = QueryRequestV3.distinctValues(
+    var invalid = try QueryRequestV3.distinctValues(
       field: "name", schema: schema, capabilities: adapter.queryCapabilities)
     invalid.rows = true
     do {

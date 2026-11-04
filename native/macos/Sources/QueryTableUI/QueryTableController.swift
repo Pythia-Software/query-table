@@ -13,6 +13,9 @@ public struct SavedQuerySnapshot: Codable, Identifiable {
 public final class QueryTableController: ObservableObject {
   public let schema: FieldSchema
   public let adapter: any QueryTransport
+  /// A server handshake's execution envelope (revisions, plan token,
+  /// snapshot), sent with every request. Nil for servers without one.
+  public var execution: QueryExecutionV3?
   public let computedColumns: ComputedColumnController
   @Published public private(set) var query: QueryState
   @Published public private(set) var rows: [QueryRow] = []
@@ -146,6 +149,7 @@ public final class QueryTableController: ObservableObject {
     let columns = visibleColumns
     let catalogueVersion = computedColumns.catalogueVersion
     let adapter = self.adapter
+    let execution = self.execution
     let schema = self.schema
     let computed = computedColumns
     isLoading = true
@@ -164,7 +168,7 @@ public final class QueryTableController: ObservableObject {
           )
         }
         var request = try snapshot.queryRequestV3(
-          schema: schema, capabilities: adapter.queryCapabilities, metrics: false)
+          schema: schema, capabilities: adapter.queryCapabilities, execution: execution, metrics: false)
         let dependencies = try await computed.dependencies(for: columns)
         request.source.select = Array(Set(request.source.select + dependencies)).sorted()
         request.result = request.source
@@ -213,7 +217,7 @@ public final class QueryTableController: ObservableObject {
       do {
         if debounce { try await Task.sleep(nanoseconds: 250_000_000) }
         let request = try snapshot.queryRequestV3(
-          schema: schema, capabilities: adapter.queryCapabilities, rows: false)
+          schema: schema, capabilities: adapter.queryCapabilities, execution: execution, rows: false)
         let result = try await Self.execute(request, adapter: adapter, schema: schema)
         guard let self, ticket == self.generation, !Task.isCancelled else { return }
         self.metrics = result.metrics
@@ -244,7 +248,7 @@ public final class QueryTableController: ObservableObject {
     }
     let count = min(10_000, max(1, count))
     var request = try snapshot.queryRequestV3(
-      schema: schema, capabilities: adapter.queryCapabilities, metrics: false)
+      schema: schema, capabilities: adapter.queryCapabilities, execution: execution, metrics: false)
     request.source.select = Array(Set(dependencies + [schema.idField])).sorted()
     request.source.offset = 0
     var rows: [QueryRow] = []
@@ -267,9 +271,9 @@ public final class QueryTableController: ObservableObject {
   public func suggestions(field: String, search: String, limit: Int = 30) async throws
     -> DistinctResultV3
   {
-    let request = QueryRequestV3.distinctValues(
+    let request = try QueryRequestV3.distinctValues(
       field: field, search: search, limit: limit, schema: schema,
-      capabilities: adapter.queryCapabilities)
+      capabilities: adapter.queryCapabilities, execution: execution)
     let result = try await Self.execute(request, adapter: adapter, schema: schema)
     guard let distinct = result.distinct else {
       throw QueryTableError.invalidResponse("The server returned no distinct values.")
@@ -279,9 +283,9 @@ public final class QueryTableController: ObservableObject {
 
   /// Refetches one row by identity with a rows request; nil when it no longer exists.
   public func fetchRow(id: JSONValue, select: [String]? = nil) async throws -> QueryRow? {
-    let request = QueryRequestV3.rowLookup(
+    let request = try QueryRequestV3.rowLookup(
       id: id, select: select ?? QueryState().serverQuery(schema: schema).select, schema: schema,
-      capabilities: adapter.queryCapabilities)
+      capabilities: adapter.queryCapabilities, execution: execution)
     let result = try await Self.execute(request, adapter: adapter, schema: schema)
     guard result.rows.count < 2, result.total < 2 else {
       throw QueryTableError.invalidResponse("identity must be unique")

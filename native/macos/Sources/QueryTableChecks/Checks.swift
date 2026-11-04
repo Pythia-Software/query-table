@@ -221,13 +221,32 @@ struct QueryTableChecks {
     try check(plainMetric.metrics.first?.buckets.first?.count == rows.count, "An empty metric filter runs as a plain metric")
     let lenient = try JSONDecoder().decode(
       AggregationBucket.self, from: Data(#"{"keys":[],"count":2}"#.utf8))
-    let envelope = try JSONDecoder().decode(
+    let lenientEnvelope = try JSONDecoder().decode(
       QueryExecutionV3.self, from: Data(#"{"profile":"p","resolvedRevisions":{},"fields":{}}"#.utf8))
     try check(
-      lenient.value == .null && envelope.planToken == "",
+      lenient.value == .null && lenientEnvelope.planToken == "",
       "An omitted bucket value or plan token decodes as before")
-    let lookup = QueryRequestV3.rowLookup(
+    let lookup = try QueryRequestV3.rowLookup(
       id: .number(2), select: ["name"], schema: schema, capabilities: local.queryCapabilities)
+    for (limit, search) in [(0, "pa"), (501, "pa"), (5, String(repeating: "x", count: 2001))] {
+      var refused: QueryTableError?
+      do {
+        _ = try QueryRequestV3.distinctValues(
+          field: "status", search: search, limit: limit, schema: schema,
+          capabilities: local.queryCapabilities)
+      } catch let error as QueryTableError { refused = error }
+      try check(refused?.code == .invalidQuery, "Distinct limits and search budgets are refused locally")
+    }
+    let envelope = QueryExecutionV3(
+      profile: local.queryCapabilities.profile, planToken: "token",
+      resolvedRevisions: ["@computed/double": "2"], fields: [:], snapshot: "s1")
+    let carried = try QueryRequestV3.rowLookup(
+      id: .number(2), select: ["name"], schema: schema, capabilities: local.queryCapabilities,
+      execution: envelope)
+    try check(
+      carried.expectedRevisions == ["double": "2"] && carried.planToken == "token"
+        && carried.snapshot == "s1",
+      "Auxiliary requests carry the execution envelope")
     let found = try await local.fetchQueryV3(lookup)
     try found.validate(for: lookup, schema: schema)
     try check(

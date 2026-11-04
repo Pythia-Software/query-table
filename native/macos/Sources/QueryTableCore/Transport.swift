@@ -115,29 +115,69 @@ extension QueryRequestV3 {
   /// Filter autocomplete: a distinct section over the unfiltered population.
   public static func distinctValues(
     field: String, search: String = "", limit: Int = 50, schema: FieldSchema,
-    capabilities: QueryCapabilitiesV3, now: Date = Date(), hostState: [String: JSONValue]? = nil
-  ) -> QueryRequestV3 {
-    QueryRequestV3(
+    capabilities: QueryCapabilitiesV3, execution: QueryExecutionV3? = nil, now: Date = Date(),
+    hostState: [String: JSONValue]? = nil
+  ) throws -> QueryRequestV3 {
+    guard (1...DistinctRequestV3.maxLimit).contains(limit) else {
+      throw QueryTableError.refused(
+        .invalidQuery, "Distinct value limit must be between 1 and \(DistinctRequestV3.maxLimit).")
+    }
+    guard search.count <= DistinctRequestV3.maxSearchLength else {
+      throw QueryTableError.refused(.invalidQuery, "Distinct search exceeds its budget.")
+    }
+    let envelope = try ExecutionEnvelope(capabilities: capabilities, execution: execution)
+    return QueryRequestV3(
       profile: capabilities.profile, now: epochMilliseconds(now),
       source: ServerQuery(select: [], limit: 1), rows: false,
-      distinct: DistinctRequestV3(
-        field: field, search: search, limit: max(1, min(DistinctRequestV3.maxLimit, limit))),
-      hostState: hostState)
+      distinct: DistinctRequestV3(field: field, search: search, limit: limit),
+      expectedRevisions: envelope.revisions, planToken: envelope.planToken,
+      snapshot: envelope.snapshot, hostState: hostState)
   }
 
   /// Row refresh by identity. A total above one is a non-unique identity.
   public static func rowLookup(
     id: JSONValue, select: [String], schema: FieldSchema, capabilities: QueryCapabilitiesV3,
-    now: Date = Date(), hostState: [String: JSONValue]? = nil
-  ) -> QueryRequestV3 {
+    execution: QueryExecutionV3? = nil, now: Date = Date(), hostState: [String: JSONValue]? = nil
+  ) throws -> QueryRequestV3 {
     let stage = ServerQuery(
       select: Array(Set(select + [schema.idField])).sorted(),
       whereTerms: [.predicate(.init(field: schema.idField, op: "=", value: id.displayString))],
       // Two rows within the server's budget; the total reports a duplicate either way.
       limit: max(1, min(2, capabilities.maxRows)))
+    let envelope = try ExecutionEnvelope(capabilities: capabilities, execution: execution)
     return QueryRequestV3(
       profile: capabilities.profile, now: epochMilliseconds(now), source: stage,
-      hostState: hostState)
+      expectedRevisions: envelope.revisions, planToken: envelope.planToken,
+      snapshot: envelope.snapshot, hostState: hostState)
+  }
+}
+
+/// The revisions, plan token and snapshot a request carries from a server
+/// handshake, as the TypeScript builders send them.
+struct ExecutionEnvelope {
+  var revisions: [String: String] = [:]
+  var planToken: String?
+  var snapshot: String?
+  /// A profile refusal, then revision refusals, in the TypeScript order.
+  var profileRefusals: [(code: ErrorCode, message: String)] = []
+  var revisionRefusals: [(code: ErrorCode, message: String)] = []
+  var refusals: [(code: ErrorCode, message: String)] { profileRefusals + revisionRefusals }
+  init(capabilities: QueryCapabilitiesV3, execution: QueryExecutionV3?, throwing: Bool = true) throws {
+    if capabilities.version != 3 || (execution.map { $0.profile != capabilities.profile } ?? false) {
+      profileRefusals.append((.profileMismatch, "The negotiated query profile is unavailable."))
+    }
+    for (id, revision) in execution?.resolvedRevisions ?? [:] {
+      if revision.isEmpty || id.count > 256 || revision.count > 256 {
+        revisionRefusals.append((.definitionChanged, "Invalid computed revision envelope."))
+      } else {
+        revisions[id.hasPrefix("@computed/") ? String(id.dropFirst(10)) : id] = revision
+      }
+    }
+    planToken = execution.flatMap { $0.planToken.isEmpty ? nil : $0.planToken }
+    snapshot = execution?.snapshot
+    if throwing, let first = refusals.first {
+      throw QueryTableError.refused(first.code, refusals.map(\.message).joined(separator: " "))
+    }
   }
 }
 
@@ -350,9 +390,8 @@ extension QueryState {
     if includeMetrics && aggregations.count != q.aggregations.count {
       refusals.append((.invalidMetric, "The query exceeds its metric budget or contains malformed metric state."))
     }
-    if capabilities.version != 3 || (execution.map { $0.profile != capabilities.profile } ?? false) {
-      refusals.append((.profileMismatch, "The negotiated query profile is unavailable."))
-    }
+    let envelope = try ExecutionEnvelope(capabilities: capabilities, execution: execution, throwing: false)
+    refusals.append(contentsOf: envelope.profileRefusals)
     let stage = q.serverQuery(schema: schema)
     if q.whereTerms.flatMap(\.predicates).contains(where: {
       ["matches_regex", "not_matches_regex"].contains($0.op)
@@ -369,14 +408,7 @@ extension QueryState {
     for metric in metrics {
       refusals.append(contentsOf: metric.diagnostics(schema: schema).map { (ErrorCode.invalidMetric, $0) })
     }
-    var revisions: [String: String] = [:]
-    for (id, revision) in execution?.resolvedRevisions ?? [:] {
-      if revision.isEmpty || id.count > 256 || revision.count > 256 {
-        refusals.append((.definitionChanged, "Invalid computed revision envelope."))
-      } else {
-        revisions[id.hasPrefix("@computed/") ? String(id.dropFirst(10)) : id] = revision
-      }
-    }
+    refusals.append(contentsOf: envelope.revisionRefusals)
     if let first = refusals.first {
       var unique = Set<String>()
       let message = refusals.map(\.message).filter { unique.insert($0).inserted }.joined(separator: " ")
@@ -384,9 +416,8 @@ extension QueryState {
     }
     return QueryRequestV3(
       profile: capabilities.profile, now: QueryRequestV3.epochMilliseconds(now), source: stage,
-      rows: rows, metrics: metrics, expectedRevisions: revisions,
-      planToken: execution.flatMap { $0.planToken.isEmpty ? nil : $0.planToken },
-      snapshot: execution?.snapshot, hostState: hostState)
+      rows: rows, metrics: metrics, expectedRevisions: envelope.revisions,
+      planToken: envelope.planToken, snapshot: envelope.snapshot, hostState: hostState)
   }
 }
 

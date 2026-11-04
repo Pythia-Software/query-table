@@ -81,8 +81,12 @@
   `toQueryRequestV3`, `toDistinctRequestV3` and the other builders throw a
   `QueryError` before anything is sent (`capability_unsupported`,
   `residual_query`, `invalid_metric`, `grouping`, `profile_mismatch`, ...),
-  and Swift's `QueryState.queryRequestV3` throws
-  `QueryTableError.refused`. The Go server refuses unsupported features on its
+  and Swift's `QueryState.queryRequestV3`, `QueryRequestV3.distinctValues`
+  and `QueryRequestV3.rowLookup` throw `QueryTableError.refused`. The Swift
+  builders refuse an out-of-range distinct limit or an oversized search
+  instead of clamping, take the server's execution envelope (`execution:`,
+  also `QueryTableController.execution`) like the TypeScript builders, and
+  `fetchRow` rejects a row with a different identity. The Go server refuses unsupported features on its
   own; a request that still has a `diagnostics` key is `invalid_query`.
 - **Breaking:** the Go HTTP handlers (`NewQueryV3Handler`,
   `NewComputedColumnsHandler`, `NewQuerySnapshotsHandler`) answer every

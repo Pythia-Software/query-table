@@ -54,7 +54,7 @@ enum WireCheck {
           try query.queryRequestV3(
             schema: fixture.schema, capabilities: fixture.capabilities, now: now, rows: false)
         },
-        distinct: .distinctValues(
+        distinct: try .distinctValues(
           field: "name", search: "caf", limit: 30, schema: fixture.schema,
           capabilities: fixture.capabilities, now: now))
     }
