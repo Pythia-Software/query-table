@@ -198,7 +198,7 @@ struct QueryTableChecks {
       nestedTable.error == nil && nestedTable.rows.count == 1 && nestedRow != nil,
       "An identity at a nested source path validates and looks up")
     let oneRow = QueryCapabilitiesV3(profile: local.queryCapabilities.profile, maxRows: 1)
-    let tightLookup = QueryRequestV3.rowLookup(id: .number(2), select: ["name"], schema: schema, capabilities: oneRow)
+    let tightLookup = try QueryRequestV3.rowLookup(id: .number(2), select: ["name"], schema: schema, capabilities: oneRow)
     try check(tightLookup.source.limit == 1, "Row lookup stays within a one-row budget")
     let metrics = try await local.metrics([.init(id: "total", op: "sum", field: "amount")])
     try check(metrics.first?.buckets.first?.value == .number(60), "Metric covers full dataset")
