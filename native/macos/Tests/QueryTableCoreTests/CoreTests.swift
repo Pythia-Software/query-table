@@ -126,9 +126,8 @@ final class CoreTests: XCTestCase {
   func testMetricsUseEntireFilteredSet() async throws {
     let adapter = LocalQueryTransport(schema: schema, rows: rows)
     let q = QueryState(limit: 1, aggregations: [.init(id: "total", op: "sum", field: "amount")])
-    let request = q.queryRequestV3(
+    let request = try q.queryRequestV3(
       schema: schema, capabilities: adapter.queryCapabilities, rows: false)
-    XCTAssertEqual(request.diagnostics, [])
     XCTAssertEqual(request.source, request.result)
     let result = try await adapter.fetchQueryV3(request)
     try result.validate(for: request, schema: schema)
@@ -172,15 +171,14 @@ final class CoreTests: XCTestCase {
     let q = QueryState(
       whereTerms: [.predicate(.init(field: "name", op: "=", value: "a"))],
       aggregations: [.init(id: "n", op: "count", label: "Rows")])
-    let request = q.queryRequestV3(
+    let request = try q.queryRequestV3(
       schema: schema, capabilities: QueryCapabilitiesV3(profile: "qt-sqlite-v1"),
       now: Date(timeIntervalSince1970: 1_772_964_000.5))
     let json = try XCTUnwrap(
       JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])
     XCTAssertEqual(
       Set(json.keys),
-      ["version", "profile", "now", "expectedRevisions", "source", "result", "rows", "metrics",
-       "diagnostics"])
+      ["version", "profile", "now", "expectedRevisions", "source", "result", "rows", "metrics"])
     XCTAssertEqual(json["now"] as? Int, 1_772_964_000_500)
     let stage = try XCTUnwrap(json["source"] as? [String: Any])
     XCTAssertEqual(Set(stage.keys), ["select", "where", "orderBy", "limit", "offset"])
@@ -188,7 +186,7 @@ final class CoreTests: XCTestCase {
     XCTAssertEqual(Set(metric.keys), ["id", "op", "groupBy"])
   }
   func testResultValidationMirrorsTypeScript() throws {
-    let request = QueryState().queryRequestV3(
+    let request = try QueryState().queryRequestV3(
       schema: schema, capabilities: QueryCapabilitiesV3(profile: "p"))
     var result = QueryResultV3(
       answering: request, schema: schema, rows: [["id": .number(1)], ["id": .number(2)]], total: 2)

@@ -37,5 +37,6 @@ final class WireFixtureTests: XCTestCase {
 
   func testResultFixturesRoundTrip() throws {
     try assertRoundTrips(QueryResultV3.self, kind: "results", minimum: 3)
+    try assertRoundTrips(QueryErrorBody.self, kind: "errors", minimum: 3)
   }
 }

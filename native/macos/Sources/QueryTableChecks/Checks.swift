@@ -233,11 +233,15 @@ struct QueryTableChecks {
     try check(
       found.rows.map { $0["id"] } == [.number(2)] && lookup.source.limit == 2,
       "Row refresh is a rows request filtered by identity")
-    let rejected = QueryState(orderBy: [.init(field: "missing")]).queryRequestV3(
-      schema: schema, capabilities: local.queryCapabilities)
+    var refusal: QueryTableError?
+    do {
+      _ = try QueryState(orderBy: [.init(field: "missing")]).queryRequestV3(
+        schema: schema, capabilities: local.queryCapabilities)
+    } catch let error as QueryTableError { refusal = error }
     try check(
-      rejected.diagnostics == ["The query contains unsupported result ordering."],
-      "Unsupported state becomes a request diagnostic")
+      refusal?.code == .residualQuery
+        && refusal?.errorDescription == "The query contains unsupported result ordering.",
+      "Unsupported state is refused locally with an error code")
     try await HTTPCheck.run()
     try check(true, "HTTP transport posts v3 JSON with authentication and rejects error status and mismatched responses")
 

@@ -4,9 +4,22 @@ public enum QueryTableError: Error, LocalizedError, Sendable {
   case unsupported(String)
   case invalidQuery(String)
   case invalidResponse(String)
+  /// A server's `QueryErrorBody` (see docs/errors.md) and the HTTP status.
+  case server(QueryErrorDetail, status: Int)
+  /// A client-side refusal: the request was not sent.
+  case refused(ErrorCode, String)
   public var errorDescription: String? {
     switch self {
-    case .unsupported(let v), .invalidQuery(let v), .invalidResponse(let v): return v
+    case .unsupported(let v), .invalidQuery(let v), .invalidResponse(let v), .refused(_, let v): return v
+    case .server(let detail, _): return detail.message
+    }
+  }
+  /// The machine-readable code of a server error or client refusal.
+  public var code: ErrorCode? {
+    switch self {
+    case .server(let detail, _): return detail.code
+    case .refused(let code, _): return code
+    default: return nil
     }
   }
 }
@@ -64,7 +77,7 @@ extension QueryRequestV3 {
     profile: String, now: Int64, source: ServerQuery, result: ServerQuery? = nil,
     rows: Bool = true, metrics: [MetricSpecV3] = [], distinct: DistinctRequestV3? = nil,
     expectedRevisions: [String: String] = [:], planToken: String? = nil,
-    snapshot: String? = nil, hostState: [String: JSONValue]? = nil, diagnostics: [String] = [],
+    snapshot: String? = nil, hostState: [String: JSONValue]? = nil,
     grouping: GroupingDefinition? = nil
   ) {
     self.version = 3
@@ -80,19 +93,18 @@ extension QueryRequestV3 {
     self.planToken = planToken
     self.snapshot = snapshot
     self.hostState = hostState
-    self.diagnostics = diagnostics
   }
   /// A request whose metrics are client aggregation clauses (sent without `label`).
   public init(
     profile: String, now: Int64, source: ServerQuery, result: ServerQuery? = nil,
     rows: Bool = true, metrics: [AggregationClause], distinct: DistinctRequestV3? = nil,
     expectedRevisions: [String: String] = [:], planToken: String? = nil,
-    snapshot: String? = nil, hostState: [String: JSONValue]? = nil, diagnostics: [String] = []
+    snapshot: String? = nil, hostState: [String: JSONValue]? = nil
   ) {
     self.init(
       profile: profile, now: now, source: source, result: result, rows: rows,
       metrics: metrics.map(\.wireSpec), distinct: distinct, expectedRevisions: expectedRevisions,
-      planToken: planToken, snapshot: snapshot, hostState: hostState, diagnostics: diagnostics)
+      planToken: planToken, snapshot: snapshot, hostState: hostState)
   }
 
   /// Epoch milliseconds for a request clock.
@@ -325,49 +337,56 @@ extension QueryState {
 
   /// An ungrouped v3 request (TypeScript `toQueryRequestV3`): source == result,
   /// `rows` selects the row section and `metrics` the aggregation clauses.
-  /// Unsupported state is reported in `diagnostics`, which servers refuse.
+  /// Throws `QueryTableError.refused` before anything is sent when the query
+  /// needs a capability the server lacks, or would leave a filter, sort or
+  /// malformed metric on the client (TypeScript throws a `QueryError`).
   public func queryRequestV3(
     schema: FieldSchema, capabilities: QueryCapabilitiesV3, execution: QueryExecutionV3? = nil,
     now: Date = Date(), rows: Bool = true, metrics includeMetrics: Bool = true,
     hostState: [String: JSONValue]? = nil
-  ) -> QueryRequestV3 {
+  ) throws -> QueryRequestV3 {
     let q = normalized()
-    var diagnostics: [String] = []
+    var refusals: [(code: ErrorCode, message: String)] = []
     if includeMetrics && aggregations.count != q.aggregations.count {
-      diagnostics.append("The query exceeds its metric budget or contains malformed metric state.")
+      refusals.append((.invalidMetric, "The query exceeds its metric budget or contains malformed metric state."))
     }
     if capabilities.version != 3 || (execution.map { $0.profile != capabilities.profile } ?? false) {
-      diagnostics.append("The negotiated query profile is unavailable.")
+      refusals.append((.profileMismatch, "The negotiated query profile is unavailable."))
     }
     let stage = q.serverQuery(schema: schema)
     if q.whereTerms.flatMap(\.predicates).contains(where: {
       ["matches_regex", "not_matches_regex"].contains($0.op)
     }) && capabilities.regexSourceFilters != true {
-      diagnostics.append("This server profile does not support isolated regex source filtering.")
+      refusals.append((.capabilityUnsupported, "This server profile does not support isolated regex source filtering."))
     }
     if stage.whereTerms.count != q.whereTerms.count {
-      diagnostics.append("The query contains unsupported source or result predicates.")
+      refusals.append((.residualQuery, "The query contains unsupported source or result predicates."))
     }
     if stage.orderBy.count != q.orderBy.count {
-      diagnostics.append("The query contains unsupported result ordering.")
+      refusals.append((.residualQuery, "The query contains unsupported result ordering."))
     }
     let metrics = includeMetrics ? q.aggregations : []
-    for metric in metrics { diagnostics.append(contentsOf: metric.diagnostics(schema: schema)) }
+    for metric in metrics {
+      refusals.append(contentsOf: metric.diagnostics(schema: schema).map { (ErrorCode.invalidMetric, $0) })
+    }
     var revisions: [String: String] = [:]
     for (id, revision) in execution?.resolvedRevisions ?? [:] {
       if revision.isEmpty || id.count > 256 || revision.count > 256 {
-        diagnostics.append("Invalid computed revision envelope.")
+        refusals.append((.definitionChanged, "Invalid computed revision envelope."))
       } else {
         revisions[id.hasPrefix("@computed/") ? String(id.dropFirst(10)) : id] = revision
       }
     }
-    var unique = Set<String>()
+    if let first = refusals.first {
+      var unique = Set<String>()
+      let message = refusals.map(\.message).filter { unique.insert($0).inserted }.joined(separator: " ")
+      throw QueryTableError.refused(first.code, message)
+    }
     return QueryRequestV3(
       profile: capabilities.profile, now: QueryRequestV3.epochMilliseconds(now), source: stage,
       rows: rows, metrics: metrics, expectedRevisions: revisions,
       planToken: execution.flatMap { $0.planToken.isEmpty ? nil : $0.planToken },
-      snapshot: execution?.snapshot, hostState: hostState,
-      diagnostics: diagnostics.filter { unique.insert($0).inserted })
+      snapshot: execution?.snapshot, hostState: hostState)
   }
 }
 

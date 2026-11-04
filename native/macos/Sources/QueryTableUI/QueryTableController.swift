@@ -158,11 +158,12 @@ public final class QueryTableController: ObservableObject {
             $0.predicates.allSatisfy { schema.field(named: $0.field)?.isPushdownFilter == true }
           })
         else {
-          throw QueryTableError.unsupported(
+          throw QueryTableError.refused(
+            .residualQuery,
             "This query includes a filter that cannot run on the backend. Native tables currently require backend filters to preserve accurate totals and pagination."
           )
         }
-        var request = snapshot.queryRequestV3(
+        var request = try snapshot.queryRequestV3(
           schema: schema, capabilities: adapter.queryCapabilities, metrics: false)
         let dependencies = try await computed.dependencies(for: columns)
         request.source.select = Array(Set(request.source.select + dependencies)).sorted()
@@ -211,7 +212,7 @@ public final class QueryTableController: ObservableObject {
     metricTask = Task { [weak self] in
       do {
         if debounce { try await Task.sleep(nanoseconds: 250_000_000) }
-        let request = snapshot.queryRequestV3(
+        let request = try snapshot.queryRequestV3(
           schema: schema, capabilities: adapter.queryCapabilities, rows: false)
         let result = try await Self.execute(request, adapter: adapter, schema: schema)
         guard let self, ticket == self.generation, !Task.isCancelled else { return }
@@ -239,10 +240,10 @@ public final class QueryTableController: ObservableObject {
         $0.predicates.allSatisfy { schema.field(named: $0.field)?.isPushdownFilter == true }
       })
     else {
-      throw QueryTableError.unsupported("Preview requires filters that run on the backend.")
+      throw QueryTableError.refused(.residualQuery, "Preview requires filters that run on the backend.")
     }
     let count = min(10_000, max(1, count))
-    var request = snapshot.queryRequestV3(
+    var request = try snapshot.queryRequestV3(
       schema: schema, capabilities: adapter.queryCapabilities, metrics: false)
     request.source.select = Array(Set(dependencies + [schema.idField])).sorted()
     request.source.offset = 0
@@ -297,7 +298,6 @@ public final class QueryTableController: ObservableObject {
   nonisolated private static func execute(
     _ request: QueryRequestV3, adapter: any QueryTransport, schema: FieldSchema
   ) async throws -> QueryResultV3 {
-    if let issue = request.diagnostics.first { throw QueryTableError.invalidQuery(issue) }
     let result = try await adapter.fetchQueryV3(request)
     try result.validate(for: request, schema: schema)
     return result

@@ -40,5 +40,15 @@ enum WireFixtureCheck {
     try check(
       results.count >= 3 && results.failed.isEmpty,
       "Wire result fixtures round-trip (\(results.count))\(results.failed.joined(separator: "\n"))")
+    let errors = try mismatches(QueryErrorBody.self, kind: "errors")
+    try check(
+      errors.count >= 3 && errors.failed.isEmpty,
+      "Wire error fixtures round-trip (\(errors.count))\(errors.failed.joined(separator: "\n"))")
+    let future = try JSONDecoder().decode(
+      QueryErrorBody.self, from: Data(#"{"error":{"code":"from_the_future","message":"later"}}"#.utf8))
+    try check(
+      future.error.code == .unknown && ErrorCode(rawValue: "resource_limit") == .resourceLimit
+        && ErrorCode.allCases.count == 80,
+      "Unknown error codes decode as .unknown")
   }
 }
