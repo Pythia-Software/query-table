@@ -119,14 +119,20 @@ extension QueryRequestV3 {
     capabilities: QueryCapabilitiesV3, execution: QueryExecutionV3? = nil, now: Date = Date(),
     hostState: [String: JSONValue]? = nil
   ) throws -> QueryRequestV3 {
-    guard (1...DistinctRequestV3.maxLimit).contains(limit) else {
-      throw QueryTableError.refused(
-        .invalidQuery, "Distinct value limit must be between 1 and \(DistinctRequestV3.maxLimit).")
+    // As TypeScript toDistinctRequestV3: a profile refusal, then the limit and
+    // search, then revisions; the first code, with every message.
+    let envelope = try ExecutionEnvelope(capabilities: capabilities, execution: execution, throwing: false)
+    var refusals = envelope.profileRefusals
+    if !(1...DistinctRequestV3.maxLimit).contains(limit) {
+      refusals.append((.invalidQuery, "Distinct value limit must be between 1 and \(DistinctRequestV3.maxLimit)."))
     }
-    guard search.utf16.count <= DistinctRequestV3.maxSearchLength else {
-      throw QueryTableError.refused(.invalidQuery, "Distinct search exceeds its budget.")
+    if search.utf16.count > DistinctRequestV3.maxSearchLength {
+      refusals.append((.invalidQuery, "Distinct search exceeds its budget."))
     }
-    let envelope = try ExecutionEnvelope(capabilities: capabilities, execution: execution)
+    refusals.append(contentsOf: envelope.revisionRefusals)
+    if let first = refusals.first {
+      throw QueryTableError.refused(first.code, refusals.map(\.message).joined(separator: " "))
+    }
     return QueryRequestV3(
       profile: capabilities.profile, now: epochMilliseconds(now),
       source: ServerQuery(select: [], limit: 1), rows: false,

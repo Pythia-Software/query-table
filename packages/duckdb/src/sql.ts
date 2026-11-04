@@ -15,6 +15,7 @@ import {
   type WhereTerm,
   type OrderByClause,
   type ServerQuery,
+  QueryError,
 } from "@pythia-software/query-table-core";
 
 export interface DuckDBStatement {
@@ -54,7 +55,7 @@ export class SQLBuilder {
   }
   statement(sql: string): DuckDBStatement {
     if (sql.length > 262144 || this.args.length > 10000)
-      throw Error("DuckDB statement budget exceeded.");
+      throw new QueryError("resource_limit", "DuckDB statement budget exceeded.");
     return { sql, args: [...this.args] };
   }
   definition(name: string): FieldDef {
@@ -185,7 +186,7 @@ export class SQLBuilder {
   node(node: FormulaNode): string {
     const sql = this.nodeSQL(node);
     if (sql.length > 131072)
-      throw Error("DuckDB expression SQL budget exceeded.");
+      throw new QueryError("resource_limit", "DuckDB expression SQL budget exceeded.");
     return sql;
   }
   private nodeSQL(node: FormulaNode): string {

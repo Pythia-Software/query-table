@@ -1419,7 +1419,7 @@ public enum ErrorCode: String, Codable, Equatable, Sendable, CaseIterable {
   case scope
   /// A shownRows metric needs a positive page limit.
   case windowRequired = "window_required"
-  /// An expression does not parse; offset points at the problem.
+  /// An expression does not parse; the message says where.
   case syntax
   /// An expression uses syntax this server does not execute.
   case unsupportedSyntax = "unsupported_syntax"
@@ -1502,7 +1502,7 @@ public struct QueryErrorDetail: Codable, Equatable, Sendable {
   public var message: String
   /// The field the error is about, when there is one.
   public var field: String?
-  /// Where in the expression source the problem starts, when known (Go: UTF-8 bytes; TypeScript: UTF-16 code units).
+  /// Where in the expression source the problem starts, when a server or client reports it (UTF-16 code units in TypeScript). The Go server does not set it yet.
   public var offset: Int?
   /// The metric the error is about, when there is one.
   public var metricId: String?

@@ -22,10 +22,12 @@ answer every failure with `Content-Type: application/json` and a
 `QueryErrorBody`:
 
 ```json
-{ "error": { "code": "syntax", "message": "expected )", "field": "@computed/margin", "offset": 12 } }
+{ "error": { "code": "conflict", "message": "query snapshot conflict" } }
 ```
 
-`field`, `offset` and `metricId` are present when they apply. The status is
+`field` and `metricId` are present when they apply, and `offset` when a
+producer reports one (the Go server does not yet). An invalid computed
+definition is `definition_invalid` with the definition's `field`. The status is
 `ErrorCode.HTTPStatus()` in Go, listed in the table below:
 
 - **400** for invalid requests (the default),
@@ -157,7 +159,7 @@ the stored object).
 | `duplicate_identity` | 400 | no | Representative rows need unique non-null source identities within every group. |
 | `scope` | 400 | no | A metric scope is invalid. |
 | `window_required` | 400 | no | A shownRows metric needs a positive page limit. |
-| `syntax` | 400 | no | An expression does not parse; offset points at the problem. |
+| `syntax` | 400 | no | An expression does not parse; the message says where. |
 | `unsupported_syntax` | 400 | no | An expression uses syntax this server does not execute. |
 | `unsupported_function` | 400 | no | An expression calls a function this server does not execute. |
 | `arity` | 400 | no | A function is called with the wrong number of arguments. |

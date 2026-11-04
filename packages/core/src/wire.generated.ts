@@ -443,7 +443,7 @@ export interface QueryErrorDetail {
   message: string;
   /** The field the error is about, when there is one. */
   field?: string;
-  /** Where in the expression source the problem starts, when known (Go: UTF-8 bytes; TypeScript: UTF-16 code units). */
+  /** Where in the expression source the problem starts, when a server or client reports it (UTF-16 code units in TypeScript). The Go server does not set it yet. */
   offset?: number;
   /** The metric the error is about, when there is one. */
   metricId?: string;

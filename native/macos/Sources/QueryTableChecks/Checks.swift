@@ -238,6 +238,15 @@ struct QueryTableChecks {
       } catch let error as QueryTableError { refused = error }
       try check(refused?.code == .invalidQuery, "Distinct limits and search budgets are refused locally")
     }
+    var mismatched: QueryTableError?
+    do {
+      _ = try QueryRequestV3.distinctValues(
+        field: "status", limit: 0, schema: schema, capabilities: local.queryCapabilities,
+        execution: QueryExecutionV3(profile: "another"))
+    } catch let error as QueryTableError { mismatched = error }
+    try check(
+      mismatched?.code == .profileMismatch && (mismatched?.errorDescription ?? "").contains("limit"),
+      "Distinct refusals keep the TypeScript order: profile first, every message")
     let envelope = QueryExecutionV3(
       profile: local.queryCapabilities.profile, planToken: "token",
       resolvedRevisions: ["@computed/double": "2"], fields: [:], snapshot: "s1")

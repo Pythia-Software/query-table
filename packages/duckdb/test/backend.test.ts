@@ -850,6 +850,8 @@ describe("DuckDB metric failure isolation", () => {
     expect(actual.metrics[0]?.error).toBeUndefined();
     expect(actual.metrics[1]).toMatchObject({ buckets: [] });
     expect(actual.metrics[1]?.error).toMatch(/Conversion Error/);
+    // A failed clause carries a code like every other engine's.
+    expect(actual.metrics[1]?.errorCode).toBe("invalid_metric");
     expect(actual.metrics[2]).toMatchObject({ buckets: [{ value: 6 }] });
     expect(await tempTables()).toBe(0);
   });

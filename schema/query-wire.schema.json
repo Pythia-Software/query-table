@@ -458,7 +458,7 @@
         "duplicate_identity": { "status": 400, "retry": "no", "description": "Representative rows need unique non-null source identities within every group." },
         "scope": { "status": 400, "retry": "no", "description": "A metric scope is invalid." },
         "window_required": { "status": 400, "retry": "no", "description": "A shownRows metric needs a positive page limit." },
-        "syntax": { "status": 400, "retry": "no", "description": "An expression does not parse; offset points at the problem." },
+        "syntax": { "status": 400, "retry": "no", "description": "An expression does not parse; the message says where." },
         "unsupported_syntax": { "status": 400, "retry": "no", "description": "An expression uses syntax this server does not execute." },
         "unsupported_function": { "status": 400, "retry": "no", "description": "An expression calls a function this server does not execute." },
         "arity": { "status": 400, "retry": "no", "description": "A function is called with the wrong number of arguments." },
@@ -502,7 +502,7 @@
         "code": { "$ref": "#/$defs/ErrorCode" },
         "message": { "type": "string", "description": "Human-readable; not stable." },
         "field": { "type": "string", "description": "The field the error is about, when there is one." },
-        "offset": { "type": "integer", "description": "Where in the expression source the problem starts, when known (Go: UTF-8 bytes; TypeScript: UTF-16 code units)." },
+        "offset": { "type": "integer", "description": "Where in the expression source the problem starts, when a server or client reports it (UTF-16 code units in TypeScript). The Go server does not set it yet." },
         "metricId": { "type": "string", "description": "The metric the error is about, when there is one." }
       }
     },

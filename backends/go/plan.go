@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -442,7 +443,13 @@ func (b *planBuilder) field(name string) (ValueSQL, error) {
 		return ValueSQL{}, diagnostic(ErrorCodeDefinitionInvalid, "resolver returned a different ID")
 	}
 	if err = validateComputed(c); err != nil {
-		return ValueSQL{}, &PlanDiagnostic{Code: ErrorCodeDefinitionInvalid, Message: err.Error(), Field: name}
+		// Keep the diagnostic's own message, not its "code: message" text.
+		message := err.Error()
+		var issue *PlanDiagnostic
+		if errors.As(err, &issue) {
+			message = issue.Message
+		}
+		return ValueSQL{}, &PlanDiagnostic{Code: ErrorCodeDefinitionInvalid, Message: message, Field: name}
 	}
 	expected, ok := b.options.ExpectedRevisions[id]
 	if !ok || expected == "" || c.Revision != expected {

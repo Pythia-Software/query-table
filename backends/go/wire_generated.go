@@ -457,7 +457,7 @@ const (
 	ErrorCodeScope ErrorCode = "scope"
 	// A shownRows metric needs a positive page limit.
 	ErrorCodeWindowRequired ErrorCode = "window_required"
-	// An expression does not parse; offset points at the problem.
+	// An expression does not parse; the message says where.
 	ErrorCodeSyntax ErrorCode = "syntax"
 	// An expression uses syntax this server does not execute.
 	ErrorCodeUnsupportedSyntax ErrorCode = "unsupported_syntax"
@@ -675,8 +675,9 @@ type QueryErrorDetail struct {
 	Message string `json:"message"`
 	// The field the error is about, when there is one.
 	Field string `json:"field,omitempty"`
-	// Where in the expression source the problem starts, when known (Go: UTF-8
-	// bytes; TypeScript: UTF-16 code units).
+	// Where in the expression source the problem starts, when a server or client
+	// reports it (UTF-16 code units in TypeScript). The Go server does not set it
+	// yet.
 	Offset int `json:"offset,omitempty"`
 	// The metric the error is about, when there is one.
 	MetricID string `json:"metricId,omitempty"`

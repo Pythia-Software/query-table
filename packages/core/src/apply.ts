@@ -228,6 +228,7 @@ export function applyAggregations<Row>(
           id: agg.id,
           buckets: [],
           error: `Field ${field.name} does not allow ${agg.op}.`,
+          errorCode: "aggregate_disabled" as const,
         };
       return {
         id: agg.id,

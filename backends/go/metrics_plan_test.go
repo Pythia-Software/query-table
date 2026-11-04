@@ -584,3 +584,18 @@ func TestPostgresShownRowsRetainsErrorSidecars(t *testing.T) {
 		t.Fatal(rows)
 	}
 }
+
+// An invalid resolved definition reports its own message once, not prefixed
+// with its code.
+func TestInvalidComputedDefinitionMessage(t *testing.T) {
+	o := metricOptions()
+	o.ExpectedRevisions = map[string]string{"a": "1"}
+	o.Resolver = DefinitionResolverFunc(func(_ context.Context, id string) (ComputedColumn, error) {
+		return ComputedColumn{ID: id, Label: " ", Revision: "1", Expression: ComputedExpression{"qt-expr", 1, "[x]+1"}}, nil
+	})
+	_, err := compileTestMetrics(context.Background(), metricRequest{Version: 2, Metrics: []AggSpec{{ID: "m", Expression: "SUM([@computed/a])"}}}, metricSchema(), o)
+	var issue *PlanDiagnostic
+	if !errors.As(err, &issue) || issue.Code != ErrorCodeDefinitionInvalid || strings.Contains(issue.Message, "definition_invalid") || issue.Field != "@computed/a" {
+		t.Fatalf("%#v", err)
+	}
+}
