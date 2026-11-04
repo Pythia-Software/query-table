@@ -140,6 +140,22 @@ struct QueryTableChecks {
     try check(
       suggestions.distinct?.values == ["PASS"] && suggestions.rows.isEmpty,
       "Autocomplete searches distinct values through the v3 distinct section")
+    // The TypeScript builder filters the population in source only.
+    let filteredSuggestions = try await local.fetchQueryV3(
+      QueryRequestV3(
+        profile: local.queryCapabilities.profile, now: 0,
+        source: ServerQuery(
+          whereTerms: [.predicate(.init(field: "amount", op: ">", value: "30"))], limit: 1),
+        result: ServerQuery(limit: 1), rows: false,
+        distinct: DistinctRequestV3(field: "status", search: "", limit: 10)))
+    try check(
+      filteredSuggestions.distinct?.values == ["FAIL"],
+      "Distinct values read a filtered source whose result stage differs")
+    let stale = QueryTableController(
+      schema: schema, adapter: ProjectionTransport(schema: schema, rows: [rows[0]]))
+    var wrongRow: Error?
+    do { _ = try await stale.fetchRow(id: .number(2)) } catch { wrongRow = error }
+    try check(wrongRow != nil, "Row lookup rejects a response for a different identity")
     let metrics = try await local.metrics([.init(id: "total", op: "sum", field: "amount")])
     try check(metrics.first?.buckets.first?.value == .number(60), "Metric covers full dataset")
     let lookup = QueryRequestV3.rowLookup(

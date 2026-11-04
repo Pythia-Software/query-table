@@ -29,17 +29,19 @@ public struct LocalQueryTransport: QueryTransport {
     guard request.profile == Self.profile else {
       throw QueryTableError.invalidQuery("Requested query profile is unavailable")
     }
-    guard request.source == request.result else {
-      throw QueryTableError.unsupported("The local transport executes ungrouped queries only")
-    }
     let reference = Date(timeIntervalSince1970: Double(request.now) / 1000)
     let matching = try filtered(request.source.whereTerms, now: reference)
+    // Distinct values read the source population only; their result stage
+    // returns nothing, so it may differ from the source.
     if let distinct = request.distinct {
       guard !request.rows, request.metrics.isEmpty else {
         throw QueryTableError.invalidQuery("A distinct request cannot also request rows or metrics")
       }
       return QueryResultV3(
         answering: request, schema: schema, distinct: try distinctValues(distinct, in: matching))
+    }
+    guard request.source == request.result else {
+      throw QueryTableError.unsupported("The local transport executes ungrouped queries only")
     }
     for name in request.result.select where schema.field(named: name) == nil {
       throw QueryTableError.invalidQuery("Unknown field: \(name)")

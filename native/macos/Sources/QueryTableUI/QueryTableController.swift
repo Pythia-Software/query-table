@@ -285,6 +285,9 @@ public final class QueryTableController: ObservableObject {
     guard result.rows.count < 2 else {
       throw QueryTableError.invalidResponse("identity must be unique")
     }
+    if let row = result.rows.first, row[schema.idField]?.displayString != id.displayString {
+      throw QueryTableError.invalidResponse("The server returned a different row.")
+    }
     return result.rows.first
   }
 
