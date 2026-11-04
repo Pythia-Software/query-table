@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "syntax",
+    "message": "expected )",
+    "field": "@computed/margin",
+    "offset": 12
+  }
+}

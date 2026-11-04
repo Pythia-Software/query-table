@@ -70,7 +70,6 @@ type MetricMinCountSum struct {
 // (label, layout, display other than scatter, window, share).
 type AggSpec struct {
 	DateGrouping *MetricDateGrouping `json:"dateGrouping,omitempty"`
-	Diagnostics  []string            `json:"diagnostics,omitempty"`
 	Display      *MetricDisplayHint  `json:"display,omitempty"`
 	// A formula over aggregates; replaces op/field.
 	Expression string `json:"expression,omitempty"`
@@ -164,7 +163,7 @@ type QueryCapabilitiesV3 struct {
 
 // QueryRequestV3: One v3 query: rows, metrics, groups or distinct values.
 // source.where runs before grouping; result selects, filters (HAVING) and
-// pages. Servers refuse a request with diagnostics.
+// pages.
 type QueryRequestV3 struct {
 	Version int    `json:"version"`
 	Profile string `json:"profile"`
@@ -181,8 +180,7 @@ type QueryRequestV3 struct {
 	Metrics           WireList[AggSpec]   `json:"metrics"`
 	// Filter-value suggestions over source.where; requires rows false, no metrics
 	// and no grouping.
-	Distinct    *DistinctRequestV3 `json:"distinct,omitempty"`
-	Diagnostics WireList[string]   `json:"diagnostics"`
+	Distinct *DistinctRequestV3 `json:"distinct,omitempty"`
 	// Host-owned state, passed through uninterpreted: any JSON object. Query
 	// Table's TypeScript client sends a HostQueryState ({ version, params }); a
 	// host defines what its own clients send.
@@ -256,6 +254,8 @@ type MetricResult struct {
 	Coverage   string `json:"coverage,omitempty"`
 	// The metric could not be computed; siblings are unaffected.
 	Error string `json:"error,omitempty"`
+	// The machine-readable code of error; present with it.
+	ErrorCode ErrorCode `json:"errorCode,omitempty"`
 	// Groups removed by minCount; present whenever it is set.
 	HiddenGroups *int64 `json:"hiddenGroups,omitempty"`
 	// The exact omitted additive quantity beyond groupLimit, when an executor
@@ -335,4 +335,356 @@ type WireQuery struct {
 	OrderBy WireList[OrderBy] `json:"orderBy"`
 	Limit   int               `json:"limit"`
 	Offset  int               `json:"offset"`
+}
+
+// ErrorCode: Every machine-readable error code the server or a client can
+// produce. x-codes gives each code's HTTP status (null: never sent by a
+// server), whether a retry can succeed (yes, no, or refresh: after refreshing
+// the handshake or reloading) and its meaning; docs/errors.md is generated from
+// it. Decoders must accept codes they do not know.
+type ErrorCode string
+
+const (
+	// The request body is not one well-formed JSON value.
+	ErrorCodeInvalidJSON ErrorCode = "invalid_json"
+	// The request is malformed outside the query itself: a missing or invalid
+	// dataset or code parameter, or an invalid stored body.
+	ErrorCodeInvalidRequest ErrorCode = "invalid_request"
+	// The endpoint does not support the HTTP method; the Allow header lists the
+	// ones it does.
+	ErrorCodeMethodNotAllowed ErrorCode = "method_not_allowed"
+	// The host's authorization callback refused the request, or none is
+	// configured.
+	ErrorCodeForbidden ErrorCode = "forbidden"
+	// The requested stored object (such as a query snapshot code) does not exist
+	// in the caller's scope.
+	ErrorCodeNotFound ErrorCode = "not_found"
+	// The request body exceeds the endpoint's byte budget.
+	ErrorCodeRequestTooLarge ErrorCode = "request_too_large"
+	// A write conflicts with stored state: a computed definition changed since it
+	// was loaded, or a snapshot code already identifies different state.
+	ErrorCodeConflict ErrorCode = "conflict"
+	// The host's storage quota refused a write.
+	ErrorCodeQuotaExceeded ErrorCode = "quota_exceeded"
+	// The query exceeded the server's time budget.
+	ErrorCodeTimeout ErrorCode = "timeout"
+	// The request was cancelled before it completed, usually because the client
+	// went away.
+	ErrorCodeCancelled ErrorCode = "cancelled"
+	// The server cannot answer right now, for example while a data snapshot is
+	// refreshed.
+	ErrorCodeUnavailable ErrorCode = "unavailable"
+	// An unexpected server failure. The message is generic; details stay in server
+	// logs.
+	ErrorCodeInternal ErrorCode = "internal"
+	// The request is not a version 3 query.
+	ErrorCodeVersion ErrorCode = "version"
+	// A query stage, metric list or distinct request is malformed: an unknown
+	// property, a wrong shape, or an out-of-range limit, offset, list length or
+	// name.
+	ErrorCodeInvalidQuery ErrorCode = "invalid_query"
+	// The request's profile is not the server's profile; refresh the capabilities
+	// handshake.
+	ErrorCodeProfileMismatch ErrorCode = "profile_mismatch"
+	// A computed definition's revision differs from expectedRevisions, or the
+	// revision envelope is invalid; refresh the execution handshake.
+	ErrorCodeDefinitionChanged ErrorCode = "definition_changed"
+	// A referenced computed definition is missing or not accessible to the caller.
+	ErrorCodeDefinitionUnavailable ErrorCode = "definition_unavailable"
+	// A computed definition does not compile.
+	ErrorCodeDefinitionInvalid ErrorCode = "definition_invalid"
+	// A datetime value or the evaluation clock is invalid or outside the supported
+	// range.
+	ErrorCodeDatetimeValue ErrorCode = "datetime_value"
+	// Part of the query cannot run on the server (a client-only filter or sort);
+	// refusing is safer than answering a different question.
+	ErrorCodeResidualQuery ErrorCode = "residual_query"
+	// The host's dataset configuration is invalid for this request.
+	ErrorCodeDataset ErrorCode = "dataset"
+	// The host schema is invalid, for example an empty binding or a reserved field
+	// name.
+	ErrorCodeSchema ErrorCode = "schema"
+	// The host did not configure a source relation.
+	ErrorCodeSourceRequired ErrorCode = "source_required"
+	// Computed fields are referenced but the host configured no definition
+	// resolver.
+	ErrorCodeResolverRequired ErrorCode = "resolver_required"
+	// The computed definition resolver is not bound to the request's scope and
+	// dataset.
+	ErrorCodeResolverScope ErrorCode = "resolver_scope"
+	// A snapshot-bound request needs a read-only snapshot transaction from the
+	// host.
+	ErrorCodeSnapshotTransactionRequired ErrorCode = "snapshot_transaction_required"
+	// A snapshot-bound request needs a host snapshot validator.
+	ErrorCodeSnapshotValidationRequired ErrorCode = "snapshot_validation_required"
+	// A request with a plan token needs a host plan-token validator.
+	ErrorCodePlanTokenValidationRequired ErrorCode = "plan_token_validation_required"
+	// A numeric SQL binding did not opt into the bounded arithmetic profile.
+	ErrorCodeNumericDomainRequired ErrorCode = "numeric_domain_required"
+	// A field is not in the schema allowlist.
+	ErrorCodeUnknownField ErrorCode = "unknown_field"
+	// The request selects no field where at least one is required.
+	ErrorCodeSelectRequired ErrorCode = "select_required"
+	// A filter is invalid for its field: operator, value or shape.
+	ErrorCodeFilter ErrorCode = "filter"
+	// The field is not server-filterable (for a computed field: not in the host's
+	// filter allowlist).
+	ErrorCodeFilterDisabled ErrorCode = "filter_disabled"
+	// A sort term is invalid, or the field is not server-sortable.
+	ErrorCodeSort ErrorCode = "sort"
+	// Text ordering needs a collation this profile does not provide.
+	ErrorCodeCollationRequired ErrorCode = "collation_required"
+	// Regex filtering or sorting is outside this server profile.
+	ErrorCodeUnsupportedRegex ErrorCode = "unsupported_regex"
+	// A text value cannot be represented (for example NUL or an unpaired
+	// surrogate).
+	ErrorCodeUnsupportedLiteral ErrorCode = "unsupported_literal"
+	// The value type does not support the operation (for example boolean extrema
+	// or arrays in expressions).
+	ErrorCodeUnsupportedType ErrorCode = "unsupported_type"
+	// A stored source value does not match its declared type.
+	ErrorCodeInvalidSourceValue ErrorCode = "invalid_source_value"
+	// A numeric literal is outside the range the profile computes exactly.
+	ErrorCodeNumericRange ErrorCode = "numeric_range"
+	// Text is not valid UTF-8.
+	ErrorCodeEncoding ErrorCode = "encoding"
+	// The operation needs a stable identity field.
+	ErrorCodeIdentityRequired ErrorCode = "identity_required"
+	// Representative rows need unique non-null source identities within every
+	// group.
+	ErrorCodeDuplicateIdentity ErrorCode = "duplicate_identity"
+	// A metric scope is invalid.
+	ErrorCodeScope ErrorCode = "scope"
+	// A shownRows metric needs a positive page limit.
+	ErrorCodeWindowRequired ErrorCode = "window_required"
+	// An expression does not parse; offset points at the problem.
+	ErrorCodeSyntax ErrorCode = "syntax"
+	// An expression uses syntax this server does not execute.
+	ErrorCodeUnsupportedSyntax ErrorCode = "unsupported_syntax"
+	// An expression calls a function this server does not execute.
+	ErrorCodeUnsupportedFunction ErrorCode = "unsupported_function"
+	// A function is called with the wrong number of arguments.
+	ErrorCodeArity ErrorCode = "arity"
+	// An expression combines values of incompatible types.
+	ErrorCodeTypeError ErrorCode = "type_error"
+	// A metric expression needs an aggregate around a field.
+	ErrorCodeAggregateRequired ErrorCode = "aggregate_required"
+	// A row field or aggregate appears where it is not allowed, such as a bare
+	// field outside an aggregate.
+	ErrorCodeAggregateContext ErrorCode = "aggregate_context"
+	// The field does not allow that aggregate.
+	ErrorCodeAggregateDisabled ErrorCode = "aggregate_disabled"
+	// A scatter metric needs both expression and expressionY.
+	ErrorCodePairedExpressionRequired ErrorCode = "paired_expression_required"
+	// Computed definitions depend on each other in a cycle.
+	ErrorCodeDependencyCycle ErrorCode = "dependency_cycle"
+	// A metric is malformed: a missing or invalid field, an unknown op or
+	// malformed state.
+	ErrorCodeInvalidMetric ErrorCode = "invalid_metric"
+	// Two metrics share an id.
+	ErrorCodeDuplicateMetric ErrorCode = "duplicate_metric"
+	// A metric sort key is invalid for the metric.
+	ErrorCodeMetricSort ErrorCode = "metric_sort"
+	// A box or histogram distribution is invalid for its input.
+	ErrorCodeDistribution ErrorCode = "distribution"
+	// A metric's calendar grouping is invalid: interval, zone, range or field
+	// type.
+	ErrorCodeDateGrouping ErrorCode = "date_grouping"
+	// Calendar grouping is unavailable on this execution path.
+	ErrorCodeUnsupportedDateGrouping ErrorCode = "unsupported_date_grouping"
+	// minCount needs a grouped metric.
+	ErrorCodeMinCountGrouping ErrorCode = "min_count_grouping"
+	// minCount's distinct or sum field is invalid.
+	ErrorCodeMinCountField ErrorCode = "min_count_field"
+	// minCount cannot be combined with a distribution.
+	ErrorCodeMinCountDistribution ErrorCode = "min_count_distribution"
+	// The field cannot be a group key (for a computed field: not in the host's
+	// grouping allowlist).
+	ErrorCodeGroupDisabled ErrorCode = "group_disabled"
+	// A grouping definition is invalid: keys, summaries or a calendar key.
+	ErrorCodeGrouping ErrorCode = "grouping"
+	// The representative-row ordering of a grouping is invalid.
+	ErrorCodeRepresentative ErrorCode = "representative"
+	// The request is well formed but exceeds a host budget: rows, groups,
+	// population, samples or work.
+	ErrorCodeResourceLimit ErrorCode = "resource_limit"
+	// An expression exceeds the complexity budget.
+	ErrorCodeComplexityLimit ErrorCode = "complexity_limit"
+	// Computed definitions or the revision envelope exceed the dependency budget.
+	ErrorCodeDependencyLimit ErrorCode = "dependency_limit"
+	// An expanded computed expression exceeds its size budget.
+	ErrorCodeExpansionLimit ErrorCode = "expansion_limit"
+	// An expression's source text is empty or exceeds its byte budget.
+	ErrorCodeSourceLimit ErrorCode = "source_limit"
+	// The query needs more SQL stages than the budget allows.
+	ErrorCodeStageLimit ErrorCode = "stage_limit"
+	// The projected schema exceeds its field budget.
+	ErrorCodeSchemaLimit ErrorCode = "schema_limit"
+	// Client only: the query needs a capability the server's handshake does not
+	// advertise (grouped rows, calendar grouping, regex source filters, ...). The
+	// request is not sent.
+	ErrorCodeCapabilityUnsupported ErrorCode = "capability_unsupported"
+	// Client only: a windowed or share metric must be expanded with
+	// planMetricSeries before it is sent.
+	ErrorCodeUnexpandedSeries ErrorCode = "unexpanded_series"
+	// Query link: the encoded query state is malformed (TypeScript
+	// QueryDecodeError, Go QueryLinkError).
+	ErrorCodeInvalid ErrorCode = "invalid"
+	// Query link: the encoded query state exceeds its size budget.
+	ErrorCodeTooLarge ErrorCode = "too_large"
+	// Query link: the encoded query state has a version this build cannot read.
+	ErrorCodeUnsupportedVersion ErrorCode = "unsupported_version"
+)
+
+// HTTPStatus is the response status for the code: 400 unless x-codes says
+// otherwise (client-only codes are 400).
+func (c ErrorCode) HTTPStatus() int {
+	switch c {
+	case ErrorCodeForbidden:
+		return 403
+	case ErrorCodeNotFound:
+		return 404
+	case ErrorCodeMethodNotAllowed:
+		return 405
+	case ErrorCodeCancelled:
+		return 408
+	case ErrorCodeConflict,
+		ErrorCodeProfileMismatch,
+		ErrorCodeDefinitionChanged:
+		return 409
+	case ErrorCodeRequestTooLarge:
+		return 413
+	case ErrorCodeResourceLimit,
+		ErrorCodeComplexityLimit,
+		ErrorCodeDependencyLimit,
+		ErrorCodeExpansionLimit,
+		ErrorCodeSourceLimit,
+		ErrorCodeStageLimit,
+		ErrorCodeSchemaLimit:
+		return 422
+	case ErrorCodeInternal,
+		ErrorCodeDataset,
+		ErrorCodeSchema,
+		ErrorCodeSourceRequired,
+		ErrorCodeResolverRequired,
+		ErrorCodeResolverScope,
+		ErrorCodeSnapshotTransactionRequired,
+		ErrorCodeSnapshotValidationRequired,
+		ErrorCodePlanTokenValidationRequired,
+		ErrorCodeNumericDomainRequired:
+		return 500
+	case ErrorCodeUnavailable:
+		return 503
+	case ErrorCodeTimeout:
+		return 504
+	case ErrorCodeQuotaExceeded:
+		return 507
+	}
+	return 400
+}
+
+// ErrorCodes lists every ErrorCode in schema order.
+func ErrorCodes() []ErrorCode {
+	return []ErrorCode{
+		ErrorCodeInvalidJSON,
+		ErrorCodeInvalidRequest,
+		ErrorCodeMethodNotAllowed,
+		ErrorCodeForbidden,
+		ErrorCodeNotFound,
+		ErrorCodeRequestTooLarge,
+		ErrorCodeConflict,
+		ErrorCodeQuotaExceeded,
+		ErrorCodeTimeout,
+		ErrorCodeCancelled,
+		ErrorCodeUnavailable,
+		ErrorCodeInternal,
+		ErrorCodeVersion,
+		ErrorCodeInvalidQuery,
+		ErrorCodeProfileMismatch,
+		ErrorCodeDefinitionChanged,
+		ErrorCodeDefinitionUnavailable,
+		ErrorCodeDefinitionInvalid,
+		ErrorCodeDatetimeValue,
+		ErrorCodeResidualQuery,
+		ErrorCodeDataset,
+		ErrorCodeSchema,
+		ErrorCodeSourceRequired,
+		ErrorCodeResolverRequired,
+		ErrorCodeResolverScope,
+		ErrorCodeSnapshotTransactionRequired,
+		ErrorCodeSnapshotValidationRequired,
+		ErrorCodePlanTokenValidationRequired,
+		ErrorCodeNumericDomainRequired,
+		ErrorCodeUnknownField,
+		ErrorCodeSelectRequired,
+		ErrorCodeFilter,
+		ErrorCodeFilterDisabled,
+		ErrorCodeSort,
+		ErrorCodeCollationRequired,
+		ErrorCodeUnsupportedRegex,
+		ErrorCodeUnsupportedLiteral,
+		ErrorCodeUnsupportedType,
+		ErrorCodeInvalidSourceValue,
+		ErrorCodeNumericRange,
+		ErrorCodeEncoding,
+		ErrorCodeIdentityRequired,
+		ErrorCodeDuplicateIdentity,
+		ErrorCodeScope,
+		ErrorCodeWindowRequired,
+		ErrorCodeSyntax,
+		ErrorCodeUnsupportedSyntax,
+		ErrorCodeUnsupportedFunction,
+		ErrorCodeArity,
+		ErrorCodeTypeError,
+		ErrorCodeAggregateRequired,
+		ErrorCodeAggregateContext,
+		ErrorCodeAggregateDisabled,
+		ErrorCodePairedExpressionRequired,
+		ErrorCodeDependencyCycle,
+		ErrorCodeInvalidMetric,
+		ErrorCodeDuplicateMetric,
+		ErrorCodeMetricSort,
+		ErrorCodeDistribution,
+		ErrorCodeDateGrouping,
+		ErrorCodeUnsupportedDateGrouping,
+		ErrorCodeMinCountGrouping,
+		ErrorCodeMinCountField,
+		ErrorCodeMinCountDistribution,
+		ErrorCodeGroupDisabled,
+		ErrorCodeGrouping,
+		ErrorCodeRepresentative,
+		ErrorCodeResourceLimit,
+		ErrorCodeComplexityLimit,
+		ErrorCodeDependencyLimit,
+		ErrorCodeExpansionLimit,
+		ErrorCodeSourceLimit,
+		ErrorCodeStageLimit,
+		ErrorCodeSchemaLimit,
+		ErrorCodeCapabilityUnsupported,
+		ErrorCodeUnexpandedSeries,
+		ErrorCodeInvalid,
+		ErrorCodeTooLarge,
+		ErrorCodeUnsupportedVersion,
+	}
+}
+
+// QueryErrorDetail: One machine-readable error.
+type QueryErrorDetail struct {
+	Code ErrorCode `json:"code"`
+	// Human-readable; not stable.
+	Message string `json:"message"`
+	// The field the error is about, when there is one.
+	Field string `json:"field,omitempty"`
+	// Where in the expression source the problem starts, when known (Go: UTF-8
+	// bytes; TypeScript: UTF-16 code units).
+	Offset int `json:"offset,omitempty"`
+	// The metric the error is about, when there is one.
+	MetricID string `json:"metricId,omitempty"`
+}
+
+// QueryErrorBody: The JSON body of every non-2xx response from the query,
+// computed-columns and query-snapshots handlers (Content-Type:
+// application/json).
+type QueryErrorBody struct {
+	Error QueryErrorDetail `json:"error"`
 }

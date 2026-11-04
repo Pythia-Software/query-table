@@ -96,7 +96,6 @@ export type MetricMinCount = number | MetricMinCountDistinct | MetricMinCountSum
 /** One metric as sent: an AggregationClause without its presentation (label, layout, display other than scatter, window, share). */
 export interface MetricSpecV3 {
   dateGrouping?: WireMetricDateGrouping;
-  diagnostics?: string[];
   display?: MetricDisplayHint;
   /** A formula over aggregates; replaces op/field. */
   expression?: string;
@@ -147,7 +146,6 @@ export interface WireGroupingDefinition {
   keys: GroupKey[];
   summaries: WireSummaryColumn[];
   representative: WireRepresentativeRow | null;
-  diagnostics?: string[];
 }
 
 /** Query state a host owns and registers with useQueryTable({ hostQuery }), such as a keyword clause it runs itself. It travels with the table query through saves, links, history and resets. params are named lists of strings, like URL search parameters, sorted by name; the host interprets them. Query Table passes it through uninterpreted. Version 0 marks a payload that could not be read and is always rejected on restore. */
@@ -188,7 +186,7 @@ export interface QueryCapabilitiesV3 {
   profile: string;
 }
 
-/** One v3 query: rows, metrics, groups or distinct values. source.where runs before grouping; result selects, filters (HAVING) and pages. Servers refuse a request with diagnostics. */
+/** One v3 query: rows, metrics, groups or distinct values. source.where runs before grouping; result selects, filters (HAVING) and pages. */
 export interface QueryRequestV3 {
   version: 3;
   profile: string;
@@ -205,7 +203,6 @@ export interface QueryRequestV3 {
   metrics: MetricSpecV3[];
   /** Filter-value suggestions over source.where; requires rows false, no metrics and no grouping. */
   distinct?: DistinctRequestV3;
-  diagnostics: string[];
   /** Host-owned state, passed through uninterpreted: any JSON object. Query Table's TypeScript client sends a HostQueryState ({ version, params }); a host defines what its own clients send. */
   hostState?: HostQueryState;
 }
@@ -276,6 +273,8 @@ export interface MetricResultV3 {
   coverage?: "exact" | "partial";
   /** The metric could not be computed; siblings are unaffected. */
   error?: string;
+  /** The machine-readable code of error; present with it. */
+  errorCode?: ErrorCode;
   /** Groups removed by minCount; present whenever it is set. */
   hiddenGroups?: number;
   /** The exact omitted additive quantity beyond groupLimit, when an executor computes it. */
@@ -351,4 +350,106 @@ export interface ServerQuery {
   orderBy: OrderByClause[];
   limit: number;
   offset: number;
+}
+
+/** Every machine-readable error code the server or a client can produce. x-codes gives each code's HTTP status (null: never sent by a server), whether a retry can succeed (yes, no, or refresh: after refreshing the handshake or reloading) and its meaning; docs/errors.md is generated from it. Decoders must accept codes they do not know. */
+export const ERROR_CODES = [
+  "invalid_json",
+  "invalid_request",
+  "method_not_allowed",
+  "forbidden",
+  "not_found",
+  "request_too_large",
+  "conflict",
+  "quota_exceeded",
+  "timeout",
+  "cancelled",
+  "unavailable",
+  "internal",
+  "version",
+  "invalid_query",
+  "profile_mismatch",
+  "definition_changed",
+  "definition_unavailable",
+  "definition_invalid",
+  "datetime_value",
+  "residual_query",
+  "dataset",
+  "schema",
+  "source_required",
+  "resolver_required",
+  "resolver_scope",
+  "snapshot_transaction_required",
+  "snapshot_validation_required",
+  "plan_token_validation_required",
+  "numeric_domain_required",
+  "unknown_field",
+  "select_required",
+  "filter",
+  "filter_disabled",
+  "sort",
+  "collation_required",
+  "unsupported_regex",
+  "unsupported_literal",
+  "unsupported_type",
+  "invalid_source_value",
+  "numeric_range",
+  "encoding",
+  "identity_required",
+  "duplicate_identity",
+  "scope",
+  "window_required",
+  "syntax",
+  "unsupported_syntax",
+  "unsupported_function",
+  "arity",
+  "type_error",
+  "aggregate_required",
+  "aggregate_context",
+  "aggregate_disabled",
+  "paired_expression_required",
+  "dependency_cycle",
+  "invalid_metric",
+  "duplicate_metric",
+  "metric_sort",
+  "distribution",
+  "date_grouping",
+  "unsupported_date_grouping",
+  "min_count_grouping",
+  "min_count_field",
+  "min_count_distribution",
+  "group_disabled",
+  "grouping",
+  "representative",
+  "resource_limit",
+  "complexity_limit",
+  "dependency_limit",
+  "expansion_limit",
+  "source_limit",
+  "stage_limit",
+  "schema_limit",
+  "capability_unsupported",
+  "unexpanded_series",
+  "invalid",
+  "too_large",
+  "unsupported_version",
+] as const;
+export type ErrorCode = (typeof ERROR_CODES)[number];
+
+/** One machine-readable error. */
+export interface QueryErrorDetail {
+  code: ErrorCode;
+  /** Human-readable; not stable. */
+  message: string;
+  /** The field the error is about, when there is one. */
+  field?: string;
+  /** Where in the expression source the problem starts, when known (Go: UTF-8 bytes; TypeScript: UTF-16 code units). */
+  offset?: number;
+  /** The metric the error is about, when there is one. */
+  metricId?: string;
+}
+
+/** The JSON body of every non-2xx response from the query, computed-columns and query-snapshots handlers (Content-Type: application/json). */
+export interface QueryErrorBody {
+  error: QueryErrorDetail;
 }

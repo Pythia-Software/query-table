@@ -1,6 +1,6 @@
 // Go emitter: structs whose field order and json tags are the wire encoding.
 import { execFileSync } from "node:child_process";
-import { banner, escapeHatch, isObject, isStringEnum, nullable, pascal, properties, refName, scalarUnion, typeName, variants } from "./model.mjs";
+import { banner, codeEnum, escapeHatch, snakePascal, isObject, isStringEnum, nullable, pascal, properties, refName, scalarUnion, typeName, variants } from "./model.mjs";
 
 const wrap = (text, indent) => {
   const lines = [];
@@ -21,6 +21,7 @@ export function emitGo(defs) {
       const name = refName(node), def = defs[name];
       if (escapeHatch(def, "go")) return (optional && isObject(def) ? "*" : "") + escapeHatch(def, "go");
       if (isObject(def)) return (optional ? "*" : "") + typeName(defs, name, "go");
+      if (codeEnum(def)) return typeName(defs, name, "go");
       if (def.type === "string") return "string";
       if (scalarUnion(defs, def)) return "any";
       throw Error(`${name}: a union referenced from Go needs x-go-type.`);
@@ -44,6 +45,21 @@ export function emitGo(defs) {
   };
   let out = `${banner("//")}\n\npackage querytable\n\nimport "encoding/json"\n`;
   for (const [name, def] of Object.entries(defs)) {
+    const codes = codeEnum(def);
+    if (codes) {
+      const go = typeName(defs, name, "go");
+      out += "\n" + wrap(`${go}: ${def.description}`, "") + `type ${go} string\n\nconst (\n`;
+      for (const { code, description } of codes) out += wrap(description, "\t") + `\t${go}${snakePascal(code)} ${go} = ${JSON.stringify(code)}\n`;
+      out += ")\n";
+      const byStatus = new Map();
+      for (const { code, status } of codes) if (status !== null && status !== 400) byStatus.set(status, [...(byStatus.get(status) ?? []), code]);
+      out += `\n// HTTPStatus is the response status for the code: 400 unless x-codes says\n// otherwise (client-only codes are 400).\nfunc (c ${go}) HTTPStatus() int {\n\tswitch c {\n`;
+      for (const [status, list] of [...byStatus].sort(([a], [b]) => a - b))
+        out += `\tcase ${list.map((code) => go + snakePascal(code)).join(",\n\t\t")}:\n\t\treturn ${status}\n`;
+      out += `\t}\n\treturn 400\n}\n`;
+      out += `\n// ${go}s lists every ${go} in schema order.\nfunc ${go}s() []${go} {\n\treturn []${go}{\n${codes.map(({ code }) => `\t\t${go}${snakePascal(code)},\n`).join("")}\t}\n}\n`;
+      continue;
+    }
     if (!isObject(def) || escapeHatch(def, "go") || isStringEnum(def)) continue;
     const go = typeName(defs, name, "go");
     out += "\n" + (def.description ? wrap(`${go}: ${def.description}`, "") : "") + `type ${go} struct {\n`;

@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "resource_limit",
+    "message": "MEDIAN exceeded the 100,000-sample budget",
+    "metricId": "p50"
+  }
+}

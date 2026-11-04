@@ -364,7 +364,6 @@ public enum MetricMinCount: Codable, Equatable, Sendable {
 /// One metric as sent: an AggregationClause without its presentation (label, layout, display other than scatter, window, share).
 public struct MetricSpecV3: Codable, Equatable, Sendable {
   public var dateGrouping: MetricDateGrouping?
-  public var diagnostics: [String]?
   public var display: MetricDisplayHint?
   /// A formula over aggregates; replaces op/field.
   public var expression: String?
@@ -385,7 +384,6 @@ public struct MetricSpecV3: Codable, Equatable, Sendable {
   public var minCount: MetricMinCount?
   enum CodingKeys: String, CodingKey {
     case dateGrouping
-    case diagnostics
     case display
     case expression
     case expressionY
@@ -400,9 +398,8 @@ public struct MetricSpecV3: Codable, Equatable, Sendable {
     case whereTerms = "where"
     case minCount
   }
-  public init(dateGrouping: MetricDateGrouping? = nil, diagnostics: [String]? = nil, display: MetricDisplayHint? = nil, expression: String? = nil, expressionY: String? = nil, scope: String? = nil, sort: [MetricSort]? = nil, groupLimit: Int? = nil, distribution: MetricDistribution? = nil, id: String, op: String, field: String? = nil, groupBy: [String] = [], whereTerms: [WhereTerm]? = nil, minCount: MetricMinCount? = nil) {
+  public init(dateGrouping: MetricDateGrouping? = nil, display: MetricDisplayHint? = nil, expression: String? = nil, expressionY: String? = nil, scope: String? = nil, sort: [MetricSort]? = nil, groupLimit: Int? = nil, distribution: MetricDistribution? = nil, id: String, op: String, field: String? = nil, groupBy: [String] = [], whereTerms: [WhereTerm]? = nil, minCount: MetricMinCount? = nil) {
     self.dateGrouping = dateGrouping
-    self.diagnostics = diagnostics
     self.display = display
     self.expression = expression
     self.expressionY = expressionY
@@ -420,7 +417,6 @@ public struct MetricSpecV3: Codable, Equatable, Sendable {
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     dateGrouping = try c.decodeIfPresent(MetricDateGrouping.self, forKey: .dateGrouping)
-    diagnostics = try c.decodeIfPresent([String].self, forKey: .diagnostics)
     display = try c.decodeIfPresent(MetricDisplayHint.self, forKey: .display)
     expression = try c.decodeIfPresent(String.self, forKey: .expression)
     expressionY = try c.decodeIfPresent(String.self, forKey: .expressionY)
@@ -438,7 +434,6 @@ public struct MetricSpecV3: Codable, Equatable, Sendable {
   public func encode(to encoder: Encoder) throws {
     var c = encoder.container(keyedBy: CodingKeys.self)
     try c.encodeIfPresent(dateGrouping, forKey: .dateGrouping)
-    try c.encodeIfPresent(diagnostics, forKey: .diagnostics)
     try c.encodeIfPresent(display, forKey: .display)
     try c.encodeIfPresent(expression, forKey: .expression)
     try c.encodeIfPresent(expressionY, forKey: .expressionY)
@@ -573,32 +568,27 @@ public struct GroupingDefinition: Codable, Equatable, Sendable {
   public var keys: [GroupKey]
   public var summaries: [SummaryColumn]
   public var representative: RepresentativeRow?
-  public var diagnostics: [String]?
   enum CodingKeys: String, CodingKey {
     case keys
     case summaries
     case representative
-    case diagnostics
   }
-  public init(keys: [GroupKey], summaries: [SummaryColumn], representative: RepresentativeRow? = nil, diagnostics: [String]? = nil) {
+  public init(keys: [GroupKey], summaries: [SummaryColumn], representative: RepresentativeRow? = nil) {
     self.keys = keys
     self.summaries = summaries
     self.representative = representative
-    self.diagnostics = diagnostics
   }
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     keys = try c.decode([GroupKey].self, forKey: .keys)
     summaries = try c.decode([SummaryColumn].self, forKey: .summaries)
     representative = try c.decodeNil(forKey: .representative) ? nil : try c.decode(RepresentativeRow.self, forKey: .representative)
-    diagnostics = try c.decodeIfPresent([String].self, forKey: .diagnostics)
   }
   public func encode(to encoder: Encoder) throws {
     var c = encoder.container(keyedBy: CodingKeys.self)
     try c.encode(keys, forKey: .keys)
     try c.encode(summaries, forKey: .summaries)
     if let v = representative { try c.encode(v, forKey: .representative) } else { try c.encodeNil(forKey: .representative) }
-    try c.encodeIfPresent(diagnostics, forKey: .diagnostics)
   }
 }
 
@@ -737,7 +727,7 @@ public struct QueryCapabilitiesV3: Codable, Equatable, Sendable {
   }
 }
 
-/// One v3 query: rows, metrics, groups or distinct values. source.where runs before grouping; result selects, filters (HAVING) and pages. Servers refuse a request with diagnostics.
+/// One v3 query: rows, metrics, groups or distinct values. source.where runs before grouping; result selects, filters (HAVING) and pages.
 public struct QueryRequestV3: Codable, Equatable, Sendable {
   public var version: Int
   public var profile: String
@@ -754,7 +744,6 @@ public struct QueryRequestV3: Codable, Equatable, Sendable {
   public var metrics: [MetricSpecV3]
   /// Filter-value suggestions over source.where; requires rows false, no metrics and no grouping.
   public var distinct: DistinctRequestV3?
-  public var diagnostics: [String]
   /// Host-owned state, passed through uninterpreted: any JSON object. Query Table's TypeScript client sends a HostQueryState ({ version, params }); a host defines what its own clients send.
   public var hostState: [String: JSONValue]?
   enum CodingKeys: String, CodingKey {
@@ -770,7 +759,6 @@ public struct QueryRequestV3: Codable, Equatable, Sendable {
     case rows
     case metrics
     case distinct
-    case diagnostics
     case hostState
   }
   public init(from decoder: Decoder) throws {
@@ -788,7 +776,6 @@ public struct QueryRequestV3: Codable, Equatable, Sendable {
     rows = try c.decode(Bool.self, forKey: .rows)
     metrics = try c.decode([MetricSpecV3].self, forKey: .metrics)
     distinct = try c.decodeIfPresent(DistinctRequestV3.self, forKey: .distinct)
-    diagnostics = try c.decode([String].self, forKey: .diagnostics)
     hostState = try c.decodeIfPresent([String: JSONValue].self, forKey: .hostState)
   }
   public func encode(to encoder: Encoder) throws {
@@ -805,7 +792,6 @@ public struct QueryRequestV3: Codable, Equatable, Sendable {
     try c.encode(rows, forKey: .rows)
     try c.encode(metrics, forKey: .metrics)
     try c.encodeIfPresent(distinct, forKey: .distinct)
-    try c.encode(diagnostics, forKey: .diagnostics)
     try c.encodeIfPresent(hostState, forKey: .hostState)
   }
 }
@@ -1042,6 +1028,8 @@ public struct AggregationResultEntry: Codable, Equatable, Sendable {
   public var coverage: String?
   /// The metric could not be computed; siblings are unaffected.
   public var error: String?
+  /// The machine-readable code of error; present with it.
+  public var errorCode: ErrorCode?
   /// Groups removed by minCount; present whenever it is set.
   public var hiddenGroups: Int?
   /// The exact omitted additive quantity beyond groupLimit, when an executor computes it.
@@ -1054,6 +1042,7 @@ public struct AggregationResultEntry: Codable, Equatable, Sendable {
     case groupCount
     case coverage
     case error
+    case errorCode
     case hiddenGroups
     case other
   }
@@ -1066,6 +1055,7 @@ public struct AggregationResultEntry: Codable, Equatable, Sendable {
     groupCount = try c.decodeIfPresent(Int.self, forKey: .groupCount)
     coverage = try c.decodeIfPresent(String.self, forKey: .coverage)
     error = try c.decodeIfPresent(String.self, forKey: .error)
+    errorCode = try c.decodeIfPresent(ErrorCode.self, forKey: .errorCode)
     hiddenGroups = try c.decodeIfPresent(Int.self, forKey: .hiddenGroups)
     other = try c.decodeIfPresent(AggregationBucket.self, forKey: .other)
   }
@@ -1078,6 +1068,7 @@ public struct AggregationResultEntry: Codable, Equatable, Sendable {
     try c.encodeIfPresent(groupCount, forKey: .groupCount)
     try c.encodeIfPresent(coverage, forKey: .coverage)
     try c.encodeIfPresent(error, forKey: .error)
+    try c.encodeIfPresent(errorCode, forKey: .errorCode)
     try c.encodeIfPresent(hiddenGroups, forKey: .hiddenGroups)
     try c.encodeIfPresent(other, forKey: .other)
   }
@@ -1333,5 +1324,235 @@ public struct ServerQuery: Codable, Equatable, Sendable {
     try c.encode(orderBy, forKey: .orderBy)
     try c.encode(limit, forKey: .limit)
     try c.encode(offset, forKey: .offset)
+  }
+}
+
+/// Every machine-readable error code the server or a client can produce. x-codes gives each code's HTTP status (null: never sent by a server), whether a retry can succeed (yes, no, or refresh: after refreshing the handshake or reloading) and its meaning; docs/errors.md is generated from it. Decoders must accept codes they do not know.
+public enum ErrorCode: String, Codable, Equatable, Sendable, CaseIterable {
+  /// The request body is not one well-formed JSON value.
+  case invalidJson = "invalid_json"
+  /// The request is malformed outside the query itself: a missing or invalid dataset or code parameter, or an invalid stored body.
+  case invalidRequest = "invalid_request"
+  /// The endpoint does not support the HTTP method; the Allow header lists the ones it does.
+  case methodNotAllowed = "method_not_allowed"
+  /// The host's authorization callback refused the request, or none is configured.
+  case forbidden
+  /// The requested stored object (such as a query snapshot code) does not exist in the caller's scope.
+  case notFound = "not_found"
+  /// The request body exceeds the endpoint's byte budget.
+  case requestTooLarge = "request_too_large"
+  /// A write conflicts with stored state: a computed definition changed since it was loaded, or a snapshot code already identifies different state.
+  case conflict
+  /// The host's storage quota refused a write.
+  case quotaExceeded = "quota_exceeded"
+  /// The query exceeded the server's time budget.
+  case timeout
+  /// The request was cancelled before it completed, usually because the client went away.
+  case cancelled
+  /// The server cannot answer right now, for example while a data snapshot is refreshed.
+  case unavailable
+  /// An unexpected server failure. The message is generic; details stay in server logs.
+  case `internal`
+  /// The request is not a version 3 query.
+  case version
+  /// A query stage, metric list or distinct request is malformed: an unknown property, a wrong shape, or an out-of-range limit, offset, list length or name.
+  case invalidQuery = "invalid_query"
+  /// The request's profile is not the server's profile; refresh the capabilities handshake.
+  case profileMismatch = "profile_mismatch"
+  /// A computed definition's revision differs from expectedRevisions, or the revision envelope is invalid; refresh the execution handshake.
+  case definitionChanged = "definition_changed"
+  /// A referenced computed definition is missing or not accessible to the caller.
+  case definitionUnavailable = "definition_unavailable"
+  /// A computed definition does not compile.
+  case definitionInvalid = "definition_invalid"
+  /// A datetime value or the evaluation clock is invalid or outside the supported range.
+  case datetimeValue = "datetime_value"
+  /// Part of the query cannot run on the server (a client-only filter or sort); refusing is safer than answering a different question.
+  case residualQuery = "residual_query"
+  /// The host's dataset configuration is invalid for this request.
+  case dataset
+  /// The host schema is invalid, for example an empty binding or a reserved field name.
+  case schema
+  /// The host did not configure a source relation.
+  case sourceRequired = "source_required"
+  /// Computed fields are referenced but the host configured no definition resolver.
+  case resolverRequired = "resolver_required"
+  /// The computed definition resolver is not bound to the request's scope and dataset.
+  case resolverScope = "resolver_scope"
+  /// A snapshot-bound request needs a read-only snapshot transaction from the host.
+  case snapshotTransactionRequired = "snapshot_transaction_required"
+  /// A snapshot-bound request needs a host snapshot validator.
+  case snapshotValidationRequired = "snapshot_validation_required"
+  /// A request with a plan token needs a host plan-token validator.
+  case planTokenValidationRequired = "plan_token_validation_required"
+  /// A numeric SQL binding did not opt into the bounded arithmetic profile.
+  case numericDomainRequired = "numeric_domain_required"
+  /// A field is not in the schema allowlist.
+  case unknownField = "unknown_field"
+  /// The request selects no field where at least one is required.
+  case selectRequired = "select_required"
+  /// A filter is invalid for its field: operator, value or shape.
+  case filter
+  /// The field is not server-filterable (for a computed field: not in the host's filter allowlist).
+  case filterDisabled = "filter_disabled"
+  /// A sort term is invalid, or the field is not server-sortable.
+  case sort
+  /// Text ordering needs a collation this profile does not provide.
+  case collationRequired = "collation_required"
+  /// Regex filtering or sorting is outside this server profile.
+  case unsupportedRegex = "unsupported_regex"
+  /// A text value cannot be represented (for example NUL or an unpaired surrogate).
+  case unsupportedLiteral = "unsupported_literal"
+  /// The value type does not support the operation (for example boolean extrema or arrays in expressions).
+  case unsupportedType = "unsupported_type"
+  /// A stored source value does not match its declared type.
+  case invalidSourceValue = "invalid_source_value"
+  /// A numeric literal is outside the range the profile computes exactly.
+  case numericRange = "numeric_range"
+  /// Text is not valid UTF-8.
+  case encoding
+  /// The operation needs a stable identity field.
+  case identityRequired = "identity_required"
+  /// Representative rows need unique non-null source identities within every group.
+  case duplicateIdentity = "duplicate_identity"
+  /// A metric scope is invalid.
+  case scope
+  /// A shownRows metric needs a positive page limit.
+  case windowRequired = "window_required"
+  /// An expression does not parse; offset points at the problem.
+  case syntax
+  /// An expression uses syntax this server does not execute.
+  case unsupportedSyntax = "unsupported_syntax"
+  /// An expression calls a function this server does not execute.
+  case unsupportedFunction = "unsupported_function"
+  /// A function is called with the wrong number of arguments.
+  case arity
+  /// An expression combines values of incompatible types.
+  case typeError = "type_error"
+  /// A metric expression needs an aggregate around a field.
+  case aggregateRequired = "aggregate_required"
+  /// A row field or aggregate appears where it is not allowed, such as a bare field outside an aggregate.
+  case aggregateContext = "aggregate_context"
+  /// The field does not allow that aggregate.
+  case aggregateDisabled = "aggregate_disabled"
+  /// A scatter metric needs both expression and expressionY.
+  case pairedExpressionRequired = "paired_expression_required"
+  /// Computed definitions depend on each other in a cycle.
+  case dependencyCycle = "dependency_cycle"
+  /// A metric is malformed: a missing or invalid field, an unknown op or malformed state.
+  case invalidMetric = "invalid_metric"
+  /// Two metrics share an id.
+  case duplicateMetric = "duplicate_metric"
+  /// A metric sort key is invalid for the metric.
+  case metricSort = "metric_sort"
+  /// A box or histogram distribution is invalid for its input.
+  case distribution
+  /// A metric's calendar grouping is invalid: interval, zone, range or field type.
+  case dateGrouping = "date_grouping"
+  /// Calendar grouping is unavailable on this execution path.
+  case unsupportedDateGrouping = "unsupported_date_grouping"
+  /// minCount needs a grouped metric.
+  case minCountGrouping = "min_count_grouping"
+  /// minCount's distinct or sum field is invalid.
+  case minCountField = "min_count_field"
+  /// minCount cannot be combined with a distribution.
+  case minCountDistribution = "min_count_distribution"
+  /// The field cannot be a group key (for a computed field: not in the host's grouping allowlist).
+  case groupDisabled = "group_disabled"
+  /// A grouping definition is invalid: keys, summaries or a calendar key.
+  case grouping
+  /// The representative-row ordering of a grouping is invalid.
+  case representative
+  /// The request is well formed but exceeds a host budget: rows, groups, population, samples or work.
+  case resourceLimit = "resource_limit"
+  /// An expression exceeds the complexity budget.
+  case complexityLimit = "complexity_limit"
+  /// Computed definitions or the revision envelope exceed the dependency budget.
+  case dependencyLimit = "dependency_limit"
+  /// An expanded computed expression exceeds its size budget.
+  case expansionLimit = "expansion_limit"
+  /// An expression's source text is empty or exceeds its byte budget.
+  case sourceLimit = "source_limit"
+  /// The query needs more SQL stages than the budget allows.
+  case stageLimit = "stage_limit"
+  /// The projected schema exceeds its field budget.
+  case schemaLimit = "schema_limit"
+  /// Client only: the query needs a capability the server's handshake does not advertise (grouped rows, calendar grouping, regex source filters, ...). The request is not sent.
+  case capabilityUnsupported = "capability_unsupported"
+  /// Client only: a windowed or share metric must be expanded with planMetricSeries before it is sent.
+  case unexpandedSeries = "unexpanded_series"
+  /// Query link: the encoded query state is malformed (TypeScript QueryDecodeError, Go QueryLinkError).
+  case invalid
+  /// Query link: the encoded query state exceeds its size budget.
+  case tooLarge = "too_large"
+  /// Query link: the encoded query state has a version this build cannot read.
+  case unsupportedVersion = "unsupported_version"
+  /// A code this build does not know; decoding never fails on a new code.
+  case unknown
+  public init(from decoder: Decoder) throws {
+    let raw = try decoder.singleValueContainer().decode(String.self)
+    self = ErrorCode(rawValue: raw) ?? .unknown
+  }
+}
+
+/// One machine-readable error.
+public struct QueryErrorDetail: Codable, Equatable, Sendable {
+  public var code: ErrorCode
+  /// Human-readable; not stable.
+  public var message: String
+  /// The field the error is about, when there is one.
+  public var field: String?
+  /// Where in the expression source the problem starts, when known (Go: UTF-8 bytes; TypeScript: UTF-16 code units).
+  public var offset: Int?
+  /// The metric the error is about, when there is one.
+  public var metricId: String?
+  enum CodingKeys: String, CodingKey {
+    case code
+    case message
+    case field
+    case offset
+    case metricId
+  }
+  public init(code: ErrorCode, message: String, field: String? = nil, offset: Int? = nil, metricId: String? = nil) {
+    self.code = code
+    self.message = message
+    self.field = field
+    self.offset = offset
+    self.metricId = metricId
+  }
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    code = try c.decode(ErrorCode.self, forKey: .code)
+    message = try c.decode(String.self, forKey: .message)
+    field = try c.decodeIfPresent(String.self, forKey: .field)
+    offset = try c.decodeIfPresent(Int.self, forKey: .offset)
+    metricId = try c.decodeIfPresent(String.self, forKey: .metricId)
+  }
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: CodingKeys.self)
+    try c.encode(code, forKey: .code)
+    try c.encode(message, forKey: .message)
+    try c.encodeIfPresent(field, forKey: .field)
+    try c.encodeIfPresent(offset, forKey: .offset)
+    try c.encodeIfPresent(metricId, forKey: .metricId)
+  }
+}
+
+/// The JSON body of every non-2xx response from the query, computed-columns and query-snapshots handlers (Content-Type: application/json).
+public struct QueryErrorBody: Codable, Equatable, Sendable {
+  public var error: QueryErrorDetail
+  enum CodingKeys: String, CodingKey {
+    case error
+  }
+  public init(error: QueryErrorDetail) {
+    self.error = error
+  }
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    error = try c.decode(QueryErrorDetail.self, forKey: .error)
+  }
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: CodingKeys.self)
+    try c.encode(error, forKey: .error)
   }
 }
