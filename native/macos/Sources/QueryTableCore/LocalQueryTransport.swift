@@ -92,7 +92,7 @@ public struct LocalQueryTransport: QueryTransport {
       throw QueryTableError.invalidQuery("Field cannot list values: \(query.field)")
     }
     guard (1...DistinctRequestV3.maxLimit).contains(query.limit),
-      query.search.count <= DistinctRequestV3.maxSearchLength
+      query.search.utf16.count <= DistinctRequestV3.maxSearchLength
     else { throw QueryTableError.invalidQuery("Invalid distinct limit or search") }
     let source = matching.map { field.value(in: $0) }
     var counts: [String: Int] = [:]

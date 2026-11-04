@@ -117,11 +117,14 @@ share the modal view using `propertyApi={api.itemDetails!.properties}` (the
 compatibility alias) or select any controller from `propertiesByMode`. Detail
 property editors name the current scope; editing a modal never updates a popover or expansion.
 
-Complete client rows are used automatically. On servers, `Transport.fetchRow`
-loads a complete item independently of the table projection and filters. A custom
-`loadRow` returns `{ row, loadedFields? }` or `null`; without either loader, the
-current projected row is used with explicit coverage, showing missing properties
-as Not loaded. Loads are cancelled on item changes and stale responses are ignored.
+Complete client rows are used automatically. With a server transport, an item is
+looked up by identity with a v3 rows request (`fetchRowV3`), independently of the
+table projection and filters, and reads the backend properties of the table and
+detail catalogues. The lookup filters the identity field with `=`, so it needs
+that field to be server-filterable; otherwise the current page row is used. A
+custom `loadRow` returns `{ row, loadedFields? }` or `null`; without a loader or
+lookup, the current projected row is used with explicit coverage, showing missing
+properties as Not loaded. Loads are cancelled on item changes and stale responses are ignored.
 A missing item stays dismissible and a failed load offers Retry. An expanded item
 outside the current page appears after the table, preserving the shared identity.
 Detail changes do not refetch the collection or enter the backend SELECT request.

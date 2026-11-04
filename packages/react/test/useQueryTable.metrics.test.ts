@@ -496,6 +496,28 @@ describe("transactional metrics controller", () => {
     expect(current.api.error?.message).toContain("handshake");
     expect(current.api.rows).toEqual([]);
   });
+  it("refuses a page filtered by a computed definition changed since the handshake", async () => {
+    const store = memoryComputedColumnStore();
+    const draft = { id: "double", label: "Double", expression: { language: "qt-expr" as const, version: 1 as const, source: "[x] * 2" } };
+    const definition = await store.save(schema.name, draft, null);
+    const execution: ComputedExecution = {
+      profile: "qt-pg-number-v1", planToken: "one",
+      fields: { "@computed/double": { type: "number", select: true, sort: true, filter: true, measure: true, group: false } },
+      resolvedRevisions: { double: "server-old" },
+    };
+    expect(definition.revision).not.toBe("server-old");
+    const transport = v3Transport({ profile: "qt-pg-number-v1", serveRows: async (request) => computedPage(request, rows.slice(0, 2), 2) });
+    const { current } = mount({
+      schema, transport, computedExecution: execution, computedColumnStore: store, debounceMs: 0,
+      initialQuery: { ...EMPTY_QUERY, where: [{ field: "@computed/double", op: ">", value: "1" }] },
+    });
+    await settle();
+    await settle();
+    // Only filtered by it, not selected: the rows would still use the old definition.
+    expect(rowRequests(transport)).toEqual([]);
+    expect(current.api.error?.message).toContain("handshake");
+    expect(current.api.rows).toEqual([]);
+  });
   it("refreshes a computed row through the page pipeline", async () => {
     const store = memoryComputedColumnStore();
     const definition = await store.save(

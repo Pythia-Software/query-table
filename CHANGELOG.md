@@ -31,6 +31,9 @@
   Core builds and reads them with `toDistinctRequestV3`, `toRowRequestV3`,
   `toFieldStatsRequestV3` and `fetchDistinctValuesV3`, `fetchRowV3`,
   `fetchFieldStatsV3`. With a transport, every metric batch is one v3 request.
+  A row lookup filters the identity field with `=`; when that field is not
+  server-filterable with `=`, item details use the page row and `refreshRow`
+  refreshes the page.
   `api.filterValues` takes an optional `AbortSignal`, and the DuckDB transport
   is v3-only. `clientRows`, `metricTransport` and `computedExecution` are
   unchanged. Remote tables refuse client-only (`pushdown: false`) filters

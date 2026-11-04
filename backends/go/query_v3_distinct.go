@@ -63,7 +63,9 @@ func (d QueryDatasetV3) executeDistinct(ctx context.Context, tx *sql.Tx, q Query
 		}
 	} else {
 		if bound.Kind == FieldDatetime {
-			value = `to_char((` + bound.Expr + `) AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`
+			// The epoch of a timestamp is its wall clock read as UTC, of a
+			// timestamptz its instant: both as rows show them, in any session zone.
+			value = `to_char(to_timestamp(extract(epoch FROM (` + bound.Expr + `))) AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`
 		}
 		if bound.Kind == FieldTextArray {
 			value, from = "qt_distinct.qt_element", b.rel+" CROSS JOIN LATERAL unnest("+bound.Expr+") AS qt_distinct(qt_element)"

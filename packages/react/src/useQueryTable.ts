@@ -1030,7 +1030,8 @@ export function useQueryTable<Row>(
             transport.queryCapabilities, opts.computedExecution, { now: groupingNow ?? (opts.evaluationNow ?? Date.now)() });
           if (request.diagnostics.length) throw Error(request.diagnostics.join(" "));
           // The server executes its own revision; never show values of a definition changed since the handshake.
-          const executed = new Set([...request.result.select, ...request.result.orderBy.map(term => term.field)]);
+          const executed = new Set([...request.result.select, ...request.result.orderBy.map(term => term.field),
+            ...[...request.source.where, ...request.result.where].flatMap(term => predicatesOf(term).map(predicate => predicate.field))]);
           for (const definition of computed.definitions) {
             const revision = executionRevision(opts.computedExecution, definition.id);
             if (executed.has(computedFieldName(definition.id)) && revision !== undefined && revision !== definition.revision)
@@ -1429,6 +1430,13 @@ export function useQueryTable<Row>(
     },
     [metadataTransport, remoteFieldStats, byName, clientRows, groupKey],
   );
+  // A lookup filters the identity with "=": the server refuses it when the
+  // field's filtering is off or "=" is not among its operators. An identity
+  // the catalogue does not declare is left to the server.
+  const identityLookup = useMemo(() => {
+    const identity = sourceCatalogue.fields.find(field => field.name === sourceCatalogue.idField);
+    return !identity || isPushdownFilter(identity) && opsForField(identity).includes("=");
+  }, [sourceCatalogue]);
   const fetchRow = useCallback(async (id: RowId, signal?: AbortSignal, select?: string[]) =>
     fetchRowV3<Row>(metadataTransport!, sourceCatalogue, id, { ...auxiliaryOptions(), ...(select?.length ? { select } : {}) }, signal),
   [metadataTransport, sourceCatalogue, auxiliaryOptions]);
@@ -1515,9 +1523,10 @@ export function useQueryTable<Row>(
   const refreshRow = useCallback(
     async (id: RowId) => {
       if (!transport) return;
-      if (query.grouping || committedFields.some(isComputedField) || query.orderBy.some((term) => isComputedField(term.field))) {
+      if (!identityLookup || query.grouping || committedFields.some(isComputedField) || query.orderBy.some((term) => isComputedField(term.field))) {
         // Grouped rows and computed values belong to one committed page, and a
-        // computed sort may also change page membership.
+        // computed sort may also change page membership. Without an identity
+        // lookup the page is the only way to read the row again.
         refresh();
         return;
       }
@@ -1526,7 +1535,7 @@ export function useQueryTable<Row>(
         prev.map((r) => (rowId(r) === id ? (updated ?? r) : r)),
       );
     },
-    [transport, fetchRow, rowId, groupKey, committedFields, query.orderBy, refresh],
+    [transport, fetchRow, rowId, groupKey, committedFields, query.orderBy, refresh, identityLookup],
   );
 
   const visibleFields = useMemo(
@@ -1636,7 +1645,8 @@ export function useQueryTable<Row>(
     schema: query.grouping ? sourceSchema : displaySchema,
     query: sourceQuery, setQuery: setSourceQuery, options: opts.itemDetails,
     rows: query.grouping ? sourceRows ?? [] : rows, clientRows: sourceRows,
-    rowId: sourceRowId, fetchRow: metadataTransport ? fetchItem : undefined, refreshKey: nonce, links, queryParameter: parameter,
+    // Without an identity lookup, item details read the rows on the page.
+    rowId: sourceRowId, fetchRow: metadataTransport && identityLookup ? fetchItem : undefined, refreshKey: nonce, links, queryParameter: parameter,
     queryReady: storageReady && !restoration.loading && !restoration.error,
   });
 

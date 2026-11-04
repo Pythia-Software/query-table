@@ -91,6 +91,36 @@ func TestPostgresDistinct(t *testing.T) {
 	if got := run(distinct("@computed/double", "", 500)); !sameSet(got.Values, doubled...) {
 		t.Fatalf("computed values: %#v %v", got, doubled)
 	}
+	// A timestamp without time zone suggests its wall clock as rows show it,
+	// whatever the session zone (PostgreSQL clusters often default to local).
+	func() {
+		tx, err := db.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Rolled back on every path: the column's lock must not outlive a failure.
+		defer tx.Rollback()
+		for _, statement := range []string{`SET LOCAL TIME ZONE 'America/New_York'`, `ALTER TABLE direct ADD COLUMN local_at timestamp`,
+			`UPDATE direct SET local_at = TIMESTAMP '2026-10-02 12:00'`} {
+			if _, err = tx.Exec(statement); err != nil {
+				t.Fatal(err)
+			}
+		}
+		local := d
+		local.Schema.Fields = map[string]qt.FieldSpec{}
+		for name, f := range d.Schema.Fields {
+			local.Schema.Fields[name] = f
+		}
+		local.Schema.Fields["local_at"] = qt.FieldSpec{Name: "local_at", Kind: qt.FieldDatetime, Expr: "r.local_at", Sortable: true, ServerFilter: true}
+		out, err := local.ExecuteIn(context.Background(), tx, distinct("local_at", "", 5), o)
+		if err != nil || out.Distinct == nil || !sameSet(out.Distinct.Values, "2026-10-02T12:00:00.000Z") {
+			t.Fatalf("timestamp without time zone: %#v %v", out.Distinct, err)
+		}
+		rowsOut, err := local.ExecuteIn(context.Background(), tx, ungroupedRequest(qt.WireQuery{Select: []string{"id", "local_at"}, Limit: 1}), o)
+		if err != nil || len(rowsOut.Rows) != 1 || rowsOut.Rows[0]["local_at"] != "2026-10-02T12:00:00.000Z" {
+			t.Fatalf("row value: %v %v", rowsOut.Rows, err)
+		}
+	}()
 	hidden := d
 	field := hidden.Schema.Fields["note"]
 	field.ServerFilter = false
