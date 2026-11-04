@@ -105,7 +105,12 @@
   (`invalid_query`, `invalid_metric`), and JSON decode failures are
   `invalid_json` or `invalid_query`.
 - The demo server writes `QueryErrorBody` too, and the demo and example
-  transports throw `queryErrorFromResponse(response)`.
+  transports throw `queryErrorFromResponse(response)`. `httpComputedColumnStore`
+  throws a `QueryError` with the server's code, field and status; a stale
+  revision (409) keeps its reload message.
+- Swift counts the distinct search budget, filter values and sort regexes in
+  UTF-16 code units, as TypeScript and Go do, so a search of 1,001 emoji is
+  refused locally instead of by the server.
 - **Breaking (TypeScript):** `ServerQuery` no longer declares `hostState`.
   No builder set it and the Go decoder rejects it on a stage; host state is
   `QueryRequestV3.hostState`.

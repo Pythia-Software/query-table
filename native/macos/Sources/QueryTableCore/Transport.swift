@@ -61,6 +61,7 @@ extension QueryCapabilitiesV3 {
 
 extension DistinctRequestV3 {
   public static let maxLimit = 500
+  /// In UTF-16 code units, as TypeScript and Go count it.
   public static let maxSearchLength = 2000
 }
 
@@ -122,7 +123,7 @@ extension QueryRequestV3 {
       throw QueryTableError.refused(
         .invalidQuery, "Distinct value limit must be between 1 and \(DistinctRequestV3.maxLimit).")
     }
-    guard search.count <= DistinctRequestV3.maxSearchLength else {
+    guard search.utf16.count <= DistinctRequestV3.maxSearchLength else {
       throw QueryTableError.refused(.invalidQuery, "Distinct search exceeds its budget.")
     }
     let envelope = try ExecutionEnvelope(capabilities: capabilities, execution: execution)

@@ -228,7 +228,8 @@ struct QueryTableChecks {
       "An omitted bucket value or plan token decodes as before")
     let lookup = try QueryRequestV3.rowLookup(
       id: .number(2), select: ["name"], schema: schema, capabilities: local.queryCapabilities)
-    for (limit, search) in [(0, "pa"), (501, "pa"), (5, String(repeating: "x", count: 2001))] {
+    // 1,001 emoji are 1,001 characters but 2,002 UTF-16 units, over the server's budget.
+    for (limit, search) in [(0, "pa"), (501, "pa"), (5, String(repeating: "x", count: 2001)), (5, String(repeating: "🙂", count: 1001))] {
       var refused: QueryTableError?
       do {
         _ = try QueryRequestV3.distinctValues(

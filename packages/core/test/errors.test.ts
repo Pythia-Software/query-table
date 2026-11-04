@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   EMPTY_QUERY, QueryDecodeError, QueryError, decodeQueryStrict, errorCodeForStatus, isErrorCode, isQueryError, loadSchema,
-  queryErrorFromResponse, toQueryRequestV3, type QueryCapabilitiesV3,
+  httpComputedColumnStore, queryErrorFromResponse, toQueryRequestV3, type QueryCapabilitiesV3,
 } from "../src/index";
 
 const json = (body: unknown, status: number) =>
@@ -58,5 +58,21 @@ describe("QueryError", () => {
     expect(() => toQueryRequestV3(EMPTY_QUERY, schema, capabilities, { profile: "other", planToken: "", resolvedRevisions: {}, fields: {} }))
       .toThrow(expect.objectContaining({ code: "profile_mismatch" }));
     expect(toQueryRequestV3(EMPTY_QUERY, schema, capabilities)).not.toHaveProperty("diagnostics");
+  });
+});
+
+describe("httpComputedColumnStore", () => {
+  const column = { id: "a", label: "A", expression: { language: "qt-expr" as const, version: 1 as const, source: "[n]" } };
+  it("keeps the server's code, field and status", async () => {
+    const store = httpComputedColumnStore("/computed", async () =>
+      json({ error: { code: "syntax", message: "expected )", field: "@computed/a" } }, 400));
+    await expect(store.save("runs", column, null)).rejects.toMatchObject({ code: "syntax", field: "@computed/a", status: 400, message: "expected )" });
+  });
+  it("reads a stale revision as a reload prompt with its code", async () => {
+    const store = httpComputedColumnStore("/computed", async () =>
+      json({ error: { code: "conflict", message: "revision mismatch" } }, 409));
+    const error = await store.save("runs", column, "r1").catch((e: unknown) => e);
+    expect(isQueryError(error) && [error.code, error.status, error.message])
+      .toEqual(["conflict", 409, "This definition changed. Reload it before saving again."]);
   });
 });
