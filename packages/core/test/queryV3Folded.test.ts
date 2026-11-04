@@ -151,8 +151,7 @@ describe("metrics this client cannot read", () => {
     // A newer client's operation decodes as count with the original kept aside.
     const query = normalizeQueryState({ aggregations: [{ id: "m", op: "future", groupBy: [] }] });
     expect(query.aggregations![0]).toMatchObject({ op: "count", unsupportedOp: "future" });
-    const request = toQueryRequestV3(query, runsSchema, capabilities, undefined, { now: 1, rows: false });
-    expect(request.diagnostics).toContain("Metric m uses an unsupported operation: future.");
-    expect(request.metrics[0]).not.toHaveProperty("unsupportedOp");
+    expect(() => toQueryRequestV3(query, runsSchema, capabilities, undefined, { now: 1, rows: false }))
+      .toThrow(expect.objectContaining({ code: "invalid_metric", metricId: "m", message: expect.stringContaining("Metric m uses an unsupported operation: future.") }));
   });
 });
