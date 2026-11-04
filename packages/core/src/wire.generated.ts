@@ -206,7 +206,7 @@ export interface QueryRequestV3 {
   /** Filter-value suggestions over source.where; requires rows false, no metrics and no grouping. */
   distinct?: DistinctRequestV3;
   diagnostics: string[];
-  /** Opaque host-owned state, passed through uninterpreted. It is the hand-written HostQueryState in Go (json.RawMessage) and Swift (JSONValue) because hosts define its params. */
+  /** Host-owned state, passed through uninterpreted: any JSON object. Query Table's TypeScript client sends a HostQueryState ({ version, params }); a host defines what its own clients send. */
   hostState?: HostQueryState;
 }
 

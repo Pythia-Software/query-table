@@ -74,7 +74,10 @@ export function toQueryRequestV3<Row>(query: QueryState, baseSchema: FieldSchema
   // narrowed population silently. (Its other diagnostics, such as calendar
   // grouping, describe the v2 transport and do not apply here.)
   diagnostics.push(...metricQuery.diagnostics.filter(issue => issue.code === "residual_metric_filter" || issue.code === "unexpanded_series").map(issue => issue.message));
-  // unsupportedOp is client state; the request is refused by its diagnostic.
+  // unsupportedOp marks an operation this client cannot read; its op is a
+  // placeholder, so the metric must never run as that op.
+  for (const metric of metricQuery.metrics) if (metric.unsupportedOp)
+    diagnostics.push(`Metric ${metric.id} uses an unsupported operation: ${metric.unsupportedOp}.`);
   const metrics: MetricSpecV3[] = metricQuery.metrics.map(({ unsupportedOp: _unsupported, ...metric }) => {
     const dateGrouping = q.aggregations?.find(clause => clause.id === metric.id)?.dateGrouping;
     // The projection keeps only the scatter display hint.

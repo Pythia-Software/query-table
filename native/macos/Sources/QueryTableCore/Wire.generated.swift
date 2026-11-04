@@ -755,7 +755,7 @@ public struct QueryRequestV3: Codable, Equatable, Sendable {
   /// Filter-value suggestions over source.where; requires rows false, no metrics and no grouping.
   public var distinct: DistinctRequestV3?
   public var diagnostics: [String]
-  /// Opaque host-owned state, passed through uninterpreted. It is the hand-written HostQueryState in Go (json.RawMessage) and Swift (JSONValue) because hosts define its params.
+  /// Host-owned state, passed through uninterpreted: any JSON object. Query Table's TypeScript client sends a HostQueryState ({ version, params }); a host defines what its own clients send.
   public var hostState: JSONValue?
   enum CodingKeys: String, CodingKey {
     case version

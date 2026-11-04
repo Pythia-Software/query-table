@@ -97,11 +97,11 @@ possible:
 | --- | --- | --- | --- |
 | `WhereClause`, `WhereConjunction`, `WhereBranch` | Go | `WhereClause` | One struct carries a literal or an `{"all": [...]}` branch, so the SQL compilers walk one type; its `MarshalJSON` writes exactly one shape. |
 | `WhereTerm`, `OrGroup` | Go | `WhereTerm` | A literal or an `{"any": [...]}` group in one struct; it also carries the presentation-only `setFilter` used by query links, which never reaches the v3 wire. |
-| `WhereTerm` | Swift | `WhereTerm` | The native editor works on `.predicate` and flat `.any` groups; OR groups with conjunction branches decode as `.group(OrGroup)` and re-encode unchanged. |
+| `WhereTerm` | Swift | `WhereTerm` | The native editor works on `.predicate` and flat `.any` groups; OR groups with conjunction branches decode as `.group(OrGroup)`, are evaluated by `branches`, are read-only in the editor and re-encode unchanged. |
 | `MetricMinCount` | Go | `MetricMinCount` | A number (rows) or `{min, distinct}` / `{min, sum}`. |
 | `GroupingDefinition` | Go | `GroupingDefinition` | `keys` mixes field names and calendar keys; Go stores names plus a `KeyIntervals` map. |
 | `MetricDistributionResult` | Go | `MetricDistributionResult` | A box or histogram union discriminated by `kind`. |
-| `hostState` | Go, Swift | `json.RawMessage`, `JSONValue` | Host-owned state, passed through uninterpreted. |
+| `hostState` | Go, Swift, TypeScript | `json.RawMessage`, `JSONValue`, `HostQueryState` | Host-owned state, passed through uninterpreted: the schema accepts any JSON object, and Go rejects anything else. The TypeScript client sends a `HostQueryState` (`{ version, params }`). |
 | `MetricSort.key` | TypeScript | `` "value" \| "y" \| "count" \| "samples" \| `group${number}` `` | A template literal type is more precise than `string`. |
 
 Scalar unions such as `MetricValue` (number, string, boolean or null) are not

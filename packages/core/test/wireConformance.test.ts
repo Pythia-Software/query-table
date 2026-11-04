@@ -132,5 +132,12 @@ describe("wire schema conformance", () => {
     expect(validate("QueryRequestV3", { ...request, source: { ...request.source, hostState } })).not.toEqual([]);
     expect(validate("QueryRequestV3", { ...request, metrics: [{ id: "m", op: "median", groupBy: [] }] })).not.toEqual([]);
     expect(validate("QueryRequestV3", { ...request, version: 2 })).not.toEqual([]);
+    expect(validate("QueryRequestV3", { ...request, hostState: ["one"] })).not.toEqual([]);
+  });
+
+  it("accepts any host-owned hostState object", () => {
+    // Go passes host state through uninterpreted; hosts define its shape.
+    const request = JSON.parse(read("requests", "rows.json"));
+    expect(validate("QueryRequestV3", { ...request, hostState: { tenant: "one" } })).toEqual([]);
   });
 });

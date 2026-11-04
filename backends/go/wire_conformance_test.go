@@ -82,3 +82,18 @@ func TestWireResultFixturesRoundTrip(t *testing.T) {
 		})
 	}
 }
+
+// Required arrays stay arrays when a Go caller leaves them nil.
+func TestWireGroupingEmptyArrays(t *testing.T) {
+	data, err := json.Marshal(GroupingDefinition{})
+	if err != nil || string(data) != `{"keys":[],"summaries":[],"representative":null}` {
+		t.Fatalf("%s %v", data, err)
+	}
+	var back GroupingDefinition
+	if err = json.Unmarshal([]byte(`{"keys":["k"],"summaries":[],"representative":null}`), &back); err != nil || len(back.Summaries) != 0 {
+		t.Fatalf("%#v %v", back, err)
+	}
+	if data, _ = json.Marshal(GroupingDefinition{Keys: []string{"k"}}); string(data) != `{"keys":["k"],"summaries":[],"representative":null}` {
+		t.Fatal(string(data))
+	}
+}

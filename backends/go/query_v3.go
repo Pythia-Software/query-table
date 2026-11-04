@@ -44,9 +44,10 @@ type groupingDefinitionJSON struct {
 
 // MarshalJSON writes a key with an interval as {"field","interval","timeZone"}.
 func (g GroupingDefinition) MarshalJSON() ([]byte, error) {
+	// keys and summaries are required arrays on the wire, even when empty.
 	out := groupingDefinitionJSON{Summaries: g.Summaries, Representative: g.Representative, Diagnostics: g.Diagnostics, Keys: []json.RawMessage{}}
-	if g.Keys == nil {
-		out.Keys = nil
+	if out.Summaries == nil {
+		out.Summaries = []SummaryColumn{}
 	}
 	for _, key := range g.Keys {
 		var value any = key
@@ -116,6 +117,10 @@ func groupKeyLocation(typ, field string, interval GroupKeyInterval) (*time.Locat
 func (q QueryRequestV3) Validate() error {
 	if q.Version != 3 || len(q.Diagnostics) > 0 {
 		return diagnostic("version", "a valid version 3 query is required")
+	}
+	// Host state is opaque, but always a JSON object (see the wire schema).
+	if host := bytes.TrimSpace(q.HostState); len(host) > 0 && host[0] != '{' {
+		return diagnostic("query", "hostState must be a JSON object")
 	}
 	for _, stage := range []struct {
 		name  string

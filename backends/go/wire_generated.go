@@ -210,9 +210,9 @@ type QueryRequestV3 struct {
 	// and no grouping.
 	Distinct    *DistinctRequestV3 `json:"distinct,omitempty"`
 	Diagnostics []string           `json:"diagnostics"`
-	// Opaque host-owned state, passed through uninterpreted. It is the
-	// hand-written HostQueryState in Go (json.RawMessage) and Swift (JSONValue)
-	// because hosts define its params.
+	// Host-owned state, passed through uninterpreted: any JSON object. Query
+	// Table's TypeScript client sends a HostQueryState ({ version, params }); a
+	// host defines what its own clients send.
 	HostState json.RawMessage `json:"hostState,omitempty"`
 }
 
