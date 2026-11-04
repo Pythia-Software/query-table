@@ -58,12 +58,21 @@ const abort = (signal?: AbortSignal) => {
 };
 
 /** Keep dispatch and the hook's committed-page lifecycle on the same route:
- * without a remote executor, shown-row metrics read the committed page. */
+ * without a remote executor, shown-row metrics read the committed page. So do
+ * shown-row regex metrics a server does not advertise (regexAggregateExpressions),
+ * which run in a formula worker over that page. */
 export function usesLocalMetricPage<Row>(
   clause: AggregationClause,
   context: MetricExecutionContext<Row>,
 ): boolean {
-  return !context.executeV3 && !context.transport && clause.scope === "shownRows";
+  if (clause.scope !== "shownRows") return false;
+  if (!context.executeV3 && !context.transport) return true;
+  if (context.transport?.queryCapabilities.regexAggregateExpressions) return false;
+  try {
+    return metricPlans(clause, context.schema, context.resolveComputed).some(hasRegex);
+  } catch {
+    return false; // An invalid metric fails on the server, with its diagnostic.
+  }
 }
 
 /** Run a metric batch as one v3 request (`rows: false`). A clause using a
@@ -297,10 +306,19 @@ export async function executeMetrics<Row>(
     );
     return { metrics: series.combine(parts.flatMap((part) => part.metrics)) };
   }
-  if (context.executeV3) return context.executeV3(query, signal);
-  if (context.transport)
-    return executeV3Metrics(context.transport, query, context.schema,
-      sourceExecutionSchema(context.schema, context.execution), context.execution, context.now ?? Date.now(), signal);
+  if (context.executeV3 || context.transport) {
+    const page = clauses.filter(c => usesLocalMetricPage(c, context));
+    const remote = (q: QueryState) => context.executeV3 ? context.executeV3(q, signal)
+      : executeV3Metrics(context.transport!, q, context.schema, sourceExecutionSchema(context.schema, context.execution),
+        context.execution, context.now ?? Date.now(), signal);
+    if (!page.length) return remote(query);
+    const { executeV3: _executeV3, transport: _transport, ...local } = context;
+    const rest = clauses.filter(c => !page.includes(c));
+    const [own, served] = await Promise.all([executeMetrics({ ...query, aggregations: page }, local, signal),
+      rest.length ? remote({ ...query, aggregations: rest }) : { metrics: [] }]);
+    const byId = new Map([...own.metrics, ...served.metrics].map(metric => [metric.id, metric]));
+    return { metrics: clauses.flatMap(c => byId.get(c.id) ?? []) };
+  }
   if (context.rowsReady === false && clauses.some(c => usesLocalMetricPage(c, context)))
     throw Error("Wait for the current table page before previewing shown-row metrics.");
   if (context.clientRows)

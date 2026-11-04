@@ -1374,8 +1374,14 @@ export function useQueryTable<Row>(
 
   // Filter suggestions, field statistics and row lookups are v3 requests in
   // the table's negotiated execution context.
-  const auxiliaryOptions = useCallback((): AuxiliaryRequestOptions => ({ now: (opts.evaluationNow ?? Date.now)(),
-    ...(opts.computedExecution ? { execution: opts.computedExecution } : {}) }), [opts.evaluationNow, opts.computedExecution]);
+  // Read at request time, so inline host options never change the identity
+  // of the lookup and suggestion callbacks (which would restart their effects).
+  const auxiliaryRef = useRef({ evaluationNow: opts.evaluationNow, execution: opts.computedExecution });
+  auxiliaryRef.current = { evaluationNow: opts.evaluationNow, execution: opts.computedExecution };
+  const auxiliaryOptions = useCallback((): AuxiliaryRequestOptions => {
+    const { evaluationNow, execution } = auxiliaryRef.current;
+    return { now: (evaluationNow ?? Date.now)(), ...(execution ? { execution } : {}) };
+  }, []);
   const remoteDistinct = useCallback(async (field: string, search: string, signal?: AbortSignal): Promise<DistinctValuesResult> => {
     const definition = sourceCatalogue.fields.find(f => f.name === field);
     if (!metadataTransport || !definition || !isPushdownFilter(definition)) return { values: [], hasMore: false };
@@ -1638,9 +1644,11 @@ export function useQueryTable<Row>(
   const lookupCatalogue = useMemo(() => !detailCatalogue ? sourceCatalogue : { ...sourceCatalogue,
     fields: [...sourceCatalogue.fields, ...detailCatalogue.fields.filter(field => !sourceCatalogue.fields.some(f => f.name === field.name))] },
   [sourceCatalogue, detailCatalogue]);
+  const lookupCatalogueRef = useRef(lookupCatalogue);
+  lookupCatalogueRef.current = lookupCatalogue;
   const fetchItem = useCallback(async (id: RowId, signal?: AbortSignal) =>
-    fetchRowV3<Row>(metadataTransport!, lookupCatalogue, id, auxiliaryOptions(), signal),
-  [metadataTransport, lookupCatalogue, auxiliaryOptions]);
+    fetchRowV3<Row>(metadataTransport!, lookupCatalogueRef.current, id, auxiliaryOptions(), signal),
+  [metadataTransport, auxiliaryOptions]);
   const itemDetails = useItemDetails({
     schema: query.grouping ? sourceSchema : displaySchema,
     query: sourceQuery, setQuery: setSourceQuery, options: opts.itemDetails,

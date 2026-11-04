@@ -327,6 +327,18 @@ describe("metric execution boundary", () => {
       ),
     ).rejects.toThrow("Regex");
     expect(inputs).toHaveLength(0);
+    // A server without regex aggregates gets only the other clauses; the
+    // shown-row regex metric still reads the committed page.
+    inputs.length = 0;
+    const transport = v3Transport(request => request.metrics.map((m) => ({ id: m.id, buckets: [{ keys: [], value: 7, count: 7 }] })),
+      { regexAggregateExpressions: false });
+    const mixed = await executeMetrics(
+      { ...EMPTY_QUERY, limit: 1, offset: 1, aggregations: [{ id: "rows", op: "count", groupBy: [] }, regex] },
+      { schema, transport, shownRows: [rows[1]!], rowsReady: true, workerFactory: () => worker as unknown as Worker },
+    );
+    expect(transport.fetchQueryV3.mock.calls.map(([request]) => request.metrics.map((m) => m.id))).toEqual([["rows"]]);
+    expect(mixed.metrics.map((m) => [m.id, m.buckets[0]?.value])).toEqual([["rows", 7], ["regex", 1]]);
+    expect(inputs.map((input) => input.name)).toEqual(["beta"]);
   });
 });
 

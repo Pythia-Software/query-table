@@ -156,6 +156,21 @@ struct QueryTableChecks {
     var wrongRow: Error?
     do { _ = try await stale.fetchRow(id: .number(2)) } catch { wrongRow = error }
     try check(wrongRow != nil, "Row lookup rejects a response for a different identity")
+    let nestedSchema = FieldSchema(
+      name: "nested", idField: "id",
+      fields: [
+        .init(name: "id", label: "ID", type: "number", source: .init(path: "meta.id")),
+        .init(name: "name", label: "Name", type: "text"),
+      ])
+    let nestedRows: [QueryRow] = [["meta": .object(["id": .number(1)]), "name": .string("a")]]
+    let nestedTable = QueryTableController(
+      schema: nestedSchema, adapter: LocalQueryTransport(schema: nestedSchema, rows: nestedRows))
+    nestedTable.refresh()
+    try await waitUntil { !nestedTable.isLoading }
+    let nestedRow = try await nestedTable.fetchRow(id: .number(1))
+    try check(
+      nestedTable.error == nil && nestedTable.rows.count == 1 && nestedRow != nil,
+      "An identity at a nested source path validates and looks up")
     let oneRow = QueryCapabilitiesV3(profile: local.queryCapabilities.profile, maxRows: 1)
     let tightLookup = QueryRequestV3.rowLookup(id: .number(2), select: ["name"], schema: schema, capabilities: oneRow)
     try check(tightLookup.source.limit == 1, "Row lookup stays within a one-row budget")

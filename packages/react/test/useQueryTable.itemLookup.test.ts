@@ -68,3 +68,21 @@ it("reads the page when the identity cannot be filtered with =", async () => {
   await until(() => rowRequests(transport).length > pages);
   expect(rowRequests(transport).some((request) => request.result.limit === 2)).toBe(false);
 });
+
+it("does not restart a lookup for inline host options", async () => {
+  const transport = memoryV3Transport<Row>([{ id: "b", name: "Elsewhere" }], schema, { project: true });
+  const current = { api: undefined as unknown as QueryTableApi<Row> };
+  function Probe() {
+    // Inline on every render, as hosts commonly write them.
+    current.api = useQueryTable<Row>({ schema, transport, debounceMs: 0, evaluationNow: () => 1, itemDetails: { modes: ["modal"], schema: { ...schema } } });
+    return null;
+  }
+  root = createRoot(document.createElement("div"));
+  act(() => root!.render(createElement(Probe)));
+  await until(() => rowRequests(transport).length > 0 && !current.api.loading);
+  act(() => current.api.itemDetails!.open("b", "modal"));
+  await until(() => current.api.itemDetails!.record?.row.name === "Elsewhere");
+  for (let i = 0; i < 3; i++) act(() => root!.render(createElement(Probe)));
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+  expect(rowRequests(transport).filter((request) => request.result.limit === 2)).toHaveLength(1);
+});

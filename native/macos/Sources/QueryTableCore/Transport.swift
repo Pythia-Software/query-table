@@ -404,7 +404,9 @@ public struct QueryResultV3: Codable, Equatable, Sendable {
     let idField = schema?.idField ?? self.schema.idField
     var seen = Set<JSONValue>()
     for row in rows {
-      let id = row[idField] ?? .null
+      // Servers key rows by field name; a local transport returns rows whose
+      // identity may live at the field's source path.
+      let id = row[idField] ?? schema?.field(named: idField)?.value(in: row) ?? .null
       switch id {
       case .string, .number, .integer: break
       default:
