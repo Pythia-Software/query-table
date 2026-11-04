@@ -195,7 +195,9 @@ public struct LocalQueryTransport: QueryTransport {
       }
     }
     return rows.filter { row in
-      terms.allSatisfy { term in term.predicates.contains { matches($0, row: row, time: times[key($0)]) } }
+      terms.allSatisfy { term in
+        term.branches.contains { $0.allSatisfy { matches($0, row: row, time: times[key($0)]) } }
+      }
     }
   }
   private func matches(_ clause: WhereClause, row: QueryRow, time: Date?) -> Bool {

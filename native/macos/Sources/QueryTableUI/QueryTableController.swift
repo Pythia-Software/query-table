@@ -337,9 +337,10 @@ public final class QueryTableController: ObservableObject {
   }
 
   /// Combines two AND terms into one OR group, preserving each predicate.
+  /// Groups with conjunction branches are read-only and never combine.
   public func groupFilter(from source: Int, with destination: Int) {
     guard query.whereTerms.indices.contains(source), query.whereTerms.indices.contains(destination),
-      source != destination
+      source != destination, query.whereTerms[source].isFlat, query.whereTerms[destination].isFlat
     else { return }
     edit { next in
       let clauses = next.whereTerms[destination].predicates + next.whereTerms[source].predicates
@@ -350,7 +351,8 @@ public final class QueryTableController: ObservableObject {
 
   /// Converts alternatives into separate AND terms.
   public func ungroupFilter(at index: Int) {
-    guard query.whereTerms.indices.contains(index), query.whereTerms[index].predicates.count > 1
+    guard query.whereTerms.indices.contains(index), query.whereTerms[index].isFlat,
+      query.whereTerms[index].predicates.count > 1
     else { return }
     edit { next in
       let terms = next.whereTerms[index].predicates.map { WhereTerm.predicate($0) }

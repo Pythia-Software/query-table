@@ -99,6 +99,16 @@ struct QueryTableChecks {
     try check(
       negated.rows.count == 1 && negated.rows[0]["id"] == .number(1),
       "Negation excludes NULL values")
+    let branches = WhereTerm.group(OrGroup(any: [
+      .all(WhereConjunction(all: [
+        .init(field: "status", op: "=", value: "PASS"), .init(field: "amount", op: ">", value: "30"),
+      ])),
+      .literal(.init(field: "name", op: "=", value: "Beta")),
+    ]))
+    let branched = try await local.rows(.init(whereTerms: [branches]))
+    try check(
+      branched.rows.map { $0["id"] } == [.number(2)],
+      "OR of AND branches matches a row only when every literal of one branch matches")
     let longerNames = try await local.rows(.init(whereTerms: [
       .predicate(.init(field: "name", op: "length_gt", value: "4"))
     ]))
@@ -244,6 +254,15 @@ struct QueryTableChecks {
     try await waitUntil { !controller.isLoading }
     try check(
       controller.rows.count == 3 && controller.error == nil, "Controller fetches through adapter")
+    controller.edit { $0.whereTerms = [branches, .predicate(.init(field: "name", op: "=", value: "Alpha"))] }
+    controller.groupFilter(from: 1, with: 0)
+    controller.groupFilter(from: 0, with: 1)
+    controller.ungroupFilter(at: 0)
+    try check(
+      controller.query.whereTerms.first == branches && controller.query.whereTerms.count == 2,
+      "The editor never flattens OR groups with AND branches")
+    controller.edit { $0.whereTerms = [] }
+    try await waitUntil { !controller.isLoading }
     controller.addFilter(field: "status", value: "PASS")
     try await waitUntil { !controller.isLoading }
     try check(

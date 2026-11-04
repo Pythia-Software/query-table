@@ -170,39 +170,51 @@ public struct QueryTableView: View {
                   }
                 Text(index == 0 ? "" : "AND").font(.caption.bold())
               }.frame(width: 30)
-              VStack(spacing: 6) {
-                ForEach(Array(term.predicates.enumerated()), id: \.offset) { child, clause in
-                  HStack {
-                    if child > 0 { Text("OR").font(.caption.bold()).frame(width: 24) }
-                    PredicateEditor(controller: controller, clause: clause) { updated in
-                      replacePredicate(term: index, child: child, clause: updated)
+              if !term.isFlat {
+                // Conjunction branches would flatten in this editor: show them
+                // read-only, removable only as a whole.
+                Text(branchSummary(term)).font(.callout).frame(maxWidth: .infinity, alignment: .leading)
+                  .help("This filter combines AND branches with OR; edit it where it was created")
+                Button {
+                  controller.edit { $0.whereTerms.remove(at: index) }
+                } label: {
+                  Image(systemName: "minus.circle")
+                }.help("Remove filter")
+              } else {
+                VStack(spacing: 6) {
+                  ForEach(Array(term.predicates.enumerated()), id: \.offset) { child, clause in
+                    HStack {
+                      if child > 0 { Text("OR").font(.caption.bold()).frame(width: 24) }
+                      PredicateEditor(controller: controller, clause: clause) { updated in
+                        replacePredicate(term: index, child: child, clause: updated)
+                      }
+                      Button {
+                        removePredicate(term: index, child: child)
+                      } label: {
+                        Image(systemName: "minus.circle")
+                      }.help("Remove condition")
                     }
-                    Button {
-                      removePredicate(term: index, child: child)
-                    } label: {
-                      Image(systemName: "minus.circle")
-                    }.help("Remove condition")
                   }
                 }
+                Button("OR") {
+                  guard let first = term.predicates.first else { return }
+                  controller.edit { $0.whereTerms[index] = .any(term.predicates + [first]) }
+                }.help("Add alternative, or drop another filter to combine with OR")
+                  .dropDestination(for: String.self) { items, _ in
+                    dropFilter(items, at: index, group: true)
+                  }
               }
-              Button("OR") {
-                guard let first = term.predicates.first else { return }
-                controller.edit { $0.whereTerms[index] = .any(term.predicates + [first]) }
-              }.help("Add alternative, or drop another filter to combine with OR")
-                .dropDestination(for: String.self) { items, _ in
-                  dropFilter(items, at: index, group: true)
-                }
               Menu {
                 Button("Move up") { controller.moveFilter(from: index, to: index - 1) }.disabled(
                   index == 0)
                 Button("Move down") { controller.moveFilter(from: index, to: index + 1) }.disabled(
                   index == controller.query.whereTerms.count - 1)
-                if index > 0 {
+                if index > 0, term.isFlat, controller.query.whereTerms[index - 1].isFlat {
                   Button("Combine with previous using OR") {
                     controller.groupFilter(from: index, with: index - 1)
                   }
                 }
-                if term.predicates.count > 1 {
+                if term.isFlat, term.predicates.count > 1 {
                   Button("Split alternatives into AND filters") {
                     controller.ungroupFilter(at: index)
                   }
@@ -231,8 +243,19 @@ public struct QueryTableView: View {
     }
     return true
   }
+  private func branchSummary(_ term: WhereTerm) -> String {
+    term.branches.map { branch in
+      let text = branch.map { clause in
+        let label = controller.schema.field(named: clause.field)?.label ?? clause.field
+        return [clause.negated == true ? "NOT" : nil, label, clause.op, clause.value.isEmpty ? nil : clause.value]
+          .compactMap { $0 }.joined(separator: " ")
+      }.joined(separator: " AND ")
+      return branch.count > 1 ? "(\(text))" : text
+    }.joined(separator: " OR ")
+  }
   private func replacePredicate(term: Int, child: Int, clause: WhereClause) {
-    guard controller.query.whereTerms.indices.contains(term) else { return }
+    guard controller.query.whereTerms.indices.contains(term), controller.query.whereTerms[term].isFlat
+    else { return }
     controller.edit { query in
       var predicates = query.whereTerms[term].predicates
       guard predicates.indices.contains(child) else { return }
@@ -241,6 +264,8 @@ public struct QueryTableView: View {
     }
   }
   private func removePredicate(term: Int, child: Int) {
+    guard controller.query.whereTerms.indices.contains(term), controller.query.whereTerms[term].isFlat
+    else { return }
     controller.edit { query in
       var predicates = query.whereTerms[term].predicates
       predicates.remove(at: child)

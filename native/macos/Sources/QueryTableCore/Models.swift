@@ -74,7 +74,7 @@ public struct SelectColumn: Codable, Equatable, Sendable {
 
 /// One conjunct of a WHERE: a literal, a flat OR group, or an OR group with
 /// conjunction branches (`(a AND b) OR c`), which the native editor does not
-/// build but must carry through unchanged.
+/// build and shows read-only, so its branches are carried through unchanged.
 public enum WhereTerm: Codable, Equatable, Sendable {
   case predicate(WhereClause)
   case any([WhereClause])
@@ -100,7 +100,29 @@ public enum WhereTerm: Codable, Equatable, Sendable {
     case .group(let v): try v.encode(to: encoder)
     }
   }
+  /// The term as alternatives of conjunctions: it matches when every literal of
+  /// some branch matches. Evaluate with this, never with `predicates`.
+  public var branches: [[WhereClause]] {
+    switch self {
+    case .predicate(let v): return [[v]]
+    case .any(let v): return v.map { [$0] }
+    case .group(let v):
+      return v.any.map { branch -> [WhereClause] in
+        switch branch {
+        case .literal(let v): return [v]
+        case .all(let v): return v.all
+        }
+      }
+    }
+  }
+  /// Whether the native editor can edit the term as a flat list of
+  /// alternatives. Conjunction branches would be flattened, widening it.
+  public var isFlat: Bool {
+    if case .group = self { return false }
+    return true
+  }
   /// Every literal of the term (each counts against the predicate budget).
+  /// Flattening loses its meaning; see `branches`.
   public var predicates: [WhereClause] {
     switch self {
     case .predicate(let v): return [v]
