@@ -12,6 +12,7 @@
 
 import { FormulaError, type FormulaPlan, type FormulaResult } from "./formula";
 import type { AggregationBucket, AggregationResultEntry } from "./encode";
+import { failedMetric } from "./errors";
 import {
   compareMetricValues,
   compileMetric,
@@ -525,6 +526,7 @@ export function planMetricSeries(
               id: part.id,
               buckets: [],
               error: "Server omitted this metric.",
+              errorCode: "internal" as const,
             },
         );
         if (item.kind === "plain") return { ...entries[0]!, id: c.id };
@@ -537,11 +539,7 @@ export function planMetricSeries(
             return combineOccurrences(c, entries[0]!);
           return combineSeries(item, entries);
         } catch (e) {
-          return {
-            id: c.id,
-            buckets: [],
-            error: e instanceof Error ? e.message : String(e),
-          };
+          return failedMetric(c.id, e, "invalid_metric");
         }
       });
     },

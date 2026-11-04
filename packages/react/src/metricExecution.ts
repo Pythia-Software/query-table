@@ -403,6 +403,7 @@ export async function executeMetrics<Row>(
           id: c.id,
           buckets: [],
           error: "Server omitted this metric.",
+          errorCode: "internal" as const,
         },
     ),
   };

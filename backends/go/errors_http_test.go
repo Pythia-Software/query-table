@@ -109,6 +109,8 @@ func TestComputedColumnsHandlerErrorBodies(t *testing.T) {
 		{"shape", "PUT", "/?dataset=runs", `{"other":1}`, &fakeComputedRepo{}, allow, 400, ErrorCodeInvalidRequest, ""},
 		{"two values", "PUT", "/?dataset=runs", column + column, &fakeComputedRepo{}, allow, 400, ErrorCodeInvalidJSON, ""},
 		{"too large", "PUT", "/?dataset=runs", `{"column":"` + strings.Repeat("x", 128*1024) + `"}`, &fakeComputedRepo{}, allow, 413, ErrorCodeRequestTooLarge, ""},
+		// The value fits the budget; what follows it does not.
+		{"trailing too large", "PUT", "/?dataset=runs", column + strings.Repeat(" ", 128*1024), &fakeComputedRepo{}, allow, 413, ErrorCodeRequestTooLarge, ""},
 		{"invalid", "PUT", "/?dataset=runs", strings.Replace(column, `"label":"Margin"`, `"label":" "`, 1), &fakeComputedRepo{}, allow, 400, ErrorCodeDefinitionInvalid, "@computed/margin"},
 		{"compile", "PUT", "/?dataset=runs", column, &fakeComputedRepo{saveError: fmt.Errorf("x: %w", &PlanDiagnostic{Code: ErrorCodeSyntax, Message: "expected )", Field: "@computed/margin", Offset: 3})}, allow, 400, ErrorCodeSyntax, "@computed/margin"},
 		{"budget", "PUT", "/?dataset=runs", column, &fakeComputedRepo{saveError: &PlanDiagnostic{Code: ErrorCodeDependencyLimit, Message: "too deep"}}, allow, 422, ErrorCodeDependencyLimit, ""},
@@ -138,7 +140,10 @@ func TestQuerySnapshotsHandlerErrorBodies(t *testing.T) {
 		{"code", "GET", "/?dataset=runs&code=x", "", snapshotTestRepo{rows: map[string]QuerySnapshot{}}, allow, 400, ErrorCodeInvalidRequest},
 		{"forbidden", "GET", "/?dataset=runs&code=" + code, "", snapshotTestRepo{rows: map[string]QuerySnapshot{}}, nil, 403, ErrorCodeForbidden},
 		{"missing", "GET", "/?dataset=runs&code=" + code, "", snapshotTestRepo{rows: map[string]QuerySnapshot{}}, allow, 404, ErrorCodeNotFound},
-		{"invalid", "PUT", "/?dataset=runs&code=" + code, string(body) + "{}", snapshotTestRepo{rows: map[string]QuerySnapshot{}}, allow, 400, ErrorCodeInvalidRequest},
+		{"two values", "PUT", "/?dataset=runs&code=" + code, string(body) + "{}", snapshotTestRepo{rows: map[string]QuerySnapshot{}}, allow, 400, ErrorCodeInvalidJSON},
+		{"json", "PUT", "/?dataset=runs&code=" + code, "{", snapshotTestRepo{rows: map[string]QuerySnapshot{}}, allow, 400, ErrorCodeInvalidJSON},
+		{"too large", "PUT", "/?dataset=runs&code=" + code, `{"token":"` + strings.Repeat("x", 2*1024*1024+1024) + `"}`, snapshotTestRepo{rows: map[string]QuerySnapshot{}}, allow, 413, ErrorCodeRequestTooLarge},
+		{"invalid", "PUT", "/?dataset=runs&code=" + code, strings.Replace(string(body), `"version":1`, `"version":9`, 1), snapshotTestRepo{rows: map[string]QuerySnapshot{}}, allow, 400, ErrorCodeInvalidRequest},
 		{"quota", "PUT", "/?dataset=runs&code=" + code, string(body), quotaSnapshotRepo{}, allow, 507, ErrorCodeQuotaExceeded},
 	} {
 		w := httptest.NewRecorder()
@@ -164,5 +169,19 @@ func TestErrorCodesAreDistinctAndMapped(t *testing.T) {
 	var link QueryLinkErrorCode = QueryLinkTooLarge
 	if !seen[link] {
 		t.Fatal("query link codes must be ErrorCodes")
+	}
+}
+
+// A coded error with status 500 keeps its code but never its text.
+func TestErrorDetailRedactsServerFailures(t *testing.T) {
+	secret := &PlanDiagnostic{Code: ErrorCodeInternal, Message: "dial tcp 10.0.0.5:5432: password authentication failed", Field: "dsn", Offset: 4}
+	if got := ErrorDetail(fmt.Errorf("wrapped: %w", secret)); got != (QueryErrorDetail{Code: ErrorCodeInternal, Message: "could not execute query"}) {
+		t.Fatalf("%+v", got)
+	}
+	if got := ErrorDetail(&PlanDiagnostic{Code: ErrorCodeDataset, Message: "source SELECT * FROM secret_table"}); got.Message != "could not execute query" || got.Code != ErrorCodeDataset {
+		t.Fatalf("%+v", got)
+	}
+	if got := ErrorDetail(&PlanDiagnostic{Code: ErrorCodeSyntax, Message: "expected )", Field: "@computed/a"}); got.Message != "expected )" || got.Field != "@computed/a" {
+		t.Fatalf("client errors keep their detail: %+v", got)
 	}
 }

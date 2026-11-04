@@ -164,7 +164,7 @@ func NewComputedColumnsHandler(repo ComputedColumnRepository, authorize func(*ht
 			return
 		}
 		if err := decoder.Decode(new(any)); err != io.EOF {
-			writeErrorCode(w, ErrorCodeInvalidJSON, "expected one JSON value")
+			WriteQueryError(w, trailingError(err))
 			return
 		}
 		if err := validateComputed(request.Column); err != nil {

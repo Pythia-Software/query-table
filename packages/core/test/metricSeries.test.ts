@@ -167,6 +167,12 @@ describe("metric shares", () => {
     expect(a).toEqual([null, 110 / 210, 10 / 10, 50 / 70]);
   });
 
+  it("codes a part the engine omitted", () => {
+    const clause: AggregationClause = { id: "models", op: "sum", field: "input", groupBy: ["model"], share: "total" };
+    const plan = planMetricSeries(query(clause), schema, { now })!;
+    expect(plan.combine([])[0]).toMatchObject({ id: "models", error: "Server omitted this metric.", errorCode: "internal" });
+  });
+
   it("keeps an engine part's error code", () => {
     const clause: AggregationClause = { id: "models", op: "sum", field: "input", groupBy: ["model"], share: "total" };
     const plan = planMetricSeries(query(clause), schema, { now })!;

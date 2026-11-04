@@ -39,7 +39,10 @@ answer every failure with `Content-Type: application/json` and a
 - **500** `internal` and host-configuration errors (`dataset`, `schema`,
   `resolver_required`, ...), **503** `unavailable`, **507** `quota_exceeded`.
 
-An `internal` message is always generic; the cause stays in server logs.
+Every 500 message is generic: an `internal` or host-configuration error keeps
+its code, and its cause stays in server logs. A body that is not one JSON value
+is `invalid_json`, one past an endpoint's byte budget `request_too_large`, and
+well-formed JSON of the wrong shape `invalid_request` or `invalid_query`.
 
 ## Metric errors
 
@@ -53,6 +56,10 @@ A metric that cannot be computed does not fail its siblings. Its
 
 Errors that describe the whole request (version, profile, revisions, filters,
 sorts, host configuration) fail the request instead.
+
+The local engine and share/window combination use the same codes:
+`invalid_metric`, `resource_limit`, `cancelled`, and `internal` for a metric a
+server omitted. A combined metric keeps the code of the part that failed.
 
 ## Client-side refusals
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  EMPTY_QUERY, QueryDecodeError, QueryError, decodeQueryStrict, errorCodeForStatus, isErrorCode, isQueryError, loadSchema,
+  EMPTY_QUERY, QueryDecodeError, QueryError, decodeQueryStrict, errorCodeForStatus, evaluateMetrics, isErrorCode, isQueryError, loadSchema,
   httpComputedColumnStore, queryErrorFromResponse, toQueryRequestV3, type QueryCapabilitiesV3,
 } from "../src/index";
 
@@ -74,5 +74,19 @@ describe("httpComputedColumnStore", () => {
     const error = await store.save("runs", column, "r1").catch((e: unknown) => e);
     expect(isQueryError(error) && [error.code, error.status, error.message])
       .toEqual(["conflict", 409, "This definition changed. Reload it before saving again."]);
+  });
+});
+
+describe("local metric failures", () => {
+  const schema = { name: "runs", idField: "id", fields: [
+    { name: "id", label: "ID", type: "number" as const, source: { kind: "backend" as const } },
+    { name: "name", label: "Name", type: "text" as const, source: { kind: "backend" as const } },
+  ] };
+  const rows = [{ id: 1, name: "a" }, { id: 2, name: "b" }];
+  it("carries a code like the server's", () => {
+    const invalid = evaluateMetrics(rows, { ...EMPTY_QUERY, aggregations: [{ id: "bad", op: "sum", field: "name", groupBy: [] }] }, schema);
+    expect(invalid.metrics[0]).toMatchObject({ id: "bad", errorCode: "invalid_metric" });
+    const budget = evaluateMetrics(rows, { ...EMPTY_QUERY, aggregations: [{ id: "n", op: "count", groupBy: [] }] }, schema, { maxRows: 1 });
+    expect(budget.metrics[0]).toMatchObject({ id: "n", error: "Metric row budget exceeded.", errorCode: "resource_limit" });
   });
 });

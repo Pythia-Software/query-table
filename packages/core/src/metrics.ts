@@ -1,4 +1,5 @@
 import type { ComputedExecution } from "./computed";
+import { QueryError, failedMetric } from "./errors";
 import { isComputedField } from "./computed";
 import {
   compileFormula,
@@ -267,7 +268,7 @@ function distinctAccumulator(options: MetricReductionOptions) {
       if (v === null || values.has(v)) return;
       const size = 64 + (typeof v === "string" ? v.length * 2 : 8);
       if (values.size >= cardinality || size > byteLimit - bytes)
-        throw Error("Metric distinct retained-memory budget exceeded.");
+        throw new QueryError("resource_limit", "Metric distinct retained-memory budget exceeded.");
       values.add(v);
       bytes += size;
     },
@@ -1026,15 +1027,15 @@ export function selectMetricShownRows<Row>(
   schema: FieldSchema<Row>,
   options: MetricEvaluationOptions<Row> = {},
 ): Row[] {
-  if (options.signal?.aborted) throw Error("Metric evaluation cancelled.");
+  if (options.signal?.aborted) throw new QueryError("cancelled", "Metric evaluation cancelled.");
   assertMetricQueryState(q, schema);
   if (options.shownRows) return options.shownRows;
   const orderBy = q.orderBy.length ? q.orderBy : (schema.defaultSort ?? []);
   assertMetricPopulation(q, schema, orderBy);
   if (rows.length > (options.maxRows ?? 1000000))
-    throw Error("Metric row budget exceeded.");
+    throw new QueryError("resource_limit", "Metric row budget exceeded.");
   if ((options.maxOperations ?? 10000000) <= 0)
-    throw Error("Metric operation budget exceeded.");
+    throw new QueryError("resource_limit", "Metric operation budget exceeded.");
   return applyQuery(
     rows,
     // Local tables use a stable sort: ties retain input order. An extra ID
@@ -1119,7 +1120,7 @@ const scalar = (v: unknown): MetricValue => {
 function groupStringLength(value: string, limit: number): number {
   let length = value.length + 2;
   if (length > limit)
-    throw Error("Metric grouping key length budget exceeded.");
+    throw new QueryError("resource_limit", "Metric grouping key length budget exceeded.");
   for (let i = 0; i < value.length; i++) {
     const code = value.charCodeAt(i);
     if (
@@ -1143,7 +1144,7 @@ function groupStringLength(value: string, limit: number): number {
       i++;
     else if (code >= 0xd800 && code <= 0xdfff) length += 5;
     if (length > limit)
-      throw Error("Metric grouping key length budget exceeded.");
+      throw new QueryError("resource_limit", "Metric grouping key length budget exceeded.");
   }
   return length;
 }
@@ -1214,15 +1215,15 @@ export function evaluateMetrics<Row>(
 ): AggregationResult {
   if (q.grouping) {
     try {
-      if (options.signal?.aborted) throw new Error("Metric evaluation cancelled.");
-      if (rows.length > (options.maxRows ?? 1_000_000)) throw new Error("Metric row budget exceeded.");
+      if (options.signal?.aborted) throw new QueryError("cancelled", "Metric evaluation cancelled.");
+      if (rows.length > (options.maxRows ?? 1_000_000)) throw new QueryError("resource_limit", "Metric row budget exceeded.");
       const now = evaluationTime(options);
       const prepared = prepareGrouping(rows, schema, q.grouping, { now });
       return evaluateMetrics(prepared.rows, withoutGrouping(q), prepared.schema, {
         ...options, now,
       } as unknown as MetricEvaluationOptions<GroupedRow>);
     } catch (error) {
-      return { metrics: (q.aggregations ?? []).map(metric => ({ id: metric.id, buckets: [], error: error instanceof Error ? error.message : String(error) })) };
+      return { metrics: (q.aggregations ?? []).map(metric => failedMetric(metric.id, error, "grouping")) };
     }
   }
   const now = evaluationTime(options),
@@ -1245,19 +1246,19 @@ export function evaluateMetrics<Row>(
     metrics: (q.aggregations ?? []).map((c) => {
       let budget = options.maxOperations ?? 10000000;
       const tick = () => {
-        if (--budget < 0) throw Error("Metric operation budget exceeded.");
+        if (--budget < 0) throw new QueryError("resource_limit", "Metric operation budget exceeded.");
         if (options.signal?.aborted)
-          throw Error("Metric evaluation cancelled.");
+          throw new QueryError("cancelled", "Metric evaluation cancelled.");
       };
       try {
         if (options.signal?.aborted)
-          throw Error("Metric evaluation cancelled.");
+          throw new QueryError("cancelled", "Metric evaluation cancelled.");
         assertMetricQueryState(q, schema);
         if ((q.aggregations?.length ?? 0) > 20)
-          throw Error("At most 20 metrics are allowed.");
+          throw new QueryError("resource_limit", "At most 20 metrics are allowed.");
         const diagnostics = validateMetric(c, schema, options.resolveComputed);
         if (diagnostics.length)
-          throw Error(diagnostics.map((d) => d.message).join(" "));
+          throw new QueryError("invalid_metric", diagnostics.map((d) => d.message).join(" "), { metricId: c.id });
         const ps = metricPlans(c, schema, options.resolveComputed);
         if (ps.some(hasRegex) && !options.evaluateInput)
           throw Error(
@@ -1270,7 +1271,7 @@ export function evaluateMetrics<Row>(
           if (!matching) {
             assertMetricPopulation(q, schema, []);
             if (rows.length > (options.maxRows ?? 1000000))
-              throw Error("Metric row budget exceeded.");
+              throw new QueryError("resource_limit", "Metric row budget exceeded.");
             matching = applyQuery(
               rows,
               { ...q, orderBy: [], offset: 0, limit: Number.MAX_SAFE_INTEGER },
@@ -1281,7 +1282,7 @@ export function evaluateMetrics<Row>(
           inputRows = matching;
         }
         if (inputRows.length > (options.maxRows ?? 1000000))
-          throw Error("Metric row budget exceeded.");
+          throw new QueryError("resource_limit", "Metric row budget exceeded.");
         // processedRows retains the scope population; this metric's own
         // predicate narrows the rows it reduces, inside a shown page as well.
         const population = inputRows.length;
@@ -1306,11 +1307,11 @@ export function evaluateMetrics<Row>(
         let groupBytes = 0;
         const reserve = (bytes: number) => {
           if (bytes > byteLimit - groupBytes)
-            throw Error("Metric grouping retained-memory budget exceeded.");
+            throw new QueryError("resource_limit", "Metric grouping retained-memory budget exceeded.");
         };
         if (!c.groupBy.length) {
           if (keyLimit < 2)
-            throw Error("Metric grouping key length budget exceeded.");
+            throw new QueryError("resource_limit", "Metric grouping key length budget exceeded.");
           reserve(256);
           groupBytes = 256;
           groups.set("[]", { keys: [], rows: [] });
@@ -1386,7 +1387,7 @@ export function evaluateMetrics<Row>(
                     : String(value).length);
             payloadBytes += typeof value === "string" ? 2 * value.length : 8;
             if (keyLength > keyLimit)
-              throw Error("Metric grouping key length budget exceeded.");
+              throw new QueryError("resource_limit", "Metric grouping key length budget exceeded.");
           }
           const retainedBytes =
             256 + 16 * keys.length + payloadBytes + 2 * keyLength;
@@ -1397,7 +1398,7 @@ export function evaluateMetrics<Row>(
           let g = groups.get(key);
           if (!g) {
             if (groups.size >= (options.maxGroups ?? 10000))
-              throw Error("Metric group budget exceeded.");
+              throw new QueryError("resource_limit", "Metric group budget exceeded.");
             g = { keys, rows: [] };
             groups.set(key, g);
             groupBytes += retainedBytes;
@@ -1440,10 +1441,10 @@ export function evaluateMetrics<Row>(
               const keys: MetricValue[] = [slot, ...tuple];
               const key = JSON.stringify(keys);
               if (key.length > keyLimit)
-                throw Error("Metric grouping key length budget exceeded.");
+                throw new QueryError("resource_limit", "Metric grouping key length budget exceeded.");
               if (!groups.has(key)) {
                 if (groups.size >= (options.maxGroups ?? 10000))
-                  throw Error("Metric group budget exceeded.");
+                  throw new QueryError("resource_limit", "Metric group budget exceeded.");
                 const bytes = 256 + 16 * keys.length + 4 * key.length;
                 reserve(bytes);
                 groupBytes += bytes;
@@ -1470,10 +1471,10 @@ export function evaluateMetrics<Row>(
                 ];
                 const key = JSON.stringify(keys);
                 if (key.length > keyLimit)
-                  throw Error("Metric grouping key length budget exceeded.");
+                  throw new QueryError("resource_limit", "Metric grouping key length budget exceeded.");
                 if (!groups.has(key)) {
                   if (groups.size >= (options.maxGroups ?? 10000))
-                    throw Error("Metric group budget exceeded.");
+                    throw new QueryError("resource_limit", "Metric group budget exceeded.");
                   const bytes = 256 + 16 * keys.length + 4 * key.length;
                   reserve(bytes);
                   groupBytes += bytes;
@@ -1486,7 +1487,7 @@ export function evaluateMetrics<Row>(
                 config.timeZone,
               );
               if (!Number.isFinite(next) || next <= time)
-                throw Error("Date grouping exceeds calendar limits.");
+                throw new QueryError("resource_limit", "Date grouping exceeds calendar limits.");
               time = next;
             }
         }
@@ -1699,11 +1700,7 @@ export function evaluateMetrics<Row>(
           ...(other ? { other } : {}),
         };
       } catch (e) {
-        return {
-          id: c.id,
-          buckets: [],
-          error: e instanceof Error ? e.message : String(e),
-        };
+        return failedMetric(c.id, e, "invalid_metric");
       }
     }),
   };

@@ -156,7 +156,15 @@ func NewQuerySnapshotsHandler(repo QuerySnapshotRepository, authorize func(*http
 		if r.Method == http.MethodPut {
 			decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2*1024*1024+1024))
 			decoder.DisallowUnknownFields()
-			if decoder.Decode(&snapshot) != nil || decoder.Decode(new(any)) != io.EOF || snapshot.Code != code || ValidateQuerySnapshot(snapshot) != nil {
+			if err := decoder.Decode(&snapshot); err != nil {
+				WriteQueryError(w, decodeError(err, ErrorCodeInvalidRequest))
+				return
+			}
+			if err := decoder.Decode(new(any)); err != io.EOF {
+				WriteQueryError(w, trailingError(err))
+				return
+			}
+			if snapshot.Code != code || ValidateQuerySnapshot(snapshot) != nil {
 				writeErrorCode(w, ErrorCodeInvalidRequest, "invalid query snapshot")
 				return
 			}

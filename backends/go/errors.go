@@ -51,7 +51,9 @@ func withContext(err error, code ErrorCode, prefix string) error {
 
 // ErrorDetail classifies an error from DecodeQueryRequestV3, Execute or a
 // repository as the machine-readable QueryErrorDetail the HTTP handlers
-// write. Errors without a code are internal; their text is not exposed.
+// write. Errors without a code are internal; their text is not exposed, and
+// neither is the text of a coded error with status 500 (internal or host
+// configuration), which keeps only its code.
 func ErrorDetail(err error) QueryErrorDetail {
 	var issue *PlanDiagnostic
 	var link *QueryLinkError
@@ -62,6 +64,9 @@ func ErrorDetail(err error) QueryErrorDetail {
 	case errors.Is(err, context.Canceled):
 		return QueryErrorDetail{Code: ErrorCodeCancelled, Message: "query cancelled"}
 	case errors.As(err, &issue):
+		if issue.Code.HTTPStatus() == http.StatusInternalServerError {
+			return QueryErrorDetail{Code: issue.Code, Message: "could not execute query"}
+		}
 		return QueryErrorDetail{Code: issue.Code, Message: issue.Message, Field: issue.Field, Offset: issue.Offset, MetricID: issue.MetricID}
 	case errors.As(err, &link):
 		return QueryErrorDetail{Code: link.Code, Message: link.Message}
@@ -111,4 +116,13 @@ func decodeError(err error, shape ErrorCode) error {
 		return &PlanDiagnostic{Code: shape, Message: "wrong JSON type for " + typeErr.Field}
 	}
 	return &PlanDiagnostic{Code: shape, Message: strings.TrimPrefix(err.Error(), "json: ")}
+}
+
+// trailingError classifies what follows a body's one JSON value: a second
+// value is invalid_json, and reading past a MaxBytesReader request_too_large.
+func trailingError(err error) error {
+	if err == nil {
+		return &PlanDiagnostic{Code: ErrorCodeInvalidJSON, Message: "expected one JSON value"}
+	}
+	return decodeError(err, ErrorCodeInvalidJSON)
 }

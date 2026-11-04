@@ -1,5 +1,6 @@
 // Machine-readable query errors. The codes are generated from
 // schema/query-wire.schema.json (ErrorCode); docs/errors.md lists them.
+import type { AggregationResultEntry } from "./encode";
 import { ERROR_CODES, type ErrorCode, type QueryCapabilitiesV3, type QueryErrorBody, type QueryErrorDetail } from "./wire.generated";
 
 export { ERROR_CODES };
@@ -98,4 +99,11 @@ export async function queryErrorFromResponse(response: Response): Promise<QueryE
   const legacy = typeof (body as { error?: unknown } | undefined)?.error === "string" ? (body as { error: string }).error : text.trim();
   const message = legacy && legacy.length <= 500 && !/^\s*</.test(legacy) ? legacy : `Request failed with HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}.`;
   return new QueryError(errorCodeForStatus(response.status), message, { status: response.status });
+}
+
+/** A failed metric entry. A QueryError keeps its code; any other failure of
+ * a local engine is `fallback`. */
+export function failedMetric(id: string, error: unknown, fallback: ErrorCode): AggregationResultEntry {
+  const code = error instanceof QueryError ? error.code : fallback;
+  return { id, buckets: [], error: error instanceof Error ? error.message : String(error), errorCode: code };
 }
