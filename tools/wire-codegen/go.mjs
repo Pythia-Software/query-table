@@ -50,18 +50,14 @@ export function emitGo(defs) {
     for (const { json, node, required } of properties(def)) {
       const omit = node["x-go-omit"] ?? (required ? "none" : "omitempty");
       if (node.description) out += wrap(node.description, "\t");
-      out += `\t${node["x-go-name"] ?? pascal(json)} ${type(node, !required)} \`json:"${json}${omit === "none" ? "" : "," + omit}"\`\n`;
+      // A required list or map is never null on the wire, even when Go's is
+      // nil: WireList and WireMap encode nil as empty (see wire_list.go).
+      let t = type(node, !required);
+      if (required && !nullable(node)) t = t.replace(/^\[\](.+)$/, "WireList[$1]").replace(/^map\[string\](.+)$/, "WireMap[$1]");
+      out += `\t${node["x-go-name"] ?? pascal(json)} ${t} \`json:"${json}${omit === "none" ? "" : "," + omit}"\`\n`;
     }
     for (const line of def["x-go-extra"] ?? []) out += `\t${line}\n`;
     out += "}\n";
-    // A required list or map is never null on the wire, even when Go's is nil.
-    const empties = properties(def).filter(({ node, required }) => required && !nullable(node)).map(({ json, node }) =>
-      ({ field: node["x-go-name"] ?? pascal(json), type: type(node, false) })).filter(({ type }) => /^(\[\]|map\[)/.test(type));
-    if (empties.length) {
-      out += `\n// MarshalJSON writes nil required lists and maps as empty.\nfunc (v ${go}) MarshalJSON() ([]byte, error) {\n\ttype wire ${go}\n`;
-      for (const { field, type: t } of empties) out += `\tif v.${field} == nil {\n\t\tv.${field} = ${t}{}\n\t}\n`;
-      out += "\treturn json.Marshal(wire(v))\n}\n";
-    }
   }
   return execFileSync("gofmt", [], { input: out, encoding: "utf8" });
 }

@@ -202,6 +202,19 @@ struct QueryTableChecks {
     try check(tightLookup.source.limit == 1, "Row lookup stays within a one-row budget")
     let metrics = try await local.metrics([.init(id: "total", op: "sum", field: "amount")])
     try check(metrics.first?.buckets.first?.value == .number(60), "Metric covers full dataset")
+    var groupedRequest = QueryRequestV3(
+      profile: local.queryCapabilities.profile, now: 0, source: ServerQuery(limit: 5))
+    groupedRequest.grouping = GroupingDefinition(keys: [.field("status")], summaries: [])
+    var groupedRefusal: Error?
+    do { _ = try await local.fetchQueryV3(groupedRequest) } catch { groupedRefusal = error }
+    try check(groupedRefusal != nil, "The local transport refuses grouped requests instead of returning rows")
+    let lenient = try JSONDecoder().decode(
+      AggregationBucket.self, from: Data(#"{"keys":[],"count":2}"#.utf8))
+    let envelope = try JSONDecoder().decode(
+      QueryExecutionV3.self, from: Data(#"{"profile":"p","resolvedRevisions":{},"fields":{}}"#.utf8))
+    try check(
+      lenient.value == .null && envelope.planToken == "",
+      "An omitted bucket value or plan token decodes as before")
     let lookup = QueryRequestV3.rowLookup(
       id: .number(2), select: ["name"], schema: schema, capabilities: local.queryCapabilities)
     let found = try await local.fetchQueryV3(lookup)

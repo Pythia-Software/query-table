@@ -19,16 +19,13 @@
 
 import type { AggOp, FilterOp, OrderByClause, SelectColumn } from "./query";
 import type { CellDisplay } from "./cellDisplay";
+import type { FieldType } from "./wire.generated";
 import { parseCellDisplay } from "./cellDisplay";
 import { normalizePropertyFormat, type PropertyFieldConfig, type FieldOrigin, type FieldRelationship } from "./properties";
 
-export type FieldType =
-  | "text"
-  | "number"
-  | "enum"
-  | "datetime"
-  | "bool"
-  | "textarray"; // array-of-text; supports `includes`, and null-as-empty semantics
+// text, number, enum, datetime, bool, or textarray (array-of-text; supports
+// `includes`, and null-as-empty semantics). Generated from the wire schema.
+export type { FieldType };
 
 export type Align = "left" | "right" | "center";
 

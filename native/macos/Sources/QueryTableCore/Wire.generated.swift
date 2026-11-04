@@ -756,7 +756,7 @@ public struct QueryRequestV3: Codable, Equatable, Sendable {
   public var distinct: DistinctRequestV3?
   public var diagnostics: [String]
   /// Host-owned state, passed through uninterpreted: any JSON object. Query Table's TypeScript client sends a HostQueryState ({ version, params }); a host defines what its own clients send.
-  public var hostState: JSONValue?
+  public var hostState: [String: JSONValue]?
   enum CodingKeys: String, CodingKey {
     case version
     case profile
@@ -789,7 +789,7 @@ public struct QueryRequestV3: Codable, Equatable, Sendable {
     metrics = try c.decode([MetricSpecV3].self, forKey: .metrics)
     distinct = try c.decodeIfPresent(DistinctRequestV3.self, forKey: .distinct)
     diagnostics = try c.decode([String].self, forKey: .diagnostics)
-    hostState = c.contains(.hostState) ? try c.decode(JSONValue.self, forKey: .hostState) : nil
+    hostState = try c.decodeIfPresent([String: JSONValue].self, forKey: .hostState)
   }
   public func encode(to encoder: Encoder) throws {
     var c = encoder.container(keyedBy: CodingKeys.self)
@@ -986,6 +986,7 @@ public struct AggregationBucket: Codable, Equatable, Sendable {
   /// Distribution inputs that were errors.
   public var inputErrorCount: Int?
   public var keys: [JSONValue]
+  /// The metric: a number for count/sum/avg, a column value for min/max, null when undefined. Swift reads an omitted value as null, as before.
   public var value: JSONValue
   /// COUNT(*) of rows in the group.
   public var count: Int
@@ -1010,7 +1011,7 @@ public struct AggregationBucket: Codable, Equatable, Sendable {
     nullCount = try c.decodeIfPresent(Int.self, forKey: .nullCount)
     inputErrorCount = try c.decodeIfPresent(Int.self, forKey: .inputErrorCount)
     keys = try c.decode([JSONValue].self, forKey: .keys)
-    value = try c.decode(JSONValue.self, forKey: .value)
+    value = try c.decodeIfPresent(JSONValue.self, forKey: .value) ?? .null
     count = try c.decode(Int.self, forKey: .count)
     error = try c.decodeIfPresent(String.self, forKey: .error)
     y = c.contains(.y) ? try c.decode(JSONValue.self, forKey: .y) : nil
@@ -1126,6 +1127,7 @@ public struct ComputedFieldCapabilityV3: Codable, Equatable, Sendable {
 /// The execution envelope: profile, token, snapshot, resolved computed revisions and capabilities. A fingerprint is not authorization.
 public struct QueryExecutionV3: Codable, Equatable, Sendable {
   public var profile: String
+  /// Empty without a handshake. Swift reads an omitted token as empty, as before.
   public var planToken: String
   public var resolvedRevisions: [String: String]
   public var fields: [String: ComputedFieldCapabilityV3]
@@ -1142,7 +1144,7 @@ public struct QueryExecutionV3: Codable, Equatable, Sendable {
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     profile = try c.decode(String.self, forKey: .profile)
-    planToken = try c.decode(String.self, forKey: .planToken)
+    planToken = try c.decodeIfPresent(String.self, forKey: .planToken) ?? ""
     // Go encodes a nil map as null.
     resolvedRevisions = try c.decodeIfPresent([String: String].self, forKey: .resolvedRevisions) ?? [:]
     // Go encodes a nil map as null.

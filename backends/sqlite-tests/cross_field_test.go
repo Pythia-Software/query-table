@@ -69,7 +69,7 @@ func crossFieldParity(t *testing.T, db *sql.DB, d qt.QueryDatasetV3, q qt.QueryR
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got.Metrics, want) {
+	if !reflect.DeepEqual([]qt.MetricResult(got.Metrics), want) {
 		t.Fatalf("batch differs:\ngot %#v\nwant %#v", got.Metrics, want)
 	}
 	return got

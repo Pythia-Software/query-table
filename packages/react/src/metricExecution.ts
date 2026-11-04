@@ -91,7 +91,9 @@ export async function executeV3Metrics<Row>(
   const capabilities = transport.queryCapabilities;
   const refused = new Map<string, string>();
   for (const clause of query.aggregations ?? []) {
-    const issue = metricPopulationError(clause, { filters: capabilities.metricFilters, minCount: capabilities.metricMinCount, minCountMeasures: capabilities.metricMinCountMeasures });
+    // An operation this client cannot read fails its own card, not the batch.
+    const issue = clause.unsupportedOp ? `Metric ${clause.id} uses an unsupported operation: ${clause.unsupportedOp}.`
+      : metricPopulationError(clause, { filters: capabilities.metricFilters, minCount: capabilities.metricMinCount, minCountMeasures: capabilities.metricMinCountMeasures });
     if (issue) refused.set(clause.id, issue);
   }
   let runnable = (query.aggregations ?? []).filter(clause => !refused.has(clause.id));

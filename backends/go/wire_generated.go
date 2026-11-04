@@ -84,20 +84,11 @@ type AggSpec struct {
 	ID string `json:"id"`
 	Op string `json:"op"`
 	// Measure field; omitted only for count.
-	Field   string   `json:"field,omitempty"`
-	GroupBy []string `json:"groupBy"`
+	Field   string           `json:"field,omitempty"`
+	GroupBy WireList[string] `json:"groupBy"`
 	// The metric's own predicate, ANDed with the table WHERE.
 	Where    []WhereTerm    `json:"where,omitempty"`
 	MinCount MetricMinCount `json:"minCount,omitzero"`
-}
-
-// MarshalJSON writes nil required lists and maps as empty.
-func (v AggSpec) MarshalJSON() ([]byte, error) {
-	type wire AggSpec
-	if v.GroupBy == nil {
-		v.GroupBy = []string{}
-	}
-	return json.Marshal(wire(v))
 }
 
 // CalendarGroupKey: A grouping key that buckets a datetime field by calendar
@@ -122,16 +113,7 @@ type SummaryColumn struct {
 // RepresentativeRow: The ordering that picks each group's representative row
 // for ROW summaries.
 type RepresentativeRow struct {
-	OrderBy []OrderBy `json:"orderBy"`
-}
-
-// MarshalJSON writes nil required lists and maps as empty.
-func (v RepresentativeRow) MarshalJSON() ([]byte, error) {
-	type wire RepresentativeRow
-	if v.OrderBy == nil {
-		v.OrderBy = []OrderBy{}
-	}
-	return json.Marshal(wire(v))
+	OrderBy WireList[OrderBy] `json:"orderBy"`
 }
 
 // HostQueryState: Query state a host owns and registers with useQueryTable({
@@ -141,17 +123,8 @@ func (v RepresentativeRow) MarshalJSON() ([]byte, error) {
 // them. Query Table passes it through uninterpreted. Version 0 marks a payload
 // that could not be read and is always rejected on restore.
 type HostQueryState struct {
-	Version int                 `json:"version"`
-	Params  map[string][]string `json:"params"`
-}
-
-// MarshalJSON writes nil required lists and maps as empty.
-func (v HostQueryState) MarshalJSON() ([]byte, error) {
-	type wire HostQueryState
-	if v.Params == nil {
-		v.Params = map[string][]string{}
-	}
-	return json.Marshal(wire(v))
+	Version int               `json:"version"`
+	Params  WireMap[[]string] `json:"params"`
 }
 
 // DistinctRequestV3: Distinct values of one server-filterable field: a literal,
@@ -198,37 +171,22 @@ type QueryRequestV3 struct {
 	// Evaluation clock, epoch milliseconds.
 	Now int64 `json:"now"`
 	// Computed definition id to the revision the client planned with.
-	ExpectedRevisions map[string]string   `json:"expectedRevisions"`
+	ExpectedRevisions WireMap[string]     `json:"expectedRevisions"`
 	PlanToken         string              `json:"planToken,omitempty"`
 	Snapshot          string              `json:"snapshot,omitempty"`
 	Source            WireQuery           `json:"source"`
 	Result            WireQuery           `json:"result"`
 	Grouping          *GroupingDefinition `json:"grouping,omitempty"`
 	Rows              bool                `json:"rows"`
-	Metrics           []AggSpec           `json:"metrics"`
+	Metrics           WireList[AggSpec]   `json:"metrics"`
 	// Filter-value suggestions over source.where; requires rows false, no metrics
 	// and no grouping.
 	Distinct    *DistinctRequestV3 `json:"distinct,omitempty"`
-	Diagnostics []string           `json:"diagnostics"`
+	Diagnostics WireList[string]   `json:"diagnostics"`
 	// Host-owned state, passed through uninterpreted: any JSON object. Query
 	// Table's TypeScript client sends a HostQueryState ({ version, params }); a
 	// host defines what its own clients send.
 	HostState json.RawMessage `json:"hostState,omitempty"`
-}
-
-// MarshalJSON writes nil required lists and maps as empty.
-func (v QueryRequestV3) MarshalJSON() ([]byte, error) {
-	type wire QueryRequestV3
-	if v.ExpectedRevisions == nil {
-		v.ExpectedRevisions = map[string]string{}
-	}
-	if v.Metrics == nil {
-		v.Metrics = []AggSpec{}
-	}
-	if v.Diagnostics == nil {
-		v.Diagnostics = []string{}
-	}
-	return json.Marshal(wire(v))
 }
 
 type MetricBoxSummary struct {
@@ -242,20 +200,11 @@ type MetricBoxSummary struct {
 	// Lower whisker.
 	Low float64 `json:"low"`
 	// Upper whisker.
-	High         float64   `json:"high"`
-	Outliers     []float64 `json:"outliers"`
-	OutlierCount int64     `json:"outlierCount"`
-	Whiskers     string    `json:"whiskers"`
-	Method       string    `json:"method"`
-}
-
-// MarshalJSON writes nil required lists and maps as empty.
-func (v MetricBoxSummary) MarshalJSON() ([]byte, error) {
-	type wire MetricBoxSummary
-	if v.Outliers == nil {
-		v.Outliers = []float64{}
-	}
-	return json.Marshal(wire(v))
+	High         float64           `json:"high"`
+	Outliers     WireList[float64] `json:"outliers"`
+	OutlierCount int64             `json:"outlierCount"`
+	Whiskers     string            `json:"whiskers"`
+	Method       string            `json:"method"`
 }
 
 type MetricBoxDistribution struct {
@@ -267,22 +216,10 @@ type MetricBoxDistribution struct {
 // MetricHistogramDistribution: Bin i is edges[i] <= value < edges[i+1]; the
 // final bin includes its upper edge.
 type MetricHistogramDistribution struct {
-	Kind   string    `json:"kind"`
-	Edges  []float64 `json:"edges"`
-	Counts []int64   `json:"counts"`
-	N      int64     `json:"n"`
-}
-
-// MarshalJSON writes nil required lists and maps as empty.
-func (v MetricHistogramDistribution) MarshalJSON() ([]byte, error) {
-	type wire MetricHistogramDistribution
-	if v.Edges == nil {
-		v.Edges = []float64{}
-	}
-	if v.Counts == nil {
-		v.Counts = []int64{}
-	}
-	return json.Marshal(wire(v))
+	Kind   string            `json:"kind"`
+	Edges  WireList[float64] `json:"edges"`
+	Counts WireList[int64]   `json:"counts"`
+	N      int64             `json:"n"`
 }
 
 // MetricBucket: One group of a metric result. `keys` has one entry per groupBy
@@ -292,9 +229,11 @@ type MetricBucket struct {
 	// Distribution inputs that were NULL.
 	NullCount *int64 `json:"nullCount,omitempty"`
 	// Distribution inputs that were errors.
-	InputErrorCount *int64 `json:"inputErrorCount,omitempty"`
-	Keys            []any  `json:"keys"`
-	Value           any    `json:"value"`
+	InputErrorCount *int64        `json:"inputErrorCount,omitempty"`
+	Keys            WireList[any] `json:"keys"`
+	// The metric: a number for count/sum/avg, a column value for min/max, null
+	// when undefined. Swift reads an omitted value as null, as before.
+	Value any `json:"value"`
 	// COUNT(*) of rows in the group.
 	Count int64  `json:"count"`
 	Error string `json:"error,omitempty"`
@@ -306,21 +245,12 @@ type MetricBucket struct {
 	minMeasureError bool
 }
 
-// MarshalJSON writes nil required lists and maps as empty.
-func (v MetricBucket) MarshalJSON() ([]byte, error) {
-	type wire MetricBucket
-	if v.Keys == nil {
-		v.Keys = []any{}
-	}
-	return json.Marshal(wire(v))
-}
-
 // MetricResult: One metric's result, in request order.
 type MetricResult struct {
-	ID            string         `json:"id"`
-	Buckets       []MetricBucket `json:"buckets"`
-	Scope         string         `json:"scope"`
-	ProcessedRows int64          `json:"processedRows"`
+	ID            string                 `json:"id"`
+	Buckets       WireList[MetricBucket] `json:"buckets"`
+	Scope         string                 `json:"scope"`
+	ProcessedRows int64                  `json:"processedRows"`
 	// Groups before groupLimit, excluding hidden groups.
 	GroupCount int64  `json:"groupCount"`
 	Coverage   string `json:"coverage,omitempty"`
@@ -331,15 +261,6 @@ type MetricResult struct {
 	// The exact omitted additive quantity beyond groupLimit, when an executor
 	// computes it.
 	Other *MetricBucket `json:"other,omitempty"`
-}
-
-// MarshalJSON writes nil required lists and maps as empty.
-func (v MetricResult) MarshalJSON() ([]byte, error) {
-	type wire MetricResult
-	if v.Buckets == nil {
-		v.Buckets = []MetricBucket{}
-	}
-	return json.Marshal(wire(v))
 }
 
 // ComputedFieldCapability: What a canonical computed field may do in a view.
@@ -358,24 +279,13 @@ type ComputedFieldCapability struct {
 // ComputedExecution: The execution envelope: profile, token, snapshot, resolved
 // computed revisions and capabilities. A fingerprint is not authorization.
 type ComputedExecution struct {
-	Profile           string                             `json:"profile"`
-	PlanToken         string                             `json:"planToken"`
-	ResolvedRevisions map[string]string                  `json:"resolvedRevisions"`
-	Fields            map[string]ComputedFieldCapability `json:"fields"`
-	Fingerprint       string                             `json:"fingerprint,omitempty"`
-	Snapshot          string                             `json:"snapshot,omitempty"`
-}
-
-// MarshalJSON writes nil required lists and maps as empty.
-func (v ComputedExecution) MarshalJSON() ([]byte, error) {
-	type wire ComputedExecution
-	if v.ResolvedRevisions == nil {
-		v.ResolvedRevisions = map[string]string{}
-	}
-	if v.Fields == nil {
-		v.Fields = map[string]ComputedFieldCapability{}
-	}
-	return json.Marshal(wire(v))
+	Profile string `json:"profile"`
+	// Empty without a handshake. Swift reads an omitted token as empty, as before.
+	PlanToken         string                           `json:"planToken"`
+	ResolvedRevisions WireMap[string]                  `json:"resolvedRevisions"`
+	Fields            WireMap[ComputedFieldCapability] `json:"fields"`
+	Fingerprint       string                           `json:"fingerprint,omitempty"`
+	Snapshot          string                           `json:"snapshot,omitempty"`
 }
 
 type ProjectedField struct {
@@ -386,88 +296,43 @@ type ProjectedField struct {
 // ProjectedSchema: The result's schema: grouped results use the group identity
 // field.
 type ProjectedSchema struct {
-	Name    string           `json:"name"`
-	IDField string           `json:"idField"`
-	Fields  []ProjectedField `json:"fields"`
-}
-
-// MarshalJSON writes nil required lists and maps as empty.
-func (v ProjectedSchema) MarshalJSON() ([]byte, error) {
-	type wire ProjectedSchema
-	if v.Fields == nil {
-		v.Fields = []ProjectedField{}
-	}
-	return json.Marshal(wire(v))
+	Name    string                   `json:"name"`
+	IDField string                   `json:"idField"`
+	Fields  WireList[ProjectedField] `json:"fields"`
 }
 
 type DistinctResultV3 struct {
 	// Non-NULL matches as text, at most limit.
-	Values  []string `json:"values"`
-	HasMore bool     `json:"hasMore"`
+	Values  WireList[string] `json:"values"`
+	HasMore bool             `json:"hasMore"`
 	// The population has a NULL (textarray: NULL or empty), whatever the search.
 	HasNull bool `json:"hasNull"`
-}
-
-// MarshalJSON writes nil required lists and maps as empty.
-func (v DistinctResultV3) MarshalJSON() ([]byte, error) {
-	type wire DistinctResultV3
-	if v.Values == nil {
-		v.Values = []string{}
-	}
-	return json.Marshal(wire(v))
 }
 
 // QueryResultV3: The answer to one QueryRequestV3. Row cells are JSON scalars,
 // arrays (textarray) or {"computedError": code}.
 type QueryResultV3 struct {
-	SourceTotal int64             `json:"sourceTotal"`
-	Version     int               `json:"version"`
-	Now         int64             `json:"now"`
-	Rows        []map[string]any  `json:"rows"`
-	Total       int64             `json:"total"`
-	Schema      ProjectedSchema   `json:"schema"`
-	Metrics     []MetricResult    `json:"metrics"`
-	Execution   ComputedExecution `json:"execution"`
+	SourceTotal int64                    `json:"sourceTotal"`
+	Version     int                      `json:"version"`
+	Now         int64                    `json:"now"`
+	Rows        WireList[map[string]any] `json:"rows"`
+	Total       int64                    `json:"total"`
+	Schema      ProjectedSchema          `json:"schema"`
+	Metrics     WireList[MetricResult]   `json:"metrics"`
+	Execution   ComputedExecution        `json:"execution"`
 	// Present exactly when the request has distinct.
 	Distinct *DistinctResultV3 `json:"distinct,omitempty"`
-}
-
-// MarshalJSON writes nil required lists and maps as empty.
-func (v QueryResultV3) MarshalJSON() ([]byte, error) {
-	type wire QueryResultV3
-	if v.Rows == nil {
-		v.Rows = []map[string]any{}
-	}
-	if v.Metrics == nil {
-		v.Metrics = []MetricResult{}
-	}
-	return json.Marshal(wire(v))
 }
 
 // WireQuery: One stage (source or result) of a request. It has exactly these
 // keys; view-only state never crosses the wire.
 type WireQuery struct {
 	// Field names to return.
-	Select []string `json:"select"`
+	Select WireList[string] `json:"select"`
 	// Pushdown predicates (CNF).
-	Where []WhereTerm `json:"where"`
+	Where WireList[WhereTerm] `json:"where"`
 	// Server-sortable terms, remapped through FieldDef.sort.field.
-	OrderBy []OrderBy `json:"orderBy"`
-	Limit   int       `json:"limit"`
-	Offset  int       `json:"offset"`
-}
-
-// MarshalJSON writes nil required lists and maps as empty.
-func (v WireQuery) MarshalJSON() ([]byte, error) {
-	type wire WireQuery
-	if v.Select == nil {
-		v.Select = []string{}
-	}
-	if v.Where == nil {
-		v.Where = []WhereTerm{}
-	}
-	if v.OrderBy == nil {
-		v.OrderBy = []OrderBy{}
-	}
-	return json.Marshal(wire(v))
+	OrderBy WireList[OrderBy] `json:"orderBy"`
+	Limit   int               `json:"limit"`
+	Offset  int               `json:"offset"`
 }

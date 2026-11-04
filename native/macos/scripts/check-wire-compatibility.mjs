@@ -82,6 +82,22 @@ try {
         {any: [null]},
       ] })).toString("base64url"),
     },
+    {
+      // Both clients drop invalid literals one by one and collapse what is left.
+      name: "or-of-ands-normalize-alike",
+      token: Buffer.from(JSON.stringify({ w: [
+        {any: [{all: [{field: "status", op: "=", value: "done"}, {field: "name", op: "contains"}]},
+          {all: [{field: 42, op: "=", value: "bad"}]}, {field: "name", op: "=", value: "x"}]},
+        {any: [{all: [{field: "status", op: "=", value: "new"}, {field: "amount", op: ">", value: "1"}]},
+          {field: "name", op: "bogus", value: "y"}]},
+        {any: [{all: [{field: "name", op: "=", value: "p"}, {field: "amount", op: "<", value: "9"}]}, {field: "status", op: "=", value: "done"}]},
+      ] })).toString("base64url"),
+    },
+    {
+      name: "or-of-ands-predicate-budget",
+      token: Buffer.from(JSON.stringify({ w: [0, 1].map((g) => ({ any: Array.from({ length: 20 }, (_, i) => ({ all: [
+        {field: "name", op: "=", value: `${g}-${i}`}, {field: "amount", op: ">", value: String(i)}, {field: "status", op: "=", value: "done"}] })) })) })).toString("base64url"),
+    },
     { name: "schema-defaults", query: {} },
     {
       name: "unicode-or-negation-metric",

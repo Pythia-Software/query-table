@@ -64,7 +64,7 @@ extension QueryRequestV3 {
     profile: String, now: Int64, source: ServerQuery, result: ServerQuery? = nil,
     rows: Bool = true, metrics: [MetricSpecV3] = [], distinct: DistinctRequestV3? = nil,
     expectedRevisions: [String: String] = [:], planToken: String? = nil,
-    snapshot: String? = nil, hostState: JSONValue? = nil, diagnostics: [String] = [],
+    snapshot: String? = nil, hostState: [String: JSONValue]? = nil, diagnostics: [String] = [],
     grouping: GroupingDefinition? = nil
   ) {
     self.version = 3
@@ -87,7 +87,7 @@ extension QueryRequestV3 {
     profile: String, now: Int64, source: ServerQuery, result: ServerQuery? = nil,
     rows: Bool = true, metrics: [AggregationClause], distinct: DistinctRequestV3? = nil,
     expectedRevisions: [String: String] = [:], planToken: String? = nil,
-    snapshot: String? = nil, hostState: JSONValue? = nil, diagnostics: [String] = []
+    snapshot: String? = nil, hostState: [String: JSONValue]? = nil, diagnostics: [String] = []
   ) {
     self.init(
       profile: profile, now: now, source: source, result: result, rows: rows,
@@ -103,7 +103,7 @@ extension QueryRequestV3 {
   /// Filter autocomplete: a distinct section over the unfiltered population.
   public static func distinctValues(
     field: String, search: String = "", limit: Int = 50, schema: FieldSchema,
-    capabilities: QueryCapabilitiesV3, now: Date = Date(), hostState: JSONValue? = nil
+    capabilities: QueryCapabilitiesV3, now: Date = Date(), hostState: [String: JSONValue]? = nil
   ) -> QueryRequestV3 {
     QueryRequestV3(
       profile: capabilities.profile, now: epochMilliseconds(now),
@@ -116,7 +116,7 @@ extension QueryRequestV3 {
   /// Row refresh by identity. A total above one is a non-unique identity.
   public static func rowLookup(
     id: JSONValue, select: [String], schema: FieldSchema, capabilities: QueryCapabilitiesV3,
-    now: Date = Date(), hostState: JSONValue? = nil
+    now: Date = Date(), hostState: [String: JSONValue]? = nil
   ) -> QueryRequestV3 {
     let stage = ServerQuery(
       select: Array(Set(select + [schema.idField])).sorted(),
@@ -329,7 +329,7 @@ extension QueryState {
   public func queryRequestV3(
     schema: FieldSchema, capabilities: QueryCapabilitiesV3, execution: QueryExecutionV3? = nil,
     now: Date = Date(), rows: Bool = true, metrics includeMetrics: Bool = true,
-    hostState: JSONValue? = nil
+    hostState: [String: JSONValue]? = nil
   ) -> QueryRequestV3 {
     let q = normalized()
     var diagnostics: [String] = []

@@ -254,7 +254,7 @@
         "metrics": { "type": "array", "maxItems": 20, "items": { "$ref": "#/$defs/MetricSpec" } },
         "distinct": { "$ref": "#/$defs/DistinctRequestV3", "description": "Filter-value suggestions over source.where; requires rows false, no metrics and no grouping." },
         "diagnostics": { "type": "array", "items": { "type": "string" } },
-        "hostState": { "type": "object", "x-ts-type": "HostQueryState", "x-go-type": "json.RawMessage", "x-swift-type": "JSONValue", "description": "Host-owned state, passed through uninterpreted: any JSON object. Query Table's TypeScript client sends a HostQueryState ({ version, params }); a host defines what its own clients send." }
+        "hostState": { "type": "object", "x-ts-type": "HostQueryState", "x-go-type": "json.RawMessage", "x-swift-type": "[String: JSONValue]", "description": "Host-owned state, passed through uninterpreted: any JSON object. Query Table's TypeScript client sends a HostQueryState ({ version, params }); a host defines what its own clients send." }
       }
     },
     "MetricValue": {
@@ -308,7 +308,7 @@
         "nullCount": { "type": "integer", "x-go-repr": "*int64", "description": "Distribution inputs that were NULL." },
         "inputErrorCount": { "type": "integer", "x-go-repr": "*int64", "description": "Distribution inputs that were errors." },
         "keys": { "type": "array", "items": { "$ref": "#/$defs/MetricValue" } },
-        "value": { "$ref": "#/$defs/MetricValue" },
+        "value": { "$ref": "#/$defs/MetricValue", "x-swift-lenient": ".null", "description": "The metric: a number for count/sum/avg, a column value for min/max, null when undefined. Swift reads an omitted value as null, as before." },
         "count": { "type": "integer", "x-go-repr": "int64", "description": "COUNT(*) of rows in the group." },
         "error": { "type": "string" },
         "y": { "$ref": "#/$defs/MetricValue", "x-go-repr": "*any", "description": "The scatter y value." },
@@ -352,7 +352,7 @@
       "type": "object", "required": ["profile", "planToken", "resolvedRevisions", "fields"],
       "properties": {
         "profile": { "type": "string" },
-        "planToken": { "type": "string" },
+        "planToken": { "type": "string", "x-swift-lenient": "\"\"", "description": "Empty without a handshake. Swift reads an omitted token as empty, as before." },
         "resolvedRevisions": { "type": "object", "additionalProperties": { "type": "string" } },
         "fields": { "type": "object", "additionalProperties": { "$ref": "#/$defs/ComputedFieldCapability" } },
         "fingerprint": { "type": "string" },

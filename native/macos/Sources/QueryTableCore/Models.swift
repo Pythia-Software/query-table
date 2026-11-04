@@ -83,12 +83,7 @@ public enum WhereTerm: Codable, Equatable, Sendable {
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     if c.contains(.any) {
-      let group = try OrGroup(from: decoder)
-      let literals = group.any.compactMap { branch -> WhereClause? in
-        if case .literal(let v) = branch { return v }
-        return nil
-      }
-      self = literals.count == group.any.count ? .any(literals) : .group(group)
+      self = WhereTerm(branches: try OrGroup(from: decoder).any)
     } else {
       self = .predicate(try WhereClause(from: decoder))
     }
@@ -99,6 +94,14 @@ public enum WhereTerm: Codable, Equatable, Sendable {
     case .any(let v): try OrGroup(any: v.map(WhereBranch.literal)).encode(to: encoder)
     case .group(let v): try v.encode(to: encoder)
     }
+  }
+  /// An OR group: flat `.any` when every branch is a literal, else `.group`.
+  public init(branches: [WhereBranch]) {
+    let literals = branches.compactMap { branch -> WhereClause? in
+      if case .literal(let v) = branch { return v }
+      return nil
+    }
+    self = literals.count == branches.count ? .any(literals) : .group(OrGroup(any: branches))
   }
   /// The term as alternatives of conjunctions: it matches when every literal of
   /// some branch matches. Evaluate with this, never with `predicates`.
@@ -123,19 +126,7 @@ public enum WhereTerm: Codable, Equatable, Sendable {
   }
   /// Every literal of the term (each counts against the predicate budget).
   /// Flattening loses its meaning; see `branches`.
-  public var predicates: [WhereClause] {
-    switch self {
-    case .predicate(let v): return [v]
-    case .any(let v): return v
-    case .group(let v):
-      return v.any.flatMap { branch -> [WhereClause] in
-        switch branch {
-        case .literal(let v): return [v]
-        case .all(let v): return v.all
-        }
-      }
-    }
-  }
+  public var predicates: [WhereClause] { branches.flatMap { $0 } }
 }
 public struct AggregationClause: Codable, Equatable, Sendable {
   public var id: String
@@ -198,26 +189,46 @@ public struct QueryState: Codable, Equatable, Sendable {
       SelectColumn(
         field: $0.field, width: $0.width.flatMap { $0.isFinite ? min(2000, max(24, $0)) : nil })
     }
-    var predicateBudget = 100
-    q.whereTerms = whereTerms.prefix(100).compactMap { term in
-      guard predicateBudget > 0 else { return nil }
-      let valid = { (p: WhereClause) in
-        !p.field.isEmpty && p.field.count <= 256 && !p.field.hasPrefix("@computed/")
-          && p.value.count <= 10000 && Self.filterOps.contains(p.op)
-      }
-      if case .group = term {
-        // Dropping one literal of a conjunction would widen the term, so a
-        // group is kept whole or not at all.
-        let all = term.predicates
-        guard all.count <= predicateBudget, all.allSatisfy(valid) else { return nil }
-        predicateBudget -= all.count
-        return term
-      }
-      let clauses = term.predicates.prefix(predicateBudget).filter(valid)
-      guard !clauses.isEmpty else { return nil }
-      predicateBudget -= clauses.count
-      return clauses.count == 1 ? .predicate(clauses[0]) : .any(Array(clauses))
+    // The same rules as TypeScript normalizeWhereTerms, so a link selects the
+    // same rows in both clients: invalid literals are dropped one by one and
+    // only valid literals count against the budget of 100. A conjunction left
+    // with one literal is that literal, an empty one is dropped, and a group
+    // left with one branch becomes plain AND terms.
+    let valid = { (p: WhereClause) in
+      !p.field.isEmpty && p.field.count <= 256 && !p.field.hasPrefix("@computed/")
+        && p.value.utf16.count <= 10000 && Self.filterOps.contains(p.op)
     }
+    var budget = 100
+    var terms: [WhereTerm] = []
+    for term in whereTerms {
+      guard budget > 0 else { break }
+      if case .predicate(let p) = term {
+        if valid(p) {
+          terms.append(.predicate(p))
+          budget -= 1
+        }
+        continue
+      }
+      var members: [WhereBranch] = []
+      for branch in term.branches {
+        guard budget > 0 else { break }
+        let kept = Array(branch.filter(valid).prefix(budget))
+        budget -= kept.count
+        if kept.count == 1 {
+          members.append(.literal(kept[0]))
+        } else if kept.count > 1 {
+          members.append(.all(WhereConjunction(all: kept)))
+        }
+      }
+      if members.count > 1 {
+        terms.append(WhereTerm(branches: members))
+      } else if case .literal(let p) = members.first {
+        terms.append(.predicate(p))
+      } else if case .all(let c) = members.first {
+        terms.append(contentsOf: c.all.map(WhereTerm.predicate))
+      }
+    }
+    q.whereTerms = terms
     q.orderBy = orderBy.prefix(20).filter {
       !$0.field.isEmpty && $0.field.count <= 256 && !$0.field.hasPrefix("@computed/")
         && ["asc", "desc"].contains($0.dir)
@@ -310,24 +321,15 @@ public struct QueryState: Codable, Equatable, Sendable {
             let predicates = members.compactMap(predicate)
             return predicates.isEmpty ? nil : .any(predicates)
           }
-          // Dropping one literal of a conjunction would widen the term, so a
-          // group with conjunction branches is kept whole or not at all.
-          var branches: [WhereBranch] = []
-          for member in members {
+          // Invalid literals drop one by one; normalized() applies the rest.
+          let branches = members.compactMap { member -> WhereBranch? in
             if case .object(let branch) = member, case .array(let all) = branch["all"] {
               let literals = all.compactMap(predicate)
-              guard !literals.isEmpty, literals.count == all.count else { return nil }
-              branches.append(literals.count == 1 ? .literal(literals[0]) : .all(WhereConjunction(all: literals)))
-            } else {
-              guard let literal = predicate(member) else { return nil }
-              branches.append(.literal(literal))
+              return literals.isEmpty ? nil : .all(WhereConjunction(all: literals))
             }
+            return predicate(member).map(WhereBranch.literal)
           }
-          let literals = branches.compactMap { branch -> WhereClause? in
-            if case .literal(let v) = branch { return v }
-            return nil
-          }
-          return literals.count == branches.count ? .any(literals) : .group(OrGroup(any: branches))
+          return branches.isEmpty ? nil : WhereTerm(branches: branches)
         }
         return predicate(term).map(WhereTerm.predicate)
       }

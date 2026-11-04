@@ -1,15 +1,15 @@
 import type { FormulaDiagnostic } from "./formula";
-import type { MetricValue, WireMetricDateGrouping } from "./wire.generated";
+import type { CalendarGroupKey, MetricMinCountDistinct, MetricMinCountSum, MetricValue, WireMetricDateGrouping, WireMetricSort } from "./wire.generated";
 // Wire shapes are generated from schema/query-wire.schema.json.
 export type { MetricValue, MetricScope, MetricDistribution, MetricBoxSummary, MetricDistributionResult } from "./wire.generated";
 export type MetricKey = MetricValue;
 /** Calendar intervals: each bucket is one interval on the timeline, keyed by
  * its start as an ISO instant. */
-export type MetricCalendarInterval = "hour" | "day" | "week" | "month" | "year";
+export type MetricCalendarInterval = CalendarGroupKey["interval"];
 /** Cyclic intervals: each bucket is one slot of a repeating cycle, keyed by a
  * number. `hourOfDay` is the local hour, 0–23; `dayOfWeek` the ISO weekday,
  * 1 (Monday) to 7 (Sunday). */
-export type MetricCycleInterval = "hourOfDay" | "dayOfWeek";
+export type MetricCycleInterval = Exclude<WireMetricDateGrouping["interval"], MetricCalendarInterval>;
 /** Summarise each cyclic slot over its occurrences: every whole day or hour
  * the slot covers inside the query's time bounds. */
 export interface MetricDateOccurrence {
@@ -55,8 +55,8 @@ export type MetricShare = "total" | "group0";
  *  numeric field (like SUM; nulls add nothing). Exactly one of `distinct` and
  *  `sum` is set. A group whose measure is an error is kept. */
 export type MetricMinCountOf =
-  | { min: number; distinct: string; sum?: never }
-  | { min: number; sum: string; distinct?: never };
+  | (MetricMinCountDistinct & { sum?: never })
+  | (MetricMinCountSum & { distinct?: never });
 export interface MetricValueFormat {
   kind: "number" | "percent" | "duration" | "date" | "time" | "datetime";
   decimals?: number;
@@ -130,11 +130,7 @@ export interface MetricLayout {
   minWidthRem: number;
   minHeightRem: number;
 }
-export interface MetricSort {
-  key: "value" | "y" | "count" | "samples" | `group${number}`;
-  dir: "asc" | "desc";
-  nulls?: "first" | "last";
-}
+export type MetricSort = WireMetricSort;
 /** One histogram bin: `min <= value < max`, or `<= max` for the final bin. */
 export interface MetricHistogramBin {
   min: number;

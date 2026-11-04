@@ -97,3 +97,18 @@ func TestWireGroupingEmptyArrays(t *testing.T) {
 		t.Fatal(string(data))
 	}
 }
+
+// A host's struct that embeds a wire type keeps its own fields, and the wire
+// type still writes its required lists and maps when they are nil.
+func TestWireTypesEmbedInHostStructs(t *testing.T) {
+	data, err := json.Marshal(struct {
+		QueryResultV3
+		TraceID string `json:"traceId"`
+	}{QueryResultV3{Version: 3}, "t1"})
+	if err != nil || !strings.Contains(string(data), `"traceId":"t1"`) || !strings.Contains(string(data), `"rows":[]`) || !strings.Contains(string(data), `"metrics":[]`) {
+		t.Fatalf("%s %v", data, err)
+	}
+	if data, _ = json.Marshal(ComputedExecution{}); !strings.Contains(string(data), `"resolvedRevisions":{}`) {
+		t.Fatal(string(data))
+	}
+}

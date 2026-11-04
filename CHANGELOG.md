@@ -36,9 +36,12 @@
     `offset`, an empty metric `groupBy` and empty request `diagnostics`, and
     an empty predicate `value` (such as on `is_null`), all of which are
     required. Go now always writes them, as TypeScript and Swift do. Nil
-    required lists and maps encode as `[]`/`{}`, never `null`, and
-    `MetricResult` carries `other`, which TypeScript declares but Go could not
-    decode or re-encode.
+    required lists and maps encode as `[]`/`{}`, never `null`: such fields
+    are `WireList[T]`/`WireMap[V]`, to which a `[]T`/`map[string]V` assigns
+    unchanged (convert back, as in `[]T(v.Rows)`, to compare with
+    `reflect.DeepEqual`), so a host's struct that embeds a wire type keeps its
+    own fields. `MetricResult` now carries `other`, which TypeScript declares
+    but Go could not decode or re-encode.
   - Swift decoded bucket keys as display strings, so numeric and boolean keys
     (`dayOfWeek`, `hourOfDay`, booleans) re-encoded as strings, and it dropped
     `y`, `yError`, `distribution`, `nullCount`, `inputErrorCount`, the
@@ -57,12 +60,17 @@
   `QueryRequestV3.hostState`.
 - **Breaking (Swift):** the wire structs are generated. `AggregationBucket.keys`
   is `[JSONValue]` (the display strings are `keyLabels`),
-  `QueryExecutionV3.planToken` is a `String` (empty for none),
+  `QueryExecutionV3.planToken` is a `String` (empty for none; an omitted
+  token or bucket `value` still decodes, as `""` and `.null`), `hostState` is
+  `[String: JSONValue]?`, as the server requires an object,
   `QueryRequestV3.metrics` is `[MetricSpecV3]` (the initializer still accepts
   `[AggregationClause]`, sent without `label`), `WhereTerm` gains a
   `.group(OrGroup)` case for OR groups with conjunction branches, and the
   local transport refuses metric features it does not execute (expressions,
-  `where`, `minCount`, distributions, calendar grouping, sorting and limits).
+  `where`, `minCount`, distributions, calendar grouping, sorting and limits)
+  and grouped requests. Swift normalizes a WHERE as TypeScript does,
+  including OR groups with conjunction branches, so a link selects the same
+  rows in both clients.
 
 - **Breaking:** v3 is the only query protocol. `Transport` is exactly
   `{ queryCapabilities, fetchQueryV3 }`, both required. `fetchRows`,

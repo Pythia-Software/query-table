@@ -255,6 +255,7 @@ export interface MetricBucketV3 {
   /** Distribution inputs that were errors. */
   inputErrorCount?: number;
   keys: MetricValue[];
+  /** The metric: a number for count/sum/avg, a column value for min/max, null when undefined. Swift reads an omitted value as null, as before. */
   value: MetricValue;
   /** COUNT(*) of rows in the group. */
   count: number;
@@ -298,6 +299,7 @@ export interface ComputedFieldCapabilities {
 /** The execution envelope: profile, token, snapshot, resolved computed revisions and capabilities. A fingerprint is not authorization. */
 export interface ComputedExecution {
   profile: string;
+  /** Empty without a handshake. Swift reads an omitted token as empty, as before. */
   planToken: string;
   resolvedRevisions: Record<string, string>;
   fields: Record<string, ComputedFieldCapabilities>;

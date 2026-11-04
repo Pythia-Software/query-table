@@ -18,7 +18,7 @@ const schemaDocument = JSON.parse(readFileSync(path.join(root, "schema/query-wir
 const ajv = new Ajv2020({ allErrors: true, strict: true, strictTypes: false });
 // The x- keywords configure the generators and are inert for validation.
 for (const keyword of ["x-ts-name", "x-ts-type", "x-go-name", "x-go-type", "x-go-repr", "x-go-omit", "x-go-extra",
-  "x-swift-name", "x-swift-type", "x-swift-repr", "x-swift-case", "x-swift-default", "x-swift-init"]) ajv.addKeyword(keyword);
+  "x-swift-name", "x-swift-type", "x-swift-repr", "x-swift-case", "x-swift-default", "x-swift-init", "x-swift-lenient"]) ajv.addKeyword(keyword);
 ajv.addSchema(schemaDocument);
 const validator = (def: string) => ajv.getSchema(`${schemaDocument.$id}#/$defs/${def}`)!;
 const validate = (def: string, value: unknown) => {

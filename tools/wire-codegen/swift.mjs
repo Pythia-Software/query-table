@@ -73,6 +73,8 @@ export function emitSwift(defs) {
       const key = `forKey: .${p.swift}`;
       if (p.required && p.nullable) out += `    ${p.swift} = try c.decodeNil(${key}) ? nil : try c.decode(${p.type}.self, ${key})\n`;
       else if (p.required && p.type.startsWith("[String:")) out += `    // Go encodes a nil map as null.\n    ${p.swift} = try c.decodeIfPresent(${p.type}.self, ${key}) ?? [:]\n`;
+      // x-swift-lenient: a required value some servers omit decodes as this.
+      else if (p.required && p.node["x-swift-lenient"] !== undefined) out += `    ${p.swift} = try c.decodeIfPresent(${p.type}.self, ${key}) ?? ${p.node["x-swift-lenient"]}\n`;
       else if (p.required) out += `    ${p.swift} = try c.decode(${p.type}.self, ${key})\n`;
       else if (p.type === "JSONValue") out += `    ${p.swift} = c.contains(.${p.swift}) ? try c.decode(JSONValue.self, ${key}) : nil\n`;
       else out += `    ${p.swift} = try c.decodeIfPresent(${p.type}.self, ${key})\n`;

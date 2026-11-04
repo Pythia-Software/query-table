@@ -28,12 +28,11 @@ struct MetricPanel: View {
   }
   private func label(_ key: String?) -> String { key ?? "NULL" }
   private var ranked: [AggregationBucket] {
-    metric.buckets.sorted { a, b in
-      if let av = number(a.value), let bv = number(b.value), av != bv { return av > bv }
-      let aKey: String = a.keyLabels.first.flatMap { $0 } ?? ""
-      let bKey: String = b.keyLabels.first.flatMap { $0 } ?? ""
-      return aKey.localizedStandardCompare(bKey) == .orderedAscending
-    }
+    // Label each bucket once, not on every comparison.
+    metric.buckets.map { ($0, $0.keyLabels.first.flatMap { $0 } ?? "") }.sorted { a, b in
+      if let av = number(a.0.value), let bv = number(b.0.value), av != bv { return av > bv }
+      return a.1.localizedStandardCompare(b.1) == .orderedAscending
+    }.map(\.0)
   }
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -107,10 +106,9 @@ struct MetricPanel: View {
   private func axisValues(_ index: Int) -> [String?] {
     var seen = Set<String?>()
     return metric.buckets.compactMap { bucket -> [String?]? in
-      guard bucket.keyLabels.indices.contains(index), seen.insert(bucket.keyLabels[index]).inserted else {
-        return nil
-      }
-      return [bucket.keyLabels[index]]
+      let labels = bucket.keyLabels
+      guard labels.indices.contains(index), seen.insert(labels[index]).inserted else { return nil }
+      return [labels[index]]
     }.flatMap { $0 }.sorted { label($0).localizedStandardCompare(label($1)) == .orderedAscending }
   }
   private var pivot: some View {
@@ -119,7 +117,7 @@ struct MetricPanel: View {
     let rowValues = Array(allRows.prefix(100))
     let columnValues = Array(allColumns.prefix(20))
     let lookup = Dictionary(
-      metric.buckets.filter { $0.keyLabels.count == 2 }.map { ($0.keyLabels, $0) },
+      metric.buckets.map { ($0.keyLabels, $0) }.filter { $0.0.count == 2 },
       uniquingKeysWith: { first, _ in first })
     return VStack(alignment: .leading, spacing: 4) {
       Text(
@@ -168,9 +166,10 @@ struct MetricPanel: View {
         LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
           Section {
             ForEach(Array(buckets.enumerated()), id: \.offset) { _, bucket in
+              let labels = bucket.keyLabels
               HStack(spacing: 0) {
                 ForEach(Array(axes.enumerated()), id: \.offset) { index, _ in
-                  Text(label(bucket.keyLabels.indices.contains(index) ? bucket.keyLabels[index] : nil)).frame(
+                  Text(label(labels.indices.contains(index) ? labels[index] : nil)).frame(
                     width: 120, alignment: .leading
                   ).padding(5)
                 }

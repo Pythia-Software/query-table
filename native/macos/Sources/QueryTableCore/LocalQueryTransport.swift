@@ -29,6 +29,9 @@ public struct LocalQueryTransport: QueryTransport {
     guard request.profile == Self.profile else {
       throw QueryTableError.invalidQuery("Requested query profile is unavailable")
     }
+    guard request.grouping == nil else {
+      throw QueryTableError.unsupported("The local transport executes ungrouped queries only")
+    }
     let reference = Date(timeIntervalSince1970: Double(request.now) / 1000)
     let matching = try filtered(request.source.whereTerms, now: reference)
     // Distinct values read the source population only; their result stage
@@ -161,7 +164,8 @@ public struct LocalQueryTransport: QueryTransport {
         return AggregationBucket(
           keys: keys, value: value,
           count: records.count)
-      }.sorted { $0.keyLabels.map { $0 ?? "" }.lexicographicallyPrecedes($1.keyLabels.map { $0 ?? "" }) }
+      }.map { ($0, $0.keyLabels.map { $0 ?? "" }) }  // Label each bucket once.
+        .sorted { $0.1.lexicographicallyPrecedes($1.1) }.map(\.0)
       return AggregationResultEntry(
         id: a.id, buckets: buckets, scope: "allMatching", processedRows: matching.count,
         groupCount: buckets.count)

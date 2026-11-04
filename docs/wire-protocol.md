@@ -33,9 +33,14 @@ the generated types: `toQueryRequestV3` and friends in TypeScript,
   Swift's `JSONEncoder` does not keep key order; Swift is compared on sorted
   keys.
 - **Required properties are always present.** A required list or map is `[]`
-  or `{}`, never omitted or `null`, in every language (Go writes nil slices
-  and maps as empty). Decoders still accept `null` for the maps older Go
-  servers wrote as `null` (`expectedRevisions`, `resolvedRevisions`, `fields`).
+  or `{}`, never omitted or `null`, in every language. In Go such a field is a
+  `WireList[T]` or `WireMap[V]`, which write nil as empty; a `[]T` or
+  `map[string]V` assigns to it unchanged, and convert it back
+  (`[]T(v.Rows)`) where `reflect.DeepEqual` compares it with a plain slice.
+  The encoding is the field's, never the struct's, so a host's struct that
+  embeds a wire type keeps its own fields. Decoders still accept `null` for
+  the maps older Go servers wrote as `null` (`expectedRevisions`,
+  `resolvedRevisions`, `fields`).
 - **Optional properties are omitted** when unset, except the capability flags
   and `MetricResult.scope`/`processedRows`/`groupCount`, which Go always writes
   (`x-go-omit: none`).
@@ -84,6 +89,7 @@ The `x-` keywords configure the generators; validators ignore them.
 | `x-go-extra` | Unserialized Go fields appended to the struct. |
 | `x-swift-case` | The enum case of a union variant. |
 | `x-swift-default`, `x-swift-init` | Default arguments of the generated memberwise initializer, or `false` for no initializer (one is hand-written in an extension). |
+| `x-swift-lenient` | A Swift expression a required property decodes as when a server omits it (`MetricBucket.value` as `.null`, `planToken` as `""`). Encoding still writes it. |
 | `x-ts-type`, `x-go-type`, `x-swift-type` | **Escape hatch**: the type is hand-written in that language. |
 
 ## Escape hatches
