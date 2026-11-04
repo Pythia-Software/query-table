@@ -317,9 +317,8 @@ func TestDirectDistributionSharedScan(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Besides the shared scan, v3 sends the population COUNT and one compiled
-	// sample-budget probe per box (v2 did neither; histograms keep only
-	// counters); no other plans.
-	if log.count("WITH qt_direct_source") != 1 || log.count(populationMarker) != 1 || log.count("WITH qt0") != 1+2 {
+	// sample-budget probe per distribution (v2 did neither); no other plans.
+	if log.count("WITH qt_direct_source") != 1 || log.count(populationMarker) != 1 || log.count("WITH qt0") != 1+len(q.Metrics) {
 		t.Fatal("expected one population count and one shared scan", strings.Join(log.seen, "\n---\n"))
 	}
 	for _, m := range got.Metrics {

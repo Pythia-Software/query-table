@@ -115,6 +115,13 @@ function useDetailProperties<Row>(mode: ItemPropertyMode, schema: FieldSchema<Ro
 }
 
 /** Independent, type-level property controllers for each detail modality. */
+/** The fields a projected row carries: a key of the field's name, or of the
+ * first segment of its path (`payload` for `payload.name`). */
+function projectedFields<Row>(schema: FieldSchema<Row>, row: Row): string[] {
+  const keys = new Set(Object.keys(row as object));
+  return schema.fields.filter((field) => keys.has(field.name) ||
+    keys.has((field.source.kind === "backend" ? field.source.path ?? field.name : field.name).split(".")[0]!)).map((field) => field.name);
+}
 export function useItemDetails<Row>({
   schema, query, setQuery, options, rows, clientRows, rowId, fetchRow, refreshKey, links, queryReady = true, queryParameter, lookupRow, subject,
 }: {
@@ -172,6 +179,8 @@ export function useItemDetails<Row>({
   const hasCustomLoad = Boolean(customLoad);
   const sourceType = config?.objectType ?? detailSchema.name;
   const fallbackRows = !customLoad && !clientRows && !fetchRow ? rows : undefined;
+  const detailSchemaRef = useRef(detailSchema);
+  detailSchemaRef.current = detailSchema;
   const loadRow = useCallback(async (id: RowId, signal: AbortSignal): Promise<ItemDetailRecord<Row> | null> => {
     if (lookupRef.current) return lookupRef.current(id) ?? null;
     if (customLoadRef.current) return customLoadRef.current(id, signal);
@@ -182,10 +191,10 @@ export function useItemDetails<Row>({
     if (fetchRow) {
       // A lookup projects the selectable backend fields; the rest are not loaded.
       const row = await fetchRow(id, signal);
-      return row ? { row, loadedFields: Object.keys(row as object) } : null;
+      return row ? { row, loadedFields: projectedFields(detailSchemaRef.current, row) } : null;
     }
     const row = rows.find((row) => rowId(row) === id);
-    return row ? { row, loadedFields: Object.keys(row as object) } : null;
+    return row ? { row, loadedFields: projectedFields(detailSchemaRef.current, row) } : null;
   }, [hasLookup, hasCustomLoad, sourceType, clientRows, fetchRow, fallbackRows, rowId]);
   const [retryKey, setRetryKey] = useState(0);
   const [result, setResult] = useState<{

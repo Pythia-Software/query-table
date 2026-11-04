@@ -134,7 +134,7 @@ func (d QueryDatasetV3) executeUngrouped(ctx context.Context, tx *sql.Tx, q Quer
 		// SQLite batches share the v2 reductions; calendar metrics and every
 		// PostgreSQL metric run on their own, as staged execution runs them.
 		batched := sqlite && spec.DateGrouping == nil
-		if batched && !metricSampled(spec) {
+		if batched && !metricSampled(spec, sqlite) {
 			batch, slots = append(batch, spec), append(slots, i)
 			continue
 		}
@@ -171,9 +171,10 @@ func (d QueryDatasetV3) executeUngrouped(ctx context.Context, tx *sql.Tx, q Quer
 }
 
 // metricSampled reports whether a metric retains per-group samples, which
-// MaxSamplesPerGroup bounds. Histograms keep only bin counters.
-func metricSampled(spec AggSpec) bool {
-	if spec.Distribution != nil && (spec.Distribution.Kind != "histogram" || sampledExpression(spec.Distribution.Input)) {
+// MaxSamplesPerGroup bounds. PostgreSQL histograms keep only bin counters;
+// SQLite's direct reducer retains a histogram's inputs, so it is bounded too.
+func metricSampled(spec AggSpec, sqlite bool) bool {
+	if spec.Distribution != nil && (sqlite || spec.Distribution.Kind != "histogram" || sampledExpression(spec.Distribution.Input)) {
 		return true
 	}
 	return sampledExpression(metricExpression(spec)) || sampledExpression(spec.ExpressionY)

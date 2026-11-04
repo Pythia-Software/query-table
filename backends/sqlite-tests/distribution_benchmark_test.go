@@ -40,6 +40,7 @@ CREATE INDEX timing_started ON timing(started);`, rows))
 		"latency_ms":    {Name: "latency_ms", Kind: qt.FieldNumber, Expr: "r.latency_ms", ExpressionNumeric: true, Sortable: true, ServerFilter: true},
 		"output_tokens": {Name: "output_tokens", Kind: qt.FieldNumber, Expr: "r.output_tokens", ExpressionNumeric: true, Sortable: true, ServerFilter: true},
 	}}
+	// SQLite histograms count against MaxSamplesPerGroup; allow the whole table.
 	return db, qt.QueryDatasetV3{Dialect: "sqlite", Schema: schema, SourceSQL: "SELECT * FROM timing", MaxPopulation: rows, MaxSamplesPerGroup: 1000000}
 }
 

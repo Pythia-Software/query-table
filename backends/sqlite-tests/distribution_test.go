@@ -156,9 +156,14 @@ func TestSQLiteDistributionErrorsAndBudgets(t *testing.T) {
 	if message := metricFailure(t, r, e); !strings.Contains(message, "100,000-sample budget") {
 		t.Fatal(message)
 	}
-	// Histograms retain only counters, so the same population remains exact
-	// under the default sample budget.
+	// SQLite's direct reducer retains a histogram's inputs, so histograms count
+	// against MaxSamplesPerGroup too and the population needs a larger budget.
 	q = distributionQuery("histogram", "[n]")
+	r, e = d.Execute(context.Background(), db, q, qt.PlanOptions{})
+	if message := metricFailure(t, r, e); message != "The histogram distribution exceeded the 100,000-sample budget" {
+		t.Fatal(message)
+	}
+	d.MaxSamplesPerGroup = 200000
 	m := runMetric(t, db, d, q)
 	h := m.Buckets[0].Distribution.(*qt.MetricHistogramDistribution)
 	var total int64

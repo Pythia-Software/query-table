@@ -242,7 +242,9 @@ func largeUngrouped(tb testing.TB) (*sql.DB, *statementLog, qt.QueryDatasetV3, q
 	db := sql.OpenDB(statementHookConnector{base: original.Driver(), hook: log.hook})
 	tb.Cleanup(func() { db.Close() })
 	q := ungroupedRequest(qt.WireQuery{Select: []string{"id", "k", "n", "at", "@computed/double"}, OrderBy: []qt.OrderBy{{Field: "at", Dir: "desc", Nulls: "last"}}, Limit: 100, Offset: 500},
-		qt.AggSpec{ID: "count", Op: "count"}, qt.AggSpec{ID: "sum", Op: "sum", Field: "n", GroupBy: []string{"k"}}, qt.AggSpec{ID: "shown", Op: "avg", Field: "@computed/double", Scope: "shownRows"})
+		qt.AggSpec{ID: "count", Op: "count"}, qt.AggSpec{ID: "sum", Op: "sum", Field: "n", GroupBy: []string{"k"}}, qt.AggSpec{ID: "shown", Op: "avg", Field: "@computed/double", Scope: "shownRows"},
+		// PostgreSQL histograms count bins, so 270,000 inputs fit the default sample budget.
+		qt.AggSpec{ID: "histogram", Op: "count", Distribution: &qt.MetricDistribution{Kind: "histogram", Input: "[n]", Bins: 10}})
 	return db, log, d, o, q
 }
 
@@ -260,12 +262,31 @@ func TestPostgresLargeUngroupedPageDoesNotStage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var result qt.QueryResultV3
+	// Only what is checked: on this branch QueryResultV3 cannot decode a
+	// distribution result from JSON.
+	var result struct {
+		Total, SourceTotal int64
+		Rows               []map[string]any
+		Metrics            []struct {
+			Error         string
+			ProcessedRows int64
+			Buckets       []struct {
+				Count        int64
+				Distribution struct {
+					Kind string
+					N    int64
+				}
+			}
+		}
+	}
 	if err = json.Unmarshal([]byte(out), &result); err != nil {
 		t.Fatal(err)
 	}
 	if result.Total != 270000 || result.SourceTotal != 270000 || len(result.Rows) != 100 || result.Metrics[0].Buckets[0].Count != 270000 || result.Metrics[2].ProcessedRows != 100 {
-		t.Fatalf("total=%d rows=%d metrics=%v", result.Total, len(result.Rows), result.Metrics)
+		t.Fatalf("total=%d rows=%d metrics=%+v", result.Total, len(result.Rows), result.Metrics)
+	}
+	if h := result.Metrics[3]; h.Error != "" || len(h.Buckets) != 1 || h.Buckets[0].Distribution.Kind != "histogram" || h.Buckets[0].Distribution.N <= 100000 {
+		t.Fatalf("histogram over the default sample budget: %+v", h)
 	}
 	// No statement copies the population: no temporary table, CTAS or COPY.
 	log.mu.Lock()

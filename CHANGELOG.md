@@ -52,8 +52,9 @@
 - Go v3 executes ungrouped requests directly against `SourceSQL` instead of
   staging the matching population, so `MaxPopulation` and `MaxStagingBytes`
   bound only grouped execution and calendar scratch. Plans recompile against
-  the bindings they reach. Histograms no longer count against
-  `MaxSamplesPerGroup`.
+  the bindings they reach. PostgreSQL histograms, which keep only bin
+  counters, no longer count against `MaxSamplesPerGroup`; SQLite histograms
+  still do, because its direct reducer retains their inputs.
 - **Breaking (Swift):** `QueryTransport` is `queryCapabilities` plus
   `fetchQueryV3`; `HTTPQueryTransport` posts one v3 request to one endpoint
   and validates the response, and `LocalQueryTransport` executes v3 requests

@@ -205,10 +205,19 @@ describe("built-in item details", () => {
     const hidden: FieldSchema<Row> = { ...remoteSchema, fields: remoteSchema.fields.map(field =>
       field.name === "secret" ? { ...field, select: { enabled: false } } : field) };
     const transport = memoryV3Transport([{ id: "remote", name: "Remote", secret: "not projected" }], hidden, { project: true });
-    const probe = await mount({ modes: ["modal"] }, EMPTY_QUERY, (id, signal) => fetchRowV3<Row>(transport, hidden, id, {}, signal));
+    const probe = await mount({ modes: ["modal"], schema: hidden }, EMPTY_QUERY, (id, signal) => fetchRowV3<Row>(transport, hidden, id, {}, signal));
     await act(async () => probe.api().open("remote", "modal"));
     // A field outside the lookup's projection is not loaded, rather than empty.
     expect(probe.api().record?.loadedFields).toEqual(["id", "name"]);
+    probe.unmount();
+  });
+  it("counts a nested field as loaded through its path", async () => {
+    const nested: FieldSchema<Row> = { ...remoteSchema, fields: [...remoteSchema.fields,
+      { name: "payloadName", label: "Payload", type: "text", source: { kind: "backend", path: "payload.name" } }] };
+    const transport = memoryV3Transport([{ id: "remote", name: "Remote", payload: { name: "inner" } } as unknown as Row], nested);
+    const probe = await mount({ modes: ["modal"], schema: nested }, EMPTY_QUERY, (id, signal) => fetchRowV3<Row>(transport, nested, id, {}, signal));
+    await act(async () => probe.api().open("remote", "modal"));
+    expect(probe.api().record?.loadedFields).toContain("payloadName");
     probe.unmount();
   });
   it("does not restart complete-record loads for inline callbacks or new collection rows", async () => {
