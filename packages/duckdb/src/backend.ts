@@ -39,6 +39,8 @@ import {
   type MetricSort,
   type MetricValue,
   type QueryState,
+  failedMetric,
+  QueryError,
 } from "@pythia-software/query-table-core";
 import {
   SQLBuilder,
@@ -353,7 +355,7 @@ export class DuckDBBackend {
       signal,
     )) as [{ n: number; bytes: number }];
     if (n > this.capabilities.maxPopulation || bytes > this.maxStagingBytes)
-      throw Error("DuckDB source population or staging byte budget exceeded.");
+      throw new QueryError("resource_limit", "DuckDB source population or staging byte budget exceeded.");
     await this.run(
       builder.statement(
         `CREATE TEMP TABLE ${id(name)} AS SELECT * FROM ${population}`,
@@ -424,8 +426,7 @@ export class DuckDBBackend {
   private validateRequest(request: QueryRequestV3): void {
     if (
       request.version !== 3 ||
-      request.profile !== DUCKDB_PROFILE ||
-      request.diagnostics.length
+      request.profile !== DUCKDB_PROFILE
     )
       throw Error("Invalid DuckDB execution request or profile.");
     if (
@@ -536,7 +537,7 @@ export class DuckDBBackend {
           signal,
         )) as [{ n: number }];
         if (n > this.capabilities.maxGroups)
-          throw Error("DuckDB grouped row budget exceeded.");
+          throw new QueryError("resource_limit", "DuckDB grouped row budget exceeded.");
         schema = model.resultSchema(grouping.keys, grouping.summaries);
       }
       const page = await this.page(
@@ -609,11 +610,7 @@ export class DuckDBBackend {
         // The rollback discarded this clause's scratch relations.
         tables.splice(created);
         abort(signal);
-        output.push({
-          id: clause.id,
-          buckets: [],
-          error: error instanceof Error ? error.message : String(error),
-        });
+        output.push(failedMetric(clause.id, error, "invalid_metric"));
       }
     }
     await this.sql("BEGIN TRANSACTION", [], signal);
@@ -749,7 +746,7 @@ export class DuckDBBackend {
       signal,
     );
     if (rows.length > this.capabilities.maxGroups)
-      throw Error("DuckDB metric group budget exceeded.");
+      throw new QueryError("resource_limit", "DuckDB metric group budget exceeded.");
     if (
       distribution &&
       rows.some(
@@ -849,7 +846,7 @@ export class DuckDBBackend {
           const values = [slot, ...tuple];
           if (!existing.has(JSON.stringify(values))) {
             if (buckets.length >= this.capabilities.maxGroups)
-              throw Error("DuckDB calendar group budget exceeded.");
+              throw new QueryError("resource_limit", "DuckDB calendar group budget exceeded.");
             buckets.push({
               keys: values,
               count: 0,

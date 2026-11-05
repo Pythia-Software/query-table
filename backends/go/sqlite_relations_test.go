@@ -159,7 +159,7 @@ func TestSQLitePredicateRelationConsultation(t *testing.T) {
 	if !errors.As(err, &relationErr) || !strings.Contains(err.Error(), "index offline") {
 		t.Fatalf("provider error %v", err)
 	}
-	if _, clause := metricClauseError(context.Background(), err); clause {
+	if _, _, clause := metricClauseError(context.Background(), err); clause {
 		t.Fatal("provider failure isolated as a metric clause")
 	}
 }

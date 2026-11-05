@@ -4,6 +4,7 @@ import {
   type AggregationClause,
   type AggregationResult,
   type FieldSchema,
+  type QueryError,
   type QueryState,
   type Transport,
 } from "@pythia-software/query-table-core";
@@ -12,7 +13,7 @@ import { executeMetrics, usesLocalMetricPage, type MetricExecutionContext } from
 export interface AggregationsApiState {
   results: AggregationResult | null;
   loading: boolean;
-  error: Error | null;
+  error: QueryError | Error | null;
   preview: (
     clauses: AggregationClause[],
     signal?: AbortSignal,

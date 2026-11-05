@@ -12,6 +12,7 @@
 
 import { FormulaError, type FormulaPlan, type FormulaResult } from "./formula";
 import type { AggregationBucket, AggregationResultEntry } from "./encode";
+import { failedMetric } from "./errors";
 import {
   compareMetricValues,
   compileMetric,
@@ -507,7 +508,7 @@ export function planMetricSeries(
       return prepared.map((item): AggregationResultEntry => {
         const c = item.clause;
         if (item.kind === "error")
-          return { id: c.id, buckets: [], error: item.error };
+          return { id: c.id, buckets: [], error: item.error, errorCode: "invalid_metric" };
         if (item.kind === "empty") {
           const none: AggregationResultEntry = {
             id: c.id,
@@ -525,19 +526,20 @@ export function planMetricSeries(
               id: part.id,
               buckets: [],
               error: "Server omitted this metric.",
+              errorCode: "internal" as const,
             },
         );
         if (item.kind === "plain") return { ...entries[0]!, id: c.id };
+        // A failed part fails the metric with the engine's message and code.
+        const failed = entries.find((entry) => entry.error);
+        if (failed)
+          return { id: c.id, buckets: [], error: failed.error!, ...(failed.errorCode ? { errorCode: failed.errorCode } : {}) };
         try {
           if (item.kind === "occurrence")
             return combineOccurrences(c, entries[0]!);
           return combineSeries(item, entries);
         } catch (e) {
-          return {
-            id: c.id,
-            buckets: [],
-            error: e instanceof Error ? e.message : String(e),
-          };
+          return failedMetric(c.id, e, "invalid_metric");
         }
       });
     },

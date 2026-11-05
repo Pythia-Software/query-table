@@ -217,7 +217,6 @@ describe("link columns in execution", () => {
 
   it("never reach the server, while the fields they read are requested", () => {
     const request = toQueryRequestV3(query, schema, capabilities, undefined, { now: 1 });
-    expect(request.diagnostics).toEqual([]);
     expect(request.grouping!.summaries.map((s) => s.op)).toEqual(["count", "sum"]);
     expect(JSON.stringify(request)).not.toContain('"link"');
     expect(request.result.select).toEqual(expect.arrayContaining(["fails", "repo", "tool"]));

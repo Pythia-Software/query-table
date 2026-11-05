@@ -198,7 +198,7 @@ struct QueryTableChecks {
       nestedTable.error == nil && nestedTable.rows.count == 1 && nestedRow != nil,
       "An identity at a nested source path validates and looks up")
     let oneRow = QueryCapabilitiesV3(profile: local.queryCapabilities.profile, maxRows: 1)
-    let tightLookup = QueryRequestV3.rowLookup(id: .number(2), select: ["name"], schema: schema, capabilities: oneRow)
+    let tightLookup = try QueryRequestV3.rowLookup(id: .number(2), select: ["name"], schema: schema, capabilities: oneRow)
     try check(tightLookup.source.limit == 1, "Row lookup stays within a one-row budget")
     let metrics = try await local.metrics([.init(id: "total", op: "sum", field: "amount")])
     try check(metrics.first?.buckets.first?.value == .number(60), "Metric covers full dataset")
@@ -221,23 +221,56 @@ struct QueryTableChecks {
     try check(plainMetric.metrics.first?.buckets.first?.count == rows.count, "An empty metric filter runs as a plain metric")
     let lenient = try JSONDecoder().decode(
       AggregationBucket.self, from: Data(#"{"keys":[],"count":2}"#.utf8))
-    let envelope = try JSONDecoder().decode(
+    let lenientEnvelope = try JSONDecoder().decode(
       QueryExecutionV3.self, from: Data(#"{"profile":"p","resolvedRevisions":{},"fields":{}}"#.utf8))
     try check(
-      lenient.value == .null && envelope.planToken == "",
+      lenient.value == .null && lenientEnvelope.planToken == "",
       "An omitted bucket value or plan token decodes as before")
-    let lookup = QueryRequestV3.rowLookup(
+    let lookup = try QueryRequestV3.rowLookup(
       id: .number(2), select: ["name"], schema: schema, capabilities: local.queryCapabilities)
+    // 1,001 emoji are 1,001 characters but 2,002 UTF-16 units, over the server's budget.
+    for (limit, search) in [(0, "pa"), (501, "pa"), (5, String(repeating: "x", count: 2001)), (5, String(repeating: "🙂", count: 1001))] {
+      var refused: QueryTableError?
+      do {
+        _ = try QueryRequestV3.distinctValues(
+          field: "status", search: search, limit: limit, schema: schema,
+          capabilities: local.queryCapabilities)
+      } catch let error as QueryTableError { refused = error }
+      try check(refused?.code == .invalidQuery, "Distinct limits and search budgets are refused locally")
+    }
+    var mismatched: QueryTableError?
+    do {
+      _ = try QueryRequestV3.distinctValues(
+        field: "status", limit: 0, schema: schema, capabilities: local.queryCapabilities,
+        execution: QueryExecutionV3(profile: "another"))
+    } catch let error as QueryTableError { mismatched = error }
+    try check(
+      mismatched?.code == .profileMismatch && (mismatched?.errorDescription ?? "").contains("limit"),
+      "Distinct refusals keep the TypeScript order: profile first, every message")
+    let envelope = QueryExecutionV3(
+      profile: local.queryCapabilities.profile, planToken: "token",
+      resolvedRevisions: ["@computed/double": "2"], fields: [:], snapshot: "s1")
+    let carried = try QueryRequestV3.rowLookup(
+      id: .number(2), select: ["name"], schema: schema, capabilities: local.queryCapabilities,
+      execution: envelope)
+    try check(
+      carried.expectedRevisions == ["double": "2"] && carried.planToken == "token"
+        && carried.snapshot == "s1",
+      "Auxiliary requests carry the execution envelope")
     let found = try await local.fetchQueryV3(lookup)
     try found.validate(for: lookup, schema: schema)
     try check(
       found.rows.map { $0["id"] } == [.number(2)] && lookup.source.limit == 2,
       "Row refresh is a rows request filtered by identity")
-    let rejected = QueryState(orderBy: [.init(field: "missing")]).queryRequestV3(
-      schema: schema, capabilities: local.queryCapabilities)
+    var refusal: QueryTableError?
+    do {
+      _ = try QueryState(orderBy: [.init(field: "missing")]).queryRequestV3(
+        schema: schema, capabilities: local.queryCapabilities)
+    } catch let error as QueryTableError { refusal = error }
     try check(
-      rejected.diagnostics == ["The query contains unsupported result ordering."],
-      "Unsupported state becomes a request diagnostic")
+      refusal?.code == .residualQuery
+        && refusal?.errorDescription == "The query contains unsupported result ordering.",
+      "Unsupported state is refused locally with an error code")
     try await HTTPCheck.run()
     try check(true, "HTTP transport posts v3 JSON with authentication and rejects error status and mismatched responses")
 

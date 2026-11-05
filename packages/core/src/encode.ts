@@ -1,5 +1,6 @@
 import type { MetricValue, MetricHistogramBin } from "./metricTypes";
 import { deflateSync, Inflate } from "fflate";
+import { QueryError, type ErrorCode } from "./errors";
 import { createSetFilter, readSetFilter } from "./setFilter";
 // encode.ts — URL serialization + the server-bound query subset.
 //
@@ -97,9 +98,11 @@ function compactQuery(q: QueryState): CompactQuery {
 }
 
 export const MAX_QUERY_STATE_BYTES = 4 * 1024 * 1024;
-export class QueryDecodeError extends Error {
-  constructor(public readonly code: "invalid" | "too_large" | "unsupported_version", message: string) {
-    super(message); this.name = "QueryDecodeError";
+/** A query link or saved state that cannot be decoded; a QueryError with a query-link code. */
+export class QueryDecodeError extends QueryError {
+  declare readonly code: Extract<ErrorCode, "invalid" | "too_large" | "unsupported_version">;
+  constructor(code: Extract<ErrorCode, "invalid" | "too_large" | "unsupported_version">, message: string) {
+    super(code, message); this.name = "QueryDecodeError";
   }
 }
 

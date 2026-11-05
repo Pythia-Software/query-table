@@ -62,7 +62,7 @@ func TestV3HTTPAuthorizationAndStrictRequests(t *testing.T) {
 	if w := invoke(handler, "POST", string(body)+" {}"); w.Code != 400 {
 		t.Fatal(w)
 	}
-	if w := invoke(handler, "POST", strings.Repeat(" ", 2<<20)+string(body)); w.Code != 400 {
+	if w := invoke(handler, "POST", strings.Repeat(" ", 2<<20)+string(body)); w.Code != 413 {
 		t.Fatal(w)
 	}
 }
@@ -77,25 +77,25 @@ func TestV3HTTPExecutionErrors(t *testing.T) {
 	}{
 		{"database", func(_ *qt.QueryRequestV3, d *qt.QueryDatasetV3, _ *qt.PlanOptions) {
 			d.SourceSQL = "SELECT * FROM private_host_catalog"
-		}, 500, "could not execute query\n"},
-		{"host failure", func(q *qt.QueryRequestV3, _ *qt.QueryDatasetV3, o *qt.PlanOptions) {
+		}, 500, `{"error":{"code":"internal","message":"could not execute query"}}` + "\n"},
+		{"host rejection", func(q *qt.QueryRequestV3, _ *qt.QueryDatasetV3, o *qt.PlanOptions) {
 			q.PlanToken = "plan"
 			o.ValidatePlanToken = func(context.Context, string) error {
 				return errors.New("private_host_catalog /private/database/path generated SQL qt_v3_secret")
 			}
-		}, 500, "could not execute query\n"},
+		}, 409, `{"error":{"code":"execution_expired","message":"the execution snapshot or plan token was rejected; refresh the execution handshake"}}` + "\n"},
 		{"deadline", func(q *qt.QueryRequestV3, _ *qt.QueryDatasetV3, o *qt.PlanOptions) {
 			q.PlanToken = "plan"
 			o.ValidatePlanToken = func(context.Context, string) error {
 				return fmt.Errorf("private_host_catalog: %w", context.DeadlineExceeded)
 			}
-		}, 504, "query timed out\n"},
+		}, 504, `{"error":{"code":"timeout","message":"query timed out"}}` + "\n"},
 		{"wrapped diagnostic", func(q *qt.QueryRequestV3, _ *qt.QueryDatasetV3, o *qt.PlanOptions) {
 			q.PlanToken = "plan"
 			o.ValidatePlanToken = func(context.Context, string) error {
 				return fmt.Errorf("private_host_catalog: %w", &qt.PlanDiagnostic{Code: "plan_expired", Message: "refresh the plan"})
 			}
-		}, 400, "plan_expired: refresh the plan\n"},
+		}, 400, `{"error":{"code":"plan_expired","message":"refresh the plan"}}` + "\n"},
 		{"invalid source limit", func(q *qt.QueryRequestV3, _ *qt.QueryDatasetV3, _ *qt.PlanOptions) { q.Source.Limit = -1 }, 400, ""},
 		{"malformed source filter", func(q *qt.QueryRequestV3, _ *qt.QueryDatasetV3, _ *qt.PlanOptions) {
 			q.Source.Where = []qt.WhereTerm{{Op: "=", Value: "x"}}
@@ -205,7 +205,7 @@ func TestV3ComputedPoliciesSamplesAndSnapshotValidation(t *testing.T) {
 	q.Grouping = nil
 	q.Result = qt.WireQuery{Select: []string{"id"}, Limit: 10}
 	q.Metrics = []qt.AggSpec{{ID: "median", Expression: "MEDIAN([n])"}}
-	if out, err := d.Execute(context.Background(), db, q, qt.PlanOptions{}); err != nil || out.Metrics[0].Error != "MEDIAN exceeded the 2-sample budget" {
+	if out, err := d.Execute(context.Background(), db, q, qt.PlanOptions{}); err != nil || out.Metrics[0].Error != "MEDIAN exceeded the 2-sample budget" || out.Metrics[0].ErrorCode != qt.ErrorCodeResourceLimit {
 		t.Fatal("metric sample budget ignored", err)
 	}
 	d.MaxSamplesPerGroup = 0
@@ -221,7 +221,7 @@ func TestV3ComputedPoliciesSamplesAndSnapshotValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	q.Metrics[0].Op = "avg"
-	if out, err := d.Execute(context.Background(), db, q, qt.PlanOptions{Resolver: resolver}); err != nil || out.Metrics[0].Error == "" {
+	if out, err := d.Execute(context.Background(), db, q, qt.PlanOptions{Resolver: resolver}); err != nil || out.Metrics[0].Error == "" || out.Metrics[0].ErrorCode == "" {
 		t.Fatal("materializing computed values bypassed base aggregate policy", err)
 	}
 	field.AggregateOps = nil

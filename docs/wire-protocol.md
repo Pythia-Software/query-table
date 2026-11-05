@@ -1,7 +1,7 @@
 # The v3 wire protocol
 
 Every JSON value that crosses the v3 query wire (the capabilities handshake,
-`QueryRequestV3` and `QueryResultV3`) is described by one JSON Schema
+`QueryRequestV3` and `QueryResultV3`, and the `QueryErrorBody` of a failure) is described by one JSON Schema
 (draft 2020-12):
 
 ```
@@ -49,6 +49,17 @@ the generated types: `toQueryRequestV3` and friends in TypeScript,
   only byte difference between the encoders, and the Go conformance test
   undoes it before comparing.
 
+## Errors
+
+Every error has a code from the schema's `ErrorCode` enum. Non-2xx responses
+of the Go handlers are a JSON `QueryErrorBody`
+(`{"error": {"code", "message", "field"?, "offset"?, "metricId"?}}`), and a
+metric that fails alone carries `errorCode` next to its `error`. Requests carry
+no `diagnostics`: a client that cannot express a query on the negotiated
+server throws a coded error before sending it, and servers refuse what they
+cannot run on their own. See [Error codes](errors.md) for every code, its HTTP
+status and whether a retry can succeed.
+
 ## Changing the protocol
 
 1. Edit `schema/query-wire.schema.json`. Keep `additionalProperties: false`
@@ -56,8 +67,8 @@ the generated types: `toQueryRequestV3` and friends in TypeScript,
 2. Run `npm run wire:generate` and commit the three generated files.
    `npm run wire:check` (part of `npm run check`) regenerates them and fails
    if they differ from what is committed.
-3. Update or add golden fixtures in `schema/fixtures/wire/requests` and
-   `schema/fixtures/wire/results`. Fixtures are formatted as
+3. Update or add golden fixtures in `schema/fixtures/wire/requests`,
+   `schema/fixtures/wire/results` and `schema/fixtures/wire/errors`. Fixtures are formatted as
    `JSON.stringify(value, null, 2)` plus a newline, in schema property order;
    row objects and maps use sorted keys (Go sorts map keys). The builder
    fixtures (`rows.json`, `distinct.json`, `row-lookup.json`,
@@ -90,6 +101,7 @@ The `x-` keywords configure the generators; validators ignore them.
 | `x-swift-case` | The enum case of a union variant. |
 | `x-swift-default`, `x-swift-init` | Default arguments of the generated memberwise initializer, or `false` for no initializer (one is hand-written in an extension). |
 | `x-swift-lenient` | A Swift expression a required property decodes as when a server omits it (`MetricBucket.value` as `.null`, `planToken` as `""`). Encoding still writes it. |
+| `x-codes` | On a string enum (`ErrorCode`): each value's HTTP status, retry advice and description. Go gets one constant per value and `ErrorCode.HTTPStatus()`, TypeScript `ERROR_CODES`, Swift an enum with an `unknown` fallback; the table in `docs/errors.md` is generated from it. |
 | `x-ts-type`, `x-go-type`, `x-swift-type` | **Escape hatch**: the type is hand-written in that language. |
 
 ## Escape hatches

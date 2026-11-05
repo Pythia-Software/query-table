@@ -235,7 +235,7 @@ public struct QueryState: Codable, Equatable, Sendable {
     }.map {
       var t = $0
       if !["first", "last"].contains(t.nulls ?? "") { t.nulls = nil }
-      if (t.extract?.regex.count ?? 0) > 10000 { t.extract = nil }
+      if (t.extract?.regex.utf16.count ?? 0) > 10000 { t.extract = nil }
       return t
     }
     q.aggregations = aggregations.prefix(20).filter {

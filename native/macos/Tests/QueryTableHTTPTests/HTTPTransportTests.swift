@@ -92,7 +92,7 @@ final class HTTPTransportTests: XCTestCase {
     let schema = FieldSchema(
       name: "items", idField: "id",
       fields: [.init(name: "id", label: "ID", type: "number"), .init(name: "name", label: "Name", type: "text")])
-    let distinct = QueryRequestV3.distinctValues(
+    let distinct = try QueryRequestV3.distinctValues(
       field: "name", search: "na", limit: 30, schema: schema, capabilities: capabilities,
       now: Date(timeIntervalSince1970: 1_772_964_000))
     StubProtocol.handler = { [self] request in

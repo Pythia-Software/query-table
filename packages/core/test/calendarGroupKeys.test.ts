@@ -188,12 +188,12 @@ describe("calendar grouping keys", () => {
       maxRows: 100, maxGroups: 100, maxPopulation: 1000,
     };
     const query = grouped([denverDay], { select: [{ field: "at" }, { field: "calls" }] });
-    expect(toQueryRequestV3(query, schema, capabilities).diagnostics).toContain(
-      "This server does not support grouping keys by calendar interval.",
+    expect(() => toQueryRequestV3(query, schema, capabilities)).toThrow(
+      expect.objectContaining({ code: "capability_unsupported", capability: "calendarGroupKeys",
+        message: "This server does not support grouping keys by calendar interval." }),
     );
     const request = toQueryRequestV3(query, schema, { ...capabilities, calendarGroupKeys: true });
-    expect(request.diagnostics).toEqual([]);
     expect(request.grouping!.keys).toEqual([denverDay]);
-    expect(toQueryRequestV3(grouped(["kind"]), schema, capabilities).diagnostics).toEqual([]);
+    expect(() => toQueryRequestV3(grouped(["kind"]), schema, capabilities)).not.toThrow();
   });
 });

@@ -1,9 +1,10 @@
 // Swift emitter: Codable structs with explicit coding (so required nulls and
 // present-null JSON values round-trip) and enums for unions.
-import { banner, escapeHatch, isObject, isStringEnum, nullable, properties, refName, scalarUnion, typeName, variants } from "./model.mjs";
+import { banner, codeEnum, escapeHatch, isObject, isStringEnum, nullable, properties, refName, scalarUnion, typeName, variants } from "./model.mjs";
 
 const comment = (text, indent) => text ? `${indent}/// ${text}\n` : "";
-const lowerFirst = (s) => s.replace(/^./, (c) => c.toLowerCase());
+const swiftKeywords = new Set(["internal", "default", "case", "class", "func", "import", "in", "is", "let", "nil", "private", "public", "return", "self", "static", "struct", "switch", "throw", "true", "false", "try", "var", "where", "while"]);
+const lowerFirst =(s) => s.replace(/^./, (c) => c.toLowerCase());
 
 export function emitSwift(defs) {
   const type = (node) => {
@@ -12,6 +13,7 @@ export function emitSwift(defs) {
     if (node.$ref) {
       const name = refName(node), def = defs[name];
       if (escapeHatch(def, "swift")) return escapeHatch(def, "swift");
+      if (codeEnum(def)) return typeName(defs, name, "swift");
       if (def.type === "string") return "String";
       if (scalarUnion(defs, def)) return "JSONValue";
       return typeName(defs, name, "swift");
@@ -35,6 +37,18 @@ export function emitSwift(defs) {
   };
   let out = `${banner("//")}\nimport Foundation\n`;
   for (const [name, def] of Object.entries(defs)) {
+    const codes = codeEnum(def);
+    if (codes) {
+      const swift = typeName(defs, name, "swift");
+      out += `\n${comment(def.description, "")}public enum ${swift}: String, Codable, Equatable, Sendable, CaseIterable {\n`;
+      for (const { code, description } of codes) {
+        const id = code.replace(/_(.)/g, (_, c) => c.toUpperCase());
+        out += comment(description, "  ") + `  case ${swiftKeywords.has(id) ? `\`${id}\`` : id}${id === code ? "" : ` = "${code}"`}\n`;
+      }
+      out += `  /// A code this build does not know; decoding never fails on a new code.\n  case unknown\n`;
+      out += `  public init(from decoder: Decoder) throws {\n    let raw = try decoder.singleValueContainer().decode(String.self)\n    self = ${swift}(rawValue: raw) ?? .unknown\n  }\n}\n`;
+      continue;
+    }
     if (escapeHatch(def, "swift") || def.type === "string") continue;
     const swift = typeName(defs, name, "swift");
     if (variants(def)) {

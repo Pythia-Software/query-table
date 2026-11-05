@@ -240,7 +240,7 @@ func (s *demoServer) localOnly(next http.Handler) http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		origin := r.Header.Get("Origin")
 		if origin != "" && origin != "http://localhost:5179" && origin != "http://127.0.0.1:5179" && origin != "http://localhost:5180" && origin != "http://127.0.0.1:5180" {
-			writeError(w, errors.New("local demo origin required"), http.StatusForbidden)
+			writeError(w, qt.ErrorCodeForbidden, "local demo origin required")
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -248,7 +248,7 @@ func (s *demoServer) localOnly(next http.Handler) http.Handler {
 }
 func (s *demoServer) bootstrap(w http.ResponseWriter, r *http.Request) {
 	if err := s.ensureSnapshot(); err != nil {
-		writeError(w, err, 503)
+		writeError(w, qt.ErrorCodeUnavailable, err.Error())
 		return
 	}
 	s.mu.RLock()
@@ -281,9 +281,31 @@ func wait(ctx context.Context, delay int64) error {
 		return nil
 	}
 }
-func writeError(w http.ResponseWriter, err error, status int) {
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+
+// writeError answers with the library's QueryErrorBody and the code's status
+// (see docs/errors.md), so the demo client parses every failure the same way.
+func writeError(w http.ResponseWriter, code qt.ErrorCode, message string) {
+	writeErrorDetail(w, qt.QueryErrorDetail{Code: code, Message: message})
+}
+
+// writeQueryError keeps the code, field and offset of library errors. This
+// local-only demo also shows the text of uncoded errors, which a production
+// host should log instead (qt.WriteQueryError does).
+func writeQueryError(w http.ResponseWriter, err error) {
+	detail := qt.ErrorDetail(err)
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		detail = qt.QueryErrorDetail{Code: qt.ErrorCodeRequestTooLarge, Message: "demo request exceeds 1 MB"}
+	} else if detail.Code == qt.ErrorCodeInternal {
+		detail.Message = err.Error()
+	}
+	writeErrorDetail(w, detail)
+}
+
+func writeErrorDetail(w http.ResponseWriter, detail qt.QueryErrorDetail) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(detail.Code.HTTPStatus())
+	_ = json.NewEncoder(w).Encode(qt.QueryErrorBody{Error: detail})
 }
 func readJSON(r *http.Request, out any) error {
 	decoder := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
@@ -304,12 +326,12 @@ func (s *demoServer) withTransaction(run handler) http.Handler {
 		var err error
 		t.DBDelayMS, err = delayHeader(r, "X-Demo-DB-Delay")
 		if err != nil {
-			writeError(w, err, 400)
+			writeError(w, qt.ErrorCodeInvalidRequest, err.Error())
 			return
 		}
 		t.ResponseDelayMS, err = delayHeader(r, "X-Demo-Response-Delay")
 		if err != nil {
-			writeError(w, err, 400)
+			writeError(w, qt.ErrorCodeInvalidRequest, err.Error())
 			return
 		}
 		// Drain the bounded request body before waiting for a slot or injecting
@@ -318,7 +340,7 @@ func (s *demoServer) withTransaction(run handler) http.Handler {
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
 		_ = r.Body.Close()
 		if err != nil {
-			writeError(w, err, http.StatusBadRequest)
+			writeQueryError(w, err)
 			return
 		}
 		r.Body = io.NopCloser(bytes.NewReader(body))
@@ -340,7 +362,7 @@ func (s *demoServer) withTransaction(run handler) http.Handler {
 		}
 		defer release()
 		if s.snapshotError != nil {
-			writeError(w, errors.New("snapshot refresh failed; reconnect to retry"), 503)
+			writeError(w, qt.ErrorCodeUnavailable, "snapshot refresh failed; reconnect to retry")
 			return
 		}
 		// Read-write only for the executor's temporary tables (grouped rows and
@@ -348,17 +370,17 @@ func (s *demoServer) withTransaction(run handler) http.Handler {
 		// changes to base records.
 		tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
 		if err != nil {
-			writeError(w, err, 503)
+			writeError(w, qt.ErrorCodeUnavailable, err.Error())
 			return
 		}
 		defer tx.Rollback()
 		// Snapshot comes only from pg_export_snapshot(), validated at capture, never request SQL.
 		if _, err = tx.ExecContext(ctx, "SET TRANSACTION SNAPSHOT '"+s.snapshot+"'"); err != nil {
-			writeError(w, err, 503)
+			writeError(w, qt.ErrorCodeUnavailable, err.Error())
 			return
 		}
 		if _, err = tx.ExecContext(ctx, `SET LOCAL statement_timeout='60s'; SET LOCAL work_mem='32MB'; SET LOCAL temp_file_limit='2GB'`); err != nil {
-			writeError(w, err, 503)
+			writeError(w, qt.ErrorCodeUnavailable, err.Error())
 			return
 		}
 		if t.DBDelayMS > 0 {
@@ -392,16 +414,16 @@ func (s *demoServer) withTransaction(run handler) http.Handler {
 		w.Header().Set("X-Demo-Server-Ms", strconv.FormatInt(time.Since(start).Milliseconds(), 10))
 		if err != nil {
 			log.Printf("%s: %v", r.URL.Path, err)
-			writeError(w, err, 422)
+			writeQueryError(w, err)
 			return
 		}
 		payload, e := json.Marshal(result)
 		if e != nil {
-			writeError(w, e, 500)
+			writeError(w, qt.ErrorCodeInternal, e.Error())
 			return
 		}
 		if len(payload) > 8<<20 {
-			writeError(w, errors.New("demo response exceeds 8 MB budget"), 422)
+			writeError(w, qt.ErrorCodeResourceLimit, "demo response exceeds 8 MB budget")
 			return
 		}
 		s.completed.Add(1)
@@ -417,7 +439,7 @@ func (s *demoServer) requestCanceled(w http.ResponseWriter, r *http.Request, ctx
 		s.canceled.Add(1)
 		return
 	}
-	writeError(w, ctx.Err(), http.StatusGatewayTimeout)
+	writeError(w, qt.ErrorCodeTimeout, "demo request timed out")
 }
 
 func (s *demoServer) query(ctx context.Context, tx *sql.Tx, r *http.Request, _ *timing) (any, error) {

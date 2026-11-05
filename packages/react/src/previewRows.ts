@@ -27,7 +27,6 @@ export async function fetchPreviewRows<Row>(
   const sourceSchema = sourceExecutionSchema(baseSchema, execution, definitions);
   const request = toQueryRequestV3({ ...query, aggregations: [] }, sourceSchema,
     transport.queryCapabilities, execution, { now });
-  if (request.diagnostics.length) throw Error(request.diagnostics.join(" "));
   // The server executes its own revision; never preview a changed local definition with it.
   const executed = new Set([...request.result.select, ...request.result.orderBy.map(term => term.field),
     ...[...request.source.where, ...request.result.where].flatMap(term => predicatesOf(term).map(predicate => predicate.field))]);

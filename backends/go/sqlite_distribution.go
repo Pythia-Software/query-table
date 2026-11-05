@@ -375,23 +375,23 @@ func (a *sqliteHistogramAggregate) Value() (driver.Value, error) {
 func (b *planBuilder) sqliteDistribution(spec AggSpec, groups []ValueSQL, scope string) (SQLPlan, error) {
 	d := spec.Distribution
 	if d.Kind != "box" && d.Kind != "histogram" {
-		return SQLPlan{}, diagnostic("distribution", "unknown distribution kind")
+		return SQLPlan{}, diagnostic(ErrorCodeDistribution, "unknown distribution kind")
 	}
 	if d.Kind == "histogram" && len(groups) > 1 {
-		return SQLPlan{}, diagnostic("distribution", "histograms support at most one grouping key")
+		return SQLPlan{}, diagnostic(ErrorCodeDistribution, "histograms support at most one grouping key")
 	}
 	if d.Whiskers != "" && d.Whiskers != "minmax" && d.Whiskers != "tukey" {
-		return SQLPlan{}, diagnostic("distribution", "unknown whisker mode")
+		return SQLPlan{}, diagnostic(ErrorCodeDistribution, "unknown whisker mode")
 	}
 	bins := d.Bins
 	if bins == 0 {
 		bins = 10
 	}
 	if bins < 2 || bins > 30 {
-		return SQLPlan{}, diagnostic("distribution", "histogram bins must be 2–30")
+		return SQLPlan{}, diagnostic(ErrorCodeDistribution, "histogram bins must be 2–30")
 	}
 	if spec.ExpressionY != "" || spec.Display != nil && spec.Display.Kind == "scatter" {
-		return SQLPlan{}, diagnostic("distribution", "distributions cannot be paired metrics")
+		return SQLPlan{}, diagnostic(ErrorCodeDistribution, "distributions cannot be paired metrics")
 	}
 	n, e := parseExpression(d.Input)
 	if e != nil {

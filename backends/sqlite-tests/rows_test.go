@@ -300,7 +300,7 @@ func TestRowsValidationAndRevisions(t *testing.T) {
 	d := qt.QueryDatasetV3{Dialect: "sqlite", Schema: s, SourceSQL: "SELECT * FROM memory"}
 	base := metricsV3(nil, nil, 0, 0, qt.AggSpec{ID: "m", Op: "count"})
 	for _, change := range []func(*qt.QueryRequestV3){
-		func(q *qt.QueryRequestV3) { q.Version = 1 }, func(q *qt.QueryRequestV3) { q.Profile = "other" }, func(q *qt.QueryRequestV3) { q.PlanToken = "invalid" }, func(q *qt.QueryRequestV3) { q.Snapshot = "invalid" }, func(q *qt.QueryRequestV3) { q.Diagnostics = []string{"residual"} }, func(q *qt.QueryRequestV3) { q.Result.Limit = 10001 }, func(q *qt.QueryRequestV3) {
+		func(q *qt.QueryRequestV3) { q.Version = 1 }, func(q *qt.QueryRequestV3) { q.Profile = "other" }, func(q *qt.QueryRequestV3) { q.PlanToken = "invalid" }, func(q *qt.QueryRequestV3) { q.Snapshot = "invalid" }, func(q *qt.QueryRequestV3) { q.Result.Limit = 10001 }, func(q *qt.QueryRequestV3) {
 			q.Metrics = []qt.AggSpec{{ID: "same", Op: "count"}, {ID: "same", Op: "count"}}
 		}, func(q *qt.QueryRequestV3) { q.Result.Where = []qt.WhereTerm{{Field: "missing", Op: "=", Value: "x"}} },
 	} {

@@ -69,13 +69,13 @@ func (d sqliteV2Dataset) limits() (int, int, int, error) {
 		pop = 250000
 	}
 	if rows < 1 || rows > 10000 || groups < 1 || groups > 100000 || pop < 1 || pop > 10000000 {
-		return 0, 0, 0, diagnostic("resource_limit", "invalid host execution budgets")
+		return 0, 0, 0, diagnostic(ErrorCodeResourceLimit, "invalid host execution budgets")
 	}
 	if e := validateSQLiteSchema(d.Schema); e != nil {
 		return 0, 0, 0, e
 	}
 	if strings.TrimSpace(d.SourceSQL) == "" {
-		return 0, 0, 0, diagnostic("source_required", "authorized source SELECT required")
+		return 0, 0, 0, diagnostic(ErrorCodeSourceRequired, "authorized source SELECT required")
 	}
 	return rows, groups, pop, nil
 }
@@ -95,7 +95,7 @@ func (d sqliteV2Dataset) executeMetrics(ctx context.Context, tx *sql.Tx, metrics
 	o = d.options(tx, o)
 	o.relations = newSQLiteRelations(ctx, tx, d.PredicateRelations)
 	if metrics.Limit > maxRows {
-		return nil, diagnostic("resource_limit", "metric row window exceeds host budget")
+		return nil, diagnostic(ErrorCodeResourceLimit, "metric row window exceeds host budget")
 	}
 	batch, failures, e := compileMetricsPartial(ctx, metrics, d.Schema, o, true)
 	if e != nil {
@@ -127,8 +127,8 @@ func (d sqliteV2Dataset) executeMetrics(ctx context.Context, tx *sql.Tx, metrics
 	next := 0
 	for i, spec := range metrics.Metrics {
 		if failures[i] != nil {
-			message, _ := metricClauseError(ctx, failures[i])
-			out = append(out, failedMetric(spec.ID, spec.Scope, message))
+			code, message, _ := metricClauseError(ctx, failures[i])
+			out = append(out, failedMetric(spec.ID, spec.Scope, code, message))
 			continue
 		}
 		p := batch.Metrics[next]
@@ -173,18 +173,18 @@ func (d sqliteV2Dataset) verifyV2Revisions(ctx context.Context, o PlanOptions, r
 	capabilityOptions := o
 	capabilityOptions.ExpectedRevisions = revisions
 	if len(revisions) > 64 {
-		return nil, nil, diagnostic("dependency_limit", "revision envelope exceeds budget")
+		return nil, nil, diagnostic(ErrorCodeDependencyLimit, "revision envelope exceeds budget")
 	}
 	for id, revision := range revisions {
 		if !computedID.MatchString(id) || revision == "" || len(revision) > 256 {
-			return nil, nil, diagnostic("definition_changed", "invalid revision envelope")
+			return nil, nil, diagnostic(ErrorCodeDefinitionChanged, "invalid revision envelope")
 		}
 		c, err := o.Resolver.ResolveComputed(ctx, id)
 		if err != nil {
 			return nil, nil, err
 		}
 		if c.ID != id || c.Revision != revision {
-			return nil, nil, diagnostic("definition_changed", "missing or mismatched expected revision")
+			return nil, nil, diagnostic(ErrorCodeDefinitionChanged, "missing or mismatched expected revision")
 		}
 		verified[id] = revision
 		name := "@computed/" + id
@@ -248,7 +248,7 @@ func (d sqliteV2Dataset) readV2Metric(ctx context.Context, tx *sql.Tx, p metricS
 			}
 			out.HiddenGroups = &hidden
 			if hidden > int64(maxGroups) {
-				return out, diagnostic("resource_limit", "group population exceeds host budget")
+				return out, diagnostic(ErrorCodeResourceLimit, "group population exceeds host budget")
 			}
 			// Only hidden groups (or none): the row carries no bucket.
 			if v["count"] == nil {
@@ -262,7 +262,7 @@ func (d sqliteV2Dataset) readV2Metric(ctx context.Context, tx *sql.Tx, p metricS
 		out.GroupCount = groups
 		// Group budgets apply to every reduced group, including hidden ones.
 		if groups+hidden > int64(maxGroups) {
-			return out, diagnostic("resource_limit", "group population exceeds host budget")
+			return out, diagnostic(ErrorCodeResourceLimit, "group population exceeds host budget")
 		}
 		for _, c := range p.Columns {
 			v[c.ValueAlias] = typedQueryValue(v[c.ValueAlias], c.Type)

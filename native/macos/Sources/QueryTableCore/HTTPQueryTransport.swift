@@ -48,6 +48,11 @@ public struct HTTPQueryTransport: QueryTransport, @unchecked Sendable {
     try Task.checkCancellation()
     guard let response = response as? HTTPURLResponse else { throw Failure.invalidResponse }
     guard (200..<300).contains(response.statusCode) else {
+      // The Go handlers answer failures with a JSON QueryErrorBody; other
+      // bodies (a proxy's error page, say) keep the bare status.
+      if let body = try? JSONDecoder().decode(QueryErrorBody.self, from: data) {
+        throw QueryTableError.server(body.error, status: response.statusCode)
+      }
       throw Failure.httpStatus(response.statusCode)
     }
     let result = try JSONDecoder().decode(QueryResultV3.self, from: data)

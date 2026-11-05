@@ -253,7 +253,6 @@ describe("shared computed columns", () => {
     expect(query.result.select).toContain("name");
     expect(query.result.select).toContain("@computed/double");
     expect(query.result.select).not.toContain("@computed/prefix");
-    expect(query.diagnostics).toEqual([]);
     // Keep the host's complete envelope for authoritative transitive checks.
     expect(query.expectedRevisions).toEqual(execution.resolvedRevisions);
     const response = await fetchQueryV3.mock.results.at(-1)!.value;

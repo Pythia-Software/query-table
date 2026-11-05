@@ -4,9 +4,22 @@ public enum QueryTableError: Error, LocalizedError, Sendable {
   case unsupported(String)
   case invalidQuery(String)
   case invalidResponse(String)
+  /// A server's `QueryErrorBody` (see docs/errors.md) and the HTTP status.
+  case server(QueryErrorDetail, status: Int)
+  /// A client-side refusal: the request was not sent.
+  case refused(ErrorCode, String)
   public var errorDescription: String? {
     switch self {
-    case .unsupported(let v), .invalidQuery(let v), .invalidResponse(let v): return v
+    case .unsupported(let v), .invalidQuery(let v), .invalidResponse(let v), .refused(_, let v): return v
+    case .server(let detail, _): return detail.message
+    }
+  }
+  /// The machine-readable code of a server error or client refusal.
+  public var code: ErrorCode? {
+    switch self {
+    case .server(let detail, _): return detail.code
+    case .refused(let code, _): return code
+    default: return nil
     }
   }
 }
@@ -48,6 +61,7 @@ extension QueryCapabilitiesV3 {
 
 extension DistinctRequestV3 {
   public static let maxLimit = 500
+  /// In UTF-16 code units, as TypeScript and Go count it.
   public static let maxSearchLength = 2000
 }
 
@@ -64,7 +78,7 @@ extension QueryRequestV3 {
     profile: String, now: Int64, source: ServerQuery, result: ServerQuery? = nil,
     rows: Bool = true, metrics: [MetricSpecV3] = [], distinct: DistinctRequestV3? = nil,
     expectedRevisions: [String: String] = [:], planToken: String? = nil,
-    snapshot: String? = nil, hostState: [String: JSONValue]? = nil, diagnostics: [String] = [],
+    snapshot: String? = nil, hostState: [String: JSONValue]? = nil,
     grouping: GroupingDefinition? = nil
   ) {
     self.version = 3
@@ -80,19 +94,18 @@ extension QueryRequestV3 {
     self.planToken = planToken
     self.snapshot = snapshot
     self.hostState = hostState
-    self.diagnostics = diagnostics
   }
   /// A request whose metrics are client aggregation clauses (sent without `label`).
   public init(
     profile: String, now: Int64, source: ServerQuery, result: ServerQuery? = nil,
     rows: Bool = true, metrics: [AggregationClause], distinct: DistinctRequestV3? = nil,
     expectedRevisions: [String: String] = [:], planToken: String? = nil,
-    snapshot: String? = nil, hostState: [String: JSONValue]? = nil, diagnostics: [String] = []
+    snapshot: String? = nil, hostState: [String: JSONValue]? = nil
   ) {
     self.init(
       profile: profile, now: now, source: source, result: result, rows: rows,
       metrics: metrics.map(\.wireSpec), distinct: distinct, expectedRevisions: expectedRevisions,
-      planToken: planToken, snapshot: snapshot, hostState: hostState, diagnostics: diagnostics)
+      planToken: planToken, snapshot: snapshot, hostState: hostState)
   }
 
   /// Epoch milliseconds for a request clock.
@@ -103,29 +116,75 @@ extension QueryRequestV3 {
   /// Filter autocomplete: a distinct section over the unfiltered population.
   public static func distinctValues(
     field: String, search: String = "", limit: Int = 50, schema: FieldSchema,
-    capabilities: QueryCapabilitiesV3, now: Date = Date(), hostState: [String: JSONValue]? = nil
-  ) -> QueryRequestV3 {
-    QueryRequestV3(
+    capabilities: QueryCapabilitiesV3, execution: QueryExecutionV3? = nil, now: Date = Date(),
+    hostState: [String: JSONValue]? = nil
+  ) throws -> QueryRequestV3 {
+    // As TypeScript toDistinctRequestV3: a profile refusal, then the limit and
+    // search, then revisions; the first code, with every message.
+    let envelope = try ExecutionEnvelope(capabilities: capabilities, execution: execution, throwing: false)
+    var refusals = envelope.profileRefusals
+    if !(1...DistinctRequestV3.maxLimit).contains(limit) {
+      refusals.append((.invalidQuery, "Distinct value limit must be between 1 and \(DistinctRequestV3.maxLimit)."))
+    }
+    if search.utf16.count > DistinctRequestV3.maxSearchLength {
+      refusals.append((.invalidQuery, "Distinct search exceeds its budget."))
+    }
+    refusals.append(contentsOf: envelope.revisionRefusals)
+    if let first = refusals.first {
+      throw QueryTableError.refused(first.code, refusalMessage(refusals))
+    }
+    return QueryRequestV3(
       profile: capabilities.profile, now: epochMilliseconds(now),
       source: ServerQuery(select: [], limit: 1), rows: false,
-      distinct: DistinctRequestV3(
-        field: field, search: search, limit: max(1, min(DistinctRequestV3.maxLimit, limit))),
-      hostState: hostState)
+      distinct: DistinctRequestV3(field: field, search: search, limit: limit),
+      expectedRevisions: envelope.revisions, planToken: envelope.planToken,
+      snapshot: envelope.snapshot, hostState: hostState)
   }
 
   /// Row refresh by identity. A total above one is a non-unique identity.
   public static func rowLookup(
     id: JSONValue, select: [String], schema: FieldSchema, capabilities: QueryCapabilitiesV3,
-    now: Date = Date(), hostState: [String: JSONValue]? = nil
-  ) -> QueryRequestV3 {
+    execution: QueryExecutionV3? = nil, now: Date = Date(), hostState: [String: JSONValue]? = nil
+  ) throws -> QueryRequestV3 {
     let stage = ServerQuery(
       select: Array(Set(select + [schema.idField])).sorted(),
       whereTerms: [.predicate(.init(field: schema.idField, op: "=", value: id.displayString))],
       // Two rows within the server's budget; the total reports a duplicate either way.
       limit: max(1, min(2, capabilities.maxRows)))
+    let envelope = try ExecutionEnvelope(capabilities: capabilities, execution: execution)
     return QueryRequestV3(
       profile: capabilities.profile, now: epochMilliseconds(now), source: stage,
-      hostState: hostState)
+      expectedRevisions: envelope.revisions, planToken: envelope.planToken,
+      snapshot: envelope.snapshot, hostState: hostState)
+  }
+}
+
+/// The revisions, plan token and snapshot a request carries from a server
+/// handshake, as the TypeScript builders send them.
+struct ExecutionEnvelope {
+  var revisions: [String: String] = [:]
+  var planToken: String?
+  var snapshot: String?
+  /// A profile refusal, then revision refusals, in the TypeScript order.
+  var profileRefusals: [(code: ErrorCode, message: String)] = []
+  var revisionRefusals: [(code: ErrorCode, message: String)] = []
+  var refusals: [(code: ErrorCode, message: String)] { profileRefusals + revisionRefusals }
+  init(capabilities: QueryCapabilitiesV3, execution: QueryExecutionV3?, throwing: Bool = true) throws {
+    if capabilities.version != 3 || (execution.map { $0.profile != capabilities.profile } ?? false) {
+      profileRefusals.append((.profileMismatch, "The negotiated query profile is unavailable."))
+    }
+    for (id, revision) in execution?.resolvedRevisions ?? [:] {
+      if revision.isEmpty || id.count > 256 || revision.count > 256 {
+        revisionRefusals.append((.definitionChanged, "Invalid computed revision envelope."))
+      } else {
+        revisions[id.hasPrefix("@computed/") ? String(id.dropFirst(10)) : id] = revision
+      }
+    }
+    planToken = execution.flatMap { $0.planToken.isEmpty ? nil : $0.planToken }
+    snapshot = execution?.snapshot
+    if throwing, let first = refusals.first {
+      throw QueryTableError.refused(first.code, refusalMessage(refusals))
+    }
   }
 }
 
@@ -325,49 +384,45 @@ extension QueryState {
 
   /// An ungrouped v3 request (TypeScript `toQueryRequestV3`): source == result,
   /// `rows` selects the row section and `metrics` the aggregation clauses.
-  /// Unsupported state is reported in `diagnostics`, which servers refuse.
+  /// Throws `QueryTableError.refused` before anything is sent when the query
+  /// needs a capability the server lacks, or would leave a filter, sort or
+  /// malformed metric on the client (TypeScript throws a `QueryError`).
   public func queryRequestV3(
     schema: FieldSchema, capabilities: QueryCapabilitiesV3, execution: QueryExecutionV3? = nil,
     now: Date = Date(), rows: Bool = true, metrics includeMetrics: Bool = true,
     hostState: [String: JSONValue]? = nil
-  ) -> QueryRequestV3 {
+  ) throws -> QueryRequestV3 {
     let q = normalized()
-    var diagnostics: [String] = []
+    var refusals: [(code: ErrorCode, message: String)] = []
     if includeMetrics && aggregations.count != q.aggregations.count {
-      diagnostics.append("The query exceeds its metric budget or contains malformed metric state.")
+      refusals.append((.invalidMetric, "The query exceeds its metric budget or contains malformed metric state."))
     }
-    if capabilities.version != 3 || (execution.map { $0.profile != capabilities.profile } ?? false) {
-      diagnostics.append("The negotiated query profile is unavailable.")
-    }
+    let envelope = try ExecutionEnvelope(capabilities: capabilities, execution: execution, throwing: false)
+    refusals.append(contentsOf: envelope.profileRefusals)
     let stage = q.serverQuery(schema: schema)
     if q.whereTerms.flatMap(\.predicates).contains(where: {
       ["matches_regex", "not_matches_regex"].contains($0.op)
     }) && capabilities.regexSourceFilters != true {
-      diagnostics.append("This server profile does not support isolated regex source filtering.")
+      refusals.append((.capabilityUnsupported, "This server profile does not support isolated regex source filtering."))
     }
     if stage.whereTerms.count != q.whereTerms.count {
-      diagnostics.append("The query contains unsupported source or result predicates.")
+      refusals.append((.residualQuery, "The query contains unsupported source or result predicates."))
     }
     if stage.orderBy.count != q.orderBy.count {
-      diagnostics.append("The query contains unsupported result ordering.")
+      refusals.append((.residualQuery, "The query contains unsupported result ordering."))
     }
     let metrics = includeMetrics ? q.aggregations : []
-    for metric in metrics { diagnostics.append(contentsOf: metric.diagnostics(schema: schema)) }
-    var revisions: [String: String] = [:]
-    for (id, revision) in execution?.resolvedRevisions ?? [:] {
-      if revision.isEmpty || id.count > 256 || revision.count > 256 {
-        diagnostics.append("Invalid computed revision envelope.")
-      } else {
-        revisions[id.hasPrefix("@computed/") ? String(id.dropFirst(10)) : id] = revision
-      }
+    for metric in metrics {
+      refusals.append(contentsOf: metric.diagnostics(schema: schema).map { (ErrorCode.invalidMetric, $0) })
     }
-    var unique = Set<String>()
+    refusals.append(contentsOf: envelope.revisionRefusals)
+    if let first = refusals.first {
+      throw QueryTableError.refused(first.code, refusalMessage(refusals))
+    }
     return QueryRequestV3(
       profile: capabilities.profile, now: QueryRequestV3.epochMilliseconds(now), source: stage,
-      rows: rows, metrics: metrics, expectedRevisions: revisions,
-      planToken: execution.flatMap { $0.planToken.isEmpty ? nil : $0.planToken },
-      snapshot: execution?.snapshot, hostState: hostState,
-      diagnostics: diagnostics.filter { unique.insert($0).inserted })
+      rows: rows, metrics: metrics, expectedRevisions: envelope.revisions,
+      planToken: envelope.planToken, snapshot: envelope.snapshot, hostState: hostState)
   }
 }
 
@@ -387,4 +442,10 @@ extension AggregationClause {
     else { return ["Field \(name) cannot be measured with \(op)."] }
     return []
   }
+}
+
+/// Every refusal message once, in order, as TypeScript's refuse joins them.
+func refusalMessage(_ refusals: [(code: ErrorCode, message: String)]) -> String {
+  var unique = Set<String>()
+  return refusals.map(\.message).filter { unique.insert($0).inserted }.joined(separator: " ")
 }

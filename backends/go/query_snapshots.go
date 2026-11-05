@@ -135,29 +135,37 @@ func NewQuerySnapshotsHandler(repo QuerySnapshotRepository, authorize func(*http
 		w.Header().Set("Cache-Control", "no-store")
 		if r.Method != http.MethodGet && r.Method != http.MethodPut {
 			w.Header().Set("Allow", "GET, PUT")
-			http.Error(w, "method not allowed", 405)
+			writeErrorCode(w, ErrorCodeMethodNotAllowed, "method not allowed")
 			return
 		}
 		dataset, code := r.URL.Query().Get("dataset"), r.URL.Query().Get("code")
 		if len(r.URL.Query()["dataset"]) != 1 || len(r.URL.Query()["code"]) != 1 || strings.TrimSpace(dataset) == "" || len(dataset) > 256 || !querySnapshotCode.MatchString(code) {
-			http.Error(w, "invalid dataset or code", 400)
+			writeErrorCode(w, ErrorCodeInvalidRequest, "invalid dataset or code")
 			return
 		}
 		if authorize == nil || repo == nil {
-			http.Error(w, "forbidden", 403)
+			writeErrorCode(w, ErrorCodeForbidden, "forbidden")
 			return
 		}
 		scope, err := authorize(r, dataset, r.Method == http.MethodPut)
 		if err != nil || scope == "" {
-			http.Error(w, "forbidden", 403)
+			writeErrorCode(w, ErrorCodeForbidden, "forbidden")
 			return
 		}
 		var snapshot QuerySnapshot
 		if r.Method == http.MethodPut {
 			decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2*1024*1024+1024))
 			decoder.DisallowUnknownFields()
-			if decoder.Decode(&snapshot) != nil || decoder.Decode(new(any)) != io.EOF || snapshot.Code != code || ValidateQuerySnapshot(snapshot) != nil {
-				http.Error(w, "invalid query snapshot", 400)
+			if err := decoder.Decode(&snapshot); err != nil {
+				WriteQueryError(w, decodeError(err, ErrorCodeInvalidRequest))
+				return
+			}
+			if err := decoder.Decode(new(any)); err != io.EOF {
+				WriteQueryError(w, trailingError(err))
+				return
+			}
+			if snapshot.Code != code || ValidateQuerySnapshot(snapshot) != nil {
+				writeErrorCode(w, ErrorCodeInvalidRequest, "invalid query snapshot")
 				return
 			}
 			snapshot, err = repo.Save(r.Context(), scope, dataset, snapshot)
@@ -165,19 +173,19 @@ func NewQuerySnapshotsHandler(repo QuerySnapshotRepository, authorize func(*http
 			snapshot, err = repo.Resolve(r.Context(), scope, dataset, code)
 		}
 		if errors.Is(err, ErrQuerySnapshotQuota) {
-			http.Error(w, "query snapshot storage quota exceeded", http.StatusInsufficientStorage)
+			writeErrorCode(w, ErrorCodeQuotaExceeded, "query snapshot storage quota exceeded")
 			return
 		}
 		if errors.Is(err, ErrQuerySnapshotConflict) {
-			http.Error(w, "query snapshot conflict", 409)
+			writeErrorCode(w, ErrorCodeConflict, "query snapshot conflict")
 			return
 		}
 		if errors.Is(err, sql.ErrNoRows) {
-			http.Error(w, "query snapshot unavailable", 404)
+			writeErrorCode(w, ErrorCodeNotFound, "query snapshot unavailable")
 			return
 		}
 		if err != nil {
-			http.Error(w, "query snapshot storage failed", 500)
+			writeErrorCode(w, ErrorCodeInternal, "query snapshot storage failed")
 			return
 		}
 		_ = json.NewEncoder(w).Encode(snapshot)

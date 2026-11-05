@@ -98,6 +98,7 @@ export type {
 } from "./encode";
 export { encodeQuery, decodeQuery, decodeQueryStrict, QueryDecodeError, MAX_QUERY_STATE_BYTES, toServerQuery } from "./encode";
 export * from "./queryLinks";
+export * from "./errors";
 
 export type { ApplyResult } from "./apply";
 export { applyQuery, matchesClause, applyAggregations } from "./apply";

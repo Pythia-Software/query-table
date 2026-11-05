@@ -21,7 +21,7 @@ func (d QueryDatasetV3) executeDistinct(ctx context.Context, tx *sql.Tx, q Query
 		ok = false
 	}
 	if !ok {
-		return out, diagnostic("query", "distinct needs a server-filterable field")
+		return out, diagnostic(ErrorCodeInvalidQuery, "distinct needs a server-filterable field")
 	}
 	population := q
 	population.Distinct = nil

@@ -71,8 +71,10 @@ PostgreSQL statement failure. Metric errors from failed statements use a fixed
 message rather than driver text. The convenience HTTP handler has a 2-MiB request
 budget and a 30-second deadline. Its authorization callback must select the
 dataset from trusted host state and enforce dataset access and CSRF policy.
-Malformed requests and execution diagnostics return HTTP 400. Infrastructure
-failures return a fixed HTTP 500 message; timeouts return a fixed HTTP 408 message.
+Every failure is a JSON `QueryErrorBody` with a stable code; the status comes
+from the code (400 for invalid requests, 409 for a stale handshake, 422 for host
+budgets, 504 for timeouts, 500 with a fixed message for infrastructure
+failures). See [Error codes](errors.md).
 Use your own endpoint when source preparation, enrichment, search coverage or
 per-request fact granularity needs host-specific handling.
 

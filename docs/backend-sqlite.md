@@ -33,8 +33,9 @@ other drivers can register the same function descriptors.
 `DecodeQueryRequestV3` is deliberately strict: it accepts one JSON object of at
 most 2 MiB, rejects unknown properties and trailing values, requires `now`, and
 accepts only `select`, `where`, `orderBy`, `limit` and `offset` in the `source`
-and `result` stages. Requests carrying unresolved client diagnostics, including
-residual client-only filters, are rejected. Do not advertise `qt-postgres-v1`
+and `result` stages. Requests no longer carry client diagnostics: the TypeScript
+and Swift builders refuse residual client-only filters locally, and the server
+refuses any capability it does not have on its own. Do not advertise `qt-postgres-v1`
 for SQLite. Selected-row scopes and automatic cross-request snapshots are
 outside the SQLite profile and are rejected explicitly. Apply your own,
 possibly smaller, body-size cap at the HTTP boundary.

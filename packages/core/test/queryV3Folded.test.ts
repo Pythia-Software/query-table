@@ -36,18 +36,18 @@ describe("distinct values", () => {
     const hostState = { version: 1, params: { k: ["v"] } };
     expect(toDistinctRequestV3("platform", "mac", capabilities, { now: 5, execution, hostState, limit: 20 })).toEqual({
       hostState, version: 3, profile: "qt-test", now: 5, expectedRevisions: { x: "r1" }, planToken: "plan", snapshot: "s1",
-      source: stage, result: stage, rows: false, metrics: [], distinct: { field: "platform", search: "mac", limit: 20 }, diagnostics: [],
+      source: stage, result: stage, rows: false, metrics: [], distinct: { field: "platform", search: "mac", limit: 20 },
     });
     expect(toDistinctRequestV3("platform", "", capabilities, { now: 5 }).distinct).toEqual({ field: "platform", search: "", limit: 50 });
     expect(toDistinctRequestV3("platform", "", capabilities, { now: 5, where: [{ field: "overall", op: "=", value: "FAIL" }] }).source.where)
       .toEqual([{ field: "overall", op: "=", value: "FAIL" }]);
   });
   it("diagnoses budgets and a mismatched profile before sending", () => {
-    expect(toDistinctRequestV3("platform", "", capabilities, { limit: 0 }).diagnostics[0]).toMatch(/between 1 and 500/);
-    expect(toDistinctRequestV3("platform", "", capabilities, { limit: 501 }).diagnostics[0]).toMatch(/between 1 and 500/);
-    expect(toDistinctRequestV3("platform", "x".repeat(2001), capabilities).diagnostics).toEqual(["Distinct search exceeds its budget."]);
-    expect(toDistinctRequestV3("platform", "", capabilities, { execution: { ...execution, profile: "other" } }).diagnostics)
-      .toEqual(["The negotiated query profile is unavailable."]);
+    expect(() => toDistinctRequestV3("platform", "", capabilities, { limit: 0 })).toThrow(/between 1 and 500/);
+    expect(() => toDistinctRequestV3("platform", "", capabilities, { limit: 501 })).toThrow(/between 1 and 500/);
+    expect(() => toDistinctRequestV3("platform", "x".repeat(2001), capabilities)).toThrow(expect.objectContaining({ code: "invalid_query", message: "Distinct search exceeds its budget." }));
+    expect(() => toDistinctRequestV3("platform", "", capabilities, { execution: { ...execution, profile: "other" } }))
+      .toThrow(expect.objectContaining({ code: "profile_mismatch", message: "The negotiated query profile is unavailable." }));
   });
   it("validates the distinct section of a response", () => {
     const request = toDistinctRequestV3("platform", "", capabilities, { now: 5, limit: 2 });
@@ -73,7 +73,7 @@ describe("row lookups", () => {
     const request = toRowRequestV3(runsSchema, 7, capabilities, { now: 5 });
     const lookup = { select: ["case_name", "error_codes", "id", "is_starred", "overall", "platform", "total_ms"],
       where: [{ field: "id", op: "=", value: "7" }], orderBy: [], limit: 2, offset: 0 };
-    expect(request).toMatchObject({ rows: true, metrics: [], source: lookup, result: lookup, diagnostics: [] });
+    expect(request).toMatchObject({ rows: true, metrics: [], source: lookup, result: lookup });
     expect(rowLookupFields(runsSchema)).toEqual(lookup.select);
     expect(toRowRequestV3(runsSchema, "a", capabilities, { select: ["overall"] }).result.select).toEqual(["id", "overall"]);
   });
@@ -93,7 +93,7 @@ describe("row lookups", () => {
 describe("field statistics", () => {
   it("asks for distinct counts and the bounds each field allows", () => {
     const request = toFieldStatsRequestV3(runsSchema, ["total_ms", "is_starred", "error_codes", "details", "missing", "total_ms"], capabilities, { now: 5 });
-    expect(request).toMatchObject({ rows: false, source: stage, result: stage, diagnostics: [] });
+    expect(request).toMatchObject({ rows: false, source: stage, result: stage });
     expect(request.metrics).toEqual([
       { id: "total_ms:distinct", op: "count_distinct", field: "total_ms", groupBy: [] },
       { id: "total_ms:min", op: "min", field: "total_ms", groupBy: [] },
@@ -151,8 +151,7 @@ describe("metrics this client cannot read", () => {
     // A newer client's operation decodes as count with the original kept aside.
     const query = normalizeQueryState({ aggregations: [{ id: "m", op: "future", groupBy: [] }] });
     expect(query.aggregations![0]).toMatchObject({ op: "count", unsupportedOp: "future" });
-    const request = toQueryRequestV3(query, runsSchema, capabilities, undefined, { now: 1, rows: false });
-    expect(request.diagnostics).toContain("Metric m uses an unsupported operation: future.");
-    expect(request.metrics[0]).not.toHaveProperty("unsupportedOp");
+    expect(() => toQueryRequestV3(query, runsSchema, capabilities, undefined, { now: 1, rows: false }))
+      .toThrow(expect.objectContaining({ code: "invalid_metric", metricId: "m", message: expect.stringContaining("Metric m uses an unsupported operation: future.") }));
   });
 });

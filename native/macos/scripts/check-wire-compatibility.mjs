@@ -29,12 +29,20 @@ try {
   const { encodeQuery, decodeQuery, toQueryRequestV3, normalizeQueryState, loadSchema } = await import(pathToFileURL(bundle).href);
   // The Go handler (backends/go/query_v3_http.go) decodes with DisallowUnknownFields
   // and accepts only these stage keys, so Swift must never send anything else.
-  const requestKeys = ["hostState", "version", "profile", "now", "expectedRevisions", "planToken", "snapshot", "source", "result", "grouping", "rows", "metrics", "distinct", "diagnostics"];
+  const requestKeys = ["hostState", "version", "profile", "now", "expectedRevisions", "planToken", "snapshot", "source", "result", "grouping", "rows", "metrics", "distinct"];
   const stageKeys = ["select", "where", "orderBy", "limit", "offset"];
-  const metricKeys = ["dateGrouping", "diagnostics", "display", "expression", "expressionY", "scope", "sort", "groupLimit", "distribution", "id", "op", "field", "groupBy", "where", "minCount"];
+  const metricKeys = ["dateGrouping", "display", "expression", "expressionY", "scope", "sort", "groupLimit", "distribution", "id", "op", "field", "groupBy", "where", "minCount"];
   const capabilities = { version: 3, groupedRows: false, calendarGrouping: false, computedSourceFilters: false, regex: false, regexSourceFilters: false, maxRows: 10000, maxGroups: 2000, maxPopulation: 250000, profile: "qt-sqlite-v1" };
   const now = 1772964000123;
   const json = (value) => JSON.parse(JSON.stringify(value));
+  // A request, or the client-side refusal (a QueryError) that replaced it; Swift
+  // throws QueryTableError.refused with the same code and message.
+  const built = (build) => {
+    try { return json(build()); } catch (error) {
+      if (typeof error?.code !== "string") throw error;
+      return { refused: { code: error.code, message: error.message } };
+    }
+  };
   const assertGoDecodable = (request, label) => {
     for (const key of Object.keys(request)) assert.ok(requestKeys.includes(key), `${label}: unknown request key ${key}`);
     for (const [key, value] of Object.entries(request)) assert.notEqual(value, null, `${label}: ${key} is null`);
@@ -153,8 +161,8 @@ try {
   const cases = inputs.map((input) => {
     const query = input.token ? decodeQuery(input.token) : normalizeQueryState(input.query);
     return { name: input.name, token: input.token ?? legacyToken(encodeQuery(query)), query,
-      request: json(toQueryRequestV3(query, schema, capabilities, undefined, { now })),
-      metricsOnly: json(toQueryRequestV3(query, schema, capabilities, undefined, { now, rows: false })) };
+      request: built(() => toQueryRequestV3(query, schema, capabilities, undefined, { now })),
+      metricsOnly: built(() => toQueryRequestV3(query, schema, capabilities, undefined, { now, rows: false })) };
   });
   const inputPath = path.join(scratch, "input.json");
   const outputPath = path.join(scratch, "output.json");
@@ -169,8 +177,8 @@ try {
     assert.deepEqual(normalizeQueryState(decodeQuery(result.token)), normalizeQueryState(expected.query), `${expected.name}: Swift token must decode to the same TypeScript query`);
     assert.deepEqual(result.request, expected.request, `${expected.name}: Swift v3 request must match TypeScript toQueryRequestV3`);
     assert.deepEqual(result.metricsOnly, expected.metricsOnly, `${expected.name}: Swift metrics-only v3 request must match TypeScript`);
-    assertGoDecodable(result.request, expected.name);
-    assertGoDecodable(result.metricsOnly, `${expected.name} (metrics)`);
+    if (!result.request.refused) assertGoDecodable(result.request, expected.name);
+    if (!result.metricsOnly.refused) assertGoDecodable(result.metricsOnly, `${expected.name} (metrics)`);
     // Autocomplete has no TypeScript builder in this check; verify the contract shape.
     assertGoDecodable(result.distinct, `${expected.name} (distinct)`);
     assert.deepEqual(result.distinct.distinct, { field: "name", search: "caf", limit: 30 });

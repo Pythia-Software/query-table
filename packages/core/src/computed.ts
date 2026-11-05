@@ -1,4 +1,5 @@
 import type { FormulaResult, FormulaValue } from "./formula";
+import { QueryError, queryErrorFromResponse } from "./errors";
 
 /** Reserved field token namespace. Query state stores IDs, never formula source. */
 export const COMPUTED_PREFIX = "@computed/";
@@ -124,14 +125,15 @@ export function httpComputedColumnStore(
   const url = (dataset: string) =>
     `${base}${base.includes("?") ? "&" : "?"}dataset=${encodeURIComponent(dataset)}`;
   async function read(response: Response): Promise<unknown> {
-    if (response.status === 409)
-      throw new Error(
-        "This definition changed. Reload it before saving again.",
-      );
-    if (!response.ok)
-      throw new Error(
-        `Computed column store request failed (${response.status}).`,
-      );
+    if (!response.ok) {
+      // The handler writes a QueryErrorBody; keep its code, field and status.
+      const error = await queryErrorFromResponse(response);
+      if (response.status !== 409) throw error;
+      const { code, field, offset, metricId, status } = error;
+      throw new QueryError(code, "This definition changed. Reload it before saving again.",
+        { ...(field !== undefined ? { field } : {}), ...(offset !== undefined ? { offset } : {}),
+          ...(metricId !== undefined ? { metricId } : {}), ...(status !== undefined ? { status } : {}), cause: error });
+    }
     return response.json();
   }
   return {

@@ -112,7 +112,7 @@ func TestV3Distinct(t *testing.T) {
 	withGrouping.Grouping = &qt.GroupingDefinition{Keys: []string{"k"}}
 	var diag *qt.PlanDiagnostic
 	for _, q := range append(bad, withRows, withMetrics, withGrouping) {
-		if err := q.Validate(); !errors.As(err, &diag) || diag.Code != "query" {
+		if err := q.Validate(); !errors.As(err, &diag) || diag.Code != qt.ErrorCodeInvalidQuery {
 			t.Fatalf("invalid distinct accepted: %#v %v", q.Distinct, err)
 		}
 	}
@@ -126,11 +126,11 @@ func TestV3Distinct(t *testing.T) {
 	}
 	defer tx.Rollback()
 	// inv is a computed field without host filter policy.
-	if _, err = d.ExecuteIn(context.Background(), tx, distinct("@computed/inv", "", 5), o); !errors.As(err, &diag) || diag.Code != "query" {
+	if _, err = d.ExecuteIn(context.Background(), tx, distinct("@computed/inv", "", 5), o); !errors.As(err, &diag) || diag.Code != qt.ErrorCodeInvalidQuery {
 		t.Fatalf("computed field without filter policy: %v", err)
 	}
 	for _, q := range []qt.QueryRequestV3{distinct("note", "", 5), distinct("secret", "", 5)} {
-		if _, err = hidden.ExecuteIn(context.Background(), tx, q, o); !errors.As(err, &diag) || diag.Code != "query" {
+		if _, err = hidden.ExecuteIn(context.Background(), tx, q, o); !errors.As(err, &diag) || diag.Code != qt.ErrorCodeInvalidQuery {
 			t.Fatalf("unfilterable field: %v", err)
 		}
 	}

@@ -132,7 +132,7 @@ func TestPostgresDistinct(t *testing.T) {
 	defer tx.Rollback()
 	var diag *qt.PlanDiagnostic
 	for _, q := range []qt.QueryRequestV3{distinct("note", "", 5), distinct("secret", "", 5)} {
-		if _, err = hidden.ExecuteIn(context.Background(), tx, q, o); !errors.As(err, &diag) || diag.Code != "query" {
+		if _, err = hidden.ExecuteIn(context.Background(), tx, q, o); !errors.As(err, &diag) || diag.Code != qt.ErrorCodeInvalidQuery {
 			t.Fatalf("unfilterable field: %v", err)
 		}
 	}

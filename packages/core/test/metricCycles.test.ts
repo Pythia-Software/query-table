@@ -150,8 +150,8 @@ describe("cyclic date intervals", () => {
   it("needs a server that executes cyclic intervals", () => {
     const capabilities = { version: 3, profile: "p", groupedRows: true, calendarGrouping: true, computedSourceFilters: false, regex: false, maxRows: 10, maxGroups: 10, maxPopulation: 10 } satisfies QueryCapabilitiesV3;
     const query = { ...EMPTY_QUERY, aggregations: [clause({})] };
-    expect(toQueryRequestV3(query, schema, capabilities).diagnostics).toContain("This server does not support hour-of-day or day-of-week grouping.");
-    expect(toQueryRequestV3(query, schema, { ...capabilities, calendarCycles: true }).diagnostics).toEqual([]);
+    expect(() => toQueryRequestV3(query, schema, capabilities)).toThrow("This server does not support hour-of-day or day-of-week grouping.");
+    expect(() => toQueryRequestV3(query, schema, { ...capabilities, calendarCycles: true })).not.toThrow();
   });
 });
 

@@ -22,9 +22,8 @@ public struct LocalQueryTransport: QueryTransport {
   /// evaluated against `request.now`.
   public func fetchQueryV3(_ request: QueryRequestV3) async throws -> QueryResultV3 {
     try Task.checkCancellation()
-    guard request.version == 3, request.diagnostics.isEmpty else {
-      throw QueryTableError.invalidQuery(
-        request.diagnostics.first ?? "A valid version 3 query is required")
+    guard request.version == 3 else {
+      throw QueryTableError.invalidQuery("A valid version 3 query is required")
     }
     guard request.profile == Self.profile else {
       throw QueryTableError.invalidQuery("Requested query profile is unavailable")

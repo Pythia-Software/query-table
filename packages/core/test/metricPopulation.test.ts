@@ -266,7 +266,6 @@ describe("measured minimums", () => {
       metricFilters: true, metricMinCount: true, metricMinCountMeasures: true, maxRows: 100, maxGroups: 100, maxPopulation: 1000, profile: "p",
     };
     const request = toQueryRequestV3(q, usage, capabilities, undefined, { now, rows: false });
-    expect(request.diagnostics).toEqual([]);
     expect(request.metrics[0]).toMatchObject({ minCount: { min: 10, sum: "call_count" } });
     expect(decodeQueryStrict(encodeQuery(q)).aggregations).toEqual([clause]);
     expect(metricComputationKey([clause])).not.toBe(metricComputationKey([{ ...clause, minCount: 10 }]));
@@ -305,11 +304,10 @@ describe("v3 metric population requests", () => {
   };
   it("refuses metric filters on non-pushdown fields instead of dropping them", () => {
     for (const field of ["note", "region"]) {
-      const request = toQueryRequestV3(
+      expect(() => toQueryRequestV3(
         { ...EMPTY_QUERY, aggregations: [{ ...base, where: [{ field, op: "=", value: "x" }] }] },
         remote, capabilities, undefined, { now },
-      );
-      expect(request.diagnostics, field).toContain("Metric filters must use server-filterable fields.");
+      ), field).toThrow(expect.objectContaining({ code: "residual_query", message: expect.stringContaining("Metric filters must use server-filterable fields.") }));
     }
   });
   it("sends pushdown metric filters and calendar metrics without diagnostics", () => {
@@ -320,7 +318,6 @@ describe("v3 metric population requests", () => {
       ] },
       remote, capabilities, undefined, { now },
     );
-    expect(request.diagnostics).toEqual([]);
     expect(request.metrics[0]).toMatchObject({ where: [{ field: "status", op: "=", value: "error" }], minCount: 2 });
   });
 });

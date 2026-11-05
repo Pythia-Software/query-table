@@ -1,5 +1,5 @@
 // TypeScript emitter: interfaces, string-literal unions and union aliases.
-import { banner, isObject, nullable, properties, refName, typeName, variants } from "./model.mjs";
+import { banner, codeEnum, constantList, isObject, nullable, properties, refName, typeName, variants } from "./model.mjs";
 
 const comment = (text, indent = "") => text ? `${indent}/** ${text.replace(/\*\//g, "*\\/")} */\n` : "";
 
@@ -32,7 +32,12 @@ export function emitTs(defs) {
     if (def["x-ts-type"] || (def.type === "string" && !def.enum)) continue;
     const ts = typeName(defs, name, "ts");
     out += "\n" + comment(def.description);
-    if (isObject(def)) {
+    const codes = codeEnum(def);
+    if (codes) {
+      const list = constantList(name);
+      out += `export const ${list} = [\n${codes.map(({ code }) => `  ${JSON.stringify(code)},\n`).join("")}] as const;\n` +
+        `export type ${ts} = (typeof ${list})[number];\n`;
+    } else if (isObject(def)) {
       out += `export interface ${ts} {\n`;
       for (const { json, node, required } of properties(def))
         out += comment(node.description, "  ") +

@@ -19,14 +19,14 @@ func calendarLocation(config MetricDateGrouping) (*time.Location, error) {
 		zone = "UTC"
 	}
 	if len(zone) > 80 || strings.HasPrefix(zone, "+") || strings.HasPrefix(zone, "-") {
-		return nil, diagnostic("date_grouping", "use an IANA grouping timezone")
+		return nil, diagnostic(ErrorCodeDateGrouping, "use an IANA grouping timezone")
 	}
 	if !containsString([]string{"hour", "day", "week", "month", "year", "hourOfDay", "dayOfWeek"}, config.Interval) || !containsString([]string{"query", "observed", "custom"}, config.Range) || config.Field == "" || len(config.Field) > 256 {
-		return nil, diagnostic("date_grouping", "invalid date grouping definition")
+		return nil, diagnostic(ErrorCodeDateGrouping, "invalid date grouping definition")
 	}
 	location, err := time.LoadLocation(zone)
 	if err != nil {
-		return nil, diagnostic("date_grouping", "use an IANA grouping timezone")
+		return nil, diagnostic(ErrorCodeDateGrouping, "use an IANA grouping timezone")
 	}
 	return location, nil
 }
@@ -126,7 +126,7 @@ func calendarWall(wall time.Time, loc *time.Location, later bool) (time.Time, er
 	if !gap.IsZero() {
 		return gap, nil
 	}
-	return time.Time{}, diagnostic("date_grouping", "unresolvable calendar boundary")
+	return time.Time{}, diagnostic(ErrorCodeDateGrouping, "unresolvable calendar boundary")
 }
 func calendarFloor(instant time.Time, interval string, loc *time.Location) (time.Time, error) {
 	interval = calendarUnit(interval)
@@ -191,18 +191,18 @@ func calendarNext(instant time.Time, interval string, loc *time.Location) (time.
 }
 func calendarInput(value string, loc *time.Location) (time.Time, error) {
 	if !calendarDatePattern.MatchString(value) {
-		return time.Time{}, diagnostic("date_grouping", "use ISO dates or timestamps with an explicit offset")
+		return time.Time{}, diagnostic(ErrorCodeDateGrouping, "use ISO dates or timestamps with an explicit offset")
 	}
 	if len(value) == 10 {
 		date, err := time.Parse("2006-01-02", value)
 		if err != nil {
-			return date, diagnostic("date_grouping", "invalid calendar date")
+			return date, diagnostic(ErrorCodeDateGrouping, "invalid calendar date")
 		}
 		return calendarWall(date, loc, false)
 	}
 	instant, err := time.Parse(time.RFC3339Nano, value)
 	if err != nil {
-		return instant, diagnostic("date_grouping", "invalid calendar instant")
+		return instant, diagnostic(ErrorCodeDateGrouping, "invalid calendar instant")
 	}
 	return instant, nil
 }
@@ -238,7 +238,7 @@ func calendarRange(config MetricDateGrouping, q metricRequest, observed []time.T
 			end = end.Add(-time.Millisecond)
 		}
 		if end.Before(start) {
-			return start, end, false, diagnostic("date_grouping", "end date must be on or after start date")
+			return start, end, false, diagnostic(ErrorCodeDateGrouping, "end date must be on or after start date")
 		}
 		start, err = calendarFloor(start, config.Interval, loc)
 		if err != nil {
@@ -249,7 +249,7 @@ func calendarRange(config MetricDateGrouping, q metricRequest, observed []time.T
 			return start, end, false, err
 		}
 		if len(observed) > 0 && (start.After(min) || end.Before(max)) {
-			return start, end, false, diagnostic("date_grouping", "custom date bounds must include all observed buckets")
+			return start, end, false, diagnostic(ErrorCodeDateGrouping, "custom date bounds must include all observed buckets")
 		}
 		return start, end, true, nil
 	}
@@ -283,7 +283,7 @@ func calendarRange(config MetricDateGrouping, q metricRequest, observed []time.T
 		}
 	}
 	if start.IsZero() || end.IsZero() {
-		return start, end, false, diagnostic("date_grouping", "include empty dates needs a bounded date filter, observed dates, or a custom range")
+		return start, end, false, diagnostic(ErrorCodeDateGrouping, "include empty dates needs a bounded date filter, observed dates, or a custom range")
 	}
 	if end.Before(start) {
 		return start, end, false, nil
@@ -322,7 +322,7 @@ func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggS
 		field, ok = computed[config.Field]
 	}
 	if !ok || field.Kind != FieldDatetime || !fieldGroupable(field) || len(spec.GroupBy) == 0 || spec.GroupBy[0] != config.Field || spec.Distribution != nil {
-		return MetricResult{}, diagnostic("date_grouping", "calendar grouping requires the first datetime key and scalar metrics")
+		return MetricResult{}, diagnostic(ErrorCodeDateGrouping, "calendar grouping requires the first datetime key and scalar metrics")
 	}
 	if _, err = metricOrder(spec, len(spec.GroupBy), spec.ExpressionY != "", false); err != nil {
 		return MetricResult{}, err
@@ -412,7 +412,7 @@ func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggS
 	}
 	bucketName := "__qt_calendar_bucket__"
 	if _, exists := calendarSchema.Fields[bucketName]; exists {
-		return MetricResult{}, diagnostic("schema", "reserved calendar field collision")
+		return MetricResult{}, diagnostic(ErrorCodeSchema, "reserved calendar field collision")
 	}
 	// Text ISO keys avoid PostgreSQL interpreting a staged datetime string under
 	// the connection timezone; original datetime inputs remain available to formulas.
@@ -451,7 +451,7 @@ func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggS
 			if text, ok := result.Buckets[i].Keys[0].(string); ok {
 				slot, e := strconv.Atoi(text)
 				if e != nil {
-					return result, diagnostic("date_grouping", "invalid calendar slot")
+					return result, diagnostic(ErrorCodeDateGrouping, "invalid calendar slot")
 				}
 				result.Buckets[i].Keys[0] = float64(slot)
 			}
@@ -534,7 +534,7 @@ func fillCalendarBuckets(ctx context.Context, result *MetricResult, config Metri
 			return nil
 		}
 		if len(result.Buckets) >= maxGroups {
-			return diagnostic("resource_limit", "calendar group population exceeds host budget")
+			return diagnostic(ErrorCodeResourceLimit, "calendar group population exceeds host budget")
 		}
 		bucket := MetricBucket{Keys: keys, Count: 0, Value: empty(metricExpression(spec))}
 		if spec.ExpressionY != "" {
@@ -585,7 +585,7 @@ func fillCalendarBuckets(ctx context.Context, result *MetricResult, config Metri
 			return e
 		}
 		if !next.After(at) {
-			return diagnostic("date_grouping", "calendar boundaries must advance")
+			return diagnostic(ErrorCodeDateGrouping, "calendar boundaries must advance")
 		}
 		at = next
 	}
@@ -610,7 +610,7 @@ func (d QueryDatasetV3) checkMetricSamples(ctx context.Context, tx *sql.Tx, spec
 	}
 	for _, bucket := range metric.Buckets {
 		if bucket.Count > int64(limit) {
-			return diagnostic("resource_limit", sampleBudgetMessage(spec, limit))
+			return diagnostic(ErrorCodeResourceLimit, sampleBudgetMessage(spec, limit))
 		}
 	}
 	return nil

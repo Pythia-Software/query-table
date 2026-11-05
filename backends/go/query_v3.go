@@ -23,7 +23,6 @@ type GroupingDefinition struct {
 	KeyIntervals   map[string]GroupKeyInterval `json:"-"`
 	Summaries      []SummaryColumn             `json:"summaries"`
 	Representative *RepresentativeRow          `json:"representative"`
-	Diagnostics    []string                    `json:"diagnostics,omitempty"`
 }
 
 // GroupKeyInterval buckets a datetime grouping key by calendar interval: one
@@ -39,13 +38,12 @@ type groupingDefinitionJSON struct {
 	Keys           []json.RawMessage  `json:"keys"`
 	Summaries      []SummaryColumn    `json:"summaries"`
 	Representative *RepresentativeRow `json:"representative"`
-	Diagnostics    []string           `json:"diagnostics,omitempty"`
 }
 
 // MarshalJSON writes a key with an interval as {"field","interval","timeZone"}.
 func (g GroupingDefinition) MarshalJSON() ([]byte, error) {
 	// keys and summaries are required arrays on the wire, even when empty.
-	out := groupingDefinitionJSON{Summaries: g.Summaries, Representative: g.Representative, Diagnostics: g.Diagnostics, Keys: []json.RawMessage{}}
+	out := groupingDefinitionJSON{Summaries: g.Summaries, Representative: g.Representative, Keys: []json.RawMessage{}}
 	if out.Summaries == nil {
 		out.Summaries = []SummaryColumn{}
 	}
@@ -72,7 +70,7 @@ func (g *GroupingDefinition) UnmarshalJSON(data []byte) error {
 	if err := decoder.Decode(&in); err != nil {
 		return err
 	}
-	*g = GroupingDefinition{Summaries: in.Summaries, Representative: in.Representative, Diagnostics: in.Diagnostics}
+	*g = GroupingDefinition{Summaries: in.Summaries, Representative: in.Representative}
 	for _, raw := range in.Keys {
 		var name string
 		if err := json.Unmarshal(raw, &name); err == nil {
@@ -83,13 +81,13 @@ func (g *GroupingDefinition) UnmarshalJSON(data []byte) error {
 		keyDecoder := json.NewDecoder(bytes.NewReader(raw))
 		keyDecoder.DisallowUnknownFields()
 		if err := keyDecoder.Decode(&key); err != nil {
-			return diagnostic("grouping", "a group key is a field name or {field, interval, timeZone}")
+			return diagnostic(ErrorCodeGrouping, "a group key is a field name or {field, interval, timeZone}")
 		}
 		if g.KeyIntervals == nil {
 			g.KeyIntervals = map[string]GroupKeyInterval{}
 		}
 		if _, duplicate := g.KeyIntervals[key.Field]; duplicate {
-			return diagnostic("grouping", "invalid or duplicate group key")
+			return diagnostic(ErrorCodeGrouping, "invalid or duplicate group key")
 		}
 		g.Keys = append(g.Keys, key.Field)
 		g.KeyIntervals[key.Field] = GroupKeyInterval{key.Interval, key.TimeZone}
@@ -104,10 +102,10 @@ func (g *GroupingDefinition) UnmarshalJSON(data []byte) error {
 // value type and loads its zone.
 func groupKeyLocation(typ, field string, interval GroupKeyInterval) (*time.Location, error) {
 	if !containsString([]string{"hour", "day", "week", "month", "year"}, interval.Interval) {
-		return nil, diagnostic("grouping", "a group key interval is hour, day, week, month or year; hour-of-day and day-of-week are metric intervals")
+		return nil, diagnostic(ErrorCodeGrouping, "a group key interval is hour, day, week, month or year; hour-of-day and day-of-week are metric intervals")
 	}
 	if typ != "datetime" {
-		return nil, diagnostic("grouping", "a calendar group key needs a datetime field")
+		return nil, diagnostic(ErrorCodeGrouping, "a calendar group key needs a datetime field")
 	}
 	return calendarLocation(MetricDateGrouping{Field: field, Interval: interval.Interval, TimeZone: interval.TimeZone, Range: "query"})
 }
@@ -115,30 +113,30 @@ func groupKeyLocation(typ, field string, interval GroupKeyInterval) (*time.Locat
 // Validate classifies malformed wire stages and metrics as request diagnostics,
 // including for hosts that construct requests directly instead of decoding JSON.
 func (q QueryRequestV3) Validate() error {
-	if q.Version != 3 || len(q.Diagnostics) > 0 {
-		return diagnostic("version", "a valid version 3 query is required")
+	if q.Version != 3 {
+		return diagnostic(ErrorCodeVersion, "a valid version 3 query is required")
 	}
 	// Host state is opaque, but always a JSON object (see the wire schema).
 	if host := bytes.TrimSpace(q.HostState); len(host) > 0 && host[0] != '{' {
-		return diagnostic("query", "hostState must be a JSON object")
+		return diagnostic(ErrorCodeInvalidQuery, "hostState must be a JSON object")
 	}
 	for _, stage := range []struct {
 		name  string
 		query WireQuery
 	}{{"source", q.Source}, {"result", q.Result}} {
 		if err := stage.query.Validate(); err != nil {
-			return diagnostic("query", stage.name+": "+err.Error())
+			return withContext(err, ErrorCodeInvalidQuery, stage.name+": ")
 		}
 	}
 	if err := validateMetricSpecs(q.Metrics); err != nil {
-		return diagnostic("query", "metrics: "+err.Error())
+		return withContext(err, ErrorCodeInvalidMetric, "metrics: ")
 	}
 	if q.Distinct != nil {
 		if q.Rows || len(q.Metrics) > 0 || q.Grouping != nil {
-			return diagnostic("query", "distinct requests take no rows, metrics or grouping")
+			return diagnostic(ErrorCodeInvalidQuery, "distinct requests take no rows, metrics or grouping")
 		}
 		if q.Distinct.Field == "" || q.Distinct.Limit < 1 || q.Distinct.Limit > 500 || utf16Length(q.Distinct.Search) > 2000 {
-			return diagnostic("query", "distinct needs a field, a limit of 1–500 and a search of at most 2000 characters")
+			return diagnostic(ErrorCodeInvalidQuery, "distinct needs a field, a limit of 1–500 and a search of at most 2000 characters")
 		}
 	}
 	return nil
@@ -177,11 +175,11 @@ type QueryDatasetV3 struct {
 
 func (d QueryDatasetV3) limits() (int, int, int, int64, error) {
 	if strings.TrimSpace(d.SourceSQL) == "" || d.Schema.IDField == "" || len(d.Schema.Fields) == 0 {
-		return 0, 0, 0, 0, diagnostic("dataset", "a source, schema and identity field are required")
+		return 0, 0, 0, 0, diagnostic(ErrorCodeDataset, "a source, schema and identity field are required")
 	}
 	identity, ok := d.Schema.Fields[d.Schema.IDField]
 	if !ok || identity.Synthetic || strings.TrimSpace(identity.Expr) == "" || (identity.Kind != FieldText && identity.Kind != FieldNumber && identity.Kind != FieldEnum) {
-		return 0, 0, 0, 0, diagnostic("dataset", "source identity needs a bound text or numeric field")
+		return 0, 0, 0, 0, diagnostic(ErrorCodeDataset, "source identity needs a bound text or numeric field")
 	}
 	rows, groups, pop, bytes := d.MaxRows, d.MaxGroups, d.MaxPopulation, d.MaxStagingBytes
 	if rows == 0 {
@@ -197,10 +195,10 @@ func (d QueryDatasetV3) limits() (int, int, int, int64, error) {
 		bytes = 64 << 20
 	}
 	if rows < 1 || rows > 10000 || groups < 1 || groups > 100000 || pop < 1 || pop > 10000000 || bytes < 1 || bytes > 1<<30 {
-		return 0, 0, 0, 0, diagnostic("resource_limit", "invalid host execution budgets")
+		return 0, 0, 0, 0, diagnostic(ErrorCodeDataset, "invalid host execution budgets")
 	}
 	if d.Dialect != "sqlite" && d.Dialect != "postgres" {
-		return 0, 0, 0, 0, diagnostic("profile_mismatch", "choose sqlite or postgres")
+		return 0, 0, 0, 0, diagnostic(ErrorCodeDataset, "choose sqlite or postgres")
 	}
 	return rows, groups, pop, bytes, nil
 }
@@ -219,14 +217,14 @@ func (d QueryDatasetV3) options(ctx context.Context, tx *sql.Tx, q QueryRequestV
 	if tx == nil {
 		return o, fmt.Errorf("nil query transaction")
 	}
-	if q.Version != 3 || len(q.Diagnostics) > 0 {
-		return o, diagnostic("version", "a valid version 3 query is required")
+	if q.Version != 3 {
+		return o, diagnostic(ErrorCodeVersion, "a valid version 3 query is required")
 	}
 	if q.Profile != d.Capabilities().Profile {
-		return o, diagnostic("profile_mismatch", "requested query profile is unavailable")
+		return o, diagnostic(ErrorCodeProfileMismatch, "requested query profile is unavailable")
 	}
 	if q.Now < -8640000000000000 || q.Now > 8640000000000000 {
-		return o, diagnostic("datetime_value", "invalid evaluation clock")
+		return o, diagnostic(ErrorCodeDatetimeValue, "invalid evaluation clock")
 	}
 	o.Now = time.UnixMilli(q.Now)
 	o.SourceSQL = d.SourceSQL
@@ -234,7 +232,7 @@ func (d QueryDatasetV3) options(ctx context.Context, tx *sql.Tx, q QueryRequestV
 	o.ComputedGroupable = d.ComputedGroupable
 	o.ComputedFilterable = d.ComputedFilterable
 	if d.PredicateRelations != nil && d.Dialect != "sqlite" {
-		return o, diagnostic("dataset", "predicate relations require the sqlite dialect")
+		return o, diagnostic(ErrorCodeDataset, "predicate relations require the sqlite dialect")
 	}
 	o.relations = newSQLiteRelations(ctx, tx, d.PredicateRelations)
 	if o.Resolver == nil {
@@ -321,11 +319,11 @@ func (d QueryDatasetV3) SourcePlan(ctx context.Context, q QueryRequestV3, o Plan
 		return out, err
 	}
 	sqlite := d.Dialect == "sqlite"
-	if q.Version != 3 || q.Profile != d.Capabilities().Profile || len(q.Diagnostics) > 0 {
-		return out, diagnostic("version", "a valid negotiated v3 query is required")
+	if q.Version != 3 || q.Profile != d.Capabilities().Profile {
+		return out, diagnostic(ErrorCodeVersion, "a valid negotiated v3 query is required")
 	}
 	if q.Now < -8640000000000000 || q.Now > 8640000000000000 {
-		return out, diagnostic("datetime_value", "invalid evaluation clock")
+		return out, diagnostic(ErrorCodeDatetimeValue, "invalid evaluation clock")
 	}
 	o.Now = time.UnixMilli(q.Now)
 	o, err = requestOptionsDialect(ctx, sqlite, q.Profile, q.PlanToken, q.Snapshot, q.ExpectedRevisions, o)
@@ -338,11 +336,11 @@ func (d QueryDatasetV3) SourcePlan(ctx context.Context, q QueryRequestV3, o Plan
 	o.ComputedFilterable = d.ComputedFilterable
 	fields := map[string]bool{d.Schema.IDField: true}
 	if len(q.ExpectedRevisions) > 64 {
-		return out, diagnostic("dependency_limit", "revision envelope exceeds budget")
+		return out, diagnostic(ErrorCodeDependencyLimit, "revision envelope exceeds budget")
 	}
 	for id, revision := range q.ExpectedRevisions {
 		if !computedID.MatchString(id) || revision == "" || len(revision) > 256 || o.Resolver == nil {
-			return out, diagnostic("definition_changed", "invalid computed revision envelope")
+			return out, diagnostic(ErrorCodeDefinitionChanged, "invalid computed revision envelope")
 		}
 		_, e := compileRowExpressionDialect(ctx, "[@computed/"+id+"]", d.Schema, o, sqlite)
 		if e != nil {
@@ -354,8 +352,8 @@ func (d QueryDatasetV3) SourcePlan(ctx context.Context, q QueryRequestV3, o Plan
 	source := q.Source
 	if q.Grouping != nil {
 		g := q.Grouping
-		if len(g.Diagnostics) > 0 || len(g.Keys) == 0 || len(g.Keys) > 20 || len(g.Summaries) > 64 {
-			return out, diagnostic("grouping", "invalid grouping definition")
+		if len(g.Keys) == 0 || len(g.Keys) > 20 || len(g.Summaries) > 64 {
+			return out, diagnostic(ErrorCodeGrouping, "invalid grouping definition")
 		}
 		count := AggSpec{ID: "__qt_count__", Op: "count", GroupBy: g.Keys}
 		plan, e := compileMetricDialect(ctx, metricRequest{Version: 2}, count, d.Schema, o, sqlite)
@@ -366,12 +364,12 @@ func (d QueryDatasetV3) SourcePlan(ctx context.Context, q QueryRequestV3, o Plan
 		seen := map[string]bool{}
 		for field := range g.KeyIntervals {
 			if !containsString(g.Keys, field) {
-				return out, diagnostic("grouping", "a calendar interval names an unknown group key")
+				return out, diagnostic(ErrorCodeGrouping, "a calendar interval names an unknown group key")
 			}
 		}
 		for i, key := range g.Keys {
 			if seen[key] || key == GroupIdentityField {
-				return out, diagnostic("grouping", "invalid or duplicate group key")
+				return out, diagnostic(ErrorCodeGrouping, "invalid or duplicate group key")
 			}
 			if interval, ok := g.KeyIntervals[key]; ok {
 				if _, e := groupKeyLocation(plan.Columns[i].Type, key, interval); e != nil {
@@ -384,16 +382,16 @@ func (d QueryDatasetV3) SourcePlan(ctx context.Context, q QueryRequestV3, o Plan
 		}
 		for _, s := range g.Summaries {
 			if s.ID == "" || len(s.ID) > 256 || seen[s.ID] || s.ID == GroupIdentityField || strings.HasPrefix(s.ID, "@computed/") || s.ID == "__proto__" || s.ID == "prototype" || s.ID == "constructor" {
-				return out, diagnostic("grouping", "invalid or duplicate summary ID")
+				return out, diagnostic(ErrorCodeGrouping, "invalid or duplicate summary ID")
 			}
 			if _, ok := d.Schema.Fields[s.ID]; ok {
-				return out, diagnostic("grouping", "summary ID collides with source field")
+				return out, diagnostic(ErrorCodeGrouping, "summary ID collides with source field")
 			}
 			seen[s.ID] = true
 			var p SQLPlan
 			if s.Op == "row" {
 				if g.Representative == nil {
-					return out, diagnostic("representative", "ROW needs representative ordering")
+					return out, diagnostic(ErrorCodeRepresentative, "ROW needs representative ordering")
 				}
 				p, err = compileRowExpressionDialect(ctx, "["+strings.ReplaceAll(s.Field, "]", "]]")+"]", d.Schema, o, sqlite)
 				fields[s.Field] = true
@@ -429,11 +427,11 @@ func (d QueryDatasetV3) SourcePlan(ctx context.Context, q QueryRequestV3, o Plan
 		}
 		if g.Representative != nil {
 			if len(g.Representative.OrderBy) == 0 || len(g.Representative.OrderBy) > 8 {
-				return out, diagnostic("representative", "choose 1–8 representative sort fields")
+				return out, diagnostic(ErrorCodeRepresentative, "choose 1–8 representative sort fields")
 			}
 			for _, term := range g.Representative.OrderBy {
 				if term.Extract != nil {
-					return out, diagnostic("unsupported_regex", "regex representative sorting is unavailable")
+					return out, diagnostic(ErrorCodeUnsupportedRegex, "regex representative sorting is unavailable")
 				}
 				fields[term.Field] = true
 				if field, ok := d.Schema.Fields[term.Field]; ok && field.SQLiteSortField != "" {
@@ -513,7 +511,7 @@ func (d QueryDatasetV3) SourcePlan(ctx context.Context, q QueryRequestV3, o Plan
 		source.Offset = 0
 	}
 	if len(fields) > 200 {
-		return out, diagnostic("dependency_limit", "source projection exceeds field budget")
+		return out, diagnostic(ErrorCodeDependencyLimit, "source projection exceeds field budget")
 	}
 	for name := range fields {
 		source.Select = append(source.Select, name)
@@ -647,7 +645,7 @@ func (d QueryDatasetV3) sampleLimit() (int, error) {
 		limit = SQLiteMaxMedianSamples
 	}
 	if limit < 1 || limit > 1000000 {
-		return 0, diagnostic("resource_limit", "invalid exact sample budget")
+		return 0, diagnostic(ErrorCodeDataset, "invalid exact sample budget")
 	}
 	return limit, nil
 }

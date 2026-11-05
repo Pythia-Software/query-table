@@ -14,31 +14,31 @@ import (
 func DecodeQueryRequestV3(data []byte) (QueryRequestV3, error) {
 	var q QueryRequestV3
 	if len(data) > 2<<20 {
-		return q, diagnostic("resource_limit", "query request exceeds byte budget")
+		return q, diagnostic(ErrorCodeRequestTooLarge, "query request exceeds byte budget")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&q); err != nil {
-		return q, err
+		return q, decodeError(err, ErrorCodeInvalidQuery)
 	}
 	if decoder.Decode(new(any)) != io.EOF {
-		return q, diagnostic("query", "expected one query object")
+		return q, diagnostic(ErrorCodeInvalidJSON, "expected one query object")
 	}
 	var object map[string]json.RawMessage
 	if json.Unmarshal(data, &object) != nil || object == nil {
-		return q, diagnostic("query", "expected a query object")
+		return q, diagnostic(ErrorCodeInvalidQuery, "expected a query object")
 	}
 	if clock, ok := object["now"]; !ok || bytes.Equal(bytes.TrimSpace(clock), []byte("null")) {
-		return q, diagnostic("datetime_value", "one evaluation clock is required")
+		return q, diagnostic(ErrorCodeDatetimeValue, "one evaluation clock is required")
 	}
 	for _, name := range []string{"source", "result"} {
 		var stage map[string]json.RawMessage
 		if json.Unmarshal(object[name], &stage) != nil || stage == nil {
-			return q, diagnostic("query", "source and result must be query objects")
+			return q, diagnostic(ErrorCodeInvalidQuery, "source and result must be query objects")
 		}
 		for key := range stage {
 			if !containsString([]string{"select", "where", "orderBy", "limit", "offset"}, key) {
-				return q, diagnostic("query", "unsupported query stage property: "+key)
+				return q, diagnostic(ErrorCodeInvalidQuery, "unsupported query stage property: "+key)
 			}
 		}
 	}
@@ -56,43 +56,40 @@ func NewQueryV3Handler(db *sql.DB, authorize func(*http.Request) (QueryDatasetV3
 		w.Header().Set("Cache-Control", "no-store")
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", "POST")
-			http.Error(w, "method not allowed", 405)
+			writeErrorCode(w, ErrorCodeMethodNotAllowed, "method not allowed")
 			return
 		}
 		if db == nil || authorize == nil {
-			http.Error(w, "forbidden", 403)
+			writeErrorCode(w, ErrorCodeForbidden, "forbidden")
 			return
 		}
 		dataset, options, err := authorize(r)
 		if err != nil {
-			http.Error(w, "forbidden", 403)
+			writeErrorCode(w, ErrorCodeForbidden, "forbidden")
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 2<<20))
 		if err != nil {
-			http.Error(w, "query request exceeds byte budget", 400)
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) {
+				writeErrorCode(w, ErrorCodeRequestTooLarge, "query request exceeds byte budget")
+			} else {
+				writeErrorCode(w, ErrorCodeInvalidRequest, "could not read the request body")
+			}
 			return
 		}
 		q, err := DecodeQueryRequestV3(body)
 		if err != nil {
-			http.Error(w, err.Error(), 400)
+			WriteQueryError(w, err)
 			return
 		}
 		result, err := dataset.Execute(ctx, db, q, options)
 		if err != nil {
-			var issue *PlanDiagnostic
-			switch {
-			case errors.Is(err, context.DeadlineExceeded):
-				http.Error(w, "query timed out", http.StatusGatewayTimeout)
-			case errors.Is(err, context.Canceled):
-				http.Error(w, "query cancelled", http.StatusRequestTimeout)
-			case errors.As(err, &issue):
-				http.Error(w, issue.Error(), http.StatusBadRequest)
-			default:
-				http.Error(w, "could not execute query", http.StatusInternalServerError)
-			}
+			// Timeouts, cancellation and coded diagnostics keep their code;
+			// anything else is internal and its text is not exposed.
+			WriteQueryError(w, err)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")

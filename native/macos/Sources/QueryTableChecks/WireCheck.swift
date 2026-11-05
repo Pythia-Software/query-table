@@ -12,12 +12,29 @@ enum WireCheck {
     let now: Int64
     let cases: [Case]
   }
+  /// A request, or the client-side refusal that replaced it.
+  enum Built: Encodable {
+    case request(QueryRequestV3)
+    case refused(ErrorCode, String)
+    init(_ build: () throws -> QueryRequestV3) throws {
+      do { self = .request(try build()) } catch QueryTableError.refused(let code, let message) {
+        self = .refused(code, message)
+      }
+    }
+    func encode(to encoder: Encoder) throws {
+      switch self {
+      case .request(let request): try request.encode(to: encoder)
+      case .refused(let code, let message):
+        try ["refused": ["code": code.rawValue, "message": message]].encode(to: encoder)
+      }
+    }
+  }
   struct Output: Encodable {
     struct Case: Encodable {
       let name: String
       let token: String
-      let request: QueryRequestV3
-      let metricsOnly: QueryRequestV3
+      let request: Built
+      let metricsOnly: Built
       let distinct: QueryRequestV3
     }
     let cases: [Case]
@@ -30,11 +47,14 @@ enum WireCheck {
       let query = QueryState.decodeToken(item.token)
       return Output.Case(
         name: item.name, token: try query.encodedToken(),
-        request: query.queryRequestV3(
-          schema: fixture.schema, capabilities: fixture.capabilities, now: now),
-        metricsOnly: query.queryRequestV3(
-          schema: fixture.schema, capabilities: fixture.capabilities, now: now, rows: false),
-        distinct: .distinctValues(
+        request: try Built {
+          try query.queryRequestV3(schema: fixture.schema, capabilities: fixture.capabilities, now: now)
+        },
+        metricsOnly: try Built {
+          try query.queryRequestV3(
+            schema: fixture.schema, capabilities: fixture.capabilities, now: now, rows: false)
+        },
+        distinct: try .distinctValues(
           field: "name", search: "caf", limit: 30, schema: fixture.schema,
           capabilities: fixture.capabilities, now: now))
     }

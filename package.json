@@ -38,7 +38,7 @@
     "package:lint": "publint packages/core && publint packages/react && publint packages/ui && publint tools/schema-codegen && attw packages/core --pack --profile esm-only && attw packages/react --pack --profile esm-only && attw packages/ui --pack --profile esm-only --exclude-entrypoints ./theme.css && attw tools/schema-codegen --pack --profile esm-only && publint packages/duckdb && attw packages/duckdb --pack --profile esm-only",
     "package:check": "npm run build:packages && npm run package:lint && node scripts/verify-packages.mjs",
     "wire:generate": "node tools/wire-codegen/generate.mjs",
-    "wire:check": "node tools/wire-codegen/generate.mjs && git diff --exit-code -- packages/core/src/wire.generated.ts backends/go/wire_generated.go native/macos/Sources/QueryTableCore/Wire.generated.swift",
+    "wire:check": "node tools/wire-codegen/generate.mjs && git diff --exit-code -- packages/core/src/wire.generated.ts backends/go/wire_generated.go native/macos/Sources/QueryTableCore/Wire.generated.swift docs/errors.md",
     "check": "npm run wire:check && npm run typecheck && npm test && npm run test:go && npm run vet:go && npm run test:sqlite",
     "release:check": "npm run version:check && npm run check && npm run build:demo && npm run package:check && npm run audit",
     "demo": "npm run dev --workspace @pythia-software/query-table-demo",

@@ -126,9 +126,8 @@ final class CoreTests: XCTestCase {
   func testMetricsUseEntireFilteredSet() async throws {
     let adapter = LocalQueryTransport(schema: schema, rows: rows)
     let q = QueryState(limit: 1, aggregations: [.init(id: "total", op: "sum", field: "amount")])
-    let request = q.queryRequestV3(
+    let request = try q.queryRequestV3(
       schema: schema, capabilities: adapter.queryCapabilities, rows: false)
-    XCTAssertEqual(request.diagnostics, [])
     XCTAssertEqual(request.source, request.result)
     let result = try await adapter.fetchQueryV3(request)
     try result.validate(for: request, schema: schema)
@@ -136,7 +135,7 @@ final class CoreTests: XCTestCase {
     XCTAssertEqual(result.total, 3)
     XCTAssertEqual(result.metrics.first?.buckets.first?.value, .number(30))
     XCTAssertEqual(result.metrics.first?.buckets.first?.count, 3)
-    let distinctRequest = QueryRequestV3.distinctValues(
+    let distinctRequest = try QueryRequestV3.distinctValues(
       field: "name", search: "a", limit: 1, schema: schema,
       capabilities: adapter.queryCapabilities)
     let distinctResult = try await adapter.fetchQueryV3(distinctRequest)
@@ -152,7 +151,7 @@ final class CoreTests: XCTestCase {
       rows: rows + [["id": .number(4), "name": .string("Beta"), "tags": .array([.string("y"), .string("x")])]])
     func values(_ field: String) async throws -> DistinctResultV3 {
       let result = try await adapter.fetchQueryV3(
-        .distinctValues(field: field, schema: schema, capabilities: adapter.queryCapabilities))
+        try .distinctValues(field: field, schema: schema, capabilities: adapter.queryCapabilities))
       return try XCTUnwrap(result.distinct)
     }
     let names = try await values("name")
@@ -160,7 +159,7 @@ final class CoreTests: XCTestCase {
     let tags = try await values("tags")
     XCTAssertEqual(tags.values, ["x", "y"])
     XCTAssertTrue(tags.hasNull)
-    var invalid = QueryRequestV3.distinctValues(
+    var invalid = try QueryRequestV3.distinctValues(
       field: "name", schema: schema, capabilities: adapter.queryCapabilities)
     invalid.rows = true
     do {
@@ -172,15 +171,14 @@ final class CoreTests: XCTestCase {
     let q = QueryState(
       whereTerms: [.predicate(.init(field: "name", op: "=", value: "a"))],
       aggregations: [.init(id: "n", op: "count", label: "Rows")])
-    let request = q.queryRequestV3(
+    let request = try q.queryRequestV3(
       schema: schema, capabilities: QueryCapabilitiesV3(profile: "qt-sqlite-v1"),
       now: Date(timeIntervalSince1970: 1_772_964_000.5))
     let json = try XCTUnwrap(
       JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])
     XCTAssertEqual(
       Set(json.keys),
-      ["version", "profile", "now", "expectedRevisions", "source", "result", "rows", "metrics",
-       "diagnostics"])
+      ["version", "profile", "now", "expectedRevisions", "source", "result", "rows", "metrics"])
     XCTAssertEqual(json["now"] as? Int, 1_772_964_000_500)
     let stage = try XCTUnwrap(json["source"] as? [String: Any])
     XCTAssertEqual(Set(stage.keys), ["select", "where", "orderBy", "limit", "offset"])
@@ -188,7 +186,7 @@ final class CoreTests: XCTestCase {
     XCTAssertEqual(Set(metric.keys), ["id", "op", "groupBy"])
   }
   func testResultValidationMirrorsTypeScript() throws {
-    let request = QueryState().queryRequestV3(
+    let request = try QueryState().queryRequestV3(
       schema: schema, capabilities: QueryCapabilitiesV3(profile: "p"))
     var result = QueryResultV3(
       answering: request, schema: schema, rows: [["id": .number(1)], ["id": .number(2)]], total: 2)

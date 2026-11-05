@@ -108,7 +108,8 @@
       "scope": "allMatching",
       "processedRows": 0,
       "groupCount": 0,
-      "error": "Field secret cannot be measured with sum."
+      "error": "Field secret cannot be measured with sum.",
+      "errorCode": "aggregate_disabled"
     },
     {
       "id": "box",

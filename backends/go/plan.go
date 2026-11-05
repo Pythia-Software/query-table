@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -141,7 +142,7 @@ func newPlanDialect(ctx context.Context, s Schema, o PlanOptions, sqlite bool) (
 		}
 	}
 	if strings.TrimSpace(o.SourceSQL) == "" {
-		return nil, diagnostic("source_required", "host must supply authorized source SELECT")
+		return nil, diagnostic(ErrorCodeSourceRequired, "host must supply authorized source SELECT")
 	}
 	if o.Now.IsZero() {
 		o.Now = time.Now()
@@ -158,7 +159,7 @@ func newPlanDialect(ctx context.Context, s Schema, o PlanOptions, sqlite bool) (
 	for i, n := range names {
 		f := s.Fields[n]
 		if f.Expr == "" {
-			return nil, diagnostic("schema", "empty field SQL binding")
+			return nil, diagnostic(ErrorCodeSchema, "empty field SQL binding")
 		}
 		// Executor-staged columns are stored values; host bindings are opaque.
 		reads := -1
@@ -188,10 +189,10 @@ func newPlanDialect(ctx context.Context, s Schema, o PlanOptions, sqlite bool) (
 		b.raw[n] = b.fields[n]
 	}
 	if len(cols) > 512 {
-		return nil, diagnostic("schema_limit", "v2 profile supports at most 512 projected schema fields")
+		return nil, diagnostic(ErrorCodeSchemaLimit, "v2 profile supports at most 512 projected schema fields")
 	}
 	if len(cols) == 0 {
-		return nil, diagnostic("schema", "empty schema")
+		return nil, diagnostic(ErrorCodeSchema, "empty schema")
 	}
 	b.stage("SELECT " + strings.Join(cols, ",") + " FROM (" + o.SourceSQL + ") AS r")
 	b.stages[0].Materialized = false
@@ -387,7 +388,7 @@ func (b *planBuilder) finish(sql, scope string, cols []OutputColumn) SQLPlan {
 }
 func (b *planBuilder) field(name string) (ValueSQL, error) {
 	if len(b.stages) > 500 {
-		return ValueSQL{}, diagnostic("stage_limit", "SQL stage budget exceeded")
+		return ValueSQL{}, diagnostic(ErrorCodeStageLimit, "SQL stage budget exceeded")
 	}
 	if err := b.ctx.Err(); err != nil {
 		return ValueSQL{}, err
@@ -395,7 +396,7 @@ func (b *planBuilder) field(name string) (ValueSQL, error) {
 	b.dependencies[name] = true
 	if v, ok := b.fields[name]; ok {
 		if v.Type == "unsupported" {
-			return v, diagnostic("unsupported_type", "arrays are outside the server expression profile")
+			return v, diagnostic(ErrorCodeUnsupportedType, "arrays are outside the server expression profile")
 		}
 		if b.sqlite && !strings.HasPrefix(name, "@computed/") && !b.checked[name] {
 			return b.sqliteField(name, v)
@@ -403,7 +404,7 @@ func (b *planBuilder) field(name string) (ValueSQL, error) {
 		if v.Type == "number" && !strings.HasPrefix(name, "@computed/") && !b.checked[name] {
 			f := b.schema.Fields[name]
 			if !f.ExpressionNumeric {
-				return v, &PlanDiagnostic{Code: "numeric_domain_required", Message: "numeric SQL binding must opt into the bounded arithmetic profile", Field: name}
+				return v, &PlanDiagnostic{Code: ErrorCodeNumericDomainRequired, Message: "numeric SQL binding must opt into the bounded arithmetic profile", Field: name}
 			}
 			raw := b.emit("("+v.Value+")::text::numeric", b.nullError(), "number").Value
 			valid := "(abs(" + raw + ") <= 1e100::numeric AND (" + raw + "=0 OR abs(" + raw + ") >= 1e-300::numeric))"
@@ -422,31 +423,37 @@ func (b *planBuilder) field(name string) (ValueSQL, error) {
 		return v, nil
 	}
 	if !strings.HasPrefix(name, "@computed/") {
-		return ValueSQL{}, &PlanDiagnostic{Code: "unknown_field", Message: "field is not in schema allowlist", Field: name}
+		return ValueSQL{}, &PlanDiagnostic{Code: ErrorCodeUnknownField, Message: "field is not in schema allowlist", Field: name}
 	}
 	id := strings.TrimPrefix(name, "@computed/")
 	if b.visiting[id] {
-		return ValueSQL{}, diagnostic("dependency_cycle", "computed dependency cycle at "+id)
+		return ValueSQL{}, diagnostic(ErrorCodeDependencyCycle, "computed dependency cycle at "+id)
 	}
 	if len(b.revisions) >= 64 || len(b.visiting) >= 32 {
-		return ValueSQL{}, diagnostic("dependency_limit", "computed graph budget exceeded")
+		return ValueSQL{}, diagnostic(ErrorCodeDependencyLimit, "computed graph budget exceeded")
 	}
 	if b.options.Resolver == nil {
-		return ValueSQL{}, diagnostic("resolver_required", "authoritative computed resolver required")
+		return ValueSQL{}, diagnostic(ErrorCodeResolverRequired, "authoritative computed resolver required")
 	}
 	c, err := b.options.Resolver.ResolveComputed(b.ctx, id)
 	if err != nil {
 		return ValueSQL{}, err
 	}
 	if c.ID != id {
-		return ValueSQL{}, diagnostic("definition_invalid", "resolver returned a different ID")
+		return ValueSQL{}, diagnostic(ErrorCodeDefinitionInvalid, "resolver returned a different ID")
 	}
 	if err = validateComputed(c); err != nil {
-		return ValueSQL{}, &PlanDiagnostic{Code: "definition_invalid", Message: err.Error(), Field: name}
+		// Keep the diagnostic's own message, not its "code: message" text.
+		message := err.Error()
+		var issue *PlanDiagnostic
+		if errors.As(err, &issue) {
+			message = issue.Message
+		}
+		return ValueSQL{}, &PlanDiagnostic{Code: ErrorCodeDefinitionInvalid, Message: message, Field: name}
 	}
 	expected, ok := b.options.ExpectedRevisions[id]
 	if !ok || expected == "" || c.Revision != expected {
-		return ValueSQL{}, &PlanDiagnostic{Code: "definition_changed", Message: "missing or mismatched expected revision", Field: name}
+		return ValueSQL{}, &PlanDiagnostic{Code: ErrorCodeDefinitionChanged, Message: "missing or mismatched expected revision", Field: name}
 	}
 	b.definitions[id] = c
 	b.visiting[id] = true
@@ -498,11 +505,11 @@ func mergeType(a, c string) (string, error) {
 	if c == "null" || a == c {
 		return a, nil
 	}
-	return "", diagnostic("type_error", "incompatible expression types "+a+" and "+c)
+	return "", diagnostic(ErrorCodeTypeError, "incompatible expression types "+a+" and "+c)
 }
 func requireType(v ValueSQL, t string) error {
 	if v.Type != t && v.Type != "null" {
-		return diagnostic("type_error", "expected "+t+", got "+v.Type)
+		return diagnostic(ErrorCodeTypeError, "expected "+t+", got "+v.Type)
 	}
 	return nil
 }
@@ -522,7 +529,7 @@ func (b *planBuilder) row(n *exprNode) (result ValueSQL, err error) {
 	}
 	b.nodes++
 	if b.nodes > 2048 {
-		return ValueSQL{}, diagnostic("expansion_limit", "expanded expression budget exceeded")
+		return ValueSQL{}, diagnostic(ErrorCodeExpansionLimit, "expanded expression budget exceeded")
 	}
 	if n.op == "field" {
 		return b.field(n.text)
@@ -533,7 +540,7 @@ func (b *planBuilder) row(n *exprNode) (result ValueSQL, err error) {
 			return ValueSQL{"NULL", b.nullError(), "null"}, nil
 		case float64:
 			if v > 1e100 || v < -1e100 || (v != 0 && v < 1e-300 && v > -1e-300) {
-				return ValueSQL{}, diagnostic("numeric_range", "literal outside profile range")
+				return ValueSQL{}, diagnostic(ErrorCodeNumericRange, "literal outside profile range")
 			}
 			return ValueSQL{b.param(v, "double precision"), b.nullError(), "number"}, nil
 		case string:
@@ -554,7 +561,7 @@ func (b *planBuilder) row(n *exprNode) (result ValueSQL, err error) {
 }
 func (b *planBuilder) operation(op string, a []ValueSQL) (ValueSQL, error) {
 	if len(b.stages) > 500 {
-		return ValueSQL{}, diagnostic("stage_limit", "SQL stage budget exceeded")
+		return ValueSQL{}, diagnostic(ErrorCodeStageLimit, "SQL stage budget exceeded")
 	}
 	arity := 2
 	switch op {
@@ -565,11 +572,11 @@ func (b *planBuilder) operation(op string, a []ValueSQL) (ValueSQL, error) {
 	case "COALESCE":
 		arity = len(a)
 		if arity < 1 || arity > 50 {
-			return ValueSQL{}, diagnostic("arity", "COALESCE requires 1–50 arguments")
+			return ValueSQL{}, diagnostic(ErrorCodeArity, "COALESCE requires 1–50 arguments")
 		}
 	}
 	if len(a) != arity {
-		return ValueSQL{}, diagnostic("arity", "invalid argument count for "+op)
+		return ValueSQL{}, diagnostic(ErrorCodeArity, "invalid argument count for "+op)
 	}
 	errors := []string{}
 	for _, v := range a {
@@ -642,7 +649,7 @@ func (b *planBuilder) operation(op string, a []ValueSQL) (ValueSQL, error) {
 			return ValueSQL{}, err
 		}
 		if typ == "text" && op != "=" && op != "!=" && op != "<>" {
-			return ValueSQL{}, diagnostic("collation_required", "text ordering is outside this profile")
+			return ValueSQL{}, diagnostic(ErrorCodeCollationRequired, "text ordering is outside this profile")
 		}
 		t = "bool"
 		v = "(" + a[0].Value + " " + op + " " + a[1].Value + ")"
@@ -684,7 +691,7 @@ func (b *planBuilder) operation(op string, a []ValueSQL) (ValueSQL, error) {
 			v = l + " " + op + " (" + a[1].Value + ")::text::numeric"
 		}
 	default:
-		return ValueSQL{}, diagnostic("unsupported_function", "function/operator "+op+" is outside the server profile")
+		return ValueSQL{}, diagnostic(ErrorCodeUnsupportedFunction, "function/operator "+op+" is outside the server profile")
 	}
 	if numeric {
 		// Compute decimal-domain arithmetic once. Range guards and the IEEE result
@@ -715,7 +722,7 @@ func (b *planBuilder) filter(where []WhereTerm) error {
 		for _, p := range term.Predicates() {
 			b.dependencies[p.Field] = true
 			if p.Op == "matches_regex" || p.Op == "not_matches_regex" {
-				return diagnostic("unsupported_regex", "regex filters are outside this server profile")
+				return diagnostic(ErrorCodeUnsupportedRegex, "regex filters are outside this server profile")
 			}
 		}
 	}
@@ -725,7 +732,7 @@ func (b *planBuilder) filter(where []WhereTerm) error {
 	}
 	p, _, err := compilePostgresWhere(where, s, len(b.args)+1, b.options.Now)
 	if err != nil {
-		return diagnostic("filter", err.Error())
+		return diagnostic(ErrorCodeFilter, err.Error())
 	}
 	b.args = append(b.args, p.Args...)
 	if p.WhereSQL != "" {
@@ -752,7 +759,7 @@ func (b *planBuilder) filterSchema(where []WhereTerm) (Schema, error) {
 				continue
 			}
 			if !b.options.ComputedFilterable[id] {
-				return s, diagnostic("filter_disabled", "computed filtering requires host policy for "+predicate.Field)
+				return s, fieldDiagnostic(ErrorCodeFilterDisabled, predicate.Field, "computed filtering requires host policy for "+predicate.Field)
 			}
 			v, err := b.field(predicate.Field)
 			if err != nil {
@@ -788,24 +795,24 @@ func (b *planBuilder) order(terms []OrderBy) (string, error) {
 	terms = append(append([]OrderBy{}, terms...), b.schema.TiebreakSort...)
 	// Always append stable row identity, including when the host configured no ties.
 	if b.schema.IDField == "" {
-		return "", diagnostic("identity_required", "stable ID field required for row windows")
+		return "", diagnostic(ErrorCodeIdentityRequired, "stable ID field required for row windows")
 	}
 	terms = append(terms, OrderBy{Field: b.schema.IDField, Dir: "asc"})
 	out := []string{}
 	for _, term := range terms {
 		if term.Extract != nil {
-			return "", diagnostic("unsupported_regex", "regex sorting is unavailable in this profile")
+			return "", diagnostic(ErrorCodeUnsupportedRegex, "regex sorting is unavailable in this profile")
 		}
 		if term.Dir != "asc" && term.Dir != "desc" {
-			return "", diagnostic("sort", "direction must be asc or desc")
+			return "", diagnostic(ErrorCodeSort, "direction must be asc or desc")
 		}
 		if !strings.HasPrefix(term.Field, "@computed/") {
 			f, ok := b.schema.Fields[term.Field]
 			if !ok || !f.Sortable {
-				return "", diagnostic("sort", "field is not sortable: "+term.Field)
+				return "", diagnostic(ErrorCodeSort, "field is not sortable: "+term.Field)
 			}
 			if f.SortExpr != "" && f.SortExpr != f.Expr {
-				return "", diagnostic("sort", "alternate sort bindings require an explicit schema field in v2")
+				return "", diagnostic(ErrorCodeSort, "alternate sort bindings require an explicit schema field in v2")
 			}
 		}
 		v, err := b.sourceValue(term.Field)
@@ -879,7 +886,7 @@ func compileComputedRowsDialect(ctx context.Context, q WireQuery, s Schema, o Pl
 		selects = append(selects, v.Value+" AS "+a, v.Error+" AS "+z)
 	}
 	if len(selects) == 0 {
-		return SQLPlan{}, diagnostic("select_required", "at least one selected field required")
+		return SQLPlan{}, diagnostic(ErrorCodeSelectRequired, "at least one selected field required")
 	}
 	// ORDER BY is repeated to preserve the selected page's ordering through
 	// materialized select-only projections. The population window is already fixed.

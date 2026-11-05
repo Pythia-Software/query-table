@@ -85,6 +85,5 @@
     }
   },
   "rows": true,
-  "metrics": [],
-  "diagnostics": []
+  "metrics": []
 }

@@ -51,10 +51,10 @@ func compileMetricsPartial(ctx context.Context, q metricRequest, s Schema, o Pla
 		o.Now = time.Now()
 	}
 	if q.Version != 2 {
-		return result, nil, diagnostic("version", "metric protocol version must be 2")
+		return result, nil, diagnostic(ErrorCodeVersion, "metric protocol version must be 2")
 	}
 	if len(q.Diagnostics) > 0 {
-		return result, nil, diagnostic("residual_query", "query contains unresolved client diagnostics")
+		return result, nil, diagnostic(ErrorCodeResidualQuery, "query contains unresolved client diagnostics")
 	}
 	if err := (WireQuery{Where: q.Where, OrderBy: q.OrderBy, Limit: q.Limit, Offset: q.Offset}).Validate(); err != nil {
 		return result, nil, err
@@ -65,14 +65,14 @@ func compileMetricsPartial(ctx context.Context, q metricRequest, s Schema, o Pla
 	ids := map[string]bool{}
 	for _, spec := range q.Metrics {
 		if ids[spec.ID] {
-			return result, nil, diagnostic("duplicate_metric", "duplicate metric ID")
+			return result, nil, diagnostic(ErrorCodeDuplicateMetric, "duplicate metric ID")
 		}
 		ids[spec.ID] = true
 	}
 	for i, spec := range q.Metrics {
 		p, e := compileMetricDialect(ctx, q, spec, s, o, sqlite)
 		if e != nil {
-			if _, clause := metricClauseError(ctx, e); !clause {
+			if _, _, clause := metricClauseError(ctx, e); !clause {
 				return metricBatchPlan{}, nil, fmt.Errorf("metric %s: %w", spec.ID, e)
 			}
 			failures[i] = e
@@ -105,22 +105,19 @@ type summaryOutput struct{ ID, Expression string }
 // on its own first: a combined plan can still exceed a compiler budget.
 func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s Schema, o PlanOptions, sqlite bool, extra []summaryOutput) (SQLPlan, error) {
 	if len(extra) > 0 && (spec.Distribution != nil || spec.ExpressionY != "") {
-		return SQLPlan{}, diagnostic("invalid_metric", "additional outputs require a scalar metric")
+		return SQLPlan{}, diagnostic(ErrorCodeInvalidMetric, "additional outputs require a scalar metric")
 	}
 	for _, output := range extra {
 		// Sampled reducers stay on their own budget-checked statement.
 		if sampledExpression(output.Expression) {
-			return SQLPlan{}, diagnostic("invalid_metric", "sampled summaries cannot share a reduction")
+			return SQLPlan{}, diagnostic(ErrorCodeInvalidMetric, "sampled summaries cannot share a reduction")
 		}
 	}
 	if spec.DateGrouping != nil {
-		return SQLPlan{}, diagnostic("unsupported_date_grouping", "calendar grouping requires the negotiated v3 executor")
-	}
-	if len(spec.Diagnostics) > 0 {
-		return SQLPlan{}, diagnostic("invalid_metric", "metric contains unresolved diagnostics")
+		return SQLPlan{}, diagnostic(ErrorCodeUnsupportedDateGrouping, "calendar grouping requires the negotiated v3 executor")
 	}
 	if spec.Display != nil && spec.Display.Kind == "scatter" && spec.ExpressionY == "" {
-		return SQLPlan{}, diagnostic("paired_expression_required", "scatter requires both X and Y aggregate expressions")
+		return SQLPlan{}, diagnostic(ErrorCodePairedExpressionRequired, "scatter requires both X and Y aggregate expressions")
 	}
 	b, e := newPlanDialect(ctx, s, o, sqlite)
 	if e != nil {
@@ -132,12 +129,12 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 	for _, term := range spec.Where {
 		for _, p := range term.Predicates() {
 			if p.Op == "matches_regex" || p.Op == "not_matches_regex" {
-				return SQLPlan{}, diagnostic("unsupported_regex", "regex is unavailable in metric filters")
+				return SQLPlan{}, diagnostic(ErrorCodeUnsupportedRegex, "regex is unavailable in metric filters")
 			}
 		}
 	}
 	if spec.MinCount.Active() && len(spec.GroupBy) == 0 {
-		return SQLPlan{}, diagnostic("min_count_grouping", "minCount requires at least one grouping field")
+		return SQLPlan{}, diagnostic(ErrorCodeMinCountGrouping, "minCount requires at least one grouping field")
 	}
 	if e = validateMinCountMeasure(spec, s); e != nil {
 		return SQLPlan{}, e
@@ -147,14 +144,14 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 		scope = "allMatching"
 	}
 	if scope != "allMatching" && scope != "shownRows" {
-		return SQLPlan{}, diagnostic("scope", "invalid metric scope")
+		return SQLPlan{}, diagnostic(ErrorCodeScope, "invalid metric scope")
 	}
 	if spec.GroupLimit < 0 || spec.GroupLimit > 10000 || len(spec.Sort) > 20 {
-		return SQLPlan{}, diagnostic("resource_limit", "invalid result limit/sort budget")
+		return SQLPlan{}, diagnostic(ErrorCodeResourceLimit, "invalid result limit/sort budget")
 	}
 	if scope == "shownRows" {
 		if q.Limit <= 0 {
-			return SQLPlan{}, diagnostic("window_required", "shownRows requires a positive limit")
+			return SQLPlan{}, diagnostic(ErrorCodeWindowRequired, "shownRows requires a positive limit")
 		}
 		order, err := b.order(q.OrderBy)
 		if err != nil {
@@ -181,10 +178,10 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 	groups := []ValueSQL{}
 	for _, name := range spec.GroupBy {
 		if strings.HasPrefix(name, "@computed/") && !o.ComputedGroupable[strings.TrimPrefix(name, "@computed/")] {
-			return SQLPlan{}, diagnostic("group_disabled", "computed grouping requires host policy for "+name)
+			return SQLPlan{}, fieldDiagnostic(ErrorCodeGroupDisabled, name, "computed grouping requires host policy for "+name)
 		}
 		if f, ok := s.Fields[name]; ok && !fieldGroupable(f) {
-			return SQLPlan{}, diagnostic("group_disabled", "grouping disabled for "+name)
+			return SQLPlan{}, fieldDiagnostic(ErrorCodeGroupDisabled, name, "grouping disabled for "+name)
 		}
 		v, err := b.field(name)
 		if err != nil {
@@ -229,7 +226,7 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 				return nil
 			}
 			if len(n.args) > 1 || (len(n.args) == 0 && op != "count") {
-				return diagnostic("arity", "aggregate requires one row expression (COUNT also accepts none)")
+				return diagnostic(ErrorCodeArity, "aggregate requires one row expression (COUNT also accepts none)")
 			}
 			raw := "*"
 			errSQL := b.nullError()
@@ -249,10 +246,10 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 				errSQL = v.Error
 				typ = v.Type
 				if (op == "sum" || op == "avg" || op == "median") && typ != "number" && typ != "null" {
-					return diagnostic("type_error", "numeric aggregate requires numeric input")
+					return diagnostic(ErrorCodeTypeError, "numeric aggregate requires numeric input")
 				}
 				if (op == "min" || op == "max") && typ == "bool" {
-					return diagnostic("unsupported_type", "boolean extrema are unsupported")
+					return diagnostic(ErrorCodeUnsupportedType, "boolean extrema are unsupported")
 				}
 			}
 			value := ""
@@ -306,7 +303,7 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 			return nil
 		}
 		if n.op == "field" {
-			return diagnostic("aggregate_context", "row fields must occur inside an aggregate")
+			return diagnostic(ErrorCodeAggregateContext, "row fields must occur inside an aggregate")
 		}
 		for _, a := range n.args {
 			if err := collect(a); err != nil {
@@ -319,7 +316,7 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 		return SQLPlan{}, e
 	}
 	if len(leaves) == 0 {
-		return SQLPlan{}, diagnostic("aggregate_required", "metric must contain an aggregate")
+		return SQLPlan{}, diagnostic(ErrorCodeAggregateRequired, "metric must contain an aggregate")
 	}
 	for _, node := range extraNodes {
 		before := len(leaves)
@@ -327,7 +324,7 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 			return SQLPlan{}, e
 		}
 		if len(leaves) == before {
-			return SQLPlan{}, diagnostic("aggregate_required", "summary must contain an aggregate")
+			return SQLPlan{}, diagnostic(ErrorCodeAggregateRequired, "summary must contain an aggregate")
 		}
 	}
 	if y != nil {
@@ -336,7 +333,7 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 			return SQLPlan{}, e
 		}
 		if len(leaves) == before {
-			return SQLPlan{}, diagnostic("aggregate_required", "paired expression must contain an aggregate")
+			return SQLPlan{}, diagnostic(ErrorCodeAggregateRequired, "paired expression must contain an aggregate")
 		}
 	}
 	// A measured minCount is one more reduction, shared with an identical
@@ -531,7 +528,7 @@ func metricOrder(spec AggSpec, groups int, paired, distribution bool) (string, e
 			valid = valid || s.Key == "group"+strconv.Itoa(i)
 		}
 		if !valid || s.Dir != "asc" && s.Dir != "desc" {
-			return "", diagnostic("metric_sort", "invalid metric sort key or direction")
+			return "", diagnostic(ErrorCodeMetricSort, "invalid metric sort key or direction")
 		}
 		t, e := orderTerm(s.Key, s.Dir, s.Nulls)
 		if e != nil {
@@ -566,7 +563,7 @@ func (b *planBuilder) aggregatePolicy(n *exprNode, op string, seen map[string]bo
 			seen[id] = true
 			c, ok := b.definitions[id]
 			if !ok {
-				return diagnostic("definition_invalid", "unresolved computed dependency")
+				return diagnostic(ErrorCodeDefinitionInvalid, "unresolved computed dependency")
 			}
 			parsed, e := parseExpression(c.Expression.Source)
 			if e != nil {
@@ -576,7 +573,7 @@ func (b *planBuilder) aggregatePolicy(n *exprNode, op string, seen map[string]bo
 		}
 		f, ok := b.schema.Fields[n.text]
 		if !ok {
-			return diagnostic("unknown_field", n.text)
+			return diagnostic(ErrorCodeUnknownField, n.text)
 		}
 		if f.AggregateOps != nil {
 			if (op == "box" || op == "histogram") && len(f.AggregateOps) > 0 {
@@ -587,7 +584,7 @@ func (b *planBuilder) aggregatePolicy(n *exprNode, op string, seen map[string]bo
 				allowed = allowed || a == op
 			}
 			if !allowed {
-				return diagnostic("aggregate_disabled", "aggregate "+op+" disabled for "+n.text)
+				return fieldDiagnostic(ErrorCodeAggregateDisabled, n.text, "aggregate "+op+" disabled for "+n.text)
 			}
 		}
 	}

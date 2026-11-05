@@ -3,7 +3,6 @@ package querytable
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"math"
 	"strconv"
 	"strings"
@@ -62,10 +61,10 @@ func (m *MetricMinCount) UnmarshalJSON(data []byte) error {
 	if len(trimmed) == 0 || trimmed[0] != '{' {
 		var n float64
 		if err := json.Unmarshal(trimmed, &n); err != nil {
-			return fmt.Errorf("minCount must be a number or an object")
+			return diagnosticf(ErrorCodeInvalidMetric, "minCount must be a number or an object")
 		}
 		if n != math.Trunc(n) || math.Abs(n) > float64(MaxMetricMinCount)+1 {
-			return fmt.Errorf("minCount must be an integer between 1 and %d", MaxMetricMinCount)
+			return diagnosticf(ErrorCodeInvalidMetric, "minCount must be an integer between 1 and %d", MaxMetricMinCount)
 		}
 		*m = MetricMinCount{Min: int(n)}
 		return nil
@@ -78,24 +77,24 @@ func (m *MetricMinCount) UnmarshalJSON(data []byte) error {
 	decoder := json.NewDecoder(bytes.NewReader(trimmed))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&object); err != nil {
-		return fmt.Errorf("invalid minCount object: %w", err)
+		return diagnosticf(ErrorCodeInvalidMetric, "invalid minCount object: %v", err)
 	}
 	if object.Min == nil || *object.Min != math.Trunc(*object.Min) || math.Abs(*object.Min) > float64(MaxMetricMinCount)+1 {
-		return fmt.Errorf("minCount min must be an integer between 1 and %d", MaxMetricMinCount)
+		return diagnosticf(ErrorCodeInvalidMetric, "minCount min must be an integer between 1 and %d", MaxMetricMinCount)
 	}
 	if (object.Distinct == nil) == (object.Sum == nil) {
-		return fmt.Errorf("minCount object needs exactly one of distinct and sum")
+		return diagnosticf(ErrorCodeInvalidMetric, "minCount object needs exactly one of distinct and sum")
 	}
 	*m = MetricMinCount{Min: int(*object.Min)}
 	if object.Distinct != nil {
 		m.Distinct = *object.Distinct
 		if m.Distinct == "" {
-			return fmt.Errorf("minCount distinct needs a field")
+			return diagnosticf(ErrorCodeInvalidMetric, "minCount distinct needs a field")
 		}
 	} else {
 		m.Sum = *object.Sum
 		if m.Sum == "" {
-			return fmt.Errorf("minCount sum needs a field")
+			return diagnosticf(ErrorCodeInvalidMetric, "minCount sum needs a field")
 		}
 	}
 	return nil
@@ -104,13 +103,13 @@ func (m *MetricMinCount) UnmarshalJSON(data []byte) error {
 // validate applies the request limits shared with the TypeScript validator.
 func (m MetricMinCount) validate(id string) error {
 	if m.Min < 0 || m.Min > MaxMetricMinCount || (m.Min == 0 && (m.Distinct != "" || m.Sum != "")) {
-		return fmt.Errorf("aggregation %q minCount must be between 1 and %d", id, MaxMetricMinCount)
+		return diagnosticf(ErrorCodeInvalidMetric, "aggregation %q minCount must be between 1 and %d", id, MaxMetricMinCount)
 	}
 	if m.Distinct != "" && m.Sum != "" {
-		return fmt.Errorf("aggregation %q minCount needs exactly one of distinct and sum", id)
+		return diagnosticf(ErrorCodeInvalidMetric, "aggregation %q minCount needs exactly one of distinct and sum", id)
 	}
 	if len(m.Distinct) > maxFieldNameLength || len(m.Sum) > maxFieldNameLength {
-		return fmt.Errorf("invalid minCount field name")
+		return diagnosticf(ErrorCodeInvalidMetric, "invalid minCount field name")
 	}
 	return nil
 }
@@ -132,13 +131,13 @@ func validateMinCountMeasure(spec AggSpec, s Schema) error {
 	}
 	f, ok := s.Fields[name]
 	if !ok || strings.HasPrefix(name, "@computed/") {
-		return diagnostic("min_count_field", "minCount must measure a schema field")
+		return diagnostic(ErrorCodeMinCountField, "minCount must measure a schema field")
 	}
 	if spec.MinCount.Sum != "" && f.Kind != FieldNumber {
-		return diagnostic("type_error", "a summed minCount requires a numeric field")
+		return diagnostic(ErrorCodeTypeError, "a summed minCount requires a numeric field")
 	}
 	if spec.Distribution != nil {
-		return diagnostic("min_count_distribution", "a distinct or summed minCount supports scalar metrics, not distributions")
+		return diagnostic(ErrorCodeMinCountDistribution, "a distinct or summed minCount supports scalar metrics, not distributions")
 	}
 	return nil
 }

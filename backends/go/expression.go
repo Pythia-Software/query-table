@@ -15,15 +15,21 @@ const ServerExpressionProfile = "qt-postgres-v1"
 const MaxExpressionBytes = 10000
 const MaxExpressionNodes = 512
 
-// PlanDiagnostic is a machine-readable capability or validation failure. Offset
-// is a UTF-8 byte offset into canonical source, not a browser UTF-16 position.
+// PlanDiagnostic is a machine-readable capability or validation failure. Code
+// is one of the schema's ErrorCode constants (see docs/errors.md). Offset is a
+// UTF-8 byte offset into canonical source, not a browser UTF-16 position.
 type PlanDiagnostic struct {
-	Code, Message, Field string
-	Offset               int
+	Code           ErrorCode
+	Message, Field string
+	Offset         int
+	// MetricID names the metric a request-level error is about.
+	MetricID string
 }
 
-func (d *PlanDiagnostic) Error() string     { return d.Code + ": " + d.Message }
-func diagnostic(code, message string) error { return &PlanDiagnostic{Code: code, Message: message} }
+func (d *PlanDiagnostic) Error() string { return string(d.Code) + ": " + d.Message }
+func diagnostic(code ErrorCode, message string) error {
+	return &PlanDiagnostic{Code: code, Message: message}
+}
 
 type exprNode struct {
 	op, text string
@@ -44,10 +50,10 @@ func letter(c byte) bool { return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' |
 func digit(c byte) bool  { return c >= '0' && c <= '9' }
 func parseExpression(source string) (*exprNode, error) {
 	if !utf8.ValidString(source) {
-		return nil, diagnostic("encoding", "source must be valid UTF-8")
+		return nil, diagnostic(ErrorCodeEncoding, "source must be valid UTF-8")
 	}
 	if len(source) == 0 || len(source) > MaxExpressionBytes {
-		return nil, diagnostic("source_limit", "expression must contain 1–10000 bytes")
+		return nil, diagnostic(ErrorCodeSourceLimit, "expression must contain 1–10000 bytes")
 	}
 	ts := []exprToken{}
 	for i := 0; i < len(source); {
@@ -78,7 +84,7 @@ func parseExpression(source string) (*exprNode, error) {
 				i++
 			}
 			if !closed {
-				return nil, diagnostic("syntax", "unclosed field reference")
+				return nil, diagnostic(ErrorCodeSyntax, "unclosed field reference")
 			}
 			t.kind = "field"
 			t.text = b.String()
@@ -91,14 +97,14 @@ func parseExpression(source string) (*exprNode, error) {
 				i++
 			}
 			if i >= len(source) {
-				return nil, diagnostic("syntax", "unclosed string")
+				return nil, diagnostic(ErrorCodeSyntax, "unclosed string")
 			}
 			i++
 			if err := json.Unmarshal([]byte(source[start:i]), &t.text); err != nil {
-				return nil, diagnostic("syntax", "invalid JSON string")
+				return nil, diagnostic(ErrorCodeSyntax, "invalid JSON string")
 			}
 			if strings.ContainsRune(t.text, 0) {
-				return nil, diagnostic("unsupported_literal", "PostgreSQL text cannot contain NUL")
+				return nil, diagnostic(ErrorCodeUnsupportedLiteral, "PostgreSQL text cannot contain NUL")
 			}
 			if err := validJSONSurrogates(source[start:i]); err != nil {
 				return nil, err
@@ -134,7 +140,7 @@ func parseExpression(source string) (*exprNode, error) {
 			t.text = strings.ToUpper(source[start:i])
 		default:
 			if !strings.ContainsRune("+-*/=<>!(),", rune(c)) {
-				return nil, diagnostic("unsupported_syntax", fmt.Sprintf("unexpected character at %d", i))
+				return nil, diagnostic(ErrorCodeUnsupportedSyntax, fmt.Sprintf("unexpected character at %d", i))
 			}
 			i++
 			if i < len(source) && ((source[i] == '=' && strings.ContainsRune("<>!", rune(c))) || (c == '<' && source[i] == '>')) {
@@ -145,14 +151,14 @@ func parseExpression(source string) (*exprNode, error) {
 		}
 		ts = append(ts, t)
 		if len(ts) > 2000 {
-			return nil, diagnostic("complexity_limit", "too many tokens")
+			return nil, diagnostic(ErrorCodeComplexityLimit, "too many tokens")
 		}
 	}
 	ts = append(ts, exprToken{kind: "end", pos: len(source)})
 	p := exprParser{tokens: ts}
 	n, e := p.parse(0)
 	if e == nil && p.peek().kind != "end" {
-		e = diagnostic("syntax", "unexpected trailing token")
+		e = diagnostic(ErrorCodeSyntax, "unexpected trailing token")
 	}
 	return n, e
 }
@@ -167,7 +173,7 @@ func (p *exprParser) take() exprToken {
 func (p *exprParser) expect(s string) error {
 	t := p.take()
 	if t.kind != "op" || t.text != s {
-		return diagnostic("syntax", "expected "+s)
+		return diagnostic(ErrorCodeSyntax, "expected "+s)
 	}
 	return nil
 }
@@ -191,7 +197,7 @@ func (p *exprParser) parse(min int) (*exprNode, error) {
 	defer func() { p.depth-- }()
 	p.nodes++
 	if p.depth > 50 || p.nodes > MaxExpressionNodes {
-		return nil, diagnostic("complexity_limit", "expression depth/node budget exceeded")
+		return nil, diagnostic(ErrorCodeComplexityLimit, "expression depth/node budget exceeded")
 	}
 	t := p.take()
 	n := &exprNode{pos: t.pos, text: t.text}
@@ -199,7 +205,7 @@ func (p *exprParser) parse(min int) (*exprNode, error) {
 	case t.kind == "number":
 		v, e := strconv.ParseFloat(t.text, 64)
 		if e != nil || math.IsInf(v, 0) || math.IsNaN(v) {
-			return nil, diagnostic("syntax", "number must be finite")
+			return nil, diagnostic(ErrorCodeSyntax, "number must be finite")
 		}
 		n.op = "literal"
 		n.value = v
@@ -255,7 +261,7 @@ func (p *exprParser) parse(min int) (*exprNode, error) {
 			return nil, e
 		}
 	default:
-		return nil, diagnostic("syntax", "expected value, field or function")
+		return nil, diagnostic(ErrorCodeSyntax, "expected value, field or function")
 	}
 	for (p.peek().kind == "op" || (p.peek().kind == "word" && (p.peek().text == "AND" || p.peek().text == "OR"))) && priority(p.peek().text) >= min {
 		op := p.take()
@@ -265,7 +271,7 @@ func (p *exprParser) parse(min int) (*exprNode, error) {
 		}
 		p.nodes++
 		if p.nodes > MaxExpressionNodes {
-			return nil, diagnostic("complexity_limit", "node budget exceeded")
+			return nil, diagnostic(ErrorCodeComplexityLimit, "node budget exceeded")
 		}
 		n = &exprNode{op: op.text, args: []*exprNode{n, right}, pos: op.pos}
 	}
@@ -285,19 +291,19 @@ func validJSONSurrogates(raw string) error {
 		}
 		v, e := strconv.ParseUint(raw[i+1:i+5], 16, 16)
 		if e != nil {
-			return diagnostic("syntax", "invalid Unicode escape")
+			return diagnostic(ErrorCodeSyntax, "invalid Unicode escape")
 		}
 		i += 4
 		if v >= 0xdc00 && v <= 0xdfff {
-			return diagnostic("unsupported_literal", "unpaired Unicode surrogate")
+			return diagnostic(ErrorCodeUnsupportedLiteral, "unpaired Unicode surrogate")
 		}
 		if v >= 0xd800 && v <= 0xdbff {
 			if i+6 >= len(raw) || raw[i+1] != '\\' || raw[i+2] != 'u' {
-				return diagnostic("unsupported_literal", "unpaired Unicode surrogate")
+				return diagnostic(ErrorCodeUnsupportedLiteral, "unpaired Unicode surrogate")
 			}
 			low, e := strconv.ParseUint(raw[i+3:i+7], 16, 16)
 			if e != nil || low < 0xdc00 || low > 0xdfff {
-				return diagnostic("unsupported_literal", "unpaired Unicode surrogate")
+				return diagnostic(ErrorCodeUnsupportedLiteral, "unpaired Unicode surrogate")
 			}
 			i += 6
 		}

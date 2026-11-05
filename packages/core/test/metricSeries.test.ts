@@ -167,6 +167,22 @@ describe("metric shares", () => {
     expect(a).toEqual([null, 110 / 210, 10 / 10, 50 / 70]);
   });
 
+  it("codes a part the engine omitted", () => {
+    const clause: AggregationClause = { id: "models", op: "sum", field: "input", groupBy: ["model"], share: "total" };
+    const plan = planMetricSeries(query(clause), schema, { now })!;
+    expect(plan.combine([])[0]).toMatchObject({ id: "models", error: "Server omitted this metric.", errorCode: "internal" });
+  });
+
+  it("keeps an engine part's error code", () => {
+    const clause: AggregationClause = { id: "models", op: "sum", field: "input", groupBy: ["model"], share: "total" };
+    const plan = planMetricSeries(query(clause), schema, { now })!;
+    const parts = plan.queries.flatMap((q) => q.aggregations ?? []);
+    const [entry] = plan.combine(parts.map((part, i) => i === 1
+      ? { id: part.id, buckets: [], error: "Too many groups.", errorCode: "resource_limit" as const }
+      : { id: part.id, buckets: [{ keys: ["a"], value: 1, count: 1 }], groupCount: 1, coverage: "exact" as const }));
+    expect(entry).toEqual({ id: "models", buckets: [], error: "Too many groups.", errorCode: "resource_limit" });
+  });
+
   it("divides by the grand total without calendar grouping, keeping legacy operations", () => {
     const clause: AggregationClause = { id: "models", op: "sum", field: "input", groupBy: ["model"], share: "total" };
     const plan = planMetricSeries(query(clause), schema, { now })!;
@@ -261,8 +277,8 @@ describe("planning and the wire", () => {
     const request = toMetricQuery(windowed, schema);
     expect(request.diagnostics.map((d) => d.code)).toContain("unexpanded_series");
     expect(request.metrics[0]).not.toHaveProperty("window");
-    const v3 = toQueryRequestV3(windowed, schema, { version: 3, profile: "test", calendarGrouping: true } as never);
-    expect(v3.diagnostics.join(" ")).toMatch(/planMetricSeries/);
+    expect(() => toQueryRequestV3(windowed, schema, { version: 3, profile: "test", calendarGrouping: true } as never))
+      .toThrow(expect.objectContaining({ code: "unexpanded_series", message: expect.stringMatching(/planMetricSeries/) }));
     const plan = planMetricSeries(windowed, schema, { now })!;
     expect(toMetricQuery(plan.queries[0]!, schema).diagnostics.map((d) => d.code)).not.toContain("unexpanded_series");
   });

@@ -12,6 +12,7 @@ import type { HostQueryState, RowId, WhereTerm, WhereClause, AggOp } from "./que
 import { evaluationTime } from "./relativeTime";
 import { withoutLinkSummaries } from "./groupLinks";
 import { isCalendarGroupKey } from "./groupKeys";
+import { QueryError, type ErrorCode } from "./errors";
 
 import type { QueryCapabilitiesV3, QueryRequestV3, DistinctRequestV3, DistinctResultV3, QueryResultV3, ServerQuery, MetricSpecV3, WireSummaryColumn } from "./wire.generated";
 // The wire types are generated from schema/query-wire.schema.json.
@@ -35,66 +36,93 @@ export function sourceExecutionSchema<Row>(schema: FieldSchema<Row>, execution?:
 }
 const profileUnavailable = (capabilities: QueryCapabilitiesV3, execution: ComputedExecution | undefined) =>
   capabilities.version !== 3 || !!execution && execution.profile !== capabilities.profile;
-/** The negotiated identity every request carries. Pushes envelope issues onto `diagnostics`. */
-function requestEnvelope(capabilities: QueryCapabilitiesV3, execution: ComputedExecution | undefined, now: number, diagnostics: string[]) {
+/** A reason the client will not send a request. */
+interface Refusal { code: ErrorCode; message: string; field?: string; metricId?: string; capability?: keyof QueryCapabilitiesV3 }
+const unsupported = (capability: keyof QueryCapabilitiesV3, message: string, field?: string): Refusal =>
+  ({ code: "capability_unsupported", message, capability, ...(field !== undefined ? { field } : {}) });
+/** Throws the refusals as one QueryError: the first refusal's code and
+ * details, with every distinct message. Nothing is sent. */
+function refuse(refusals: Refusal[]): void {
+  const [first] = refusals;
+  if (!first) return;
+  const { code, message: _message, ...details } = first;
+  throw new QueryError(code, [...new Set(refusals.map(refusal => refusal.message))].join(" "), details);
+}
+/** The negotiated identity every request carries. Pushes envelope issues onto `refusals`. */
+function requestEnvelope(capabilities: QueryCapabilitiesV3, execution: ComputedExecution | undefined, now: number, refusals: Refusal[]) {
   const revisions: Record<string, string> = Object.create(null);
   for (const [id, revision] of Object.entries(execution?.resolvedRevisions ?? {})) {
-    if (!revision || id.length > 256 || revision.length > 256) diagnostics.push("Invalid computed revision envelope.");
+    if (!revision || id.length > 256 || revision.length > 256) refusals.push({ code: "definition_changed", message: "Invalid computed revision envelope." });
     else revisions[id.startsWith("@computed/") ? id.slice(10) : id] = revision;
   }
   return { version: 3 as const, profile: capabilities.profile, now, expectedRevisions: revisions,
     ...(execution?.planToken ? { planToken: execution.planToken } : {}), ...(execution?.snapshot !== undefined ? { snapshot: execution.snapshot } : {}) };
 }
+const profileRefusal: Refusal = { code: "profile_mismatch", message: "The negotiated query profile is unavailable." };
+/** The v3 request for a query. Throws a QueryError, before anything is sent,
+ * when the query needs a capability the server does not advertise or would
+ * leave a filter or sort on the client (see docs/errors.md). */
 export function toQueryRequestV3<Row>(query: QueryState, baseSchema: FieldSchema<Row>, capabilities: QueryCapabilitiesV3,
   execution?: ComputedExecution, options: { now?: number; rows?: boolean } = {}): QueryRequestV3 {
   const now = evaluationTime(options), q = normalizeQueryState(query);
   const sourceSchema = sourceExecutionSchema(baseSchema, execution);
   const source = q.grouping?.source ?? withoutGrouping(q);
-  const diagnostics: string[] = [];
-  if ((query.aggregations?.length ?? 0) !== (q.aggregations?.length ?? 0)) diagnostics.push("The query exceeds its metric budget or contains malformed metric state.");
-  if (profileUnavailable(capabilities, execution)) diagnostics.push("The negotiated query profile is unavailable.");
+  const refusals: Refusal[] = [];
+  if ((query.aggregations?.length ?? 0) !== (q.aggregations?.length ?? 0))
+    refusals.push({ code: "invalid_metric", message: "The query exceeds its metric budget or contains malformed metric state." });
+  if (profileUnavailable(capabilities, execution)) refusals.push(profileRefusal);
   let resultSchema = sourceSchema as FieldSchema<any>;
   if (q.grouping) {
-    if (!capabilities.groupedRows) diagnostics.push("This server does not support grouped rows.");
+    if (!capabilities.groupedRows) refusals.push(unsupported("groupedRows", "This server does not support grouped rows."));
     else if (q.grouping.keys.some(isCalendarGroupKey) && !capabilities.calendarGroupKeys)
-      diagnostics.push("This server does not support grouping keys by calendar interval.");
+      refusals.push(unsupported("calendarGroupKeys", "This server does not support grouping keys by calendar interval."));
+    for (const message of q.grouping.diagnostics ?? []) refusals.push({ code: "grouping", message });
     try { const model = createGroupingModel(sourceSchema); model.validate(q.grouping); resultSchema = model.resultSchema(q.grouping.keys, q.grouping.summaries); }
-    catch (error) { diagnostics.push(error instanceof Error ? error.message : String(error)); }
+    catch (error) { refusals.push({ code: "grouping", message: error instanceof Error ? error.message : String(error) }); }
   }
   const sourceRequest = toServerQuery(withoutGrouping(source), sourceSchema);
   for (const term of source.where) for (const predicate of predicatesOf(term)) if (["matches_regex", "not_matches_regex"].includes(predicate.op) && !capabilities.regexSourceFilters)
-    diagnostics.push("This server profile does not support isolated regex source filtering.");
+    refusals.push(unsupported("regexSourceFilters", "This server profile does not support isolated regex source filtering.", predicate.field));
   const result = toServerQuery(withoutGrouping(q), resultSchema);
-  if (sourceRequest.where.length !== source.where.length || result.where.length !== q.where.length) diagnostics.push("The query contains unsupported source or result predicates.");
-  if (result.orderBy.length !== q.orderBy.length) diagnostics.push("The query contains unsupported result ordering.");
+  if (sourceRequest.where.length !== source.where.length || result.where.length !== q.where.length)
+    refusals.push({ code: "residual_query", message: "The query contains unsupported source or result predicates." });
+  if (result.orderBy.length !== q.orderBy.length) refusals.push({ code: "residual_query", message: "The query contains unsupported result ordering." });
   if (q.grouping) for (const term of q.grouping.source.where) for (const predicate of predicatesOf(term))
-    if (predicate.field.startsWith("@computed/") && !capabilities.computedSourceFilters) diagnostics.push("This server does not support computed source predicates.");
+    if (predicate.field.startsWith("@computed/") && !capabilities.computedSourceFilters)
+      refusals.push(unsupported("computedSourceFilters", "This server does not support computed source predicates.", predicate.field));
   const metricQuery = toMetricQuery(withoutGrouping(q), resultSchema, execution);
   // The projection keeps only pushdown metric-filter terms; never send the
   // narrowed population silently. (Its other diagnostics, such as calendar
   // grouping, describe the v2 transport and do not apply here.)
-  diagnostics.push(...metricQuery.diagnostics.filter(issue => issue.code === "residual_metric_filter" || issue.code === "unexpanded_series").map(issue => issue.message));
+  for (const issue of metricQuery.diagnostics)
+    if (issue.code === "residual_metric_filter" || issue.code === "unexpanded_series")
+      refusals.push({ code: issue.code === "unexpanded_series" ? "unexpanded_series" : "residual_query", message: issue.message, ...(issue.metricId ? { metricId: issue.metricId } : {}) });
+  const metrics: MetricSpecV3[] = [];
   // unsupportedOp marks an operation this client cannot read; its op is a
-  // placeholder, so the metric must never run as that op.
-  for (const metric of metricQuery.metrics) if (metric.unsupportedOp)
-    diagnostics.push(`Metric ${metric.id} uses an unsupported operation: ${metric.unsupportedOp}.`);
-  const metrics: MetricSpecV3[] = metricQuery.metrics.map(({ unsupportedOp: _unsupported, ...metric }) => {
-    const dateGrouping = q.aggregations?.find(clause => clause.id === metric.id)?.dateGrouping;
+  // placeholder, so the metric is refused rather than run as that op. It and
+  // diagnostics are client state and never cross the wire.
+  for (const { unsupportedOp, ...clause } of metricQuery.metrics) {
+    const { diagnostics: _diagnostics, ...projected } = clause;
+    if (unsupportedOp)
+      refusals.push({ code: "invalid_metric", message: `Metric ${projected.id} uses an unsupported operation: ${unsupportedOp}.`, metricId: projected.id });
+    const dateGrouping = q.aggregations?.find(c => c.id === projected.id)?.dateGrouping;
+    for (const issue of validateMetric({ ...clause, ...(dateGrouping ? { dateGrouping } : {}) } as AggregationClause, resultSchema))
+      refusals.push({ code: "invalid_metric", message: issue.message, metricId: projected.id });
+    if (dateGrouping && !capabilities.calendarGrouping)
+      refusals.push({ ...unsupported("calendarGrouping", "This server does not support calendar grouping."), metricId: projected.id });
+    else if (isMetricCycle(dateGrouping?.interval) && !capabilities.calendarCycles)
+      refusals.push({ ...unsupported("calendarCycles", "This server does not support hour-of-day or day-of-week grouping."), metricId: projected.id });
     // The projection keeps only the scatter display hint.
-    return (dateGrouping ? { ...metric, dateGrouping } : metric) as MetricSpecV3;
-  });
-  for (const metric of metrics) {
-    diagnostics.push(...validateMetric(metric as AggregationClause, resultSchema).map(issue => issue.message));
-    if (metric.dateGrouping && !capabilities.calendarGrouping) diagnostics.push("This server does not support calendar grouping.");
-    else if (isMetricCycle(metric.dateGrouping?.interval) && !capabilities.calendarCycles)
-      diagnostics.push("This server does not support hour-of-day or day-of-week grouping.");
+    metrics.push((dateGrouping ? { ...projected, dateGrouping } : projected) as MetricSpecV3);
   }
-  return { ...requestEnvelope(capabilities, execution, now, diagnostics),
+  const envelope = requestEnvelope(capabilities, execution, now, refusals);
+  refuse(refusals);
+  return { ...envelope,
     source: sourceRequest, result, ...(q.grouping ? { grouping: { keys: q.grouping.keys,
       // Summary display is presentation only and link columns are computed on
       // the client; the wire contract is unchanged.
-      summaries: withoutLinkSummaries(q.grouping.summaries).map(({ display: _display, link: _link, ...summary }) => summary as WireSummaryColumn), representative: q.grouping.representative,
-      ...(q.grouping.diagnostics ? { diagnostics: q.grouping.diagnostics } : {}) } } : {}), rows: options.rows !== false, metrics, diagnostics: [...new Set(diagnostics)] };
+      summaries: withoutLinkSummaries(q.grouping.summaries).map(({ display: _display, link: _link, ...summary }) => summary as WireSummaryColumn),
+      representative: q.grouping.representative } } : {}), rows: options.rows !== false, metrics };
 }
 export function validateQueryResultV3(result: QueryResultV3, request: QueryRequestV3, schema: FieldSchema): void {
   if (!result || result.version !== 3 || result.now !== request.now || !Number.isSafeInteger(result.total) || result.total < 0 ||
@@ -130,15 +158,16 @@ export interface AuxiliaryRequestOptions {
 }
 const emptyStage = (where: WhereTerm[] = []): ServerQuery => ({ select: [], where, orderBy: [], limit: 1, offset: 0 });
 function auxiliaryRequest(capabilities: QueryCapabilitiesV3, source: ServerQuery, result: ServerQuery, options: AuxiliaryRequestOptions,
-  part: Pick<QueryRequestV3, "rows" | "metrics"> & { distinct?: DistinctRequestV3 }, diagnostics: string[] = []): QueryRequestV3 {
-  if (profileUnavailable(capabilities, options.execution)) diagnostics.unshift("The negotiated query profile is unavailable.");
+  part: Pick<QueryRequestV3, "rows" | "metrics"> & { distinct?: DistinctRequestV3 }, refusals: Refusal[] = []): QueryRequestV3 {
+  if (profileUnavailable(capabilities, options.execution)) refusals.unshift(profileRefusal);
   // Keys follow the schema's property order, the order Go encodes.
-  return { ...requestEnvelope(capabilities, options.execution, evaluationTime(options), diagnostics),
-    source, result, ...part, diagnostics: [...new Set(diagnostics)],
+  const envelope = requestEnvelope(capabilities, options.execution, evaluationTime(options), refusals);
+  refuse(refusals);
+  return { ...envelope,
+    source, result, ...part,
     ...(options.hostState ? { hostState: options.hostState } : {}) };
 }
 async function execute(transport: Transport, request: QueryRequestV3, signal?: AbortSignal): Promise<QueryResultV3> {
-  if (request.diagnostics.length) throw Error(request.diagnostics.join(" "));
   const result = await transport.fetchQueryV3(request, signal);
   if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
   return result;
@@ -148,10 +177,10 @@ async function execute(transport: Transport, request: QueryRequestV3, signal?: A
  * whole source). */
 export function toDistinctRequestV3(field: string, search: string, capabilities: QueryCapabilitiesV3,
   options: AuxiliaryRequestOptions & { limit?: number; where?: WhereTerm[] } = {}): QueryRequestV3 {
-  const limit = options.limit ?? 50, diagnostics: string[] = [];
-  if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_DISTINCT_LIMIT) diagnostics.push(`Distinct value limit must be between 1 and ${MAX_DISTINCT_LIMIT}.`);
-  if (search.length > MAX_DISTINCT_SEARCH_LENGTH) diagnostics.push("Distinct search exceeds its budget.");
-  return auxiliaryRequest(capabilities, emptyStage(options.where), emptyStage(), options, { rows: false, metrics: [], distinct: { field, search, limit } }, diagnostics);
+  const limit = options.limit ?? 50, refusals: Refusal[] = [];
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_DISTINCT_LIMIT) refusals.push({ code: "invalid_query", message: `Distinct value limit must be between 1 and ${MAX_DISTINCT_LIMIT}.` });
+  if (search.length > MAX_DISTINCT_SEARCH_LENGTH) refusals.push({ code: "invalid_query", message: "Distinct search exceeds its budget." });
+  return auxiliaryRequest(capabilities, emptyStage(options.where), emptyStage(), options, { rows: false, metrics: [], distinct: { field, search, limit } }, refusals);
 }
 export function readDistinctResultV3(result: QueryResultV3, request: QueryRequestV3, schema: FieldSchema): DistinctResultV3 {
   validateQueryResultV3(result, request, schema);
@@ -227,7 +256,6 @@ export function readFieldStatsResultV3(result: QueryResultV3, request: QueryRequ
 export async function fetchFieldStatsV3(transport: Transport, schema: FieldSchema, fields: string[],
   options: AuxiliaryRequestOptions = {}, signal?: AbortSignal): Promise<Record<string, FieldStats>> {
   const all = toFieldStatsRequestV3(schema, fields, transport.queryCapabilities, options);
-  if (all.diagnostics.length) throw Error(all.diagnostics.join(" "));
   const stats = new Map<string, FieldStats>();
   for (let i = 0; i < all.metrics.length; i += MAX_AGGREGATIONS) {
     const request = { ...all, metrics: all.metrics.slice(i, i + MAX_AGGREGATIONS) };

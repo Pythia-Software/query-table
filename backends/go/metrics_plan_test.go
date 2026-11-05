@@ -511,7 +511,7 @@ func TestStageDedupAndNestedRestrictions(t *testing.T) {
 	if _, e := compileTestMetrics(context.Background(), metricRequest{Version: 2, Metrics: []AggSpec{{ID: "m", Expression: "SUM([@computed/a])"}}}, s, o); e == nil {
 		t.Fatal("computed dependency bypassed disabled measure")
 	}
-	for _, spec := range []AggSpec{{ID: "m", Expression: "1+2"}, {ID: "m", Expression: "COUNT()", ExpressionY: "1"}, {ID: "m", Expression: "COUNT()", Display: &MetricDisplayHint{Kind: "scatter"}}, {ID: "m", Expression: "COUNT()", Diagnostics: []string{"invalid"}}} {
+	for _, spec := range []AggSpec{{ID: "m", Expression: "1+2"}, {ID: "m", Expression: "COUNT()", ExpressionY: "1"}, {ID: "m", Expression: "COUNT()", Display: &MetricDisplayHint{Kind: "scatter"}}} {
 		if _, e := compileTestMetrics(context.Background(), metricRequest{Version: 2, Metrics: []AggSpec{spec}}, metricSchema(), metricOptions()); e == nil {
 			t.Fatal("invalid metric accepted", spec)
 		}
@@ -582,5 +582,20 @@ func TestPostgresShownRowsRetainsErrorSidecars(t *testing.T) {
 	rows = executePlan(t, batch.Metrics[0].SQLPlan)
 	if len(rows) != 1 || rows[0]["error"] != "unavailable" {
 		t.Fatal(rows)
+	}
+}
+
+// An invalid resolved definition reports its own message once, not prefixed
+// with its code.
+func TestInvalidComputedDefinitionMessage(t *testing.T) {
+	o := metricOptions()
+	o.ExpectedRevisions = map[string]string{"a": "1"}
+	o.Resolver = DefinitionResolverFunc(func(_ context.Context, id string) (ComputedColumn, error) {
+		return ComputedColumn{ID: id, Label: " ", Revision: "1", Expression: ComputedExpression{"qt-expr", 1, "[x]+1"}}, nil
+	})
+	_, err := compileTestMetrics(context.Background(), metricRequest{Version: 2, Metrics: []AggSpec{{ID: "m", Expression: "SUM([@computed/a])"}}}, metricSchema(), o)
+	var issue *PlanDiagnostic
+	if !errors.As(err, &issue) || issue.Code != ErrorCodeDefinitionInvalid || strings.Contains(issue.Message, "definition_invalid") || issue.Field != "@computed/a" {
+		t.Fatalf("%#v", err)
 	}
 }

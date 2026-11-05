@@ -53,10 +53,10 @@ func (d QueryDatasetV3) checkCalendarStaging(ctx context.Context, tx *sql.Tx, so
 		return err
 	}
 	if count > int64(maxPopulation) {
-		return diagnostic("resource_limit", "calendar population exceeds host budget")
+		return diagnostic(ErrorCodeResourceLimit, "calendar population exceeds host budget")
 	}
 	if bytes > maxBytes {
-		return diagnostic("resource_limit", "calendar staging exceeds host byte budget")
+		return diagnostic(ErrorCodeResourceLimit, "calendar staging exceeds host byte budget")
 	}
 	return nil
 }

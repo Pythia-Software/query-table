@@ -155,7 +155,8 @@ your own markup, or just `@pythia-software/query-table-core` for the wire types 
 
 The v3 query wire is defined once, in [`schema/query-wire.schema.json`](schema/query-wire.schema.json);
 the TypeScript, Go and Swift wire types are generated from it and checked against shared golden
-fixtures. See [the wire protocol guide](docs/wire-protocol.md).
+fixtures. See [the wire protocol guide](docs/wire-protocol.md). Every error, from the server or a client-side
+refusal, carries a stable code from the same schema: see [Error codes](docs/errors.md).
 
 ### Packages
 

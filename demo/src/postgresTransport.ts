@@ -6,6 +6,7 @@ import type {
   QueryResultV3,
   Transport,
 } from "@pythia-software/query-table-core";
+import { queryErrorFromResponse } from "@pythia-software/query-table-core";
 
 export type PostgresRun = Record<string, unknown> & { id: number };
 export interface DemoBootstrap {
@@ -66,9 +67,9 @@ export function createPostgresTransport(
         body: JSON.stringify(body),
         ...(signal ? { signal } : {}),
       });
-      const result = (await response.json()) as Result & { error?: string };
-      if (!response.ok)
-        throw new Error(result.error ?? `HTTP ${response.status}`);
+      // Failures are a QueryErrorBody; the QueryError keeps its code and field.
+      if (!response.ok) throw await queryErrorFromResponse(response);
+      const result = (await response.json()) as Result;
       if (signal?.aborted)
         throw new DOMException("Request aborted", "AbortError");
       const header = (name: string) => Number(response.headers.get(name) ?? 0);

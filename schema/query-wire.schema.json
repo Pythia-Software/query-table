@@ -132,7 +132,6 @@
       "type": "object", "additionalProperties": false, "required": ["id", "op", "groupBy"],
       "properties": {
         "dateGrouping": { "$ref": "#/$defs/MetricDateGrouping" },
-        "diagnostics": { "type": "array", "items": { "type": "string" } },
         "display": { "$ref": "#/$defs/MetricDisplayHint" },
         "expression": { "type": "string", "description": "A formula over aggregates; replaces op/field." },
         "expressionY": { "type": "string", "description": "The scatter y expression." },
@@ -189,8 +188,7 @@
       "properties": {
         "keys": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "$ref": "#/$defs/GroupKey" } },
         "summaries": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/SummaryColumn" } },
-        "representative": { "oneOf": [{ "$ref": "#/$defs/RepresentativeRow" }, { "type": "null" }] },
-        "diagnostics": { "type": "array", "items": { "type": "string" } }
+        "representative": { "oneOf": [{ "$ref": "#/$defs/RepresentativeRow" }, { "type": "null" }] }
       }
     },
     "HostQueryState": {
@@ -237,9 +235,9 @@
       }
     },
     "QueryRequestV3": {
-      "description": "One v3 query: rows, metrics, groups or distinct values. source.where runs before grouping; result selects, filters (HAVING) and pages. Servers refuse a request with diagnostics.",
+      "description": "One v3 query: rows, metrics, groups or distinct values. source.where runs before grouping; result selects, filters (HAVING) and pages.",
       "type": "object", "additionalProperties": false, "x-swift-init": false,
-      "required": ["version", "profile", "expectedRevisions", "now", "source", "result", "rows", "metrics", "diagnostics"],
+      "required": ["version", "profile", "expectedRevisions", "now", "source", "result", "rows", "metrics"],
       "properties": {
         "version": { "const": 3 },
         "profile": { "type": "string" },
@@ -253,7 +251,6 @@
         "rows": { "type": "boolean" },
         "metrics": { "type": "array", "maxItems": 20, "items": { "$ref": "#/$defs/MetricSpec" } },
         "distinct": { "$ref": "#/$defs/DistinctRequestV3", "description": "Filter-value suggestions over source.where; requires rows false, no metrics and no grouping." },
-        "diagnostics": { "type": "array", "items": { "type": "string" } },
         "hostState": { "type": "object", "x-ts-type": "HostQueryState", "x-go-type": "json.RawMessage", "x-swift-type": "[String: JSONValue]", "description": "Host-owned state, passed through uninterpreted: any JSON object. Query Table's TypeScript client sends a HostQueryState ({ version, params }); a host defines what its own clients send." }
       }
     },
@@ -327,6 +324,7 @@
         "groupCount": { "type": "integer", "x-go-repr": "int64", "x-go-omit": "none", "description": "Groups before groupLimit, excluding hidden groups." },
         "coverage": { "type": "string", "enum": ["exact", "partial"] },
         "error": { "type": "string", "description": "The metric could not be computed; siblings are unaffected." },
+        "errorCode": { "$ref": "#/$defs/ErrorCode", "x-ts-type": "ErrorCode | (string & {})", "description": "The machine-readable code of error; present with it. A newer server may send a code this client does not know." },
         "hiddenGroups": { "type": "integer", "x-go-repr": "*int64", "description": "Groups removed by minCount; present whenever it is set." },
         "other": { "$ref": "#/$defs/MetricBucket", "x-go-repr": "*MetricBucket", "description": "The exact omitted additive quantity beyond groupLimit, when an executor computes it." }
       }
@@ -409,6 +407,110 @@
         "limit": { "type": "integer", "minimum": 0, "x-swift-default": "100" },
         "offset": { "type": "integer", "minimum": 0, "maximum": 1000000, "x-swift-default": "0" }
       }
+    },
+    "ErrorCode": {
+      "description": "Every machine-readable error code the server or a client can produce. x-codes gives each code's HTTP status (null: never sent by a server), whether a retry can succeed (yes, no, or refresh: after refreshing the handshake or reloading) and its meaning; docs/errors.md is generated from it. Decoders must accept codes they do not know.",
+      "type": "string",
+      "enum": ["invalid_json", "invalid_request", "method_not_allowed", "forbidden", "not_found", "request_too_large", "conflict", "quota_exceeded", "timeout", "cancelled", "unavailable", "internal", "version", "invalid_query", "profile_mismatch", "definition_changed", "execution_expired", "definition_unavailable", "definition_invalid", "datetime_value", "residual_query", "dataset", "schema", "source_required", "resolver_required", "resolver_scope", "snapshot_transaction_required", "snapshot_validation_required", "plan_token_validation_required", "numeric_domain_required", "unknown_field", "select_required", "filter", "filter_disabled", "sort", "collation_required", "unsupported_regex", "unsupported_literal", "unsupported_type", "invalid_source_value", "numeric_range", "encoding", "identity_required", "duplicate_identity", "scope", "window_required", "syntax", "unsupported_syntax", "unsupported_function", "arity", "type_error", "aggregate_required", "aggregate_context", "aggregate_disabled", "paired_expression_required", "dependency_cycle", "invalid_metric", "duplicate_metric", "metric_sort", "distribution", "date_grouping", "unsupported_date_grouping", "min_count_grouping", "min_count_field", "min_count_distribution", "group_disabled", "grouping", "representative", "resource_limit", "complexity_limit", "dependency_limit", "expansion_limit", "source_limit", "stage_limit", "schema_limit", "capability_unsupported", "unexpanded_series", "invalid", "too_large", "unsupported_version"],
+      "x-codes": {
+        "invalid_json": { "status": 400, "retry": "no", "description": "The request body is not one well-formed JSON value." },
+        "invalid_request": { "status": 400, "retry": "no", "description": "The request is malformed outside the query itself: a missing or invalid dataset or code parameter, or an invalid stored body." },
+        "method_not_allowed": { "status": 405, "retry": "no", "description": "The endpoint does not support the HTTP method; the Allow header lists the ones it does." },
+        "forbidden": { "status": 403, "retry": "no", "description": "The host's authorization callback refused the request, or none is configured." },
+        "not_found": { "status": 404, "retry": "no", "description": "The requested stored object (such as a query snapshot code) does not exist in the caller's scope." },
+        "request_too_large": { "status": 413, "retry": "no", "description": "The request body exceeds the endpoint's byte budget." },
+        "conflict": { "status": 409, "retry": "refresh", "description": "A write conflicts with stored state: a computed definition changed since it was loaded, or a snapshot code already identifies different state." },
+        "quota_exceeded": { "status": 507, "retry": "no", "description": "The host's storage quota refused a write." },
+        "timeout": { "status": 504, "retry": "yes", "description": "The query exceeded the server's time budget." },
+        "cancelled": { "status": 408, "retry": "yes", "description": "The request was cancelled before it completed, usually because the client went away." },
+        "unavailable": { "status": 503, "retry": "yes", "description": "The server cannot answer right now, for example while a data snapshot is refreshed." },
+        "internal": { "status": 500, "retry": "yes", "description": "An unexpected server failure. The message is generic; details stay in server logs." },
+        "version": { "status": 400, "retry": "no", "description": "The request is not a version 3 query." },
+        "invalid_query": { "status": 400, "retry": "no", "description": "A query stage, metric list or distinct request is malformed: an unknown property, a wrong shape, or an out-of-range limit, offset, list length or name." },
+        "profile_mismatch": { "status": 409, "retry": "refresh", "description": "The request's profile is not the server's profile; refresh the capabilities handshake." },
+        "definition_changed": { "status": 409, "retry": "refresh", "description": "A computed definition's revision differs from expectedRevisions, or the revision envelope is invalid; refresh the execution handshake." },
+        "execution_expired": { "status": 409, "retry": "refresh", "description": "The host rejected the request's data snapshot or plan token, such as an expired or another session's; refresh the execution handshake." },
+        "definition_unavailable": { "status": 400, "retry": "no", "description": "A referenced computed definition is missing or not accessible to the caller." },
+        "definition_invalid": { "status": 400, "retry": "no", "description": "A computed definition does not compile." },
+        "datetime_value": { "status": 400, "retry": "no", "description": "A datetime value or the evaluation clock is invalid or outside the supported range." },
+        "residual_query": { "status": 400, "retry": "no", "description": "Part of the query cannot run on the server (a client-only filter or sort); refusing is safer than answering a different question." },
+        "dataset": { "status": 500, "retry": "no", "description": "The host's dataset configuration is invalid for this request." },
+        "schema": { "status": 500, "retry": "no", "description": "The host schema is invalid, for example an empty binding or a reserved field name." },
+        "source_required": { "status": 500, "retry": "no", "description": "The host did not configure a source relation." },
+        "resolver_required": { "status": 500, "retry": "no", "description": "Computed fields are referenced but the host configured no definition resolver." },
+        "resolver_scope": { "status": 500, "retry": "no", "description": "The computed definition resolver is not bound to the request's scope and dataset." },
+        "snapshot_transaction_required": { "status": 500, "retry": "no", "description": "A snapshot-bound request needs a read-only snapshot transaction from the host." },
+        "snapshot_validation_required": { "status": 500, "retry": "no", "description": "A snapshot-bound request needs a host snapshot validator." },
+        "plan_token_validation_required": { "status": 500, "retry": "no", "description": "A request with a plan token needs a host plan-token validator." },
+        "numeric_domain_required": { "status": 500, "retry": "no", "description": "A numeric SQL binding did not opt into the bounded arithmetic profile." },
+        "unknown_field": { "status": 400, "retry": "no", "description": "A field is not in the schema allowlist." },
+        "select_required": { "status": 400, "retry": "no", "description": "The request selects no field where at least one is required." },
+        "filter": { "status": 400, "retry": "no", "description": "A filter is invalid for its field: operator, value or shape." },
+        "filter_disabled": { "status": 400, "retry": "no", "description": "The field is not server-filterable (for a computed field: not in the host's filter allowlist)." },
+        "sort": { "status": 400, "retry": "no", "description": "A sort term is invalid, or the field is not server-sortable." },
+        "collation_required": { "status": 400, "retry": "no", "description": "Text ordering needs a collation this profile does not provide." },
+        "unsupported_regex": { "status": 400, "retry": "no", "description": "Regex filtering or sorting is outside this server profile." },
+        "unsupported_literal": { "status": 400, "retry": "no", "description": "A text value cannot be represented (for example NUL or an unpaired surrogate)." },
+        "unsupported_type": { "status": 400, "retry": "no", "description": "The value type does not support the operation (for example boolean extrema or arrays in expressions)." },
+        "invalid_source_value": { "status": 400, "retry": "no", "description": "A stored source value does not match its declared type." },
+        "numeric_range": { "status": 400, "retry": "no", "description": "A numeric literal is outside the range the profile computes exactly." },
+        "encoding": { "status": 400, "retry": "no", "description": "Text is not valid UTF-8." },
+        "identity_required": { "status": 400, "retry": "no", "description": "The operation needs a stable identity field." },
+        "duplicate_identity": { "status": 400, "retry": "no", "description": "Representative rows need unique non-null source identities within every group." },
+        "scope": { "status": 400, "retry": "no", "description": "A metric scope is invalid." },
+        "window_required": { "status": 400, "retry": "no", "description": "A shownRows metric needs a positive page limit." },
+        "syntax": { "status": 400, "retry": "no", "description": "An expression does not parse; the message says where." },
+        "unsupported_syntax": { "status": 400, "retry": "no", "description": "An expression uses syntax this server does not execute." },
+        "unsupported_function": { "status": 400, "retry": "no", "description": "An expression calls a function this server does not execute." },
+        "arity": { "status": 400, "retry": "no", "description": "A function is called with the wrong number of arguments." },
+        "type_error": { "status": 400, "retry": "no", "description": "An expression combines values of incompatible types." },
+        "aggregate_required": { "status": 400, "retry": "no", "description": "A metric expression needs an aggregate around a field." },
+        "aggregate_context": { "status": 400, "retry": "no", "description": "A row field or aggregate appears where it is not allowed, such as a bare field outside an aggregate." },
+        "aggregate_disabled": { "status": 400, "retry": "no", "description": "The field does not allow that aggregate." },
+        "paired_expression_required": { "status": 400, "retry": "no", "description": "A scatter metric needs both expression and expressionY." },
+        "dependency_cycle": { "status": 400, "retry": "no", "description": "Computed definitions depend on each other in a cycle." },
+        "invalid_metric": { "status": 400, "retry": "no", "description": "A metric is malformed: a missing or invalid field, an unknown op or malformed state." },
+        "duplicate_metric": { "status": 400, "retry": "no", "description": "Two metrics share an id." },
+        "metric_sort": { "status": 400, "retry": "no", "description": "A metric sort key is invalid for the metric." },
+        "distribution": { "status": 400, "retry": "no", "description": "A box or histogram distribution is invalid for its input." },
+        "date_grouping": { "status": 400, "retry": "no", "description": "A metric's calendar grouping is invalid: interval, zone, range or field type." },
+        "unsupported_date_grouping": { "status": 400, "retry": "no", "description": "Calendar grouping is unavailable on this execution path." },
+        "min_count_grouping": { "status": 400, "retry": "no", "description": "minCount needs a grouped metric." },
+        "min_count_field": { "status": 400, "retry": "no", "description": "minCount's distinct or sum field is invalid." },
+        "min_count_distribution": { "status": 400, "retry": "no", "description": "minCount cannot be combined with a distribution." },
+        "group_disabled": { "status": 400, "retry": "no", "description": "The field cannot be a group key (for a computed field: not in the host's grouping allowlist)." },
+        "grouping": { "status": 400, "retry": "no", "description": "A grouping definition is invalid: keys, summaries or a calendar key." },
+        "representative": { "status": 400, "retry": "no", "description": "The representative-row ordering of a grouping is invalid." },
+        "resource_limit": { "status": 422, "retry": "no", "description": "The request is well formed but exceeds a host budget: rows, groups, population, samples or work." },
+        "complexity_limit": { "status": 422, "retry": "no", "description": "An expression exceeds the complexity budget." },
+        "dependency_limit": { "status": 422, "retry": "no", "description": "Computed definitions or the revision envelope exceed the dependency budget." },
+        "expansion_limit": { "status": 422, "retry": "no", "description": "An expanded computed expression exceeds its size budget." },
+        "source_limit": { "status": 422, "retry": "no", "description": "An expression's source text is empty or exceeds its byte budget." },
+        "stage_limit": { "status": 422, "retry": "no", "description": "The query needs more SQL stages than the budget allows." },
+        "schema_limit": { "status": 422, "retry": "no", "description": "The projected schema exceeds its field budget." },
+        "capability_unsupported": { "status": null, "retry": "no", "description": "Client only: the query needs a capability the server's handshake does not advertise (grouped rows, calendar grouping, regex source filters, ...). The request is not sent." },
+        "unexpanded_series": { "status": null, "retry": "no", "description": "Client only: a windowed or share metric must be expanded with planMetricSeries before it is sent." },
+        "invalid": { "status": null, "retry": "no", "description": "Query link: the encoded query state is malformed (TypeScript QueryDecodeError, Go QueryLinkError)." },
+        "too_large": { "status": null, "retry": "no", "description": "Query link: the encoded query state exceeds its size budget." },
+        "unsupported_version": { "status": null, "retry": "no", "description": "Query link: the encoded query state has a version this build cannot read." }
+      }
+    },
+    "QueryError": {
+      "x-ts-name": "QueryErrorDetail", "x-go-name": "QueryErrorDetail", "x-swift-name": "QueryErrorDetail",
+      "description": "One machine-readable error.",
+      "type": "object", "required": ["code", "message"],
+      "properties": {
+        "code": { "$ref": "#/$defs/ErrorCode", "x-ts-type": "ErrorCode | (string & {})", "description": "A newer server may send a code this client does not know; narrow with isErrorCode." },
+        "message": { "type": "string", "description": "Human-readable; not stable." },
+        "field": { "type": "string", "description": "The field the error is about, when there is one." },
+        "offset": { "type": "integer", "description": "Where in the expression source the problem starts, when a server or client reports it (UTF-16 code units in TypeScript). The Go server does not set it yet." },
+        "metricId": { "type": "string", "description": "The metric the error is about, when there is one." }
+      }
+    },
+    "QueryErrorBody": {
+      "description": "The JSON body of every non-2xx response from the query, computed-columns and query-snapshots handlers (Content-Type: application/json).",
+      "type": "object", "required": ["error"],
+      "properties": { "error": { "$ref": "#/$defs/QueryError" } }
     }
   }
 }

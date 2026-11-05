@@ -61,7 +61,7 @@ func utf16Length(value string) int {
 
 func validateComputed(c ComputedColumn) error {
 	if !computedID.MatchString(c.ID) || strings.TrimSpace(c.Label) == "" || utf16Length(c.Label) > 200 || c.Expression.Language != "qt-expr" || c.Expression.Version != 1 || strings.TrimSpace(c.Expression.Source) == "" || utf16Length(c.Expression.Source) > 10000 {
-		return errors.New("invalid computed column definition")
+		return &PlanDiagnostic{Code: ErrorCodeDefinitionInvalid, Message: "invalid computed column definition", Field: "@computed/" + c.ID}
 	}
 	return nil
 }
@@ -126,27 +126,27 @@ func NewComputedColumnsHandler(repo ComputedColumnRepository, authorize func(*ht
 		w.Header().Set("Cache-Control", "no-store")
 		if r.Method != http.MethodGet && r.Method != http.MethodPut {
 			w.Header().Set("Allow", "GET, PUT")
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			writeErrorCode(w, ErrorCodeMethodNotAllowed, "method not allowed")
 			return
 		}
 		dataset := r.URL.Query().Get("dataset")
 		if strings.TrimSpace(dataset) == "" || len(dataset) > 256 {
-			http.Error(w, "invalid dataset", http.StatusBadRequest)
+			writeErrorCode(w, ErrorCodeInvalidRequest, "invalid dataset")
 			return
 		}
 		if authorize == nil || repo == nil {
-			http.Error(w, "forbidden", http.StatusForbidden)
+			writeErrorCode(w, ErrorCodeForbidden, "forbidden")
 			return
 		}
 		scope, err := authorize(r, dataset, r.Method == http.MethodPut)
 		if err != nil || scope == "" {
-			http.Error(w, "forbidden", http.StatusForbidden)
+			writeErrorCode(w, ErrorCodeForbidden, "forbidden")
 			return
 		}
 		if r.Method == http.MethodGet {
 			columns, err := repo.List(r.Context(), scope, dataset)
 			if err != nil {
-				http.Error(w, "could not load definitions", http.StatusInternalServerError)
+				writeErrorCode(w, ErrorCodeInternal, "could not load definitions")
 				return
 			}
 			if columns == nil {
@@ -160,29 +160,29 @@ func NewComputedColumnsHandler(repo ComputedColumnRepository, authorize func(*ht
 		decoder := json.NewDecoder(r.Body)
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&request); err != nil {
-			http.Error(w, "invalid request", http.StatusBadRequest)
+			WriteQueryError(w, decodeError(err, ErrorCodeInvalidRequest))
 			return
 		}
 		if err := decoder.Decode(new(any)); err != io.EOF {
-			http.Error(w, "invalid request", http.StatusBadRequest)
+			WriteQueryError(w, trailingError(err))
 			return
 		}
 		if err := validateComputed(request.Column); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			WriteQueryError(w, err)
 			return
 		}
 		column, err := repo.Save(r.Context(), scope, dataset, request)
 		if errors.Is(err, ErrComputedConflict) {
-			http.Error(w, err.Error(), http.StatusConflict)
+			writeErrorCode(w, ErrorCodeConflict, err.Error())
 			return
 		}
 		var invalid *PlanDiagnostic
 		if errors.As(err, &invalid) {
-			http.Error(w, invalid.Error(), http.StatusBadRequest)
+			WriteQueryError(w, invalid)
 			return
 		}
 		if err != nil {
-			http.Error(w, "could not save definition", http.StatusInternalServerError)
+			writeErrorCode(w, ErrorCodeInternal, "could not save definition")
 			return
 		}
 		_ = json.NewEncoder(w).Encode(column)

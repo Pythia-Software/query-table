@@ -45,6 +45,5 @@
     "representative": null
   },
   "rows": true,
-  "metrics": [],
-  "diagnostics": []
+  "metrics": []
 }
