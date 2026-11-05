@@ -42,8 +42,9 @@ export function FilterValueAutocomplete<Row>({ api, field, value, contextKey, cl
   useEffect(() => {
     if (!open || loaded) return;
     let cancelled = false;
+    const ac = new AbortController();
     const timer = setTimeout(() => {
-      void Promise.resolve().then(() => fetchValues(field.name, value)).then(
+      void Promise.resolve().then(() => fetchValues(field.name, value, ac.signal)).then(
         result => {
           if (cancelled) return;
           setResponse({ key: requestKey, fetchValues, result });
@@ -52,7 +53,7 @@ export function FilterValueAutocomplete<Row>({ api, field, value, contextKey, cl
         () => { if (!cancelled) setResponse({ key: requestKey, fetchValues, failed: true }); },
       );
     }, 200);
-    return () => { cancelled = true; clearTimeout(timer); };
+    return () => { cancelled = true; clearTimeout(timer); ac.abort(); };
   }, [open, loaded, fetchValues, requestKey, scopeKey, field.name, value]);
 
   useEffect(() => {

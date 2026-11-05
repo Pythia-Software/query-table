@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { FieldSchema, Transport } from "@pythia-software/query-table-core";
 import { useQueryTable, type QueryTableApi } from "../src/useQueryTable";
+import { distinctRequests, memoryV3Transport } from "./v3Transport";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -128,23 +129,23 @@ describe("useQueryTable filter values", () => {
     });
   });
 
-  it("uses local arrays when the transport has no distinct-value lookup", async () => {
-    const result = renderQueryTable([{ id: 1, tags: ["local"] }], {
-      fetchRows: async () => ({ rows: [], total: 0 }),
-    });
-    await expect(result.current.filterValues("tags", "")).resolves.toEqual({
-      values: ["local"], hasMore: false, hasNull: false,
-    });
+  it("delegates suggestions to the transport as a v3 distinct request with its signal", async () => {
+    const transport = memoryV3Transport<Row>([{ id: 1, tags: ["remote", "other"] }, { id: 2, tags: ["remote"] }, { id: 3, tags: [] }], schema);
+    const result = renderQueryTable([{ id: 1, tags: ["local"] }], transport);
+    const controller = new AbortController();
+    await expect(result.current.filterValues("tags", "REM", controller.signal)).resolves.toEqual({ values: ["remote"], hasMore: false, hasNull: true });
+    const [request, signal] = transport.fetchQueryV3.mock.calls.find(([request]) => request.distinct)!;
+    expect(request).toMatchObject({ rows: false, metrics: [], source: { where: [] }, distinct: { field: "tags", search: "REM", limit: 50 } });
+    expect(request).not.toHaveProperty("grouping");
+    expect(signal).toBe(controller.signal);
+    controller.abort();
+    await expect(result.current.filterValues("tags", "", controller.signal)).rejects.toThrow("Aborted");
   });
 
-  it("still delegates suggestions to an available transport", async () => {
-    const response = { values: ["remote"], hasMore: true, hasNull: true };
-    const fetchDistinctValues = vi.fn(async () => response);
-    const result = renderQueryTable([{ id: 1, tags: ["local"] }], {
-      fetchRows: async () => ({ rows: [], total: 0 }),
-      fetchDistinctValues,
-    });
-    await expect(result.current.filterValues("tags", "rem")).resolves.toEqual(response);
-    expect(fetchDistinctValues).toHaveBeenCalledWith({ field: "tags", search: "rem" });
+  it("offers no remote suggestions for a field the server cannot filter", async () => {
+    const transport = memoryV3Transport<Row>([{ id: 1, tags: ["remote"] }], schema);
+    const result = renderQueryTable([], transport);
+    await expect(result.current.filterValues("derivedTags", "")).resolves.toEqual({ values: [], hasMore: false });
+    expect(distinctRequests(transport)).toEqual([]);
   });
 });

@@ -124,7 +124,7 @@ func TestPostgresMetricPopulationFixture(t *testing.T) {
 				limit = 100
 			}
 			q := qt.QueryRequestV3{Version: 3, Profile: qt.ServerExpressionProfile, Now: now.UnixMilli(), Metrics: []qt.AggSpec{c.Metric},
-				Source: qt.WireQuery{Limit: 100}, Result: qt.WireQuery{Where: c.Where, OrderBy: qt.OrderBys(c.OrderBy), Limit: limit}}
+				Source: qt.WireQuery{Limit: 100}, Result: qt.WireQuery{Where: c.Where, OrderBy: c.OrderBy, Limit: limit}}
 			if c.Grouping != nil {
 				q.Grouping = c.Grouping
 				q.Source.Where, q.Result.Where = c.Where, nil
@@ -144,72 +144,5 @@ func TestPostgresMetricPopulationFixture(t *testing.T) {
 				t.Fatalf("got  %v\nwant %v", got, c.Expected)
 			}
 		})
-	}
-}
-
-// The optional single-statement batch decodes buckets from JSONB and reads
-// hidden_groups from the envelope, including when every group is hidden.
-func TestPostgresCombinedMetricPopulation(t *testing.T) {
-	db, d, f, now := setupPopulation(t)
-	q := qt.MetricQuery{Version: 2, Limit: 100}
-	cases := []populationCase{}
-	for _, c := range f.Cases {
-		// Combined batches share one table window; keep the unwindowed cases.
-		if c.Grouping != nil || c.Metric.DateGrouping != nil || c.Expected["error"] == true || len(c.Where) > 0 || c.Limit > 0 {
-			continue
-		}
-		spec := c.Metric
-		spec.ID = c.Name
-		q.Metrics = append(q.Metrics, spec)
-		cases = append(cases, c)
-	}
-	plan, err := qt.CompileCombinedMetrics(context.Background(), q, d.Schema, qt.PlanOptions{SourceSQL: d.SourceSQL, Now: now})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rows, err := db.Query(plan.SQL, plan.Args...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	seen := 0
-	for rows.Next() {
-		var index, groups, hidden int64
-		var raw []byte
-		if err = rows.Scan(&index, &raw, &groups, &hidden); err != nil {
-			t.Fatal(err)
-		}
-		c := cases[index]
-		var buckets []map[string]any
-		if err = json.Unmarshal(raw, &buckets); err != nil {
-			t.Fatal(err)
-		}
-		metric := map[string]any{"groupCount": groups, "buckets": []any{}}
-		if c.Metric.MinCount.Active() {
-			metric["hiddenGroups"] = hidden
-		} else if hidden != 0 {
-			t.Fatalf("%s: hidden_groups without minCount", c.Name)
-		}
-		for _, b := range buckets {
-			keys := []any{}
-			for i := range c.Metric.GroupBy {
-				keys = append(keys, b["group"+string(rune('0'+i))])
-			}
-			bucket := map[string]any{"keys": keys, "count": b["count"], "value": b["value"]}
-			if dist, ok := b["distribution"]; ok {
-				bucket["distribution"] = dist
-			}
-			metric["buckets"] = append(metric["buckets"].([]any), bucket)
-		}
-		if got := projectPopulation(t, metric, c.Expected); !reflect.DeepEqual(got, c.Expected) {
-			t.Fatalf("%s:\ngot  %v\nwant %v", c.Name, got, c.Expected)
-		}
-		seen++
-	}
-	if err = rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	if seen != len(cases) || seen < 5 {
-		t.Fatalf("decoded %d of %d envelopes", seen, len(cases))
 	}
 }

@@ -11,8 +11,6 @@ import {
   metricComputationKey,
   metricPopulationError,
   normalizeQueryState,
-  toAggregationQuery,
-  toMetricQuery,
   toQueryRequestV3,
   validateMetric,
   type AggregationClause,
@@ -21,6 +19,7 @@ import {
   type QueryCapabilitiesV3,
   type QueryState,
 } from "../src/index";
+import { toMetricQuery } from "../src/metrics";
 
 type Row = Record<string, unknown>;
 interface ExpectedBucket {
@@ -145,7 +144,7 @@ describe("metric population semantics", () => {
     expect(metricPopulationError({ minCount: 2 }, { filters: true })).toMatch(/minimum rows/);
     expect(metricPopulationError({ where: [], minCount: 2 }, { minCount: true })).toBeUndefined();
   });
-  it("sends where and minCount to v2 servers and refuses residual filters", () => {
+  it("sends where and minCount to servers and refuses residual filters", () => {
     const remote: FieldSchema<Row> = {
       ...schema,
       fields: [...schema.fields, { name: "note", label: "Note", type: "text", source: { kind: "derived", dependencies: [] }, filter: { enabled: true } }],
@@ -159,8 +158,6 @@ describe("metric population semantics", () => {
     expect(ok.metrics[0]!.where![0]).not.toHaveProperty("setFilter");
     const residual = toMetricQuery({ ...EMPTY_QUERY, aggregations: [{ ...base, where: [{ field: "note", op: "=", value: "x" }] }] }, remote);
     expect(residual.diagnostics.map((d) => d.code)).toContain("residual_metric_filter");
-    expect(() => toAggregationQuery({ ...EMPTY_QUERY, aggregations: [{ ...base, minCount: 2 }] }, schema)).toThrow(/version 2/);
-    expect(() => toAggregationQuery({ ...EMPTY_QUERY, aggregations: [{ ...base, where: [{ field: "kind", op: "=", value: "x" }] }] }, schema)).toThrow(/version 2/);
   });
 });
 

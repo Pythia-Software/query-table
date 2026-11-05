@@ -66,19 +66,22 @@ documents are ignored by the frontend.
 
 ## Connect a backend
 
-Implement `QueryTransport.fetchRows(query:)`; autocomplete and metrics methods
-have default unsupported implementations. Methods are asynchronous and should
-cooperate with task cancellation. The controller also rejects stale responses.
+The transport speaks the v3 query protocol only. Implement
+`QueryTransport.queryCapabilities` (the server handshake) and
+`fetchQueryV3(_:)`, which receives one `QueryRequestV3` and returns a
+`QueryResultV3`. Rows, metrics and filter autocomplete are sections of the same
+request: `rows: true` asks for the page, `metrics` lists aggregation clauses, and
+`distinct` asks for autocomplete values. Requests are asynchronous and should
+cooperate with task cancellation. The controller also rejects stale responses and
+validates every response against its request with `QueryResultV3.validate(for:schema:)`.
 
-For JSON HTTP services, use the included adapter with explicit routes:
+For JSON HTTP services, such as the Go `NewQueryV3Handler`, use the included
+adapter with one endpoint and the server's capabilities:
 
 ```swift
 let transport = HTTPQueryTransport(
-    endpoints: .init(
-        rows: URL(string: "https://example.com/api/runs/query")!,
-        distinctValues: URL(string: "https://example.com/api/runs/values")!,
-        aggregations: URL(string: "https://example.com/api/runs/metrics")!
-    ),
+    endpoint: URL(string: "https://example.com/api/runs/query")!,
+    capabilities: capabilities, // QueryCapabilitiesV3 from your handshake
     prepareRequest: { request in
         var request = request
         // Supply your application's authentication here.
@@ -88,23 +91,34 @@ let transport = HTTPQueryTransport(
 )
 ```
 
-These URLs are examples, not prescribed query-table routes. The HTTP adapter
-POSTs readable JSON to each route. Implement a custom transport for other HTTP
-methods, response envelopes, RPC, or direct local data access.
+The URL is an example, not a prescribed route. The adapter POSTs readable
+`QueryRequestV3` JSON, decodes `QueryResultV3`, and rejects a response whose
+version, clock, profile, plan token or snapshot does not match the request, whose
+totals are negative, or whose row identities repeat. Implement a custom transport
+for other envelopes, RPC, or direct local data access;
+`QueryResultV3(answering:schema:rows:total:metrics:distinct:)` builds a response
+that echoes a request's envelope.
 
-| Method | Request | Response |
+| Section | Request | Response |
 | --- | --- | --- |
-| Rows | `{select, where, orderBy, limit, offset}` | `{rows, total}` |
-| Suggestions | `{field, search, limit?}` | `{values, hasMore, hasNull?}` |
-| Metrics | `{where, aggregations}` | `{metrics: [{id, buckets: [{keys, value, count}]}]}` |
+| Rows | `rows: true`, `source`/`result` `{select, where, orderBy, limit, offset}` | `rows`, `total`, projected `schema` |
+| Metrics | `rows: false`, `metrics: [{id, op, field?, groupBy}]` | `metrics: [{id, buckets: [{keys, value, count}]}]` |
+| Autocomplete | `rows: false`, `metrics: []`, `distinct: {field, search, limit}` | `distinct: {values, hasMore, hasNull}` |
 
-`total` is the matching count before paging. Row projection always includes the
-stable ID and inputs required by computed columns. Metrics run independently of
-rows over the full filtered dataset. Authorization, database validation, enforced
-filters, and operational query limits remain the backend's responsibility.
+Every request carries `version: 3`, the negotiated `profile`, `now` (the
+evaluation clock for relative datetimes, in epoch milliseconds),
+`expectedRevisions` and `diagnostics`. The native client does not group rows, so
+`source` and `result` are the same stage. `QueryState.queryRequestV3(schema:capabilities:)`
+builds the request the way the TypeScript `toQueryRequestV3` does; query state the
+server cannot run, such as a sort on a derived column, is reported in
+`diagnostics` and refused before it is sent. Row refresh
+(`QueryTableController.fetchRow(id:)`) is a rows request filtered by the
+identity field. `total` is the matching count before paging. Metrics run over the
+full filtered dataset. Authorization, database validation, enforced filters, and
+operational query limits remain the backend's responsibility.
 
-`LocalQueryTransport(schema:rows:)` provides immutable in-memory rows for demos
-and small datasets. It handles filters, sorting, pagination, suggestions, and
+`LocalQueryTransport(schema:rows:)` executes v3 requests over immutable in-memory
+rows for demos and small datasets: filters, sorting, pagination, autocomplete and
 metrics. It is not a database adapter.
 
 ## Saved queries and computed columns
@@ -179,6 +193,10 @@ npm ci --ignore-scripts
 node native/macos/scripts/build-formula-runtime.mjs
 node native/macos/scripts/check-wire-compatibility.mjs
 ```
+
+The wire check compares the Swift `QueryRequestV3` encoding with the TypeScript
+`toQueryRequestV3` output and checks the keys the Go decoder accepts. Build
+`QueryTableChecks` first.
 
 The generated runtime is committed so Swift consumers do not need Node. The root
 and native package manifests expose the same targets; the root manifest adds

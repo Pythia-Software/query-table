@@ -1,10 +1,12 @@
 # SQLite + Go integration
 
-For grouped result rows, calendar/timezone metrics, canonical source predicates
-and narrow source dependency plans, use the opt-in `QueryDatasetV3` executor.
-The existing v1/v2 APIs below remain compatible. See the
+`QueryDatasetV3{Dialect: "sqlite"}` executes every v3 request over SQLite:
+rows, totals, grouped result rows, metrics (including calendar/timezone
+metrics) and distinct filter values. See the
 [next-release host integration guide](host-integration-next-release.md) for the
-versioned transport, transaction/budget contract and migration examples.
+transport, transaction/budget contract and migration examples. The v1/v2 SQLite
+datasets, compilers and request types were removed in this release; their
+features are served by `QueryRequestV3` as described below.
 
 The dependency-free `github.com/Pythia-Software/query-table/backends/go` module
 supports SQLite 3.38+ with JSON functions. The application supplies the driver,
@@ -14,31 +16,28 @@ other drivers can register the same function descriptors.
 
 ## Supported boundary
 
-- Readable and compact v1 row queries, AND/OR predicates, null-exclusive negation,
+- AND/OR predicates (including OR-of-AND branches), null-exclusive negation,
   scalar comparisons, literal substring/prefix/suffix matching, Unicode code-point
   length, Go/RE2 regex filtering and capture-group sorting.
 - JSON text-array membership, exact or case-insensitive, including ANY/ALL/NONE/
   EMPTY compositions from the existing set-filter editor.
 - Multi-column sorting, explicit NULL ordering, schema defaults, and stable ID ties.
-- Count + page, autocomplete with `hasMore`/`hasNull`, scalar field statistics,
-  and six basic aggregates: count, count_distinct, sum, avg, min, max.
+- Count + page, grouped result rows, distinct-value autocomplete with
+  `hasMore`/`hasNull`, and field statistics expressed as ordinary metrics.
 - Scoped computed-definition persistence with atomic revision checks.
-- A distinct `qt-sqlite-v1` v2 expression profile: composed aggregate formulas,
-  paired X/Y metrics, all-matching and shown-row scopes, computed SELECT/ORDER BY,
-  final group sorting and top-N, exact MEDIAN, box plots/histograms, and
-  transaction-based execution.
+- The `qt-sqlite-v1` expression profile: composed aggregate formulas, paired
+  X/Y metrics, all-matching and shown-row scopes, computed SELECT/ORDER BY,
+  final group sorting and top-N, metric `where`/`minCount`, exact MEDIAN, box
+  plots/histograms, and transaction-based execution.
 
-The v1 entry points remain deliberately strict. Use `DecodeSQLiteQuery` for v1
-row bodies and `SQLiteAggregationRequest` for basic aggregation bodies; they
-reject v2 envelopes instead of silently discarding modern settings. Use
-`ServerQueryV2`, `MetricQuery`, and `SQLiteV2Dataset` for v2 requests.
-Compact row bodies preserve `s` selection tuples and legacy `c` selections.
-Basic aggregation requests reject unresolved top-level diagnostics, including
-residual client-only filters, during decoding and execution.
-Do not advertise `qt-postgres-v1` for SQLite. Selected-row scopes, computed
-filters, and automatic cross-request snapshots
-are outside the SQLite profile and are rejected explicitly.
-Apply your own body-size cap and reject trailing JSON values at the HTTP boundary.
+`DecodeQueryRequestV3` is deliberately strict: it accepts one JSON object of at
+most 2 MiB, rejects unknown properties and trailing values, requires `now`, and
+accepts only `select`, `where`, `orderBy`, `limit` and `offset` in the `source`
+and `result` stages. Requests carrying unresolved client diagnostics, including
+residual client-only filters, are rejected. Do not advertise `qt-postgres-v1`
+for SQLite. Selected-row scopes and automatic cross-request snapshots are
+outside the SQLite profile and are rejected explicitly. Apply your own,
+possibly smaller, body-size cap at the HTTP boundary.
 
 ## Shared schemas
 
@@ -76,10 +75,10 @@ query-table-codegen runs.schema.json --go runs_schema.go \
   --go-package catalog --dialect sqlite
 ```
 
-Expressions, FROM/JOIN trees, base predicates, and binding conventions are
+Expressions, source SELECTs, authorization predicates, and binding conventions are
 trusted host configuration. Never construct any of them from request input.
-The compiler enforces filter/sort/aggregate allowlists; values are bound with
-anonymous `?` placeholders. Reserve SQL aliases beginning `_qt_` for the adapter.
+The compiler enforces filter/sort/aggregate allowlists; values are always bound
+parameters. Reserve SQL aliases beginning `_qt_` for the adapter.
 
 ## Register functions before opening connections
 
@@ -116,49 +115,75 @@ remain driver-independent; no driver is imported into their module.
 ## Execute an authorized dataset
 
 ```go
-dataset := querytable.SQLiteDataset{
-    Schema: schema,
-    FromSQL: "FROM runs r",
-    BaseWhereSQL: "r.tenant_id = ?",
-    BaseArgs: []any{authorizedTenant},
-    MaxLimit: 1000,
-    MaxGroups: 2000,
+dataset := querytable.QueryDatasetV3{
+    Schema: schema, Dialect: "sqlite",
+    SourceSQL: "SELECT * FROM runs WHERE tenant_id = ?1",
+    SourceArgs: []any{authorizedTenant},
+    Scope: authorizedScope, Dataset: "runs",
+    ComputedGroupable: map[string]bool{"category": true},
+    MaxRows: 1000, MaxGroups: 2000,
 }
-rows, err := dataset.Rows(ctx, db, query)
-values, err := dataset.Distinct(ctx, db, "labels", "bug", 50)
-metrics, err := dataset.Aggregations(ctx, db, request)
-stats, err := dataset.FieldStats(ctx, db, []string{"duration_ms"})
+capabilities := dataset.Capabilities() // version 3, qt-sqlite-v1
+
+request, err := querytable.DecodeQueryRequestV3(body)
+if err != nil { return err }
+result, err := dataset.Execute(ctx, db, request,
+    querytable.PlanOptions{Identity: trustedActorDatasetSchemaIdentity})
 ```
 
-`Rows` includes the ID field even if it is hidden and returns `{rows,total}`.
-Zero row limit defaults to 100. Zero host caps default to 10,000 rows and 2,000
-metric groups. Exceeding a cap is an error. A metric group limit never silently
-changes the meaning of a result. Empty ungrouped populations return a bucket
-with count 0 and NULL reductions (COUNT returns 0); empty grouped populations
-return no buckets.
+`Execute` owns one short transaction. To share a snapshot with other host work,
+begin a transaction and call `ExecuteIn(ctx, tx, request, options)`; the caller
+owns the transaction and must finish it promptly. `NewQueryV3Handler(db,
+authorize)` wraps `Execute` as a POST handler: `authorize` returns the trusted
+dataset and options for the request (nil or an error denies with 403), the body
+is capped at 2 MiB, execution has a 30-second deadline, and `PlanDiagnostic`
+errors return 400.
 
-Each operation uses a short transaction, including all statements in a metric
-batch. To share one snapshot between multiple operations, begin a transaction
-and use `RowsIn`, `DistinctIn`, `AggregationsIn`, and `FieldStatsIn`. The caller
-owns the transaction and must finish it promptly. These methods do not import
-or export Postgres snapshot tokens.
+A request selects its work:
 
-Hosts with optimized FROM trees, counts, search indexes, or rollup tables can
-use `CompileSQLiteWhere`, `CompileSQLiteDistinct`, and
-`CompileSQLiteAggregation` directly. `CompileSQLite` returns SELECT, WHERE,
-ORDER BY and argument fragments. `WhereArgs` and `OrderArgs` allow a count query
-to omit ORDER parameters; `Args` is their concatenation. Capture one
-`SQLiteOptions.Now` for all related relative-time compilations. If bypassing the
-executor, the host also owns result validation, group limits, and typed mapping.
-A rollup optimization must enforce the same source and result guards; checking
-only a final rollup sum is insufficient to detect unsafe inputs that cancel.
+- **Rows**: `rows: true` pages `result` (`limit` 1 through `MaxRows`). Rows
+  include the ID field even if it is hidden. Without grouping, `total` and
+  `sourceTotal` both count the complete matching population.
+- **Metrics**: `metrics` is a list of `AggSpec`, at most 20. Metric-only requests
+  send `rows: false` but still need a `result.limit` of at least 1, which defines
+  the `shownRows` window.
+- **Grouped rows**: `grouping` (keys, summaries, calendar key intervals,
+  representatives) turns result rows into groups; see [grouping](grouping.md).
+- **Distinct values** (filter autocomplete): `distinct: {field, search, limit}`
+  with `rows: false`, no metrics and no grouping. The population is
+  `source.where`; matching is a literal case-insensitive substring of the value
+  as text, text arrays contribute each element, values are ordered by count
+  then value, `limit` is 1–500, and `hasNull` reports a NULL (or empty array)
+  in the population independent of the search. The field must be
+  server-filterable.
+- **Row lookup and field statistics** are ordinary requests: an identity filter
+  with `limit: 2` (1 when `MaxRows` is 1; a `total` above 1 is a duplicate
+  identity), or `rows: false` with `count_distinct`/`min`/`max` metrics.
+  The TypeScript builders are `toRowRequestV3` and `toFieldStatsRequestV3`.
+
+A request without `grouping` reads `SourceSQL` directly: it counts the matching
+population, pages rows with the row compiler, and reduces metrics without
+copying the population. A grouped request stages a narrow source projection in
+a temporary table (text/enum-keyed scalar groups may reduce directly; see
+[direct groups](sqlite-direct-groups.md)). Exceeding a row cap is an error, and
+a metric group limit never silently changes the meaning of a result. Empty
+ungrouped populations return a bucket with count 0 and NULL reductions (COUNT
+returns 0); empty grouped populations return no buckets.
+
+The executor does not import or export Postgres snapshot tokens. Hosts with
+optimized FROM trees, counts, search indexes, or rollup tables can expose them
+through `SourceSQL` or [predicate relations](#host-predicate-relations); a host
+that bypasses the executor owns result validation, group limits, and typed
+mapping. A rollup optimization must enforce the same source and result guards;
+checking only a final rollup sum is insufficient to detect unsafe inputs that
+cancel.
 
 ## Host predicate relations
 
 A host that maintains its own index for a predicate, such as a trigram index
 for substring filters over wide text, can let the executor use it. Set
-`PredicateRelations` on `SQLiteDataset`, `SQLiteV2Dataset` or a SQLite
-`QueryDatasetV3`. Nil (the default) compiles every predicate as before.
+`PredicateRelations` on a SQLite `QueryDatasetV3`. Nil (the default) compiles
+every predicate normally.
 
 ```go
 type textIndex struct{}
@@ -183,7 +208,7 @@ func (textIndex) PredicateRelation(ctx context.Context, tx *sql.Tx, p querytable
     }, true, nil
 }
 
-dataset := querytable.SQLiteV2Dataset{Schema: schema, SourceSQL: source, PredicateRelations: textIndex{}}
+dataset := querytable.QueryDatasetV3{Schema: schema, Dialect: "sqlite", SourceSQL: source, PredicateRelations: textIndex{}}
 ```
 
 The executor offers each non-blank base-field literal (`Field`, `Op`, `Value`,
@@ -214,26 +239,24 @@ must be non-NULL and identify source rows.
   or a positive candidate). Otherwise the whole term keeps its typed
   predicates. Separate AND terms decide independently.
 
-Relations apply to rows and aggregations on `SQLiteDataset`, V2 rows,
-populations and metric filters on `SQLiteV2Dataset.ExecuteV2In`, and `/query-v3`
-source filters, ungrouped row and metric filters (including calendar metrics).
-They never apply to group filters over grouped results, to computed fields or
-to `ExecuteV2Rows`. A relation whose key field is not part of a staged
-projection is ignored there and the typed predicate applies. A provider error
-fails the whole execution. `QueryDatasetV3` rejects relations for PostgreSQL.
-The compile-only APIs (`CompileSQLite`, `CompileSQLiteWhere`, the V2 compile
-functions) never consult them.
+Relations apply to base-field predicates in source and row filters, ungrouped
+populations and metric filters (including calendar metrics). They never apply
+to group filters over grouped results, to computed fields, or to the rows of
+in-process distribution reducers. A relation whose key field is not part of a
+staged projection is ignored there and the typed predicate applies. A provider
+error fails the whole execution. `QueryDatasetV3` rejects relations for
+PostgreSQL.
 
 ## Data and semantic conventions
 
 Use STRICT tables or equivalent ingestion validation. Bind numeric fields to
 native INTEGER/REAL values, booleans to INTEGER 0/1, text/enums to TEXT, and
-textarrays to JSON arrays containing strings only. `Rows` rejects unexpected
-storage types and malformed selected arrays. Membership/nullity treats NULL,
+textarrays to JSON arrays containing strings only. Row reads reject unexpected
+storage types and malformed selected arrays (`invalid_source_value`). Membership/nullity treats NULL,
 empty, malformed, and non-text arrays as empty; malformed data is never passed
-to `json_each` unchecked. Autocomplete expands arrays into individual values.
+to `json_each` unchecked. Distinct values expand arrays into individual elements.
 An empty string satisfies scalar `is_null`, matching the filter editor; it is
-still a distinct text value and a present value for basic COUNT, as in core v1.
+still a distinct text value and a present value for COUNT.
 NULL text compares like `""` for text equality/inequality. Explicit negation
 excludes empty/null source values. Raw text sorting retains empty strings.
 
@@ -251,10 +274,8 @@ Numeric reductions validate numeric storage, finite values, and integral inputs
 within ±9,007,199,254,740,991 (except COUNT, which observes presence). Returned
 row numbers and numeric reduction outputs have the same finite/safe-integer
 guards. Invalid numeric samples fail the operation; they do not silently become
-zero. SQLite integer SUM can fail with integer overflow; floating accumulation
-uses SQLite's arithmetic and can differ from Postgres or browser reduction
-order. The v1 adapter does not claim the Postgres v2 numeric profile or exact
-decimal accounting. Counts refer to complete populations, not page size.
+zero. Counts refer to complete populations, not page size. Reduction
+arithmetic is described in the [numeric contract](#numeric-contract).
 
 Datetime bindings select a storage convention:
 
@@ -265,17 +286,18 @@ Datetime bindings select a storage convention:
 | `unix-seconds` | Numeric seconds since Unix epoch |
 | `unix-millis` | Numeric milliseconds since Unix epoch |
 
-Row datetime output is UTC RFC3339; autocomplete returns normalized UTC text.
+Row datetime output is UTC `YYYY-MM-DDTHH:mm:ss.sssZ`; distinct values return
+normalized UTC text.
 Supported dates are years 0000–9999. Noncanonical `utc-millis` selected values
 are rejected. Between-millisecond filter boundaries preserve exact equality and
 inequality semantics without wrapping indexed columns. Normalize ingestion
 before choosing this mode. Normalizing arbitrary RFC3339 per row costs CPU and
 can prevent a plain timestamp index from serving an ORDER BY. Use a validated
 canonical column or matching expression index for frequent operations. Require
-a unique, non-NULL, nonempty scalar ID across the complete FROM/JOIN result;
-the executor also rejects duplicate IDs within a returned page.
+a unique, non-NULL, nonempty scalar ID across the complete authorized source;
+grouped representatives reject duplicate IDs within a group.
 
-V2 windows trust text IDs and `utc-millis` sort bindings: they order those raw
+Row windows trust text IDs and `utc-millis` sort bindings: they order those raw
 values with BINARY collation and allow raw filter stages to flatten before LIMIT.
 The host must enforce unique, nonempty scalar text IDs and canonical fixed-width
 UTC timestamps at ingestion, across the complete authorized source. Sorting
@@ -283,7 +305,7 @@ alone does not validate those bindings. Selected fields and consumed formula
 inputs still pass their normal storage/error guards. Arbitrary RFC3339,
 extracted keys, and computed ordering retain normalization and checking.
 
-## V2 formulas and computed execution
+## Formulas and computed execution
 
 Enable the profile by registering **both** `SQLiteFunctions()` and
 `SQLiteV2Functions()` scalar descriptors, plus `SQLiteV2Aggregates()`.
@@ -319,7 +341,7 @@ All registrations must finish before opening connections. Each aggregate group
 gets independent state. Do not reuse one aggregate across groups/connections or
 register these descriptors as sliding window functions.
 
-Numeric bindings used by v2 expressions, projections, and sorting opt into the
+Numeric bindings used by expressions, projections, and sorting opt into the
 bounded profile through trusted schema metadata:
 
 ```json
@@ -338,84 +360,59 @@ Aggregate leaves are COUNT, COUNT_DISTINCT, SUM, AVG, MIN, MAX, and MEDIAN.
 Nested reductions and row fields outside reductions are rejected. Aggregate
 allowlists apply through every transitive computed dependency. Base numeric/date
 grouping requires explicit `aggregate.groupable`; computed grouping requires a
-host allowlist. Regex filters and base-field capture sorting use the v1 RE2
-semantics. Computed sorts cannot use regex extraction. Alternate sort bindings
+host allowlist. Regex filters and base-field capture sorting use the RE2
+semantics above. Computed sorts cannot use regex extraction. Alternate sort bindings
 must identify their target through `sort.field` / `SQLiteSortField`.
 
 ```go
-v2 := querytable.SQLiteV2Dataset{
-    Schema: schema,
-    SourceSQL: "SELECT * FROM runs WHERE tenant_id = ?1",
-    SourceArgs: []any{authorizedTenant},
-    Scope: authorizedScope, Dataset: "runs",
-    ComputedGroupable: map[string]bool{"category": true},
-    MaxRows: 1000, MaxGroups: 2000, MaxPopulation: 250000,
+request := querytable.QueryRequestV3{
+    Version: 3, Profile: querytable.SQLiteExpressionProfile,
+    Now: time.Now().UnixMilli(), // one clock for every relative filter
+    Result: querytable.WireQuery{Limit: 50},
+    Metrics: []querytable.AggSpec{
+        {ID: "runs", Op: "count", GroupBy: []string{"status"}},
+        {ID: "cost_rate", GroupBy: []string{"status"},
+         Expression: "SUM([cost_usd]) / NULLIF(SUM([duration_ms]), 0)"},
+    },
+    ExpectedRevisions: expectedRevisions, // from the computed handshake
 }
-capabilities := v2.Capabilities() // version 2, qt-sqlite-v1, distributions:true
-
-// Decode these envelopes at the host's bounded JSON/HTTP boundary.
-var rowRequest querytable.ServerQueryV2
-var metricRequest querytable.MetricQuery
-result, err := v2.ExecuteV2(ctx, db, &rowRequest, &metricRequest,
+result, err := dataset.ExecuteIn(ctx, tx, request,
     querytable.PlanOptions{Identity: trustedActorDatasetSchemaIdentity})
 ```
 
 `SourceSQL` is always an authorized SELECT exposing every schema binding's
 column aliases. Its parameters use numbered `?1` through `?N` for `SourceArgs`;
 compiler parameters start after them. Schema expressions contain no parameters.
-This differs from the anonymous `?` fragments in the v1 API. No client source,
-SQL, scope, or definition text is trusted.
+No client source, SQL, scope, or definition text is trusted.
 
-Either request may be nil. Combined requests must carry the same filters,
-ordering, window, revision envelope, and token/snapshot binding. The request
-(version, profile, token/snapshot, filters, ordering, window, metric IDs and
-scopes) is validated before execution. Each metric then compiles and runs in its
-own savepoint: a clause-level failure (an invalid or unsupported input, a
-budget, or a failed statement) is returned as that metric's `error` with empty
-buckets, and sibling metrics and rows still return. Request-level diagnostics,
-stale revisions and cancellation still fail the request. Identical metric fingerprints and scopes share a
-result within that execution, with independent mutable bucket/distribution
-payloads. Compatible scalar cards share grouped reductions across fields when
-their populations, scopes, metric predicates and grouping agree. A failed metric's savepoint discards the reductions it
-created, so later metrics rebuild them, and a failing fused statement falls back
-to per-metric reductions. Compatible SUM/AVG/MIN and other scalar reductions
-fuse into one grouped SELECT, limited to 128 projected expressions. Final
-formulas, group sorting, and top-N still run per plan. Distributions retain their
-existing exact sampling/streaming paths. No result or reduction crosses requests
-or snapshots; only the opt-in source proofs below are reused, per host data
-generation.
+The request (version, profile, token/snapshot, filters, ordering, window,
+metric IDs and scopes) is validated before execution. Each metric then compiles
+and runs in its own savepoint: a clause-level failure (an invalid or
+unsupported input, a budget, or a failed statement) is returned as that
+metric's `error` with empty buckets, and sibling metrics and rows still return.
+Request-level diagnostics, stale revisions and cancellation still fail the
+request.
+
+In an ungrouped request, scalar metrics run as one batch. Identical metric
+fingerprints and scopes share a result within that execution, with independent
+mutable bucket/distribution payloads. Compatible scalar cards share grouped
+reductions across fields when their populations, scopes, metric predicates and
+grouping agree. A failed metric's savepoint discards the reductions it created,
+so later metrics rebuild them, and a failing fused statement falls back to
+per-metric reductions. Compatible SUM/AVG/MIN and other scalar reductions fuse
+into one grouped SELECT, limited to 128 projected expressions. Final formulas,
+group sorting, and top-N still run per plan. Calendar metrics, and every metric
+of a grouped request, run individually. No result or reduction crosses requests
+or snapshots.
 
 Plain numeric base-field metrics over INTEGER/NULL storage may use a guarded
 SQLite reduction. Every group's storage types and absolute integer totals must
 prove exact arithmetic before the result is used; other domains retain the
 general exact decimal plan. Simple stored-column sources may reduce directly;
 opaque host bindings retain materialization to avoid repeated evaluation. See [the performance and migration notes](sqlite-performance-handoff.md)
-for eligibility, fallback semantics and portable benchmarks.
-
-Those per-row proofs cost most of such a batch. A host with a transactional
-data generation can let executions share them:
-
-```go
-var proofs querytable.SQLiteSourceProofs // one per process, shared by requests
-
-tx, _ := db.BeginTx(ctx, nil)
-var generation int64 // advanced by triggers in every writing transaction
-_ = tx.QueryRowContext(ctx, "SELECT value FROM data_generation").Scan(&generation)
-v2.SourceGeneration, v2.SourceProofs = strconv.FormatInt(generation, 10), &proofs
-result, err := v2.ExecuteV2In(ctx, tx, nil, &metricRequest, options)
-```
-
-The first execution in a generation scans the whole authorized source once
-(at most `MaxPopulation`+1 rows) and records its row count and, per numeric
-field expression, whether every value is INTEGER/NULL with an absolute total
-within 2^53−1. Later fused integer reductions over proven fields use plain SQL
-aggregates, and an unfiltered request reuses the row count. Since the whole
-source then fits the budget, a filtered metric batch takes its population count
-from its fused reduction instead of a separate scan. Only stored projections are
-proven; group keys, budgets, revisions, filters and result types are still
-checked on every execution. The generation must be read in the execution
-transaction and change whenever anything the source reads may have changed;
-see `SQLiteSourceProofs`.
+for eligibility, fallback semantics and portable benchmarks. These proofs run
+on every execution; the earlier opt-in per-generation proof cache was removed
+with the v2 API.
 
 Shared reductions use uniquely named temporary tables in the same transaction.
 The executor drops them before returning, using a separate bounded cleanup
@@ -425,160 +422,66 @@ modernc is covered by the integration tests. Test this behavior before using
 another driver. Compiler reduction metadata is intended for this adapter's
 execution path, and does not authorize a plan or bypass its guards.
 
-Definition resolution, the bounded count, the row page, and every metric run
-in the same short transaction. Use `ExecuteV2In`
-when a host already owns that transaction. `PlanOptions.Resolver` can override
-the built-in scoped `SQLiteComputedDefinitionResolver`, but it must resolve
-canonical definitions in that same snapshot.
+Definition resolution, the count, the row page, and every metric run in the
+same transaction. `PlanOptions.Resolver` can override the built-in scoped
+`SQLiteComputedDefinitionResolver`, but it must resolve canonical definitions
+in that same snapshot.
 
-After either `ExecuteV2In` or `QueryDatasetV3.ExecuteIn` returns nil, the host may
-commit that successful query transaction: adapter-owned scratch objects have
-been dropped without ending the source snapshot. Roll back after a non-nil
-execution or cleanup error. The adapter never changes connection PRAGMAs.
-See the [caller-owned transaction example](sqlite-performance-handoff.md#supported-sqlite-scratch-lifetime)
+After `ExecuteIn` returns nil, the host may commit that successful query
+transaction: adapter-owned scratch objects have been dropped without ending the
+source snapshot. Roll back after a non-nil execution or cleanup error. The
+adapter never changes connection PRAGMAs. See the
+[caller-owned transaction example](sqlite-performance-handoff.md#supported-sqlite-scratch-lifetime)
 before changing a host's connection policy.
 
-`result.Rows` matches `FetchRowsResultV2`: `{version:2,rows,total,computed,execution}`.
-Computed values are separate sidecars indexed by stable row ID, with **bare
-computed IDs** inside `values`, e.g. `values.duration.value`; per-value row errors
-are `{code:"divide_by_zero"}`. `result.Metrics` matches the existing aggregation
-result wire format: `{metrics:[{id,buckets,scope,processedRows,groupCount,coverage,error?}]}`.
-Metric bucket `error`/`yError` are strings. X and Y share one grouped population;
-null measures never realign buckets. Group counts are computed before the final
-sort/top-N. Returned coverage is exact for the requested scope, including when
-only the highest-ranked groups are returned; no additive `other` is invented
-for ratios, medians, or distinct counts.
+The result is a `QueryResultV3`:
+`{version:3,now,rows,total,sourceTotal,schema,metrics,execution,distinct?}`.
+Computed values appear inline in rows under their `@computed/id` field, as the
+value or `{"computedError":"divide_by_zero"}` for a per-cell error. Each
+`metrics` entry is a `MetricResult`:
+`{id,buckets,scope,processedRows,groupCount,coverage,error?,hiddenGroups?}`.
+Metric bucket `error`/`yError` are strings. X and Y share one grouped
+population; null measures never realign buckets. Group counts are computed
+before the final sort/top-N. Returned coverage is exact for the requested
+scope, including when only the highest-ranked groups are returned; no additive
+`other` is invented for ratios, medians, or distinct counts.
 
-Default execution budgets are 10,000 page rows, 2,000 total groups, and 250,000
-matching source rows. Trusted hosts may explicitly set `MaxGroups` from 1 through
-100,000; zero retains the 2,000-group default advertised by `Capabilities()`.
-This ceiling applies to `SQLiteV2Dataset` and to both SQLite and PostgreSQL
-`QueryDatasetV3` hosts. Request `groupLimit` and result paging do not raise the
-host budget. The population check reads at most budget+1 matching rows
-before sorting/formulas. A source SELECT with its own expensive joins/sorts
-still needs host indexes and a context deadline. Exceeding the row or population
-budget fails the entire request; exceeding a metric's group or sample budget
-fails only that metric. A top-N limit cannot hide an exceeded group budget.
-Standalone compilers do not enforce these executor budgets; their callers own
-population/result limits and typed mapping.
+Default execution budgets are 10,000 page rows, 2,000 groups, 250,000 staged
+source rows and 64 MiB of staged value payload. Trusted hosts may explicitly
+set `MaxGroups` from 1 through 100,000; zero retains the 2,000-group default
+advertised by `Capabilities()`. `MaxPopulation` and `MaxStagingBytes` bound
+only staged (grouped) execution and calendar metric scratch; an ungrouped
+request counts its complete population and copies none of it. Request
+`groupLimit` and result paging do not raise the host budget. A source SELECT
+with its own expensive joins/sorts still needs host indexes and a context
+deadline. Exceeding the row or staging budget fails the entire request;
+exceeding a metric's group or sample budget fails only that metric. A top-N
+limit cannot hide an exceeded group budget.
 
-For the initial computed handshake, call `DescribeComputedIn(ctx, tx, ids, opts)`
-in an authorized transaction. It validates the current canonical definitions,
-cycles, types, and transitive graph, and returns capabilities with every reached
-revision. Its field keys use `@computed/id`, and revision keys use bare IDs.
-Pass that envelope to React's `computedExecution`, the metric capabilities to
-`metricCapabilities`, and map transport callbacks to `result.Rows` and
-`result.Metrics`. Later requests require the expected revision of every reached
-definition; the executor additionally checks and echoes the complete supplied
-handshake, including currently hidden definitions. A revision change requires
+For the initial computed handshake, call
+`DescribeComputedPartialIn(ctx, tx, ids, opts)` in an authorized transaction.
+It validates the current canonical definitions, cycles, types, and transitive
+graph. Its `execution` advertises capabilities and every reached revision for
+healthy graphs only, with field keys `@computed/id` and revision keys bare IDs;
+`diagnostics` reports each failing ID. Pass `execution` to React's
+`computedExecution` and `Capabilities()` to the transport's
+`queryCapabilities`. Later requests require the expected revision of every
+reached definition; the executor additionally checks the complete supplied
+envelope, including currently hidden definitions. A revision change requires
 refreshing the handshake; nothing silently falls back to client evaluation.
 
 Tokens remain host responsibilities. A nonempty planToken requires
 `ValidatePlanToken`, and a nonempty snapshot requires `ValidateSnapshot` to
-bind the active transaction. After validation, row responses echo those bindings.
-`ExecuteV2` refuses snapshot tokens because a newly opened transaction cannot
-retain another request's snapshot. Only `ExecuteV2In` can use a genuinely retained
-host transaction. Fingerprints bind profile, SQL, arguments, reached revisions,
-and the supplied trusted identity; they are neither signatures nor promises of
-cross-request data stability.
+bind the active transaction. `Execute` refuses snapshot requests because a
+newly opened transaction cannot retain another request's snapshot; only
+`ExecuteIn` can use a genuinely retained host transaction. Fingerprints bind
+profile, SQL, arguments, reached revisions, and the supplied trusted identity;
+they are neither signatures nor promises of cross-request data stability.
 
-### Metrics over rows in memory
+The in-memory row-slice metric executor and its standalone row filter were
+removed with the v2 API; stage rows in SQLite and send a `QueryRequestV3`.
 
-`ExecuteV2Rows` accepts an already-authorized slice of row maps and returns the
-same `SQLiteV2ExecutionResult` metric envelope as staging those rows in untyped
-SQLite columns and calling `ExecuteV2In`. It never executes `SourceSQL`, which
-may be empty for this API. Hosts remain responsible for authorizing the supplied
-rows and binding token/snapshot validators to that population.
-
-```go
-options := querytable.PlanOptions{Now: requestClock}
-result, err := querytable.ExecuteV2Rows(ctx, tx, v2, authorizedRows,
-    metricRequest, options)
-if errors.Is(err, querytable.ErrRowsUnsupported) {
-    // Stage the complete population in this transaction, then use ExecuteV2In.
-    result, err = v2.ExecuteV2In(ctx, tx, nil, &metricRequest, options)
-}
-```
-
-A dataset method with the same name is also available. `tx` may be nil when no
-expected revisions need the built-in definition store; a host `Resolver` can
-verify revisions without it. The complete supplied revision envelope is checked,
-including definitions unused by the metrics. A successful ordinary request does
-not touch a supplied transaction. Snapshot and plan-token validation retain the
-V2 host callbacks.
-
-The row executor supports plain `count`, `count(field)`, number `sum`/`avg`,
-number/text/enum/datetime `min`/`max`, scalar `count_distinct`, and box and
-histogram distributions whose input is one number field (`[duration_ms]`),
-grouped by text, enum or bool fields. Equivalent single-aggregate expressions
-such as `SUM([cost_usd])` are accepted. Every base-field table filter is supported, along with per-metric
-`where`, `minCount`, metric sorting and `groupLimit`. As in SQL V2, regex inside a
-per-metric `where` is a clause error. `processedRows` counts the table-filtered
-population before per-metric predicates; `groupCount` counts visible groups
-before top-N. Hidden groups still consume the group budget. Group budget failures
-fail only affected metrics, while population overflow fails the request.
-
-All metrics run during one traversal of the source slice. Matching grouping and
-per-metric predicates share group lookup; identical reductions also share their
-accumulator. Group lookup reuses a typed key buffer; only new groups allocate
-keys and validate their text. SUM/AVG accumulate exact decimal integers at each
-input scale, spilling a part to `big.Int` before it overflows. The parts are
-combined into rationals once at finalization, retaining the SQLite profile's
-rounding, absolute-sum bound and numeric diagnostics. Distributions over the same
-field and population share one slice of samples per group; boxes and histograms
-are computed from it once the traversal ends.
-
-Rows are keyed by schema field name. A consumed binding must directly reference
-that same column, e.g. `r.cost_usd` or `r."repository_name"`. SQL expressions,
-computed fields, paired/formula metrics, distributions of formulas, `shownRows`,
-and other grouping kinds return `ErrRowsUnsupported`. Runtime values that cannot be
-handled exactly also return that sentinel with **no partial result**. For
-example, unsupported Go types, invalid datetime inputs consumed by parsing,
-embedded NULs passed to text functions, unpaired surrogate escapes in JSON
-arrays, and invalid group storage require staging. Unused fields do not force fallback.
-
-| Field kind | Go storage accepted by the row path |
-| --- | --- |
-| All kinds | Missing key or `nil` becomes SQL NULL. |
-| Text / enum | `string` is TEXT. Filtering comparisons also preserve numeric storage-class ordering for `int64`/`float64`. Metric inputs with numeric storage report `storage_type`. |
-| Number | `int64` is INTEGER; `float64` is REAL. NaN becomes NULL, as in SQLite. Non-numeric strings in metrics report `storage_type`; unsafe integers and range failures keep their V2 bucket diagnostics. |
-| Bool | `bool` becomes INTEGER 0/1; `int64` 0/1 is also accepted. Other scalar storage can be compared by filters but produces `storage_type` in metric inputs. |
-| Datetime | `string` for RFC3339/default and canonical UTC milliseconds; `int64`/`float64` for Unix seconds/milliseconds. An empty string becomes NULL. Datetime grouping requires fallback. |
-| Text array | A JSON `string`, matching `qt_array_json`. NULL, malformed JSON, or arrays with non-string elements behave as empty arrays. |
-
-No implicit conversion of `int`, unsigned integers, `time.Time`, `[]byte` or
-`[]string` occurs. `SQLiteRowValues(row, schema, columnNames)` exports the same
-parameter-binding normalization for a host's untyped staging table. It returns
-parameters in the requested column order; the host creates/inserts/drops the
-table and quotes its own identifiers. Using column affinities or source SQL
-transformations changes the reference population and is outside this contract.
-
-The standalone `CompileRowFilter(where, schema, SQLiteOptions{Now: clock})`
-returns an immutable filter. `matches, err := filter.Match(row)` follows
-`CompileSQLiteWhere`, including OR groups and their `{"all": [...]}` AND
-branches, blank no-ops, NULL/empty-string rules,
-Unicode lower-casing and code-point lengths, RE2 regex, array membership and
-relative/indexed datetime comparisons. Handle `ErrRowsUnsupported` before using
-any selected rows. The zero-value `RowFilter` matches every row.
-
-The differential tests and 50,000-row six-metric benchmark are in
-`backends/sqlite-tests/rows_test.go`:
-
-```sh
-cd backends/sqlite-tests
-go test -run '^TestRows' ./...
-go test -run '^$' -bench '^BenchmarkV2RowsTokenSummary' -benchmem ./...
-```
-
-The Go backend also has 20,000-row benchmarks for two-text-key grouping,
-float-noise versus six-decimal-place costs, and a six-metric token summary:
-
-```sh
-cd backends/go
-go test -run '^$' -bench '^BenchmarkV2Rows' -benchmem ./...
-```
-
-### V2 numeric contract
+### Numeric contract
 
 The SQLite profile checks native storage and finite numeric inputs in the range
 zero or ±[1e-300,1e100]. Formula failures produce per-value diagnostics; IF,
@@ -596,13 +499,14 @@ Numeric metric samples/results reject integral doubles outside MAX_SAFE_INTEGER;
 COUNT observes presence without that metric-only restriction. SUM also rejects
 an absolute sample sum above MAX_SAFE_INTEGER, even if cancellation would make
 the final sum small. MEDIAN sorts exact samples and uses a linear midpoint for
-even populations. More than `SQLiteMaxMedianSamples` (100,000) non-null samples
-per group yields a `resource_limit` metric error, never an approximation.
+even populations. A group above `MaxSamplesPerGroup` (default
+`SQLiteMaxMedianSamples`, 100,000; at most 1,000,000) yields a `resource_limit`
+metric error, never an approximation.
 
 Wrong storage types, invalid/noncanonical datetime bindings, text over 100,000
 UTF-8 bytes, unsafe integers, range errors, and division by zero remain explicit.
-Selected invalid base fields fail row decoding. Datetime filters retain v1
-storage conventions; formulas normalize datetime values to UTC. Arrays cannot
+Selected invalid base fields fail row decoding. Datetime filters retain the
+storage conventions above; formulas normalize datetime values to UTC. Arrays cannot
 enter formulas. Box plots and histograms are described below.
 
 ### Box plots and histograms
@@ -615,8 +519,9 @@ formulas, including canonical computed fields, and honor allMatching/shownRows,
 transitive revision/measure policy, null/error diagnostics, and host limits.
 
 ```go
-request := querytable.MetricQuery{
-    Version: 2, Profile: querytable.SQLiteExpressionProfile,
+request := querytable.QueryRequestV3{
+    Version: 3, Profile: querytable.SQLiteExpressionProfile,
+    Now: time.Now().UnixMilli(), Result: querytable.WireQuery{Limit: 50},
     Metrics: []querytable.AggSpec{
         {ID: "duration_box", GroupBy: []string{"status"},
          Distribution: &querytable.MetricDistribution{
@@ -628,7 +533,7 @@ request := querytable.MetricQuery{
          }},
     },
 }
-result, err := v2.ExecuteV2(ctx, db, nil, &request, querytable.PlanOptions{})
+result, err := dataset.Execute(ctx, db, request, querytable.PlanOptions{})
 ```
 
 Boxes return `MetricBoxDistribution` with a nullable `MetricBoxSummary`:
@@ -639,8 +544,9 @@ samples. Mean is a compensated (Neumaier) sum of the sorted samples divided by
 their count, and may differ by roundoff from browser accumulation. Whiskers default to minmax; Tukey uses
 1.5×IQR fences and actual observed endpoints. Responses retain all outliers up
 to 20; larger populations retain the first 10 and last 10 sorted outliers while
-reporting the full count. `SQLiteMaxBoxSamples` is 100,000 non-null samples per
-group. Exceeding it yields a `resource_limit` bucket error rather than sampling.
+reporting the full count. The per-group sample budget is `MaxSamplesPerGroup`
+(default `SQLiteMaxBoxSamples`, 100,000). Exceeding it yields a
+`resource_limit` metric error rather than sampling.
 The scalar `value` used for box sorting is the median.
 
 Histograms return `MetricHistogramDistribution` with edges, per-bin counts, and
@@ -658,16 +564,17 @@ edges return `unsafe_integer`. A global input/extent error invalidates every
 histogram group, even if top-N would omit its originating group. The scalar
 `value` used for histogram sorting is the sample count.
 
-`ExecuteV2In` reduces every distribution whose input is one stored number field,
-grouped by stored text, enum or bool fields, without compiled plans: one native
-scan of the matching population feeds the `ExecuteV2Rows` reducers for all such
-metrics in the request, with table and metric filters still evaluated in SQL.
-Results are identical to the compiled plans. Formula or computed inputs,
-`shownRows`, fields with a `ValueErrorExpr`, and other groupings use compiled
-plans, which materialize the population and sort it once per metric. So does
-the whole request when a scanned value cannot be read exactly (for example BLOB
-storage, a bool stored as 2, or text containing NUL). The scan retains 8 bytes
-per sample, bounded by the host's population budget.
+An ungrouped request reduces every distribution whose input is one stored
+number field, grouped by stored text, enum or bool fields, without compiled
+plans: one native scan of the matching population feeds in-memory reducers for
+all such metrics in the request, with table and metric filters still evaluated
+in SQL. Results are identical to the compiled plans. Formula or computed
+inputs, `shownRows`, fields with a `ValueErrorExpr`, and other groupings use
+compiled plans, which materialize the population and sort it once per metric.
+So does the whole request when a scanned value cannot be read exactly (for
+example BLOB storage, a bool stored as 2, or text containing NUL). The scan
+retains 8 bytes per sample and fails the request with `resource_limit` above
+10,000,000 matching rows.
 
 Distribution buckets include `nullCount` and `inputErrorCount`; nulls are not
 errors or numeric zero. Errors clear both scalar value and distribution payload.
@@ -680,16 +587,16 @@ SQLite response payloads against the core box/histogram algorithms.
 
 ### Pharos cutover
 
-The generic v2 APIs are ready for the same release as the SQLite adapter. Pharos
-can retain its authorized source selection, trigram/index strategy, rollups, and
-HTTP handlers while wiring `fetchRowsV2`, `fetchMetrics`, and the handshake to
-this executor. Opt numeric bindings into `expressionNumeric` first, register the
-additional descriptors at startup, and advertise the returned profile/capabilities.
-Keep optimized rollup paths only where they preserve this profile's sample,
-revision, numeric, and snapshot checks. Publish the libraries before upgrading
-Pharos's pinned dependencies; the ignored local Go workspace remains a development
-overlay, not a released-module dependency. This library change does not itself
-activate v2 endpoints in Pharos.
+Pharos can retain its authorized source selection, trigram/index strategy,
+rollups, and HTTP handlers while wiring the client transport's
+`queryCapabilities` and `fetchQueryV3` to this executor (directly or through
+`NewQueryV3Handler`), plus the computed handshake. Opt numeric bindings into
+`expressionNumeric` first, register the additional descriptors at startup, and
+advertise the returned profile/capabilities. Keep optimized rollup paths only
+where they preserve this profile's sample, revision, numeric, and snapshot
+checks. Publish the libraries before upgrading Pharos's pinned dependencies;
+the ignored local Go workspace remains a development overlay, not a
+released-module dependency.
 
 ## Connections, cancellation and persistence
 
@@ -706,7 +613,7 @@ permits one writer at a time. Bound pools and serialize writes where appropriate
 do not rely on a busy timeout as a retry policy for every transaction failure.
 Close result sets before starting another operation on a single-connection pool.
 Do not deploy WAL databases on network filesystems. Long read transactions can
-prevent checkpoint progress. Use context deadlines for autocomplete/metrics and
+prevent checkpoint progress. Use context deadlines for every query request and
 let database failures propagate; the adapter uses context-aware operations and
 never retries writes invisibly. SQLite interruption may abort a caller-owned
 transaction (including with modernc); after a cancelled or failed execution,
@@ -738,16 +645,17 @@ predicate. Only an already-existing create or a stale revision becomes
 
 For transactional graph validation, begin an authorized transaction, call
 `store.SaveIn(ctx, tx, scope, dataset, request)`, and then call
-`v2.DescribeComputedIn(ctx, tx, allCatalogueIDs, opts)` before committing. Supply
-the complete resulting catalogue so updates that invalidate dependents are also
-rejected; roll back on any failure. `SaveIn` preserves `Save`'s revision
+`dataset.DescribeComputedPartialIn(ctx, tx, allCatalogueIDs, opts)` before
+committing. Supply the complete resulting catalogue so updates that invalidate
+dependents are also detected, and roll back on an error or on any entry in the
+returned `Diagnostics`. `SaveIn` preserves `Save`'s revision
 predicates and leaves commit/rollback to the caller. Metadata-only applications
 can continue using `Save` without graph validation. A host repository wrapper
 can perform this sequence for `NewComputedColumnsHandler`: wrapped
 `PlanDiagnostic` errors return HTTP 400, revision conflicts return 409, and
 infrastructure errors return 500.
 
-Legacy map/SQL paths can resolve signed datetime operands with
+Host-owned map/SQL paths can resolve signed datetime operands with
 `ResolveRelativeDatetime(value, now)`. Capture one clock per request (including
 OR branches), resolve into new operands, and retain the original saved values.
 The helper shares the compiler's signed-duration grammar, precision, and bounds;
@@ -760,13 +668,13 @@ detector and vet. Root Go tests exercise compiler/decoder validation and scalar
 semantics without adding runtime dependencies. The fixture module covers
 actual SQL, scope isolation, NULL/empty arrays, Unicode/literal searches, sorting,
 result mapping, aggregation limits/numeric errors, WAL snapshot consistency,
-cancellation, concurrent revision conflicts, v2 lazy formulas/paired scopes,
+cancellation, concurrent revision conflicts, lazy formulas/paired scopes,
 computed ordering/transitive revisions, exact reductions/distributions, execution budgets,
-wire-format sidecars, and held snapshots across concurrent writes. It is included in `npm run check`.
+inline computed values, and held snapshots across concurrent writes. It is included in `npm run check`.
 
 Pharos is the first consumer. It keeps its host-owned trigram search, timestamp
-indexes, and rollups, while using shared Go wire types, predicates, autocomplete,
-aggregate compilation, and function implementations. Its local map executor
+indexes, and rollups, while using shared Go wire types, predicates, distinct
+values, metric execution, and function implementations. Its local map executor
 retains host conventions such as empty-text measures and numeric regex sort
 captures. Its upgrade tooling installs built npm archives and uses an ignored
 Go workspace during development, then upgrades all frontend pins and the tagged

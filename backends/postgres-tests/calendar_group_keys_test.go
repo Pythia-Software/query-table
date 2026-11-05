@@ -23,7 +23,7 @@ func TestPostgresCalendarGroupKeys(t *testing.T) {
 		q.Grouping.Keys = []string{"at", "k"}
 		q.Grouping.KeyIntervals = map[string]qt.GroupKeyInterval{"at": {Interval: c.interval, TimeZone: c.zone}}
 		q.Grouping.Summaries = []qt.SummaryColumn{{ID: "num", Op: "count"}, {ID: "total", Op: "sum", Field: "n"}, {ID: "example", Op: "row", Field: "id"}}
-		q.Result = qt.WireQuery{Select: []string{"at", "k", "num", "total", "example"}, OrderBy: qt.OrderBys{{Field: "at", Dir: "asc", Nulls: "last"}, {Field: "k", Dir: "asc"}}, Limit: 100}
+		q.Result = qt.WireQuery{Select: []string{"at", "k", "num", "total", "example"}, OrderBy: []qt.OrderBy{{Field: "at", Dir: "asc", Nulls: "last"}, {Field: "k", Dir: "asc"}}, Limit: 100}
 		grouped, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
 		if err != nil {
 			t.Fatal(c, err)

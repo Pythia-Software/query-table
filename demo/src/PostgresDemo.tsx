@@ -23,7 +23,6 @@ import {
   type DemoBootstrap,
   type DemoLatency,
   type DemoRequest,
-  type DemoMetricTiming,
   type PostgresRun,
 } from "./postgresTransport";
 import "./demo.css";
@@ -115,8 +114,6 @@ function ConnectedDemo({
   const [requests, setRequests] = useState<DemoRequest[]>([]);
   const [tableCollapsed, setTableCollapsed] = useState(false);
   const [metricsCollapsed, setMetricsCollapsed] = useState(false);
-  const executionRef = useRef(connection.execution);
-  executionRef.current = connection.execution;
   const latencyRef = useRef(latency);
   latencyRef.current = latency;
   const onRequest = useCallback((request: DemoRequest) => {
@@ -129,11 +126,11 @@ function ConnectedDemo({
   const transport = useMemo(
     () =>
       createPostgresTransport(
-        () => executionRef.current,
+        connection.capabilities,
         () => latencyRef.current,
         onRequest,
       ),
-    [onRequest],
+    [connection.capabilities, onRequest],
   );
   const store = useMemo<ComputedColumnStore>(() => {
     const delegate = httpComputedColumnStore("/api/postgres/computed");
@@ -166,14 +163,6 @@ function ConnectedDemo({
   const aborted = requests.filter(
     (request) => request.status === "aborted",
   ).length;
-  const timingById = new Map<string, DemoMetricTiming>();
-  for (const request of requests)
-    for (const metric of request.metrics ?? []) {
-      if (!timingById.has(metric.id)) timingById.set(metric.id, metric);
-    }
-  const metricTimings = [...timingById.values()].sort(
-    (a, b) => b.sqlMs - a.sqlMs,
-  );
   const setDelay = (key: keyof DemoLatency, value: string) => {
     const parsed = Number(value);
     if (Number.isFinite(parsed))
@@ -306,7 +295,6 @@ function ConnectedDemo({
                       <th>Real SQL</th>
                       <th>DB wait</th>
                       <th>Response wait</th>
-                      <th>Statements</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -344,47 +332,11 @@ function ConnectedDemo({
                             ? "—"
                             : `${request.responseDelayMs} ms`}
                         </td>
-                        <td>{request.statements ?? "—"}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-              {metricTimings.length > 0 && (
-                <details className="qt-demo-metric-timings">
-                  <summary>
-                    Latest timing for each metric · slowest first
-                  </summary>
-                  <div className="qt-demo-request-table">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Metric</th>
-                          <th>SQL</th>
-                          <th>Planner</th>
-                          <th>Stages</th>
-                          <th>SQL bytes</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {metricTimings.map((metric) => (
-                          <tr key={metric.id}>
-                            <td>
-                              {api.aggregations.clauses.find(
-                                (clause) => clause.id === metric.id,
-                              )?.label ?? metric.id}
-                            </td>
-                            <td>{metric.sqlMs} ms</td>
-                            <td>{metric.planMs} ms</td>
-                            <td>{metric.stages}</td>
-                            <td>{metric.sqlBytes}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </details>
-              )}
             </details>
           </>
         }
@@ -439,7 +391,7 @@ function ConnectedDemo({
       <footer className="qt-demo-backend-info">
         <a href="/">Small client demo</a>
         <span>
-          Execution profile {connection.profile} · shared MVCC snapshot{" "}
+          Execution profile {connection.capabilities.profile} · shared MVCC snapshot{" "}
           {connection.execution.snapshot}
         </span>
       </footer>

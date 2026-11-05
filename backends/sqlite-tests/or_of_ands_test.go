@@ -175,47 +175,47 @@ func TestOrOfAndsTenPairsMatchTheUnion(t *testing.T) {
 		t.Fatalf("group filter groups %v, want %v", got, wantGroups)
 	}
 
-	// /metrics: the metric's own where, and the query population.
-	v2 := qt.SQLiteV2Dataset{Schema: schema, SourceSQL: "SELECT * FROM calls", Scope: "one", Dataset: "calls"}
-	metrics := func(q qt.MetricQuery) []qt.SQLiteMetricV2 {
-		q.Version, q.Profile = 2, qt.SQLiteExpressionProfile
-		r, err := v2.ExecuteV2(context.Background(), db, nil, &q, qt.PlanOptions{})
+	// Metrics: the metric's own where, and the query population.
+	direct := qt.QueryDatasetV3{Dialect: "sqlite", Schema: schema, SourceSQL: "SELECT * FROM calls", Scope: "one", Dataset: "calls"}
+	metrics := func(where []qt.WhereTerm, specs ...qt.AggSpec) []qt.MetricResult {
+		r, err := direct.Execute(context.Background(), db, metricsV3(where, nil, 0, 0, specs...), qt.PlanOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, m := range r.Metrics.Metrics {
+		for _, m := range r.Metrics {
 			if m.Error != "" {
 				t.Fatal(m.ID, m.Error)
 			}
 		}
-		return r.Metrics.Metrics
+		return r.Metrics
 	}
-	count := func(m qt.SQLiteMetricV2) int64 { return m.Buckets[0].Count }
-	pairCounts := func(m qt.SQLiteMetricV2) map[orOfAndsPair]float64 {
+	count := func(m qt.MetricResult) int64 { return m.Buckets[0].Count }
+	pairCounts := func(m qt.MetricResult) map[orOfAndsPair]float64 {
 		out := map[orOfAndsPair]float64{}
 		for _, b := range m.Buckets {
 			out[orOfAndsPair{fmt.Sprint(b.Keys[0]), fmt.Sprint(b.Keys[1])}] = float64(b.Count)
 		}
 		return out
 	}
-	scoped := metrics(qt.MetricQuery{Metrics: []qt.AggSpec{
-		{ID: "all", Op: "count"},
-		{ID: "selected", Op: "count", Where: []qt.WhereTerm{term}},
-		{ID: "pairs", Op: "count", GroupBy: []string{"provider", "model"}, Where: []qt.WhereTerm{term}},
-	}})
+	scoped := metrics(nil,
+		qt.AggSpec{ID: "all", Op: "count"},
+		qt.AggSpec{ID: "selected", Op: "count", Where: []qt.WhereTerm{term}},
+		qt.AggSpec{ID: "pairs", Op: "count", GroupBy: []string{"provider", "model"}, Where: []qt.WhereTerm{term}},
+	)
 	if count(scoped[0]) != int64(len(records)) || count(scoped[1]) != int64(len(want)) || !reflect.DeepEqual(pairCounts(scoped[2]), wantGroups) {
 		t.Fatalf("metric where: %+v", scoped)
 	}
-	population := metrics(qt.MetricQuery{Where: []qt.WhereTerm{term}, Metrics: []qt.AggSpec{
-		{ID: "selected", Op: "count"},
-		{ID: "pairs", Op: "count", GroupBy: []string{"provider", "model"}},
-	}})
+	population := metrics([]qt.WhereTerm{term},
+		qt.AggSpec{ID: "selected", Op: "count"},
+		qt.AggSpec{ID: "pairs", Op: "count", GroupBy: []string{"provider", "model"}},
+	)
 	if count(population[0]) != int64(len(want)) || !reflect.DeepEqual(pairCounts(population[1]), wantGroups) {
 		t.Fatalf("population: %+v", population)
 	}
 
-	// ExecuteV2Rows over the same records in memory agrees with SQL.
-	memory := qt.SQLiteV2Dataset{Schema: schema, SourceSQL: "SELECT * FROM calls"}
+	// The staged executor (formerly also the in-memory ExecuteV2Rows) agrees
+	// with direct SQL over the same records.
+	staged := qt.TestOnlyStageUngrouped(direct)
 	tx, err := db.Begin()
 	if err != nil {
 		t.Fatal(err)
@@ -226,24 +226,22 @@ func TestOrOfAndsTenPairsMatchTheUnion(t *testing.T) {
 		{Field: "tokens", Op: ">", Value: "50"},
 		{All: []qt.WhereClause{{Field: "provider", Op: "=", Value: "meta"}, {Field: "model", Op: "contains", Value: ""}}},
 	}}
-	for _, q := range []qt.MetricQuery{
-		{Where: []qt.WhereTerm{term}, Metrics: []qt.AggSpec{{ID: "n", Op: "count"}, {ID: "pairs", Op: "sum", Field: "tokens", GroupBy: []string{"provider", "model"}}}},
-		{Metrics: []qt.AggSpec{{ID: "n", Op: "count", Where: []qt.WhereTerm{term}}, {ID: "by", Op: "count", GroupBy: []string{"model"}, Where: []qt.WhereTerm{term, {Field: "tokens", Op: ">=", Value: "20"}}}}},
-		{Where: []qt.WhereTerm{negated}, Metrics: []qt.AggSpec{{ID: "n", Op: "count"}, {ID: "by", Op: "count", GroupBy: []string{"provider", "model"}}}},
+	for _, q := range []qt.QueryRequestV3{
+		metricsV3([]qt.WhereTerm{term}, nil, 0, 0, qt.AggSpec{ID: "n", Op: "count"}, qt.AggSpec{ID: "pairs", Op: "sum", Field: "tokens", GroupBy: []string{"provider", "model"}}),
+		metricsV3(nil, nil, 0, 0, qt.AggSpec{ID: "n", Op: "count", Where: []qt.WhereTerm{term}}, qt.AggSpec{ID: "by", Op: "count", GroupBy: []string{"model"}, Where: []qt.WhereTerm{term, {Field: "tokens", Op: ">=", Value: "20"}}}),
+		metricsV3([]qt.WhereTerm{negated}, nil, 0, 0, qt.AggSpec{ID: "n", Op: "count"}, qt.AggSpec{ID: "by", Op: "count", GroupBy: []string{"provider", "model"}}),
 	} {
-		q.Version, q.Profile = 2, qt.SQLiteExpressionProfile
-		got, gotErr := qt.ExecuteV2Rows(context.Background(), tx, memory, records, q, qt.PlanOptions{})
-		sqlResult, sqlErr := memory.ExecuteV2In(context.Background(), tx, nil, &q, qt.PlanOptions{})
+		got, gotErr := staged.ExecuteIn(context.Background(), tx, q, qt.PlanOptions{})
+		sqlResult, sqlErr := direct.ExecuteIn(context.Background(), tx, q, qt.PlanOptions{})
 		if gotErr != nil || sqlErr != nil {
-			t.Fatalf("memory %v SQL %v", gotErr, sqlErr)
+			t.Fatalf("staged %v direct %v", gotErr, sqlErr)
 		}
 		gb, _ := json.Marshal(got)
 		wb, _ := json.Marshal(sqlResult)
 		if string(gb) != string(wb) {
-			t.Fatalf("memory %s\nSQL    %s", gb, wb)
+			t.Fatalf("staged %s\ndirect %s", gb, wb)
 		}
 	}
-
 	// A negated literal stays null-exclusive inside a branch: an openai row
 	// with no model matches neither "contains gpt" nor its negation.
 	out = orOfAndsV3(d, db, t, qt.QueryRequestV3{Rows: true, Result: qt.WireQuery{Select: []string{"id", "model"}, Where: []qt.WhereTerm{{Any: negated.Any[:1]}}, Limit: 1000}})

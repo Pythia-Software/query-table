@@ -3,7 +3,6 @@ import {
   applyAggregations,
   encodeQuery,
   decodeQuery,
-  toAggregationQuery,
   aggOpsForField,
   isGroupable,
   isMeasurable,
@@ -106,22 +105,6 @@ describe("aggregation encode round-trip + projection", () => {
     expect(decodeQuery(encodeQuery(base as QueryState)).aggregations).toBeUndefined();
   });
 
-  it("toAggregationQuery keeps pushdown WHERE and drops derived-field metrics", () => {
-    const q: QueryState = {
-      ...base,
-      where: [
-        { field: "overall", op: "=", value: "FAIL" }, // pushdown
-        { field: "error_codes", op: "includes", value: "eval" }, // pushdown:false → dropped
-      ],
-      aggregations: [
-        { id: "ok", op: "avg", field: "total_ms", groupBy: ["platform"] },
-        { id: "bad", op: "count", groupBy: ["details"] }, // derived group field → dropped
-      ],
-    };
-    const req = toAggregationQuery(q, runsSchema);
-    expect(req.where).toEqual([{ field: "overall", op: "=", value: "FAIL" }]);
-    expect(req.aggregations.map((a) => a.id)).toEqual(["ok"]);
-  });
 });
 
 describe("aggregate capability helpers", () => {

@@ -46,7 +46,7 @@ func TestCompileRelativeDuration(t *testing.T) {
 		"text": {Expr: "e.text", Kind: FieldText, ServerFilter: true},
 	}}
 	q := WireQuery{Where: []WhereTerm{{Field: "at", Op: ">=", Value: "-1h"}, {Any: []WhereClause{{Field: "at", Op: "<", Value: "+0s"}, {Field: "at", Op: "<=", Value: "+8d2h10m", Negated: true}}}}}
-	res, next, err := CompileAt(q, schema, 4, now)
+	res, next, err := compileTestWhereAt(q, schema, 4, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,28 +59,28 @@ func TestCompileRelativeDuration(t *testing.T) {
 		t.Fatalf("args %#v", res.Args)
 	}
 	for _, op := range []string{"=", "!=", ">", ">=", "<", "<="} {
-		result, next, err := CompileAt(WireQuery{Where: []WhereTerm{{Field: "at", Op: op, Value: "+1ms"}}}, schema, 1, now)
+		result, next, err := compileTestWhereAt(WireQuery{Where: []WhereTerm{{Field: "at", Op: op, Value: "+1ms"}}}, schema, 1, now)
 		if err != nil || next != 2 || !result.Args[0].(time.Time).Equal(now.Add(time.Millisecond)) {
 			t.Fatalf("%s: %+v %v", op, result, err)
 		}
 	}
 	for _, value := range []string{"+", "-", "+1h-2m", "+1h; DROP TABLE events", "+8640000000000000ms1ms", "last 7d", "now", "1h from now"} {
-		if _, _, err := CompileAt(WireQuery{Where: []WhereTerm{{Field: "at", Op: ">=", Value: value}}}, schema, 1, now); err == nil {
+		if _, _, err := compileTestWhereAt(WireQuery{Where: []WhereTerm{{Field: "at", Op: ">=", Value: value}}}, schema, 1, now); err == nil {
 			t.Fatalf("accepted %q", value)
 		}
 	}
-	text, _, err := CompileAt(WireQuery{Where: []WhereTerm{{Field: "text", Op: "=", Value: "-1h"}}}, schema, 1, now)
+	text, _, err := compileTestWhereAt(WireQuery{Where: []WhereTerm{{Field: "text", Op: "=", Value: "-1h"}}}, schema, 1, now)
 	if err != nil || text.Args[0] != "-1h" {
 		t.Fatal("duration coercion affected a text field")
 	}
-	if _, _, err := CompileAt(WireQuery{Where: []WhereTerm{{Field: "id", Op: ">=", Value: "-1h"}}}, schema, 1, now); err == nil {
+	if _, _, err := compileTestWhereAt(WireQuery{Where: []WhereTerm{{Field: "id", Op: ">=", Value: "-1h"}}}, schema, 1, now); err == nil {
 		t.Fatal("duration accepted on a number field")
 	}
-	if _, _, err := CompileAt(WireQuery{Where: []WhereTerm{{Field: "at", Op: ">=", Value: "+1ms"}}}, schema, 1, time.UnixMilli(MaxRelativeTimeMilliseconds)); err == nil {
+	if _, _, err := compileTestWhereAt(WireQuery{Where: []WhereTerm{{Field: "at", Op: ">=", Value: "+1ms"}}}, schema, 1, time.UnixMilli(MaxRelativeTimeMilliseconds)); err == nil {
 		t.Fatal("accepted timestamp overflow")
 	}
 	// Absolute comparisons retain their existing coercion.
-	absolute, _, err := CompileAt(WireQuery{Where: []WhereTerm{{Field: "at", Op: "=", Value: "2026-03-08T03:00:00-07:00"}}}, schema, 1, now)
+	absolute, _, err := compileTestWhereAt(WireQuery{Where: []WhereTerm{{Field: "at", Op: "=", Value: "2026-03-08T03:00:00-07:00"}}}, schema, 1, now)
 	if err != nil || !absolute.Args[0].(time.Time).Equal(time.Date(2026, 3, 8, 10, 0, 0, 0, time.UTC)) {
 		t.Fatal("absolute datetime changed")
 	}
@@ -90,7 +90,7 @@ func TestCompileUsesOneServerClock(t *testing.T) {
 	schema := Schema{Fields: map[string]FieldSpec{"at": {Expr: "e.at", Kind: FieldDatetime, ServerFilter: true}}}
 	q := WireQuery{Where: []WhereTerm{{Field: "at", Op: ">=", Value: "+0s"}, {Field: "at", Op: "<=", Value: "+0s"}}}
 	before := time.Now()
-	result, _, err := Compile(q, schema, 1)
+	result, _, err := compileTestWhere(q, schema, 1)
 	after := time.Now()
 	if err != nil {
 		t.Fatal(err)

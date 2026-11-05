@@ -7,6 +7,8 @@ import {
   formulaRuntime,
   memoryComputedColumnStore,
   readFieldValue,
+  sourceExecutionSchema,
+  validateQueryResultV3,
   type ComputedColumnStore,
   type ComputedExecution,
   type FieldSchema,
@@ -16,7 +18,7 @@ import {
 } from "@pythia-software/query-table-core";
 import { useQueryTable, type QueryTableApi } from "../src/useQueryTable";
 import { evaluateFormulaRows } from "../src/formulaWorker";
-import { validateComputedResponse } from "../src/computedExecution";
+import { MEMORY_V3_CAPABILITIES, serveQueryV3 } from "./v3Transport";
 (
   globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
@@ -159,22 +161,17 @@ describe("shared computed columns", () => {
   it("requests hidden dependencies, batches previews, and only refetches on dependency changes", async () => {
     const store = memoryComputedColumnStore();
     const saved = await store.save("shared", definition, null);
-    const fetchRows = vi.fn<NonNullable<Transport<Row>["fetchRows"]>>(async (query) => ({
-      rows: rows
-        .slice(query.offset, query.offset + Math.min(query.limit, 2))
-        .map(
-          (row) =>
-            Object.fromEntries(
-              query.select.map((k) => [k, row[k as keyof Row]]),
-            ) as unknown as Row,
-        ),
-      total: rows.length,
-    }));
-    const result = mount(store, { fetchRows });
+    // A server that returns at most two projected rows per page.
+    const fetchQueryV3 = vi.fn<Transport<Row>["fetchQueryV3"]>(async (request) => {
+      const result = serveQueryV3(rows, schema, request, { project: true });
+      return { ...result, rows: result.rows.slice(0, 2) };
+    });
+    const lastResult = () => fetchQueryV3.mock.calls.at(-1)?.[0].result;
+    const result = mount(store, { queryCapabilities: MEMORY_V3_CAPABILITIES, fetchQueryV3 });
     await settle();
     await settle();
-    expect(fetchRows.mock.calls.at(-1)?.[0].select).toEqual(["id", "name"]);
-    const calls = fetchRows.mock.calls.length;
+    expect(lastResult()?.select).toEqual(["id", "name"]);
+    const calls = fetchQueryV3.mock.calls.length;
     await act(async () => {
       await result.current.computed.save(
         {
@@ -186,7 +183,7 @@ describe("shared computed columns", () => {
     });
     await settle();
     await settle();
-    expect(fetchRows).toHaveBeenCalledTimes(calls);
+    expect(fetchQueryV3).toHaveBeenCalledTimes(calls);
     const latest = result.current.computed.definitions[0]!;
     await act(async () => {
       await result.current.computed.save(
@@ -199,10 +196,10 @@ describe("shared computed columns", () => {
     });
     await settle();
     await settle();
-    expect(fetchRows.mock.calls.at(-1)?.[0].select).toEqual(["id", "other"]);
+    expect(lastResult()?.select).toEqual(["id", "other"]);
     const preview = await result.current.computed.preview("[other]", 3);
     expect(preview.processed).toBe(3);
-    expect(fetchRows.mock.calls.at(-1)?.[0].offset).toBe(2);
+    expect(lastResult()?.offset).toBe(2);
   });
   it("rejects cycles and leaves missing definitions visible", async () => {
     const store = memoryComputedColumnStore();
@@ -238,18 +235,13 @@ describe("shared computed columns", () => {
         type: "number", select: true, sort: true, measure: true, group: true,
       } },
     };
-    const responseExecution = {
-      ...execution, resolvedRevisions: { double: double.revision },
-    };
-    const fetchRowsV2 = vi.fn<NonNullable<Transport<Row>["fetchRowsV2"]>>(async () => ({
-      version: 2, rows: [rows[0]!], total: rows.length,
-      computed: [{ id: 1, values: { double: { value: 17 } } }],
-      execution: responseExecution,
+    const fetchQueryV3 = vi.fn<Transport<Row>["fetchQueryV3"]>(async (request) => ({
+      version: 3, now: request.now, sourceTotal: rows.length, total: rows.length, metrics: [],
+      rows: [{ ...rows[0]!, "@computed/double": 17 }],
+      schema: { name: schema.name, idField: "id", fields: [...schema.fields.map(({ name, type }) => ({ name, type })), { name: "@computed/double", type: "number" }] },
+      execution,
     }));
-    const result = mount(store, {
-      fetchRows: async () => ({ rows: [rows[0]!], total: rows.length }),
-      fetchRowsV2,
-    }, execution);
+    const result = mount(store, { queryCapabilities: { ...MEMORY_V3_CAPABILITIES, profile: execution.profile }, fetchQueryV3 }, execution);
     await settle();
     await settle();
     act(() => result.current.setQuery(q => ({
@@ -257,25 +249,24 @@ describe("shared computed columns", () => {
     })));
     await settle();
     await settle();
-    const query = fetchRowsV2.mock.calls.at(-1)![0];
-    expect(query.select).toContain("name");
-    expect(query.select).toContain("@computed/double");
-    expect(query.select).not.toContain("@computed/prefix");
+    const query = fetchQueryV3.mock.calls.at(-1)![0];
+    expect(query.result.select).toContain("name");
+    expect(query.result.select).toContain("@computed/double");
+    expect(query.result.select).not.toContain("@computed/prefix");
     expect(query.diagnostics).toEqual([]);
     // Keep the host's complete envelope for authoritative transitive checks.
     expect(query.expectedRevisions).toEqual(execution.resolvedRevisions);
-    const response = await fetchRowsV2.mock.results.at(-1)!.value;
+    const response = await fetchQueryV3.mock.results.at(-1)!.value;
+    const catalogue = sourceExecutionSchema(schema, execution);
+    expect(() => validateQueryResultV3(response, query, catalogue)).not.toThrow();
     const staleResponse = {
       ...response,
-      execution: { ...responseExecution, resolvedRevisions: { double: "stale" } },
+      execution: { ...execution, resolvedRevisions: { ...execution.resolvedRevisions, double: "stale" } },
     };
-    expect(() => validateComputedResponse(query, staleResponse, schema)).toThrow("revision changed");
-    expect(() => validateComputedResponse({
-      ...query, select: ["id"], orderBy: [{ field: "@computed/double", dir: "desc" }],
-    }, staleResponse, schema)).toThrow("revision changed");
-    expect(() => validateComputedResponse(query, {
-      ...response, computed: [],
-    }, schema)).toThrow("Missing or invalid server computed result");
+    expect(() => validateQueryResultV3(staleResponse, query, catalogue)).toThrow("Computed definitions changed");
+    expect(() => validateQueryResultV3({
+      ...response, schema: { ...response.schema, fields: response.schema.fields.filter((field: { name: string }) => field.name !== "@computed/double") },
+    }, query, catalogue)).toThrow("different projected schema");
     expect(result.current.error).toBeNull();
     expect(result.current.visibleFields.map(f => readFieldValue(f, result.current.rows[0]!))).toEqual(["al", 17]);
     await act(async () => {
@@ -289,13 +280,13 @@ describe("shared computed columns", () => {
     expect(result.current.visibleFields.map(f => readFieldValue(f, result.current.rows[0]!))).toEqual(["alp", 17]);
     expect(result.current.visibleFields[0]!.sort?.enabled).toBe(false);
     expect(result.current.visibleFields[0]!.aggregate?.groupable).toBe(false);
-    const calls = fetchRowsV2.mock.calls.length;
+    const calls = fetchQueryV3.mock.calls.length;
     act(() => result.current.setQuery(q => ({
       ...q, orderBy: [{ field: "@computed/prefix", dir: "asc" }],
     })));
     await settle();
-    expect(result.current.error?.message).toContain("unavailable for sort");
-    expect(fetchRowsV2).toHaveBeenCalledTimes(calls);
+    expect(result.current.error?.message).toContain("unsupported result ordering");
+    expect(fetchQueryV3).toHaveBeenCalledTimes(calls);
   });
   it("terminates timed-out and cancelled workers", async () => {
     vi.useFakeTimers();

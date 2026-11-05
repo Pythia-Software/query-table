@@ -51,9 +51,7 @@ function useMetricBatch<Row>(
     context.strictLocalMetrics, context.queryContextKey,
     page ? context.shownFields : null,
   ]);
-  const localDataset = !context.executeV3 &&
-    !(context.transport?.fetchMetrics && context.transport.metricCapabilities?.version === 2) &&
-    !context.transport?.fetchAggregations;
+  const localDataset = !context.executeV3 && !context.transport;
   // Standalone callers can derive the page from a complete client dataset.
   // useQueryTable supplies an explicit gate for its committed-page lifecycle.
   const pageReady = context.rowsReady ?? (localDataset && context.clientRows !== undefined);

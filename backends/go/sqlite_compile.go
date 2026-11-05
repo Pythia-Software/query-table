@@ -9,116 +9,27 @@ import (
 	"time"
 )
 
-// SQLiteOptions captures one clock for filters in rows, counts, and metrics.
+// sqliteOptions captures one clock for filters in rows, counts, and metrics.
 // Zero Now captures time.Now once per compilation. Share it across a batch.
-type SQLiteOptions struct{ Now time.Time }
+type sqliteOptions struct{ Now time.Time }
 
-// CompileSQLite emits fragments with anonymous ? parameters. Args are ordered
-// for WHERE followed by ORDER BY; SELECT expressions contain no parameters.
-// FROM/JOIN and field expressions are trusted host input, never query input.
-// Requires SQLite 3.38+ with JSON and the functions from SQLiteFunctions.
-// This is a v1 row/basic-aggregation adapter, not the qt-postgres-v1 v2 profile.
-func CompileSQLite(q WireQuery, s Schema, o SQLiteOptions) (CompileResult, error) {
-	return compileSQLite(q, s, o, nil)
-}
-func compileSQLite(q WireQuery, s Schema, o SQLiteOptions, relations *sqliteRelations) (CompileResult, error) {
-	var res CompileResult
-	if err := q.Validate(); err != nil {
-		return res, err
-	}
-	for _, metric := range q.Aggregations {
-		if err := validateBasicMetricShape(metric); err != nil {
-			return res, err
-		}
-	}
-	if err := validateSQLiteSchema(s); err != nil {
-		return res, err
-	}
-	if o.Now.IsZero() {
-		o.Now = time.Now()
-	}
-	where, _, err := compileSQLiteWhere(q.Where, s, o, relations)
-	if err != nil {
-		return res, err
-	}
-	res.WhereSQL, res.WhereArgs = where.SQL, where.Args
-	res.Args = append([]any{}, where.Args...)
-	orders := []OrderBy(q.OrderBy)
-	if len(orders) == 0 {
-		orders = s.DefaultSort
-	}
-	orders = append(append([]OrderBy{}, orders...), s.TiebreakSort...)
-	// Always end in stable identity, including an otherwise unsorted request.
-	seenID := false
-	for _, order := range orders {
-		if order.Field == s.IDField && order.Extract == nil {
-			seenID = true
-		}
-	}
-	if !seenID {
-		orders = append(orders, OrderBy{Field: s.IDField, Dir: "asc"})
-	}
-	var terms []string
-	for _, order := range orders {
-		f, ok := s.Fields[order.Field]
-		if !ok || !f.Sortable {
-			return CompileResult{}, fmt.Errorf("unknown or disabled sort field %q", order.Field)
-		}
-		expr := f.SortExpr
-		if expr == "" {
-			expr = f.Expr
-		}
-		if f.SQLiteSortField != "" {
-			f = s.Fields[f.SQLiteSortField]
-		}
-		f.Expr = expr
-		expr = sqliteOrderValue(f)
-		if order.Extract != nil {
-			if _, err := sqlitePattern(order.Extract.Regex); err != nil {
-				return CompileResult{}, err
-			}
-			expr = "qt_regexp_extract(?,CAST(" + expr + " AS TEXT))"
-			res.Args = append(res.Args, order.Extract.Regex)
-			// Captures are text even for a numeric source, as in the frontend.
-		}
-		if order.Dir != "asc" && order.Dir != "desc" {
-			return CompileResult{}, fmt.Errorf("invalid sort direction %q", order.Dir)
-		}
-		sql, err := orderTerm(expr, order.Dir, order.Nulls)
-		if err != nil {
-			return CompileResult{}, err
-		}
-		terms = append(terms, sql)
-	}
-	res.OrderSQL = strings.Join(terms, ", ")
-	res.OrderArgs = append([]any{}, res.Args[len(res.WhereArgs):]...)
-	for _, name := range q.Select {
-		f, ok := s.Fields[name]
-		if !ok {
-			return CompileResult{}, fmt.Errorf("unknown select field %q", name)
-		}
-		res.SelectExprs = append(res.SelectExprs, f.Expr+" AS "+sqliteIdent(name))
-	}
-	return res, nil
-}
-
-// SQLiteWhereResult can be composed with host-owned FROM trees and optimized
+// sqliteWhereResult can be composed with host-owned FROM trees and optimized
 // count/rollup queries. It requires only bindings for fields actually filtered;
 // a row identity and row ordering are not needed for predicate compilation.
-type SQLiteWhereResult struct {
+type sqliteWhereResult struct {
 	SQL  string
 	Args []any
 }
 
-func CompileSQLiteWhere(terms []WhereTerm, s Schema, o SQLiteOptions) (SQLiteWhereResult, error) {
+func compileSQLiteWhereV1(terms []WhereTerm, s Schema, o sqliteOptions) (sqliteWhereResult, error) {
 	result, _, err := compileSQLiteWhere(terms, s, o, nil)
 	return result, err
 }
 
 // compileSQLiteWhere also applies an execution's host predicate relations and
-// reports the key fields they read. With nil relations it is CompileSQLiteWhere.
-func compileSQLiteWhere(terms []WhereTerm, s Schema, o SQLiteOptions, relations *sqliteRelations) (SQLiteWhereResult, []string, error) {
-	result := SQLiteWhereResult{}
+// reports the key fields they read. With nil relations it is compileSQLiteWhereV1.
+func compileSQLiteWhere(terms []WhereTerm, s Schema, o sqliteOptions, relations *sqliteRelations) (sqliteWhereResult, []string, error) {
+	result := sqliteWhereResult{}
 	if err := (WireQuery{Where: terms}).Validate(); err != nil {
 		return result, nil, err
 	}
@@ -130,7 +41,7 @@ func compileSQLiteWhere(terms []WhereTerm, s Schema, o SQLiteOptions, relations 
 	var parts []string
 	for _, term := range terms {
 		if term.IsGroup() && (len(term.Any) == 0 || term.Field != "" || term.Op != "" || term.Value != "" || term.Negated) {
-			return SQLiteWhereResult{}, nil, fmt.Errorf("invalid OR group")
+			return sqliteWhereResult{}, nil, fmt.Errorf("invalid OR group")
 		}
 		// A term is an OR of AND branches. An always-true literal (blank value)
 		// drops out of its branch; a branch with nothing left makes the whole
@@ -143,7 +54,7 @@ func compileSQLiteWhere(terms []WhereTerm, s Schema, o SQLiteOptions, relations 
 			for _, c := range branch {
 				sql, args, err := sqliteBaseLiteral(c, s, now)
 				if err != nil {
-					return SQLiteWhereResult{}, nil, err
+					return sqliteWhereResult{}, nil, err
 				}
 				if sql != "" {
 					literals[i] = append(literals[i], c)
@@ -161,7 +72,7 @@ func compileSQLiteWhere(terms []WhereTerm, s Schema, o SQLiteOptions, relations 
 		if relations != nil {
 			var err error
 			if uses, err = relations.choose(literals, s); err != nil {
-				return SQLiteWhereResult{}, nil, err
+				return sqliteWhereResult{}, nil, err
 			}
 		}
 		var alternatives []string
@@ -271,17 +182,6 @@ func sqliteNull(f FieldSpec) string {
 		return "(" + f.Expr + " IS NULL OR " + f.Expr + " = '')"
 	}
 	return f.Expr + " IS NULL"
-}
-func sqliteOrderValue(f FieldSpec) string {
-	switch f.Kind {
-	case FieldText, FieldEnum:
-		return f.Expr + " COLLATE BINARY"
-	case FieldDatetime:
-		if f.SQLiteDatetimeFormat == "" || f.SQLiteDatetimeFormat == "rfc3339" {
-			return "qt_datetime(" + f.Expr + ")"
-		}
-	}
-	return f.Expr
 }
 func sqliteDateText(f FieldSpec) string {
 	switch f.SQLiteDatetimeFormat {
@@ -450,129 +350,4 @@ func sqliteComparison(c WhereClause, f FieldSpec, now time.Time) (expr string, v
 		expr = "COALESCE(" + expr + ",'') COLLATE BINARY"
 	}
 	return expr, value, comparisonOp, constant, nil
-}
-
-// CompileSQLiteAggregation supports the six basic aggregate operations. Modern
-// expressions, scopes, distributions and paired metrics are explicitly refused.
-// Numeric measures are checked before and after reductions; unsafe integers,
-// non-finite values, and nonnumeric SQLite storage fail rather than becoming 0.
-func CompileSQLiteAggregation(a AggSpec, s Schema) (AggCompileResult, error) {
-	if err := validateSQLiteSchema(s); err != nil {
-		return AggCompileResult{}, err
-	}
-	if err := (WireQuery{Aggregations: []AggSpec{a}}).Validate(); err != nil {
-		return AggCompileResult{}, err
-	}
-	// Reuse the common aggregate allowlists and modern-request rejection.
-	res, err := CompileAggregation(a, s)
-	if err != nil {
-		return res, err
-	}
-	if a.Field != "" && s.Fields[a.Field].Kind == FieldNumber && a.Op != "count" {
-		f := s.Fields[a.Field]
-		safe := s
-		safe.Fields = make(map[string]FieldSpec, len(s.Fields))
-		for k, v := range s.Fields {
-			safe.Fields[k] = v
-		}
-		f.Expr = "qt_number(" + f.Expr + ")"
-		safe.Fields[a.Field] = f
-		res, err = CompileAggregation(a, safe)
-		if err != nil {
-			return res, err
-		}
-		if a.Op != "count_distinct" {
-			raw, _ := aggValueExpr(a, safe)
-			res.SelectExprs[len(a.GroupBy)] = "qt_number(" + raw + ") AS \"value\""
-		}
-	}
-	if a.Field != "" && (s.Fields[a.Field].Kind == FieldText || s.Fields[a.Field].Kind == FieldEnum) {
-		f := s.Fields[a.Field]
-		f.Expr = "(" + f.Expr + ") COLLATE BINARY"
-		copySchema := s
-		copySchema.Fields = map[string]FieldSpec{}
-		for k, v := range s.Fields {
-			copySchema.Fields[k] = v
-		}
-		copySchema.Fields[a.Field] = f
-		value, err := aggValueExpr(a, copySchema)
-		if err != nil {
-			return res, err
-		}
-		res.SelectExprs[len(a.GroupBy)] = value + ` AS "value"`
-	}
-	// Quote output names losslessly and make text/date group ordering explicit.
-	groups := make([]string, 0, len(a.GroupBy))
-	for i, name := range a.GroupBy {
-		f := s.Fields[name]
-		if f.Kind == FieldTextArray {
-			return AggCompileResult{}, fmt.Errorf("SQLite cannot group textarray field %q", name)
-		}
-		expr := sqliteGroupValue(f)
-		groups = append(groups, expr)
-		res.SelectExprs[i] = expr + " AS " + sqliteIdent(fmt.Sprintf("g%d", i))
-	}
-	res.GroupBySQL = strings.Join(groups, ", ")
-	if a.Field != "" {
-		f := s.Fields[a.Field]
-		if f.Kind == FieldDatetime {
-			f.Expr = sqliteOrderValue(f)
-			copySchema := s
-			copySchema.Fields = map[string]FieldSpec{}
-			for k, v := range s.Fields {
-				copySchema.Fields[k] = v
-			}
-			copySchema.Fields[a.Field] = f
-			value, err := aggValueExpr(a, copySchema)
-			if err != nil {
-				return res, err
-			}
-			res.SelectExprs[len(a.GroupBy)] = value + ` AS "value"`
-		}
-	}
-	return res, nil
-}
-func sqliteGroupValue(f FieldSpec) string {
-	if f.Kind == FieldText || f.Kind == FieldEnum {
-		return f.Expr + " COLLATE BINARY"
-	}
-	if f.Kind == FieldDatetime {
-		return sqliteOrderValue(f)
-	}
-	return f.Expr
-}
-
-// SQLiteDistinctCompile describes a literal autocomplete query. ArraySQL is a
-// CROSS JOIN of individual JSON text-array elements, empty for scalar fields.
-// Hosts reserve aliases beginning _qt_. IsNullExpr describes source nullity,
-// before the element join, so empty arrays still contribute to hasNull.
-type SQLiteDistinctCompile struct {
-	Expr       string
-	SearchSQL  string
-	Args       []any
-	ArraySQL   string
-	IsNullExpr string
-}
-
-func CompileSQLiteDistinct(field, search string, s Schema) (SQLiteDistinctCompile, error) {
-	f, ok := s.Fields[field]
-	if !ok || !f.ServerFilter || strings.TrimSpace(f.Expr) == "" {
-		return SQLiteDistinctCompile{}, fmt.Errorf("unknown or disabled filter field %q", field)
-	}
-	if len(search) > maxFilterValueBytes {
-		return SQLiteDistinctCompile{}, fmt.Errorf("distinct search too long")
-	}
-	result := SQLiteDistinctCompile{Expr: f.Expr, IsNullExpr: sqliteNull(f)}
-	if f.Kind == FieldDatetime {
-		result.Expr = sqliteDateText(f)
-	}
-	if f.Kind == FieldTextArray {
-		result.ArraySQL = " CROSS JOIN json_each(" + sqliteArray(f) + ") AS _qt_distinct"
-		result.Expr = "_qt_distinct.value"
-	}
-	if search != "" {
-		result.SearchSQL = "instr(qt_lower(CAST(" + result.Expr + " AS TEXT)),qt_lower(?))>0"
-		result.Args = []any{search}
-	}
-	return result, nil
 }

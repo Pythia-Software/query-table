@@ -1,7 +1,8 @@
 # Query Table DuckDB backend
 
-`@pythia-software/query-table-duckdb` executes Query Table's row, metric, and
-version 3 grouped-query contracts with DuckDB SQL. The same TypeScript planner
+`@pythia-software/query-table-duckdb` executes Query Table's version 3 query
+contract (rows, metrics, grouping and distinct values) with DuckDB SQL; its
+transport is exactly `{ queryCapabilities, fetchQueryV3 }`. The same TypeScript planner
 runs against native DuckDB or DuckDB-Wasm. There is no React, HTTP server, Go,
 database driver, or browser dependency in this package.
 
@@ -64,7 +65,7 @@ The explicitly negotiated profile is `qt-duckdb-v1`.
 | Contract | Support |
 | --- | --- |
 | Rows | projection, all filter operators, AND/OR/NOT, nulls, text sets, multi-sort, null placement, pagination |
-| Metadata/items | scalar/array autocomplete with `hasNull`, complete item lookup |
+| Metadata/items | v3 `distinct` scalar/array autocomplete with `hasNull` over the source WHERE; item lookup and field statistics are ordinary v3 row/metric requests |
 | Regex | bounded RE2 source filtering and regex sort extraction; unsupported RE2 patterns fail |
 | Scalar metrics | COUNT, COUNT_DISTINCT, SUM, AVG, MIN, MAX, exact MEDIAN; composed formulas; paired scatter measures |
 | Distributions | exact boxes and shared-edge histograms; bounded numeric samples |

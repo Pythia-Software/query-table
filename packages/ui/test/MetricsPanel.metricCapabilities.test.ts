@@ -29,13 +29,17 @@ it("lets a client-row host select and apply a computed grouping advertised by it
     id: "category", label: "Category",
     expression: { language: "qt-expr", version: 1, source: "[group]" },
   }, null);
-  const fetchRows = vi.fn(async (): Promise<{ rows: Row[]; total: number }> => { throw Error("Metric transport cannot fetch rows"); });
-  const fetchMetrics = vi.fn<NonNullable<Transport<Row>["fetchMetrics"]>>(async request => ({
-    metrics: request.metrics.map(m => ({ id: m.id, buckets: [{ keys: [], value: 1, count: 1 }] })),
-  }));
+  const fetchQueryV3 = vi.fn<Transport<Row>["fetchQueryV3"]>(async request => {
+    if (request.rows) throw Error("Metric transport cannot fetch rows");
+    return { version: 3, now: request.now, sourceTotal: 1, rows: [], total: 0, schema: { name: schema.name, idField: "id", fields: [] },
+      metrics: request.metrics.map(m => ({ id: m.id, buckets: [{ keys: [], value: 1, count: 1 }] })),
+      execution: { profile: request.profile, planToken: request.planToken ?? "", resolvedRevisions: { ...request.expectedRevisions }, fields: {} } };
+  });
+  const queryCapabilities = { version: 3 as const, profile: "qt-postgres-v1", groupedRows: false, calendarGrouping: false,
+    computedSourceFilters: false, regex: false, maxRows: 100, maxGroups: 100, maxPopulation: 100 };
   const options: UseQueryTableOptions<Row> = {
     schema, clientRows: [{ id: 1, group: "a" }], computedColumnStore: store,
-    metricTransport: { fetchRows, fetchMetrics, metricCapabilities: { version: 2, computedFields: true, expressions: true } },
+    metricTransport: { queryCapabilities, fetchQueryV3 },
     metricExecution: {
       profile: "qt-postgres-v1", planToken: "metric-plan", resolvedRevisions: { category: definition.revision },
       fields: { "@computed/category": { type: "text", select: false, sort: false, group: true, measure: false } },
@@ -66,11 +70,14 @@ it("lets a client-row host select and apply a computed grouping advertised by it
     act(() => apply.click());
     await act(async () => { await vi.advanceTimersByTimeAsync(50); });
     expect(api.aggregations.clauses[0]?.groupBy).toEqual(["@computed/category"]);
-    expect(fetchMetrics.mock.lastCall![0]).toMatchObject({
+    expect(fetchQueryV3.mock.lastCall![0]).toMatchObject({
+      rows: false,
       metrics: [{ id: "m", groupBy: ["@computed/category"] }],
       expectedRevisions: { category: definition.revision },
+      planToken: "metric-plan",
     });
-    expect(fetchRows).not.toHaveBeenCalled();
+    expect(fetchQueryV3.mock.calls.some(([request]) => request.rows)).toBe(false);
+    expect(api.aggregations.error).toBeNull();
   } finally {
     act(() => root.unmount()); host.remove();
   }

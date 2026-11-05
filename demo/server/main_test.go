@@ -43,24 +43,6 @@ func TestReadJSONRejectsMultipleDocuments(t *testing.T) {
 		t.Fatal("accepted multiple documents")
 	}
 }
-func TestNarrowSchemaKeepsFiltersAndIdentity(t *testing.T) {
-	s, err := qt.LoadSchema(schemaJSON)
-	if err != nil {
-		t.Fatal(err)
-	}
-	narrowed := narrowSchema(s, []string{"total_ms"}, []qt.WhereTerm{{Field: "platform", Op: "=", Value: "linux"}})
-	for _, name := range []string{"id", "total_ms", "platform"} {
-		if _, ok := narrowed.Fields[name]; !ok {
-			t.Fatal("missing", name)
-		}
-	}
-	if _, ok := narrowed.Fields["worker"]; ok {
-		t.Fatal("unneeded binding retained")
-	}
-	if len(s.Fields) <= len(narrowed.Fields) {
-		t.Fatal("mutated original schema")
-	}
-}
 
 // Opt-in read-only tests use an already seeded demo database. No seed/save or
 // data mutation occurs, so these are safe to run while exploring the dashboard.
@@ -96,9 +78,11 @@ func TestPostgresSnapshotLifetimeAndFractionalFilters(t *testing.T) {
 	if _, err := tx.Exec("SET TRANSACTION SNAPSHOT '" + server.snapshot + "'"); err != nil {
 		t.Fatal(err)
 	}
-	count, err := server.count(context.Background(), tx, []qt.WhereTerm{{Field: "id", Op: "<", Value: "1.5"}}, &timing{})
-	if err != nil || count != 1 {
-		t.Fatal("fractional filter", count, err)
+	stage := qt.WireQuery{Select: []string{"id"}, Where: []qt.WhereTerm{{Field: "id", Op: "<", Value: "1.5"}}, Limit: 10}
+	result, err := server.dataset(server.columns).ExecuteIn(context.Background(), tx, qt.QueryRequestV3{Version: 3, Profile: qt.ServerExpressionProfile,
+		Now: time.Now().UnixMilli(), ExpectedRevisions: server.revisions, PlanToken: server.token, Snapshot: server.snapshot, Source: stage, Result: stage, Rows: true}, server.options(tx))
+	if err != nil || result.Total != 1 {
+		t.Fatal("fractional filter", result.Total, err)
 	}
 	// A failed refresh is repaired before exposing cached columns/revisions.
 	tx.Rollback()

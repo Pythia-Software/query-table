@@ -29,7 +29,6 @@ import {
   type ComputedExecution,
   type FieldSchema,
   type FormulaPlan,
-  type MetricQuery,
   type QueryCapabilitiesV3,
   type QueryRequestV3,
   type QueryResultV3,
@@ -465,6 +464,7 @@ export class DuckDBBackend {
     signal?: AbortSignal,
   ): Promise<QueryResultV3> {
     this.validateRequest(request);
+    if (request.distinct) return this.distinct(request, signal);
     return this.transaction(async (tables) => {
       const source = await this.stage(
         request.source,
@@ -917,158 +917,68 @@ export class DuckDBBackend {
   transport(): Transport<DuckDBRow> {
     return {
       queryCapabilities: this.capabilities,
-      metricCapabilities: {
-        version: 2,
-        expressions: true,
-        shownRows: true,
-        distributions: true,
-        computedFields: this.computed.size > 0,
-        filters: true,
-        minCount: true,
-        minCountMeasures: true,
-        profile: DUCKDB_PROFILE,
-        maxGroups: this.capabilities.maxGroups,
-      },
       fetchQueryV3: (request, signal) => this.execute(request, signal),
-      fetchRows: (query, signal) =>
-        this.transaction(async (tables) => {
-          this.window(query);
-          const source = await this.stage(query, Date.now(), tables, signal);
-          return this.page(
-            source.name,
-            this.schema,
-            { ...query, where: [] },
-            Date.now(),
-            signal,
-          );
-        }, signal),
-      fetchMetrics: (query: MetricQuery, signal) => {
-        if (
-          query.diagnostics.length ||
-          (query.profile && query.profile !== DUCKDB_PROFILE) ||
-          query.metrics.length > 20
-        )
-          return Promise.reject(Error("Invalid DuckDB metric request."));
-        return this.transaction(async (tables) => {
-          const now = Date.now(),
-            server = { ...query, select: [] };
-          const source = await this.stage(server, now, tables, signal);
-          return {
-            metrics: await this.metrics(
-              source.name,
-              this.schema,
-              server,
-              query.metrics,
-              now,
-              tables,
-              signal,
-            ),
-          };
-        }, signal);
-      },
-      fetchAggregations: (query, signal) =>
-        this.transaction(async (tables) => {
-          if (query.diagnostics?.length || query.aggregations.length > 20)
-            throw Error("Invalid DuckDB aggregation request.");
-          const server = {
-              select: [],
-              where: query.where,
-              orderBy: [],
-              limit: 100,
-              offset: 0,
-            },
-            now = Date.now();
-          const source = await this.stage(server, now, tables, signal);
-          return {
-            metrics: await this.metrics(
-              source.name,
-              this.schema,
-              { ...server, where: [] },
-              query.aggregations,
-              now,
-              tables,
-              signal,
-            ),
-          };
-        }, signal),
-      fetchDistinctValues: (query, signal) =>
-        this.serial(async () => {
-          const builder = this.builder(),
-            field = builder.definition(query.field),
-            limit = positive(query.limit, 50, 500);
-          if (!isFilterable(field))
-            throw Error(`Field ${field.name} is not filterable.`);
-          if (query.search.length > 2000)
-            throw Error("Distinct search exceeds its budget.");
-          const source = this.projectedSource(Date.now()),
-            value = builder.field(query.field),
-            array = field.type === "textarray";
-          builder.args.push(...source.args);
-          const param = builder.bind(query.search);
-          const rows = await this.run(
-            builder.statement(
-              `SELECT CAST(value AS VARCHAR) AS value, COUNT(*) AS n FROM (SELECT ${array ? `unnest(${value})` : value} AS value FROM (${source.sql}) r) v WHERE value IS NOT NULL AND contains(lower(CAST(value AS VARCHAR)), lower(${param})) GROUP BY value ORDER BY n DESC, value ASC LIMIT ${limit + 1}`,
-            ),
-            signal,
-          );
-          const [{ n }] = (await this.sql(
-            `SELECT COUNT(*) AS n FROM (${source.sql}) r WHERE ${array ? `COALESCE(len(${value}),0) = 0` : `${value} IS NULL`}`,
-            source.args,
-            signal,
-          )) as [{ n: number }];
-          return {
-            values: rows.slice(0, limit).map((row) => String(row.value)),
-            hasMore: rows.length > limit,
-            hasNull: n > 0,
-          };
-        }, signal),
-      fetchRow: (identity, signal) =>
-        this.serial(async () => {
-          const source = this.projectedSource(Date.now());
-          const rows = await this.sql(
-            `SELECT * FROM (${source.sql}) r WHERE ${id(this.schema.idField)} = $${source.args.length + 1} LIMIT 2`,
-            [...source.args, identity],
-            signal,
-          );
-          if (rows.length > 1) throw Error("DuckDB identity must be unique.");
-          return rows[0] ? this.formatRow(rows[0], this.schema) : null;
-        }, signal),
-      fetchFieldStats: (fields, signal) =>
-        this.serial(async () => {
-          if (fields.length > 64)
-            throw Error("At most 64 field stats can be requested.");
-          const stats: Record<
-            string,
-            import("@pythia-software/query-table-core").FieldStats
-          > = {};
-          for (const name of fields) {
-            const builder = this.builder(),
-              field = builder.definition(name),
-              source = this.projectedSource(Date.now()),
-              value = builder.field(name);
-            const rows = await this.sql(
-              field.type === "textarray"
-                ? `SELECT COUNT(DISTINCT value) AS "distinct" FROM (SELECT unnest(${value}) AS value FROM (${source.sql}) r)`
-                : `SELECT COUNT(DISTINCT ${value}) AS "distinct", MIN(${value}) AS min, MAX(${value}) AS max FROM (${source.sql}) r`,
-              source.args,
-              signal,
-            );
-            const result = rows[0]!;
-            stats[name] = {
-              distinct: result.distinct as number,
-              ...(typeof result.min === "number" ||
-              typeof result.min === "string"
-                ? { min: result.min }
-                : {}),
-              ...(typeof result.max === "number" ||
-              typeof result.max === "string"
-                ? { max: result.max }
-                : {}),
-            };
-          }
-          return stats;
-        }, signal),
     };
+  }
+  /** Distinct values over the source population, without staging it. */
+  private distinct(
+    request: QueryRequestV3,
+    signal?: AbortSignal,
+  ): Promise<QueryResultV3> {
+    const query = request.distinct!;
+    if (request.rows || request.metrics.length || request.grouping)
+      return Promise.reject(
+        Error("A distinct request has no rows, metrics or grouping."),
+      );
+    if (
+      !Number.isSafeInteger(query.limit) ||
+      query.limit < 1 ||
+      query.limit > 500 ||
+      typeof query.search !== "string" ||
+      query.search.length > 2000
+    )
+      return Promise.reject(Error("Distinct request exceeds its budget."));
+    return this.serial(async () => {
+      const builder = this.builder(this.schema, request.now),
+        field = builder.definition(query.field);
+      if (!isFilterable(field))
+        throw Error(`Field ${field.name} is not filterable.`);
+      const source = this.projectedSource(request.now),
+        value = builder.field(query.field),
+        array = field.type === "textarray";
+      builder.args.push(...source.args);
+      const population = `(${source.sql}) r WHERE ${builder.where(request.source.where)}`;
+      const param = builder.bind(query.search);
+      const rows = await this.run(
+        builder.statement(
+          `SELECT CAST(value AS VARCHAR) AS value, COUNT(*) AS n FROM (SELECT ${array ? `unnest(${value})` : value} AS value FROM ${population}) v WHERE value IS NOT NULL AND contains(lower(CAST(value AS VARCHAR)), lower(${param})) GROUP BY value ORDER BY n DESC, value ASC LIMIT ${query.limit + 1}`,
+        ),
+        signal,
+      );
+      const nulls = this.builder(this.schema, request.now);
+      nulls.args.push(...source.args);
+      const [{ n }] = (await this.run(
+        nulls.statement(
+          `SELECT COUNT(*) AS n FROM (${source.sql}) r WHERE ${nulls.where(request.source.where)} AND ${array ? `COALESCE(len(${value}),0) = 0` : `${value} IS NULL`}`,
+        ),
+        signal,
+      )) as [{ n: number }];
+      return {
+        version: 3,
+        now: request.now,
+        sourceTotal: 0,
+        rows: [],
+        total: 0,
+        schema: { name: this.schema.name, idField: this.schema.idField, fields: [] },
+        metrics: [],
+        distinct: {
+          values: rows.slice(0, query.limit).map((row) => String(row.value)),
+          hasMore: rows.length > query.limit,
+          hasNull: n > 0,
+        },
+        execution: { ...this.execution, planToken: request.planToken ?? "" },
+      };
+    }, signal);
   }
 }
 

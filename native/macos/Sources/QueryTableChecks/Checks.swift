@@ -48,7 +48,7 @@ struct QueryTableChecks {
     let malformed =
       #"{"w":[{"field":"status","op":"=","value":"PASS","negated":"invalid"},null,{"field":"amount","op":">"},{"any":[{"field":"name","op":"=","value":"Alpha"},false,{"field":4,"op":"=","value":"x"}]}]}"#
     let recovered = QueryState.decodeToken(Data(malformed.utf8).base64EncodedString())
-    let recoveredResult = try await local.fetchRows(query: recovered.serverQuery(schema: schema))
+    let recoveredResult = try await local.rows(recovered.serverQuery(schema: schema))
     try check(
       recovered.whereTerms.count == 2 && recoveredResult.total == 1
         && recoveredResult.rows.first?["id"] == .number(1),
@@ -60,7 +60,7 @@ struct QueryTableChecks {
         let query = QueryState(select: selected)
         let table = QueryTableController(
           schema: columnSchema,
-          adapter: ProjectionTransport(rows: rows), initialQuery: query)
+          adapter: ProjectionTransport(schema: columnSchema, rows: rows), initialQuery: query)
         table.refresh()
         try await waitUntil { !table.isLoading }
         let visible = table.visibleColumns.map(\.field)
@@ -87,21 +87,21 @@ struct QueryTableChecks {
       QueryState.decodeToken(try query.encodedToken()) == query, "Compact query token round trip")
     let server = query.serverQuery(schema: schema)
     try check(server.select == ["id", "name"], "Projection retains stable row ID")
-    let first = try await local.fetchRows(query: server)
+    let first = try await local.rows(server)
     try check(
       first.total == 3 && first.rows.first?["id"] == .number(2),
       "OR filtering, sorting and total before pagination")
-    let negated = try await local.fetchRows(
-      query: .init(whereTerms: [
+    let negated = try await local.rows(
+      .init(whereTerms: [
         .predicate(.init(field: "amount", op: ">", value: "30", negated: true))
       ]))
     try check(
       negated.rows.count == 1 && negated.rows[0]["id"] == .number(1),
       "Negation excludes NULL values")
-    let longerNames = try await local.fetchRows(query: .init(whereTerms: [
+    let longerNames = try await local.rows(.init(whereTerms: [
       .predicate(.init(field: "name", op: "length_gt", value: "4"))
     ]))
-    let shorterNames = try await local.fetchRows(query: .init(whereTerms: [
+    let shorterNames = try await local.rows(.init(whereTerms: [
       .predicate(.init(field: "name", op: "length_lt", value: "5"))
     ]))
     try check(
@@ -113,16 +113,16 @@ struct QueryTableChecks {
         ["id": .number(4), "name": .string("")],
         ["id": .number(5), "name": .null],
       ])
-    let negatedLength = try await namesWithEmpty.fetchRows(query: .init(whereTerms: [
+    let negatedLength = try await namesWithEmpty.rows(.init(whereTerms: [
       .predicate(.init(field: "name", op: "length_gt", value: "5", negated: true))
     ]))
     try check(
       negatedLength.rows.map { $0["id"] } == [.number(1), .number(2), .number(3)],
       "Negated string length filters exclude empty and NULL values")
-    let emptyOnly = try await namesWithEmpty.fetchRows(query: .init(whereTerms: [
+    let emptyOnly = try await namesWithEmpty.rows(.init(whereTerms: [
       .predicate(.init(field: "name", op: "length_eq", value: "0"))
     ]))
-    let nonemptyOnly = try await namesWithEmpty.fetchRows(query: .init(whereTerms: [
+    let nonemptyOnly = try await namesWithEmpty.rows(.init(whereTerms: [
       .predicate(.init(field: "name", op: "length_gt", value: "0"))
     ]))
     try check(
@@ -134,15 +134,62 @@ struct QueryTableChecks {
         nonemptyClause, allowedOps: ["length_gt", "length_eq"])
         == WhereClause(field: "name", op: "length_eq", value: "0"),
       "Zero-length negation chooses the empty-string filter")
-    let suggestions = try await local.fetchDistinctValues(
-      query: .init(field: "status", search: "pa"))
-    try check(suggestions.values == ["PASS"], "Autocomplete searches distinct values")
-    let metrics = try await local.fetchAggregations(
-      query: .init(aggregations: [.init(id: "total", op: "sum", field: "amount")]))
+    let suggestions = try await local.fetchQueryV3(
+      .distinctValues(
+        field: "status", search: "pa", schema: schema, capabilities: local.queryCapabilities))
     try check(
-      metrics.metrics.first?.buckets.first?.value == .number(60), "Metric covers full dataset")
+      suggestions.distinct?.values == ["PASS"] && suggestions.rows.isEmpty,
+      "Autocomplete searches distinct values through the v3 distinct section")
+    // The TypeScript builder filters the population in source only.
+    let filteredSuggestions = try await local.fetchQueryV3(
+      QueryRequestV3(
+        profile: local.queryCapabilities.profile, now: 0,
+        source: ServerQuery(
+          whereTerms: [.predicate(.init(field: "amount", op: ">", value: "30"))], limit: 1),
+        result: ServerQuery(limit: 1), rows: false,
+        distinct: DistinctRequestV3(field: "status", search: "", limit: 10)))
+    try check(
+      filteredSuggestions.distinct?.values == ["FAIL"],
+      "Distinct values read a filtered source whose result stage differs")
+    let stale = QueryTableController(
+      schema: schema, adapter: ProjectionTransport(schema: schema, rows: [rows[0]]))
+    var wrongRow: Error?
+    do { _ = try await stale.fetchRow(id: .number(2)) } catch { wrongRow = error }
+    try check(wrongRow != nil, "Row lookup rejects a response for a different identity")
+    let nestedSchema = FieldSchema(
+      name: "nested", idField: "id",
+      fields: [
+        .init(name: "id", label: "ID", type: "number", source: .init(path: "meta.id")),
+        .init(name: "name", label: "Name", type: "text"),
+      ])
+    let nestedRows: [QueryRow] = [["meta": .object(["id": .number(1)]), "name": .string("a")]]
+    let nestedTable = QueryTableController(
+      schema: nestedSchema, adapter: LocalQueryTransport(schema: nestedSchema, rows: nestedRows))
+    nestedTable.refresh()
+    try await waitUntil { !nestedTable.isLoading }
+    let nestedRow = try await nestedTable.fetchRow(id: .number(1))
+    try check(
+      nestedTable.error == nil && nestedTable.rows.count == 1 && nestedRow != nil,
+      "An identity at a nested source path validates and looks up")
+    let oneRow = QueryCapabilitiesV3(profile: local.queryCapabilities.profile, maxRows: 1)
+    let tightLookup = QueryRequestV3.rowLookup(id: .number(2), select: ["name"], schema: schema, capabilities: oneRow)
+    try check(tightLookup.source.limit == 1, "Row lookup stays within a one-row budget")
+    let metrics = try await local.metrics([.init(id: "total", op: "sum", field: "amount")])
+    try check(metrics.first?.buckets.first?.value == .number(60), "Metric covers full dataset")
+    let lookup = QueryRequestV3.rowLookup(
+      id: .number(2), select: ["name"], schema: schema, capabilities: local.queryCapabilities)
+    let found = try await local.fetchQueryV3(lookup)
+    try found.validate(for: lookup, schema: schema)
+    try check(
+      found.rows.map { $0["id"] } == [.number(2)] && lookup.source.limit == 2,
+      "Row refresh is a rows request filtered by identity")
+    let rejected = QueryState(orderBy: [.init(field: "missing")]).queryRequestV3(
+      schema: schema, capabilities: local.queryCapabilities)
+    try check(
+      rejected.diagnostics == ["The query contains unsupported result ordering."],
+      "Unsupported state becomes a request diagnostic")
     try await HTTPCheck.run()
-    try check(true, "HTTP transport sends query JSON/authentication and rejects error status")
+    try check(true, "HTTP transport posts v3 JSON with authentication and rejects error status and mismatched responses")
 
     let engine = FormulaEngine()
     let plan = try await engine.compile(
@@ -215,7 +262,7 @@ struct QueryTableChecks {
 
     let nullPredicate = WhereClause(field: "amount", op: "is_null")
     let notNull = QueryPredicateOperations.negate(nullPredicate)
-    let nonnullRows = try await local.fetchRows(query: .init(whereTerms: [.predicate(notNull)]))
+    let nonnullRows = try await local.rows(.init(whereTerms: [.predicate(notNull)]))
     try check(
       notNull.op == "is_not_null" && notNull.negated == nil && nonnullRows.total == 2,
       "NOT NULL control uses the complementary operator")
@@ -257,13 +304,13 @@ struct QueryTableChecks {
       "Explicit query takes precedence over saved default and last view")
 
     let sampleController = QueryTableController(
-      schema: schema, adapter: CappedTransport(rows: rows), initialQuery: QueryState(offset: 2))
+      schema: schema, adapter: CappedTransport(schema: schema, rows: rows), initialQuery: QueryState(offset: 2))
     let sample = try await sampleController.sampleRows(dependencies: ["amount"], count: 3)
     try check(
       sample.rows.count == 3 && sample.rows.first?["id"] == .number(1),
       "Preview starts at zero and follows server page caps")
 
-    let delayed = ControlledTransport()
+    let delayed = ControlledTransport(schema: schema)
     let racing = QueryTableController(schema: schema, adapter: delayed)
     racing.refresh()
     try await waitUntil { await delayed.requestCount == 1 }
@@ -287,29 +334,45 @@ struct QueryTableChecks {
   }
 }
 
+private let checkCapabilities = QueryCapabilitiesV3(profile: "checks")
+
 private struct ProjectionTransport: QueryTransport {
+  let schema: FieldSchema
   let rows: [QueryRow]
-  func fetchRows(query: ServerQuery) async throws -> FetchRowsResult {
-    .init(rows: rows.map { row in row.filter { query.select.contains($0.key) } }, total: rows.count)
+  var queryCapabilities: QueryCapabilitiesV3 { checkCapabilities }
+  func fetchQueryV3(_ request: QueryRequestV3) async throws -> QueryResultV3 {
+    QueryResultV3(
+      answering: request, schema: schema,
+      rows: rows.map { row in row.filter { request.result.select.contains($0.key) } },
+      total: rows.count)
   }
 }
 
 private struct CappedTransport: QueryTransport {
+  let schema: FieldSchema
   let rows: [QueryRow]
-  func fetchRows(query: ServerQuery) async throws -> FetchRowsResult {
-    .init(rows: Array(rows.dropFirst(query.offset).prefix(1)), total: rows.count)
+  var queryCapabilities: QueryCapabilitiesV3 { checkCapabilities }
+  func fetchQueryV3(_ request: QueryRequestV3) async throws -> QueryResultV3 {
+    QueryResultV3(
+      answering: request, schema: schema,
+      rows: Array(rows.dropFirst(request.result.offset).prefix(1)), total: rows.count)
   }
 }
 
 private actor ControlledTransport: QueryTransport {
-  private var pending: [Int: CheckedContinuation<FetchRowsResult, Error>] = [:]
+  private let schema: FieldSchema
+  private var pending: [Int: (QueryRequestV3, CheckedContinuation<QueryResultV3, Error>)] = [:]
   private(set) var requestCount = 0
-  func fetchRows(query: ServerQuery) async throws -> FetchRowsResult {
+  init(schema: FieldSchema) { self.schema = schema }
+  nonisolated var queryCapabilities: QueryCapabilitiesV3 { checkCapabilities }
+  func fetchQueryV3(_ request: QueryRequestV3) async throws -> QueryResultV3 {
     let index = requestCount
     requestCount += 1
-    return try await withCheckedThrowingContinuation { pending[index] = $0 }
+    return try await withCheckedThrowingContinuation { pending[index] = (request, $0) }
   }
   func complete(index: Int, rows: [QueryRow]) {
-    pending.removeValue(forKey: index)?.resume(returning: .init(rows: rows, total: rows.count))
+    guard let (request, continuation) = pending.removeValue(forKey: index) else { return }
+    continuation.resume(
+      returning: QueryResultV3(answering: request, schema: schema, rows: rows, total: rows.count))
   }
 }

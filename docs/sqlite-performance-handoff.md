@@ -1,108 +1,20 @@
 # SQLite reductions and caller-owned transactions
 
-For the subsequent 0.9.4 work, see [direct V3 grouping, measurements and residual
-V2 costs](sqlite-direct-groups.md). The lifecycle contract below still applies.
+For the subsequent 0.9.4 work, see [direct V3 grouping and
+measurements](sqlite-direct-groups.md). The lifecycle contract below still
+applies. `QueryDatasetV3` is now the only executor: the v1/v2 SQLite datasets
+were removed, and the reductions described here serve ungrouped v3 metric
+batches and direct v3 groups.
 
-## V2 scalar metrics after 0.9.6: per-generation source proofs
+## Removed: per-generation source proofs
 
-Pharos request 14 (after 0.9.6) asked why plain integer COUNT/SUM batches still
-cost 2–3× its cached host reducer (`nativeMetricsV2`). The shape is COUNT plus
-nine SUMs over stored `INTEGER NOT NULL` columns of a 50,000-row table:
-ungrouped, grouped by `day`, and grouped with `provider = 'codex'` through a
-join. `BenchmarkV2ScalarMetrics` (`backends/sqlite-tests`) reproduces it with a
-host-style flattened projection and a 64 MiB page cache, and reports SQL time
-per statement category.
+The opt-in per-generation source-proof cache added for Pharos request 14 was
+removed with the v2 API; v3 never used it. Every execution proves the storage
+and bounds of the values it consumes, as described below.
 
-**Profile.** With the source in the page cache, about 90% of adapter time on
-the base was the single fused integer reduction statement. Compilation, planning,
-EXPLAIN inspection, savepoints, the ten consumer statements over the tiny
-reduction table, result mapping and cleanup together took about 3–5 ms. The
-population preflight took 1.5 ms, or 10 ms when the filter needs the join. In
-the reduction, the per-row storage and bound proofs (a `typeof` call, comparisons
-and a CASE per value) cost as much again as bare SQL. Cheaper per-execution
-formulations were measured and rejected: a checked SUM with only a `typeof`
-test, comparison-only guards, extra MIN/MAX aggregates and row-wide `max()`
-guards all cost 30–35 ms against 41 ms for the guard and 16 ms for bare SQL.
-In modernc SQLite every per-value check costs about 1.5 ms per field per 50,000
-rows. Any proof that inspects every value therefore stays near 2× bare SQL.
-(On macOS, pprof attributes uncached page reads to `pread`. Profile with a
-warm page cache.)
+## Cross-field scalar metrics (QT-14)
 
-**What may be cached.** A generation-scoped fact about the *whole authorized
-source* bounds every subset. If every value of a field is INTEGER/NULL and its
-absolute total is at most 2^53−1, then every filter, group or metric predicate
-over that source has exact, safe integer COUNT, SUM, AVG, MIN and MAX. The
-host's reducer relies on the same argument through its cached
-`nativeTableBounds`. The library still checks on every execution: group keys
-(once per BINARY group), group and population budgets, revisions, filters,
-metric isolation, and the SUM result type, which is a free backstop.
-
-**Change.** `SQLiteV2Dataset.SourceGeneration` plus `SourceProofs
-*SQLiteSourceProofs` opt into this. The first execution in a generation proves
-the fields it consumes with one bounded whole-source scan (at most
-`MaxPopulation`+1 rows). The scan uses the checked nonnegative SUM, with a
-signed `typeof`/`TOTAL(abs)` proof for fields it declines. It also records the
-row count. Later fused integer reductions over proven fields use plain
-aggregates (`TrustedSQL`). Unfiltered requests reuse the row count. Because the
-source then fits the budget, a filtered metric batch takes its population from
-its fused reduction (`qt_integer_population`) instead of a separate count. A
-metric that needs the count before any reduction counts it lazily, and a failed
-count is still a request error. Only projections that pass the existing
-stored-value EXPLAIN allowlist are proven; host functions, sources over the
-budget, failed statements and inspection failures leave the per-execution
-proofs in place. Negative results are cached too. Without a generation nothing
-changes.
-
-**Measurements.** Apple M3 Ultra, Go 1.27, modernc SQLite 1.59, shared and
-loaded host. Process CPU ms/op (getrusage) are medians of four interleaved
-runs of ten operations each, comparing base `7996049` with this change; the
-spread was under 2 ms.
-
-| Shape | Bare SQL | Guarded SQL | Adapter, base | Adapter, no generation | Adapter, warm generation | Adapter, new generation each request |
-|---|---:|---:|---:|---:|---:|---:|
-| Scalar | 16.2 | 40.9 | 46.4 | 46.9 | **20.6** | 63.8 |
-| Grouped by day | 42.5 | 67.4 | 74.0 | 74.3 | **48.6** | 90.8 |
-| Filtered + grouped | 36.5 | 51.2 | 67.5 | 66.9 | **42.0** | 98.8 |
-
-Warm, the adapter is 1.14–1.27× bare SQL, down from 2.9×, 1.7× and 1.8×. Its
-remaining 4–6 ms is compilation, EXPLAIN, CTAS, consumer reads and cleanup.
-The first execution in each generation costs 1.2–1.5× the base, because it also
-scans the whole source. A host whose generation changes between almost every
-request should not enable this.
-
-**Pharos.** A temporary copy of Pharos `cb3636a` was run with a `replace` to
-this branch; the Pharos checkout was not touched. In that copy the adapter
-reads `query_cache_generation` in its transaction and passes it with a
-process-wide cache. `TestNativeMetricsMatchTheAdapter` and
-`TestNativeMetricsMatchTheAdapterOnPharosDatasets` pass with and without it.
-The probe (`TestUsagePerformanceSQLHost`, `nativeMetrics` toggled by the probe
-itself) returned identical responses throughout. Medians of 11 warm full HTTP
-requests per variant, wall ms, three alternating process runs:
-
-| Shape | Host reducer | Adapter, no generation | Adapter, generation |
-|---|---:|---:|---:|
-| Scalar | 16–23 | 51–71 | 26–30 |
-| Grouped | 31–38 | 72–81 | 42–63 |
-| Filtered | 34–50 | 74–85 | 48–67 |
-
-Probe CPU includes unrelated server goroutines and is not comparable. Timing
-`ExecuteV2In` inside the same requests gave 16–18 ms scalar and 32–34 ms
-grouped, about the host reducer's whole request. Most of the remaining
-difference is host work before the adapter runs: Pharos leases memory temp
-storage (PRAGMA `temp_store`/`temp.cache_size` changes and restores), and its
-host reducer skips that. Running the adapter in the host's plain read
-transaction gave 23–26 ms scalar and about 48 ms grouped. Whether that remainder
-justifies keeping `nativeMetricsV2` is Pharos's decision. The library-side gap
-is now small for warm generations.
-
-This records the Query Table side of the 2026-10-21 Pharos handoff against
-Query Table mainline `835b71a` and Pharos `b454ffe`. The changes are prepared
-for the aligned 0.9.3 Go/npm release. They are not a claim that either host
-accelerator can already be deleted.
-
-## Cross-field V2 scalar metrics (QT-14)
-
-`SQLiteV2Dataset.ExecuteV2` and `ExecuteV2In` now share reductions across scalar
+Ungrouped SQLite `QueryDatasetV3` requests share reductions across scalar
 metrics with the same population, scope, metric predicates and grouping.
 Independent compilation still validates every member and its aggregate policy.
 A combined compiler plan supplies aggregate columns to each original plan using
@@ -142,10 +54,10 @@ cancelling integers, unsupported key types, computed inputs, inherited error
 sidecars, row formulas and shown-row windows. General fusion still applies to
 eligible scalar formulas and computed fields. A fast-path failure does not
 turn into a sibling metric's error. Source authorization, the population
-preflight, revisions, group budgets and cancellation remain enforced.
+count, revisions, group budgets and cancellation remain enforced.
 
 No API or request change is needed. Hosts should batch compatible cards into
-one ordinary metric request, upgrade the Go module and all npm packages to the
+one ordinary v3 request, upgrade the Go module and all npm packages to the
 same published release, and run their own parity and cost tests before deleting
 a bypass. Do not replace a published dependency with these source files.
 
@@ -161,10 +73,10 @@ go test -run '^$' -bench SQLiteScratchLifecycle -benchtime=3x -benchmem -count=3
 
 The fixture has 50,000 authorized rows, nine integer fields, NULL/empty text
 keys, five groups, and a denied tenant row. There are no host indexes, cubes or
-private catalogs. V2 compares ten independent cards in one transaction, the
-combined adapter batch, guarded SQL alone, and native SQL. The guarded SQL
+private catalogs. `CrossFieldV2` compares ten independent cards in one
+transaction, the combined adapter batch, guarded SQL alone, and native SQL. The guarded SQL
 ablation isolates the strict storage/numeric proofs from compilation, population
-preflight, savepoints, consumer mapping and scratch lifecycle. It is a cost
+count, savepoints, consumer mapping and scratch lifecycle. It is a cost
 breakdown, not another supported executor. The native query intentionally omits
 the adapter's validation and budgets: it is a lower bound on cost, not a
 semantically equivalent replacement. Every benchmark includes one untimed
@@ -177,9 +89,10 @@ bytes SQLite wrote to disk. Correctness tests count submitted reduction
 statements and source-function evaluations separately from population checks;
 neither number is called a physical table-scan count. No test asserts latency.
 
-### V2 before/after
+### Cross-field before/after
 
-Medians of three runs of three timed operations on the same Apple M3 Ultra,
+These measurements predate the v3-only API and were taken on the removed v2
+executor, whose reduction path ungrouped v3 metrics now use. Medians of three runs of three timed operations on the same Apple M3 Ultra,
 Go 1.25 and modernc SQLite 1.59.0. “Before” is mainline `835b71a` with the same
 benchmark fixture. Wall latency varied with other work on this host; process
 CPU and allocations give the more stable comparison.
@@ -223,8 +136,7 @@ This locates much of the remaining cost in the value proofs, rather than
 compilation or per-card mapping. It does not prove those costs cannot improve.
 The host's narrower nonnegative reducer motivated the aggregate-level proof;
 the library retains an explicit storage guard because SUM can coerce numeric
-TEXT. Source-generation caches remain host-owned and were not used in this
-probe.
+TEXT. No source-generation cache was used in this probe.
 
 ### V3 raw-source staging investigation
 
@@ -255,7 +167,7 @@ revisions, representatives, expensive inputs and execution budgets.
 
 ## Supported SQLite scratch lifetime
 
-A successful `ExecuteV2In` or `QueryDatasetV3.ExecuteIn` returns after dropping
+A successful `QueryDatasetV3.ExecuteIn` returns after dropping
 its own scratch tables and indexes. Tables created for speculative reductions
 are registered **before** DDL: an interrupted CTAS can leave an empty table.
 Cleanup uses an independent, bounded context. Cleanup errors are returned;
@@ -287,9 +199,8 @@ if err := tx.Commit(); err != nil { return err }
 _ = result
 ```
 
-Use the analogous pattern with `SQLiteV2Dataset.ExecuteV2In`. A metric's
-clause-level error is part of a successful V2 result after its savepoint has
-been restored; a non-nil execution error requires rollback. SQLite interruption
+A metric's clause-level error is part of a successful result after its
+savepoint has been restored; a non-nil execution error requires rollback. SQLite interruption
 can abort a transaction. Do not assume a cancelled transaction remains usable,
 and do not commit other host operations after an execution/cleanup error.
 

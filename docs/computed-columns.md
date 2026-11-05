@@ -2,40 +2,33 @@
 
 The SELECT editor combines a column catalogue, draft column ordering, value-frequency browsing, and a formula workbench. Open it through **Edit columns** in `QueryBuilder`, or mount the exported `SelectColumnEditor` yourself. Column layout is applied as one undoable query change. Saving a shared definition is a separate action and is not undone by cancelling layout changes or undoing a query.
 
-## Modern row transports
+## Remote rows and previews
 
-From 0.9.4, `Transport.fetchRows` is optional. Remote tables and computed
-previews can use `fetchRowsV2` with `computedExecution`, or `fetchQueryV3` with
-`queryCapabilities`. Legacy-only transports keep using `fetchRows`; complete
-client datasets keep their local execution behavior.
+Remote tables and computed previews run through the v3 executor:
+`fetchQueryV3` with `queryCapabilities`. Complete client datasets keep their
+local execution behavior.
 
 ```ts
-const transport: Transport<Row> = { fetchRowsV2, fetchQueryV3, queryCapabilities,
-  fetchMetrics, metricCapabilities };
+const transport: Transport<Row> = { queryCapabilities, fetchQueryV3 };
 useQueryTable({ schema, transport, computedExecution });
 ```
 
-Previews prefer negotiated V2 for ordinary rows. V3 supports V3-only hosts,
-computed source filters and grouped-result inputs. Grouping retains its source
-and result stages. Previews start at offset zero in the current filter/sort
-order, independent of the table page. They request only the identity and draft
-dependencies in pages of at most 500 rows (or a smaller V3 `maxRows`), up to
-10,000 rows and the existing 16 MB input limit. One evaluation time is reused
-across V3 pages. Totals, server diagnostics, execution identity and canonical
-computed revisions are checked before evaluating the draft locally.
+V3 supports computed source filters and grouped-result inputs. Grouping
+retains its source and result stages. Previews start at offset zero in the
+current filter/sort order, independent of the table page. They request only
+the identity and draft dependencies in pages of at most 500 rows (or a smaller
+`maxRows`), up to 10,000 rows and the existing 16 MB input limit. One
+evaluation time is reused across pages. Totals, server diagnostics, execution
+identity and canonical computed revisions are checked before evaluating the
+draft locally.
 
 Unsaved expression source is never submitted as a saved server definition.
 References to saved expressions expand to their input dependencies locally;
-saved fields used by server sorting/filtering retain their negotiated revisions.
-Cancelling, replacing or invalidating a preview aborts it; late responses from
-transports that ignore abort cannot return a stale preview.
-
-Hosts implementing modern methods can remove their legacy preview route after
-upgrading all Query Table packages together. Direct application calls through
-the general `Transport` interface must now check `transport.fetchRows` before
-calling it, or migrate to their negotiated method. Application actions such as
-share/export Select all remain the host's responsibility. A transport lacking
-any usable negotiated or legacy row method produces an execution diagnostic.
+saved fields used by server sorting/filtering retain their negotiated revisions,
+and a preview using a saved field changed since the handshake fails until the
+handshake is refreshed. Cancelling, replacing or invalidating a preview aborts
+it; late responses from transports that ignore abort cannot return a stale
+preview.
 
 ## Persistence and identity
 
@@ -121,7 +114,7 @@ wrapped as its argument. The Numbers & statistics category covers numeric
 operations within a row. Regex extraction results expose a match inspector with
 highlighted input and capture groups.
 
-The row-count control accepts 1–10,000 rows. A preview starts at the first row matching the current filters in the current sort order, independently of table pagination. Server mode fetches batches of at most 500 through `Transport.fetchRows`, following offsets until the requested count or reported total is reached. Transports must honor the requested projection, sort, offset, and cancellation signal; ordinary server page-size caps are supported. Concurrent dataset mutations can change an offset-based sample; use snapshot-consistent transport requests if your application requires that guarantee.
+The row-count control accepts 1–10,000 rows. A preview starts at the first row matching the current filters in the current sort order, independently of table pagination. Server mode fetches batches of at most 500 through `Transport.fetchQueryV3`, following offsets until the requested count or reported total is reached. Transports must honor the requested projection, sort, offset, and cancellation signal; ordinary server page-size caps are supported. Concurrent dataset mutations can change an offset-based sample; use snapshot-consistent transport requests if your application requires that guarantee.
 
 - Formula editing groups by the complete typed tuple `(input values, output value/error)` and counts occurrences.
 - Catalogue browsing groups by the output value/error alone, including computed columns, so different inputs producing the same value share one frequency row.

@@ -7,12 +7,11 @@ import {
   decodeQuery,
   normalizeQueryState,
   metricComputationKey,
-  toMetricQuery,
-  toAggregationQuery,
   type AggregationClause,
   type FieldSchema,
   type QueryState,
 } from "../src/index";
+import { toMetricQuery } from "../src/metrics";
 import {
   metricDateFloor,
   metricDateNext,
@@ -278,7 +277,6 @@ describe("calendar metric grouping", () => {
     expect(toMetricQuery(q, schema).metrics[0]).not.toHaveProperty(
       "dateGrouping",
     );
-    expect(() => toAggregationQuery(q, schema)).toThrow("Date grouping");
     expect(
       normalizeQueryState({
         ...q,

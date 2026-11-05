@@ -7,8 +7,8 @@ import (
 	"strconv"
 )
 
-// SQLiteComputedColumnsDDL stores canonical definitions. Hosts opt into v2
-// execution separately by registering the v2 descriptors and executor.
+// SQLiteComputedColumnsDDL stores canonical definitions. Executing them needs
+// the SQLiteFunctions and SQLiteV2Functions/SQLiteV2Aggregates registered.
 // Requires SQLite 3.38+ (RETURNING).
 const SQLiteComputedColumnsDDL = `CREATE TABLE IF NOT EXISTS query_table_computed_columns (
  scope TEXT NOT NULL,
@@ -93,7 +93,7 @@ func sqliteSaveComputed(ctx context.Context, db interface {
 }
 
 // SQLiteComputedDefinitionResolver uses the same caller-owned transaction as
-// v2 execution. Scope/Dataset must come from host authorization.
+// QueryDatasetV3 execution. Scope/Dataset must come from host authorization.
 type SQLiteComputedDefinitionResolver struct {
 	Tx             *sql.Tx
 	Scope, Dataset string

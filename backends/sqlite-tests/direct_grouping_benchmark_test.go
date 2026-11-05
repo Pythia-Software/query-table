@@ -29,7 +29,7 @@ func BenchmarkV3SimpleGrouping(b *testing.B) {
 			d := qt.QueryDatasetV3{Schema: crossFieldSchema(), SourceSQL: "SELECT * FROM source WHERE tenant=?1", SourceArgs: []any{"allowed"}, Dialect: "sqlite", Scope: "bench", Dataset: "bench"}
 			q := qt.QueryRequestV3{Version: 3, Profile: qt.SQLiteExpressionProfile, Now: time.Date(2026, 10, 21, 0, 0, 0, 0, time.UTC).UnixMilli(), Rows: true,
 				Grouping: &qt.GroupingDefinition{Keys: []string{"k"}, Summaries: []qt.SummaryColumn{{ID: "rows", Op: "count"}, {ID: "values", Op: "count", Field: "n0"}, {ID: "total", Op: "sum", Field: "n0"}, {ID: "average", Op: "avg", Field: "n1"}}},
-				Result:   qt.WireQuery{Select: []string{"k", "rows", "values", "total", "average"}, OrderBy: qt.OrderBys{{Field: "k", Dir: "asc"}}, Limit: 100}}
+				Result:   qt.WireQuery{Select: []string{"k", "rows", "values", "total", "average"}, OrderBy: []qt.OrderBy{{Field: "k", Dir: "asc"}}, Limit: 100}}
 			plan, err := d.SourcePlan(context.Background(), q, qt.PlanOptions{})
 			if err != nil {
 				b.Fatal(err)

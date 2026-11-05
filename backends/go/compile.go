@@ -14,49 +14,27 @@ import (
 	"time"
 )
 
-// CompileResult holds the SQL fragments plus their ordered bound args.
-type CompileResult struct {
+// postgresWhere is a PostgreSQL WHERE fragment and its ordered bound args.
+type postgresWhere struct {
 	// WhereSQL is "" when no filters apply, else "(c1) AND (c2) ...". Never
 	// includes the WHERE keyword, so callers AND it into their own predicates.
 	WhereSQL string
-	// OrderSQL is "" to use the schema default, else
-	// "expr DIR NULLS x, expr2 DIR2 NULLS y, <tiebreak...>".
-	OrderSQL string
-	// SelectExprs are "<expr> AS <safe_alias>" for each requested backend field.
-	SelectExprs []string
 	// Args are the $N bound values, in placeholder order starting at startIdx.
 	Args []any
-	// SQLite-only parameter partitions, for composing count and row statements.
-	WhereArgs []any
-	OrderArgs []any
 }
 
-// Compile validates q against schema and emits SQL fragments. startIdx is the
-// 1-based pgx placeholder index for the first bound value, so callers can
-// interleave their own params; the returned int is the next free index.
-//
-// Errors (never a panic) on: unknown field, an operator not allowed for a
-// field's kind or per-field operator allowlist, a filter on a
-// non-server-filterable field, a sort on a non-sortable field, an unknown
-// select field, or a value that fails coercion.
-func Compile(q WireQuery, schema Schema, startIdx int) (CompileResult, int, error) {
-	return CompileAt(q, schema, startIdx, time.Now())
-}
-
-// CompileAt captures relative datetime values using one explicit reference time.
-// Share now across row/count/metric compilations for a consistent snapshot.
-// Relative values are resolved to bound UTC timestamps, never interpolated SQL.
-func CompileAt(q WireQuery, schema Schema, startIdx int, now time.Time) (CompileResult, int, error) {
-	var res CompileResult
+// compilePostgresWhere compiles the AND of where terms, each a single
+// predicate or an OR group whose members are predicates or AND branches of
+// predicates. Relative datetime values resolve against now to bound UTC
+// timestamps, never interpolated SQL.
+func compilePostgresWhere(where []WhereTerm, schema Schema, startIdx int, now time.Time) (postgresWhere, int, error) {
+	var res postgresWhere
 	idx := startIdx
-	if err := q.Validate(); err != nil {
+	if err := (WireQuery{Where: where}).Validate(); err != nil {
 		return res, idx, fmt.Errorf("invalid query: %w", err)
 	}
-
-	// WHERE — the AND of terms, each a single predicate or an OR group whose
-	// members are predicates or AND branches of predicates.
-	clauses := make([]string, 0, len(q.Where))
-	for _, term := range q.Where {
+	clauses := make([]string, 0, len(where))
+	for _, term := range where {
 		var (
 			sql  string
 			args []any
@@ -81,183 +59,13 @@ func CompileAt(q WireQuery, schema Schema, startIdx int, now time.Time) (Compile
 	if len(clauses) > 0 {
 		res.WhereSQL = strings.Join(clauses, " AND ")
 	}
-
-	// ORDER BY (multi-sort) + tiebreak
-	terms := make([]string, 0, len(q.OrderBy)+len(schema.TiebreakSort))
-	for _, ob := range q.OrderBy {
-		spec, ok := schema.Fields[ob.Field]
-		if !ok {
-			return res, idx, fmt.Errorf("unknown sort field %q", ob.Field)
-		}
-		if !spec.Sortable {
-			return res, idx, fmt.Errorf("field %q is not sortable", ob.Field)
-		}
-		t, args, next, err := compileOrderTerm(spec.SortExpr, ob, idx)
-		if err != nil {
-			return res, idx, fmt.Errorf("field %q: %w", ob.Field, err)
-		}
-		terms = append(terms, t)
-		res.Args = append(res.Args, args...)
-		idx = next
-	}
-	if len(terms) > 0 {
-		for _, tb := range schema.TiebreakSort {
-			if spec, ok := schema.Fields[tb.Field]; ok {
-				if t, args, next, err := compileOrderTerm(spec.SortExpr, tb, idx); err == nil {
-					terms = append(terms, t)
-					res.Args = append(res.Args, args...)
-					idx = next
-				}
-			}
-		}
-		res.OrderSQL = strings.Join(terms, ", ")
-	}
-
-	// SELECT (computed/backed columns the caller asked to project)
-	for _, name := range q.Select {
-		spec, ok := schema.Fields[name]
-		if !ok {
-			return res, idx, fmt.Errorf("unknown select field %q", name)
-		}
-		res.SelectExprs = append(res.SelectExprs, fmt.Sprintf("%s AS %s", spec.Expr, safeIdent(name)))
-	}
-
 	return res, idx, nil
-}
-
-// AggCompileResult holds the SQL fragments for one metric's GROUP BY query. The
-// caller splices them into its own FROM/JOIN, sharing the rows query's WHERE so
-// the metric covers the same filtered set (scope = whole set, no paging). Use
-// the same now passed to CompileAt for the rows query when compiling this WHERE:
-//
-//	SELECT <SelectExprs joined by ", ">
-//	FROM   <caller FROM/JOIN>
-//	[WHERE <CompileAt(WireQuery{Where: req.Where}, …, now).WhereSQL>]
-//	[GROUP BY <GroupBySQL>]
-//
-// SelectExprs is, in order: one `expr AS "g0"/"g1"/…` per group field, then the
-// aggregate `AS "value"`, then `COUNT(*) AS "count"`. GroupBySQL lists the same
-// group expressions (empty string ⇒ a single grand-total row, no GROUP BY).
-type AggCompileResult struct {
-	SelectExprs []string
-	GroupBySQL  string
-}
-
-// CompileAggregation validates one AggSpec against the schema allowlist and emits
-// its SELECT + GROUP BY fragments. Like Compile, the only request-influenced
-// tokens that reach SQL are the validated op and the schema-defined field
-// expressions — never request input. No bound args are produced (aggregations
-// carry no values; the shared WHERE is compiled separately via CompileAt using
-// the rows query's clock).
-//
-// Errors on: unknown op, unknown measure/group field, a missing measure for an
-// op that needs one, or an op not allowed for the measure field's kind.
-func CompileAggregation(spec AggSpec, schema Schema) (AggCompileResult, error) {
-	var res AggCompileResult
-	if err := validateBasicMetricShape(spec); err != nil {
-		return res, err
-	}
-	if !aggOpKnown(spec.Op) {
-		return res, fmt.Errorf("unknown aggregate op %q", spec.Op)
-	}
-
-	groupExprs := make([]string, 0, len(spec.GroupBy))
-	for i, g := range spec.GroupBy {
-		gs, ok := schema.Fields[g]
-		if ok && gs.Groupable != nil && !*gs.Groupable {
-			return res, fmt.Errorf("grouping disabled for %q", g)
-		}
-		if !ok {
-			return res, fmt.Errorf("unknown group field %q", g)
-		}
-		res.SelectExprs = append(res.SelectExprs, fmt.Sprintf("%s AS %s", gs.Expr, safeIdent(fmt.Sprintf("g%d", i))))
-		groupExprs = append(groupExprs, gs.Expr)
-	}
-
-	valueExpr, err := aggValueExpr(spec, schema)
-	if err != nil {
-		return res, err
-	}
-	res.SelectExprs = append(res.SelectExprs, valueExpr+` AS "value"`, `COUNT(*) AS "count"`)
-
-	if len(groupExprs) > 0 {
-		res.GroupBySQL = strings.Join(groupExprs, ", ")
-	}
-	return res, nil
-}
-
-// aggValueExpr builds the aggregate SELECT expression. `count` with no field is
-// COUNT(*) (counts rows); with a field it counts non-null values.
-func aggValueExpr(spec AggSpec, schema Schema) (string, error) {
-	if spec.Op == "count" && spec.Field == "" {
-		return "COUNT(*)", nil
-	}
-	if spec.Field == "" {
-		return "", fmt.Errorf("aggregate op %q requires a measure field", spec.Op)
-	}
-	fs, ok := schema.Fields[spec.Field]
-	if !ok {
-		return "", fmt.Errorf("unknown measure field %q", spec.Field)
-	}
-	if fs.AggregateOps != nil {
-		allowed := false
-		for _, op := range fs.AggregateOps {
-			allowed = allowed || op == spec.Op
-		}
-		if !allowed {
-			return "", fmt.Errorf("aggregate op %q disabled for %q", spec.Op, spec.Field)
-		}
-	}
-	if !aggOpAllowed(fs.Kind, spec.Op) {
-		return "", fmt.Errorf("aggregate op %q not allowed on %s field", spec.Op, kindName(fs.Kind))
-	}
-	switch spec.Op {
-	case "count":
-		return "COUNT(" + fs.Expr + ")", nil
-	case "count_distinct":
-		return "COUNT(DISTINCT " + fs.Expr + ")", nil
-	case "sum":
-		return "SUM(" + fs.Expr + ")", nil
-	case "avg":
-		return "AVG(" + fs.Expr + ")", nil
-	case "min":
-		return "MIN(" + fs.Expr + ")", nil
-	case "max":
-		return "MAX(" + fs.Expr + ")", nil
-	default:
-		return "", fmt.Errorf("unknown aggregate op %q", spec.Op)
-	}
 }
 
 func aggOpKnown(op string) bool {
 	switch op {
 	case "count", "count_distinct", "sum", "avg", "min", "max":
 		return true
-	}
-	return false
-}
-
-// aggOpAllowed mirrors @pythia-software/query-table-core AGG_OPS_BY_TYPE — the server-side
-// enforcement of which aggregate ops a field's kind permits. Keep in lockstep.
-func aggOpAllowed(kind FieldKind, op string) bool {
-	switch kind {
-	case FieldNumber:
-		switch op {
-		case "count", "count_distinct", "sum", "avg", "min", "max":
-			return true
-		}
-	case FieldDatetime, FieldEnum, FieldText:
-		switch op {
-		case "count", "count_distinct", "min", "max":
-			return true
-		}
-	case FieldBool:
-		switch op {
-		case "count", "count_distinct":
-			return true
-		}
-	case FieldTextArray:
-		return op == "count"
 	}
 	return false
 }
@@ -277,17 +85,6 @@ func orderTerm(expr, dir, nulls string) (string, error) {
 		return "", fmt.Errorf("unknown nulls position %q", nulls)
 	}
 	return expr + " " + d + " " + n, nil
-}
-
-func compileOrderTerm(expr string, term OrderBy, idx int) (string, []any, int, error) {
-	var args []any
-	if term.Extract != nil {
-		expr = fmt.Sprintf("substring((%s)::text FROM $%d)", expr, idx)
-		args = []any{term.Extract.Regex}
-		idx++
-	}
-	t, err := orderTerm(expr, term.Dir, term.Nulls)
-	return t, args, idx, err
 }
 
 // compileLiteral validates one predicate against the schema allowlist and emits
@@ -568,51 +365,6 @@ func coerce(kind FieldKind, v string) (any, error) {
 	}
 }
 
-// DistinctCompile holds the fragments for an autocomplete distinct-values query.
-// The caller assembles them into its own FROM/JOIN tree:
-//
-//	SELECT DISTINCT <Expr> AS v FROM ... WHERE <Expr> IS NOT NULL [AND <SearchSQL>]
-//	ORDER BY v LIMIT <n+1>   -- fetch one extra to compute hasMore
-type DistinctCompile struct {
-	Expr      string
-	SearchSQL string // "" when search is empty
-	Args      []any
-}
-
-type DistinctHasNullCompile struct {
-	IsNullExpr string
-}
-
-// CompileDistinct builds the fragments to back filter-value autocomplete for a
-// field (design feedback: every field is an autocomplete by default). The search
-// is a literal case-insensitive substring (no wildcard injection).
-func CompileDistinct(field, search string, schema Schema, startIdx int) (DistinctCompile, int, error) {
-	spec, ok := schema.Fields[field]
-	if !ok {
-		return DistinctCompile{}, startIdx, fmt.Errorf("unknown field %q", field)
-	}
-	dc := DistinctCompile{Expr: spec.Expr}
-	idx := startIdx
-	if search != "" {
-		dc.SearchSQL = fmt.Sprintf("POSITION(LOWER($%d) IN LOWER(%s::text)) > 0", idx, spec.Expr)
-		dc.Args = append(dc.Args, search)
-		idx++
-	}
-	return dc, idx, nil
-}
-
-// CompileDistinctHasNull builds the nullability expression for the same field-aware
-// distinct path used by value autocomplete. It is intended for a lightweight
-// metadata query that answers “does this field have any nulls?” without another
-// independent field lookup path in callers.
-func CompileDistinctHasNull(field string, schema Schema) (DistinctHasNullCompile, error) {
-	spec, ok := schema.Fields[field]
-	if !ok {
-		return DistinctHasNullCompile{}, fmt.Errorf("unknown field %q", field)
-	}
-	return DistinctHasNullCompile{IsNullExpr: spec.Expr + " IS NULL"}, nil
-}
-
 func kindName(k FieldKind) string {
 	switch k {
 	case FieldText:
@@ -630,29 +382,4 @@ func kindName(k FieldKind) string {
 	default:
 		return "unknown"
 	}
-}
-
-// safeIdent makes a SELECT alias from a (schema-validated) field name. Field
-// names already pass the schema's name pattern, but we defensively strip
-// anything that isn't an identifier char so an alias can never break out.
-func safeIdent(name string) string {
-	var b strings.Builder
-	for _, r := range name {
-		if r == '_' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
-			b.WriteRune(r)
-		}
-	}
-	s := b.String()
-	if s == "" {
-		s = "col"
-	}
-	return "\"" + s + "\""
-}
-
-// validateBasicMetricShape guards v1 entry points against dropping v2 intent.
-func validateBasicMetricShape(spec AggSpec) error {
-	if spec.DateGrouping != nil || spec.Expression != "" || spec.ExpressionY != "" || spec.Distribution != nil || (spec.Scope != "" && spec.Scope != "allMatching") || len(spec.Sort) > 0 || spec.GroupLimit != 0 || len(spec.Where) > 0 || spec.MinCount != (MetricMinCount{}) || len(spec.Diagnostics) > 0 || (spec.Display != nil && spec.Display.Kind == "scatter") {
-		return fmt.Errorf("modern metrics require CompileMetrics")
-	}
-	return nil
 }

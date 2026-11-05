@@ -3,10 +3,10 @@ import { useQueryTable } from "@pythia-software/query-table-react";
 import { DataTable, QueryBuilder, MetricsPanel } from "@pythia-software/query-table-ui";
 
 /** Keep this adapter stable. The endpoint authorizes the dataset and executes
- * grouping/calendar queries on the server, returning pages and metric buckets. */
-export function withServerExecution<Row>(services: Transport<Row>, endpoint: string, capabilities: QueryCapabilitiesV3): Transport<Row> {
+ * every request on the server: row pages, grouping, metric buckets, filter
+ * suggestions (`distinct`), row lookups and field statistics. */
+export function withServerExecution<Row>(endpoint: string, capabilities: QueryCapabilitiesV3): Transport<Row> {
   return {
-    ...services,
     queryCapabilities: capabilities,
     async fetchQueryV3(request, signal) {
       const response = await fetch(endpoint, { method: "POST", ...(signal ? { signal } : {}),

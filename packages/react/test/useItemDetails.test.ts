@@ -2,7 +2,8 @@
 import { act, createElement, StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { describe, expect, it, vi } from "vitest";
-import { createPropertyView, EMPTY_QUERY, ITEM_DETAILS_COLUMN, memoryPropertyViewStorage, normalizeQueryState, toServerQuery, type FieldSchema, type QueryState, type Transport } from "@pythia-software/query-table-core";
+import { createPropertyView, EMPTY_QUERY, ITEM_DETAILS_COLUMN, memoryPropertyViewStorage, normalizeQueryState, toServerQuery, fetchRowV3, type FieldSchema, type QueryRequestV3, type QueryState, type RowId } from "@pythia-software/query-table-core";
+import { memoryV3Transport, rowRequests } from "./v3Transport";
 import { useItemDetails, type ItemDetailsApi, type ItemDetailsOptions, type ItemDetailRecord } from "../src/useItemDetails";
 import { useQueryTable, type QueryTableApi } from "../src/useQueryTable";
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -12,8 +13,11 @@ const schema: FieldSchema<Row> = { name: "items", idField: "id", fields: [
   { name: "secret", label: "Secret", type: "text", source: { kind: "backend" } },
 ] };
 const rows: Row[] = [{ id: 0, name: "Zero", secret: "complete" }, { id: "0", name: "String" }];
+// A v3 server reports the identity in its projected schema.
+const remoteSchema: FieldSchema<Row> = { ...schema, fields: [{ name: "id", label: "ID", type: "text", source: { kind: "backend" } }, ...schema.fields] };
+const isLookup = (request: QueryRequestV3) => request.result.limit === 2 && JSON.stringify(request.result.where).includes('"field":"id"');
 const rowId = (row: Row) => row.id;
-async function mount(options: ItemDetailsOptions<Row> | boolean = true, seed: QueryState = EMPTY_QUERY, transport?: Transport<Row>) {
+async function mount(options: ItemDetailsOptions<Row> | boolean = true, seed: QueryState = EMPTY_QUERY, fetchRow?: (id: RowId, signal: AbortSignal) => Promise<Row | null>) {
   let api!: ItemDetailsApi<Row>;
   let query!: QueryState;
   let setQuery!: (next: QueryState) => void;
@@ -22,7 +26,7 @@ async function mount(options: ItemDetailsOptions<Row> | boolean = true, seed: Qu
     query = state;
     setQuery = (next) => set(normalizeQueryState(next));
     api = useItemDetails({ schema, query: state, setQuery: (next) => set((previous) => normalizeQueryState(typeof next === "function" ? next(previous) : next)),
-      options, rows, clientRows: transport ? undefined : rows, rowId, transport, refreshKey: 0 })!;
+      options, rows, clientRows: fetchRow ? undefined : rows, rowId, fetchRow, refreshKey: 0 })!;
     return null;
   }
   const root = createRoot(document.createElement("div"));
@@ -71,11 +75,11 @@ describe("built-in item details", () => {
     await probe.unmount();
   });
   it("fetches hidden Page template fields and follows creator defaults for Page-only instances", async () => {
-    const fetchRows = vi.fn<NonNullable<Transport<Row>["fetchRows"]>>(async () => ({ rows, total: 2 }));
     let api!: QueryTableApi<Row>;
     const options: ItemDetailsOptions<Row> = { modes: ["page"], page: { urlTemplate: "/items/{field:secret}", target: "_self" } };
-    const transport: Transport<Row> = { fetchRows };
-    const projectedSchema = { ...schema, defaultSelect: [{ field: "name" }] };
+    const projectedSchema = { ...remoteSchema, defaultSelect: [{ field: "name" }] };
+    const transport = memoryV3Transport(rows.slice(0, 1), projectedSchema);
+    const fetchRows = { mock: { get calls() { return rowRequests(transport).map((request) => [request.result] as const); } } };
     function Probe() { api = useQueryTable({ schema: projectedSchema, transport, itemDetails: options, debounceMs: 0 }); return null; }
     const root = createRoot(document.createElement("div"));
     await act(async () => root.render(createElement(Probe)));
@@ -88,7 +92,7 @@ describe("built-in item details", () => {
       const count = fetchRows.mock.calls.length;
       await act(async () => api.setQuery(q => ({ ...q, itemDetails: { modes: ["page"], page: { urlTemplate: "/items/{field:secret}", target: "_blank" } } })));
       await act(async () => new Promise(resolve => setTimeout(resolve, 10)));
-      expect(fetchRows).toHaveBeenCalledTimes(count);
+      expect(fetchRows.mock.calls).toHaveLength(count);
     } finally { await act(async () => root.unmount()); }
   });
   it("keeps modality views independent across identities and query undo", async () => {
@@ -183,15 +187,37 @@ describe("built-in item details", () => {
     expect(probe.api().record?.row.name).toBe("String");
     probe.unmount();
   });
-  it("loads an item absent from the page using fetchRow and enforces creator modes", async () => {
-    const fetchRow = vi.fn(async () => ({ id: "remote", name: "Remote", secret: "not projected" }));
-    const probe = await mount({ modes: ["modal"] }, EMPTY_QUERY, { fetchRows: async () => ({ rows: [], total: 0 }), fetchRow });
+  it("loads an item absent from the page by identity and enforces creator modes", async () => {
+    const transport = memoryV3Transport([{ id: "remote", name: "Remote", secret: "not projected" }], remoteSchema);
+    const probe = await mount({ modes: ["modal"] }, EMPTY_QUERY, (id, signal) => fetchRowV3<Row>(transport, remoteSchema, id, {}, signal));
     await act(async () => probe.api().open("remote", "modal"));
     expect(probe.api().record?.row.secret).toBe("not projected");
+    expect(transport.fetchQueryV3).toHaveBeenCalledOnce();
+    expect(transport.fetchQueryV3.mock.calls[0]![0].result).toMatchObject({ where: [{ field: "id", op: "=", value: "remote" }], limit: 2, offset: 0 });
+    expect(transport.fetchQueryV3.mock.calls[0]![1]).toBeInstanceOf(AbortSignal);
     await act(async () => probe.api().open(0, "expand"));
     expect(probe.api().active?.id).toBe("remote");
     await act(async () => probe.api().setModes([]));
     expect(probe.api().active).toBeNull();
+    probe.unmount();
+  });
+  it("records which fields an identity lookup loaded", async () => {
+    const hidden: FieldSchema<Row> = { ...remoteSchema, fields: remoteSchema.fields.map(field =>
+      field.name === "secret" ? { ...field, select: { enabled: false } } : field) };
+    const transport = memoryV3Transport([{ id: "remote", name: "Remote", secret: "not projected" }], hidden, { project: true });
+    const probe = await mount({ modes: ["modal"], schema: hidden }, EMPTY_QUERY, (id, signal) => fetchRowV3<Row>(transport, hidden, id, {}, signal));
+    await act(async () => probe.api().open("remote", "modal"));
+    // A field outside the lookup's projection is not loaded, rather than empty.
+    expect(probe.api().record?.loadedFields).toEqual(["id", "name"]);
+    probe.unmount();
+  });
+  it("counts a nested field as loaded through its path", async () => {
+    const nested: FieldSchema<Row> = { ...remoteSchema, fields: [...remoteSchema.fields,
+      { name: "payloadName", label: "Payload", type: "text", source: { kind: "backend", path: "payload.name" } }] };
+    const transport = memoryV3Transport([{ id: "remote", name: "Remote", payload: { name: "inner" } } as unknown as Row], nested);
+    const probe = await mount({ modes: ["modal"], schema: nested }, EMPTY_QUERY, (id, signal) => fetchRowV3<Row>(transport, nested, id, {}, signal));
+    await act(async () => probe.api().open("remote", "modal"));
+    expect(probe.api().record?.loadedFields).toContain("payloadName");
     probe.unmount();
   });
   it("does not restart complete-record loads for inline callbacks or new collection rows", async () => {
@@ -200,7 +226,7 @@ describe("built-in item details", () => {
     function Probe() {
       const [query, setQuery] = useState<QueryState>(EMPTY_QUERY);
       api = useItemDetails({ schema, query, setQuery, options: { loadRow: async () => loader() },
-        rows: [...rows], clientRows: undefined, rowId, transport: undefined, refreshKey: 0 })!;
+        rows: [...rows], clientRows: undefined, rowId, fetchRow: undefined, refreshKey: 0 })!;
       return null;
     }
     const root = createRoot(document.createElement("div"));
@@ -214,20 +240,22 @@ describe("built-in item details", () => {
   });
   it("does not refetch the collection when the detail view or identity changes", async () => {
     vi.useFakeTimers();
-    const fetchRows = vi.fn(async () => ({ rows, total: 2 }));
     let api!: QueryTableApi<Row>;
-    const transport: Transport<Row> = { fetchRows, fetchRow: async (id) => rows.find((row) => row.id === id) ?? null };
-    function Probe() { api = useQueryTable({ schema, transport, itemDetails: true, debounceMs: 10 }); return null; }
+    const transport = memoryV3Transport(rows.slice(0, 1), remoteSchema);
+    const collection = () => rowRequests(transport).filter((request) => !isLookup(request)).length;
+    function Probe() { api = useQueryTable({ schema: remoteSchema, transport, itemDetails: true, debounceMs: 10 }); return null; }
     const root = createRoot(document.createElement("div"));
     try {
       await act(async () => root.render(createElement(Probe)));
       await act(async () => vi.advanceTimersByTimeAsync(10));
-      const count = fetchRows.mock.calls.length;
+      const count = collection();
+      expect(count).toBeGreaterThan(0);
       await act(async () => api.itemDetails!.open(0, "modal"));
       await act(async () => api.itemDetails!.properties.setView(createPropertyView(schema, ["secret"])));
       await act(async () => vi.advanceTimersByTimeAsync(100));
       expect(api.itemDetails!.record?.row.secret).toBe("complete");
-      expect(fetchRows).toHaveBeenCalledTimes(count);
+      expect(rowRequests(transport).filter(isLookup)).toHaveLength(1);
+      expect(collection()).toBe(count);
     } finally { act(() => root.unmount()); vi.useRealTimers(); }
   });
 });

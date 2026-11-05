@@ -6,6 +6,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { FieldSchema, StorageAdapter, Transport } from "@pythia-software/query-table-core";
 import { useQueryTable, type QueryTableApi } from "../src/useQueryTable";
+import { memoryV3Transport, metricRequests, rowRequests } from "./v3Transport";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -40,7 +41,7 @@ const storage: StorageAdapter = {
   deleteSaved: async () => {},
 };
 
-function renderQueryTable(options: { clientRows?: Row[]; transport?: Transport<Row> }) {
+function renderQueryTable(options: { clientRows?: Row[]; transport?: Transport<Row>; remoteFieldStats?: boolean }) {
   const result = { current: undefined as unknown as QueryTableApi<Row> };
   function Probe() {
     result.current = useQueryTable<Row>({ schema, storage, debounceMs: 20, ...options });
@@ -77,17 +78,22 @@ describe("useQueryTable row pipeline", () => {
     });
     local.unmount();
 
-    const fetchFieldStats = vi.fn(async () => ({ status: { distinct: 7 } }));
-    const remote = renderQueryTable({
-      transport: {
-        fetchRows: async () => ({ rows: [], total: 0 }),
-        fetchFieldStats,
-      },
-    });
+    const transport = memoryV3Transport<Row>(
+      Array.from({ length: 7 }, (_, i) => ({ id: i, name: "n", status: `s${i}` })), schema);
+    // Remote statistics reduce the whole dataset, so hosts opt in.
+    const quiet = renderQueryTable({ transport });
+    await expect(quiet.result.current.fieldStats(["status"])).resolves.toEqual({});
+    expect(metricRequests(transport)).toEqual([]);
+    quiet.unmount();
+    const remote = renderQueryTable({ transport, remoteFieldStats: true });
     await expect(
       remote.result.current.fieldStats(["status", "missing"]),
-    ).resolves.toEqual({ status: { distinct: 7 } });
-    expect(fetchFieldStats).toHaveBeenCalledWith(["status"], undefined);
+    ).resolves.toEqual({ status: { distinct: 7, min: "s0", max: "s6" } });
+    expect(metricRequests(transport).map((request) => request.metrics)).toEqual([[
+      { id: "status:distinct", op: "count_distinct", field: "status", groupBy: [] },
+      { id: "status:min", op: "min", field: "status", groupBy: [] },
+      { id: "status:max", op: "max", field: "status", groupBy: [] },
+    ]]);
     remote.unmount();
   });
 
@@ -113,12 +119,12 @@ describe("useQueryTable row pipeline", () => {
   });
 
   it("does not refetch transport rows for widths, but does for a changed projection", async () => {
-    const fetchRows = vi.fn(async () => ({ rows: clientRows, total: clientRows.length }));
-    const { result, unmount } = renderQueryTable({ transport: { fetchRows } });
+    const transport = memoryV3Transport(clientRows, schema);
+    const { result, unmount } = renderQueryTable({ transport });
     await act(async () => {});
     advance(20);
     await act(async () => {});
-    expect(fetchRows).toHaveBeenCalledTimes(1);
+    expect(rowRequests(transport)).toHaveLength(1);
 
     act(() => {
       result.current.setQuery((query) => ({
@@ -127,7 +133,7 @@ describe("useQueryTable row pipeline", () => {
       }));
     });
     advance(100);
-    expect(fetchRows).toHaveBeenCalledTimes(1);
+    expect(rowRequests(transport)).toHaveLength(1);
 
     act(() => {
       result.current.setQuery((query) => ({
@@ -136,7 +142,7 @@ describe("useQueryTable row pipeline", () => {
       }));
     });
     advance(20);
-    expect(fetchRows).toHaveBeenCalledTimes(2);
+    expect(rowRequests(transport)).toHaveLength(2);
     unmount();
   });
 

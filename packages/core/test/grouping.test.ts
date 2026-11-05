@@ -12,15 +12,14 @@ import {
   prepareGrouping,
   queriesEqual,
   readFieldValue,
-  toAggregationQuery,
-  toMetricQuery,
   toServerQuery,
-  toServerQueryV2,
   type FieldSchema,
   type GroupedRow,
   type GroupingState,
   type QueryState,
 } from "../src/index";
+import { toMetricQuery } from "../src/metrics";
+import { toServerQueryV2 } from "../src/execution";
 
 // A host schema with nested paths and no catalogue entry for its identity.
 const schema: FieldSchema<GroupedRow> = {
@@ -321,7 +320,6 @@ describe("standard grouping model", () => {
         planToken: "x",
       }),
     ).toThrow(/group/);
-    expect(() => toAggregationQuery(q, schema)).toThrow(/group/);
     expect(() => toMetricQuery(q, schema)).toThrow(/group/);
   });
 });

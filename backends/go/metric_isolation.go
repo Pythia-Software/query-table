@@ -40,37 +40,37 @@ func metricClauseError(ctx context.Context, err error) (string, bool) {
 	return "could not execute metric", true
 }
 
-func failedMetric(id, scope, message string) SQLiteMetricV2 {
+func failedMetric(id, scope, message string) MetricResult {
 	if scope == "" {
 		scope = "allMatching"
 	}
-	return SQLiteMetricV2{ID: id, Scope: scope, Buckets: []SQLiteMetricV2Bucket{}, Error: message}
+	return MetricResult{ID: id, Scope: scope, Buckets: []MetricBucket{}, Error: message}
 }
 
 // isolateMetric runs one metric inside a savepoint so a failed PostgreSQL
 // statement does not abort the transaction for later metrics or the commit.
 // Clause failures become that metric's error. Cancellation, request-level
 // diagnostics and a savepoint that cannot be restored fail the request.
-func isolateMetric(ctx context.Context, tx *sql.Tx, id, scope string, run func() (SQLiteMetricV2, error)) (SQLiteMetricV2, error) {
+func isolateMetric(ctx context.Context, tx *sql.Tx, id, scope string, run func() (MetricResult, error)) (MetricResult, error) {
 	if _, err := tx.ExecContext(ctx, "SAVEPOINT qt_metric"); err != nil {
-		return SQLiteMetricV2{}, err
+		return MetricResult{}, err
 	}
 	metric, err := run()
 	if err == nil {
 		if _, err = tx.ExecContext(ctx, "RELEASE SAVEPOINT qt_metric"); err != nil {
-			return SQLiteMetricV2{}, err
+			return MetricResult{}, err
 		}
 		return metric, nil
 	}
 	message, clause := metricClauseError(ctx, err)
 	if !clause {
-		return SQLiteMetricV2{}, err
+		return MetricResult{}, err
 	}
 	if _, rollback := tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT qt_metric"); rollback != nil {
-		return SQLiteMetricV2{}, errors.Join(err, rollback)
+		return MetricResult{}, errors.Join(err, rollback)
 	}
 	if _, release := tx.ExecContext(ctx, "RELEASE SAVEPOINT qt_metric"); release != nil {
-		return SQLiteMetricV2{}, errors.Join(err, release)
+		return MetricResult{}, errors.Join(err, release)
 	}
 	return failedMetric(id, scope, message), nil
 }

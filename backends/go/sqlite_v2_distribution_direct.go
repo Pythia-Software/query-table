@@ -16,9 +16,9 @@ import (
 // copy the population through validation stages and sort it once per metric.
 // Rows reach the in-memory reducers as their SQLite storage values; the
 // request's and each metric's filters stay in SQL. Values the reducers cannot
-// read exactly (ErrRowsUnsupported) or a failed statement leave every metric
+// read exactly (errRowsUnsupported) or a failed statement leave every metric
 // to its compiled plan: ok is false. total is the matching population.
-func (d SQLiteV2Dataset) directDistributions(ctx context.Context, tx *sql.Tx, q MetricQuery, failures []error, o PlanOptions, maxGroups, maxPopulation int) (metrics map[int]SQLiteMetricV2, total int64, ok bool, err error) {
+func (d sqliteV2Dataset) directDistributions(ctx context.Context, tx *sql.Tx, q metricRequest, failures []error, o PlanOptions, maxGroups, maxPopulation int) (metrics map[int]MetricResult, total int64, ok bool, err error) {
 	include := make([]bool, len(q.Metrics))
 	selected := false
 	fields := map[string]bool{}
@@ -67,7 +67,7 @@ func (d SQLiteV2Dataset) directDistributions(ctx context.Context, tx *sql.Tx, q 
 		if i, ok := flags[string(key)]; ok {
 			return i
 		}
-		filter, _, e := compileSQLiteWhere(where, d.Schema, SQLiteOptions{Now: o.Now}, o.relations)
+		filter, _, e := compileSQLiteWhere(where, d.Schema, sqliteOptions{Now: o.Now}, o.relations)
 		if e != nil || filter.SQL == "" {
 			// Blank literals match every row. A filter error leaves every
 			// metric to its compiled plan, which reports it.
@@ -83,9 +83,11 @@ func (d SQLiteV2Dataset) directDistributions(ctx context.Context, tx *sql.Tx, q 
 	if err != nil || flagErr != nil {
 		return nil, 0, false, ctx.Err()
 	}
-	filter, _, err := compileSQLiteWhere(q.Where, d.Schema, SQLiteOptions{Now: o.Now}, o.relations)
+	filter, _, err := compileSQLiteWhere(q.Where, d.Schema, sqliteOptions{Now: o.Now}, o.relations)
 	if err != nil {
-		return nil, 0, false, err
+		// Like a metric filter, a population filter the stored-field scan cannot
+		// read (such as a computed field) leaves every metric to its compiled plan.
+		return nil, 0, false, ctx.Err()
 	}
 	statement += strings.Join(projections, ",") + " FROM " + sourceName + " AS r"
 	if filter.SQL != "" {
@@ -121,7 +123,7 @@ func (d SQLiteV2Dataset) directDistributions(ctx context.Context, tx *sql.Tx, q 
 			matches[i] = flag == 1
 		}
 		if err = reducer.add(row, matches); err != nil {
-			if errors.Is(err, ErrRowsUnsupported) {
+			if errors.Is(err, errRowsUnsupported) {
 				return nil, 0, false, nil
 			}
 			return nil, 0, false, err
@@ -134,7 +136,7 @@ func (d SQLiteV2Dataset) directDistributions(ctx context.Context, tx *sql.Tx, q 
 	if err != nil {
 		return nil, 0, false, err
 	}
-	metrics = map[int]SQLiteMetricV2{}
+	metrics = map[int]MetricResult{}
 	for i, m := range result.Metrics {
 		if include[i] {
 			metrics[i] = m

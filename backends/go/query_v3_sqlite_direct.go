@@ -31,9 +31,9 @@ func (d QueryDatasetV3) sqliteDirectGroups(ctx context.Context, tx *sql.Tx, q Qu
 		}
 		spec := summarySpec(summary, q.Grouping.Keys)
 		specs = append(specs, spec)
-		outputs = append(outputs, summaryOutput{ID: summary.ID, Expression: MetricExpression(spec)})
+		outputs = append(outputs, summaryOutput{ID: summary.ID, Expression: metricExpression(spec)})
 	}
-	mq := MetricQuery{Version: 2, Where: q.Source.Where}
+	mq := metricRequest{Version: 2, Where: q.Source.Where}
 	combined, err := compileMetricOutputs(ctx, mq, count, d.Schema, o, true, outputs)
 	if err != nil {
 		return nil, 0, ctx.Err() // A combined compiler limit retains ordinary execution.
@@ -70,7 +70,7 @@ func (d QueryDatasetV3) sqliteDirectGroups(ctx context.Context, tx *sql.Tx, q Qu
 			if groups > int64(maxGroups) {
 				return nil, 0, diagnostic("resource_limit", "group population exceeds host budget")
 			}
-			prepared, err := sqliteReplaceStage(MetricSQLPlan{SQLPlan: combined}, combined.SQLiteReductionStage, "SELECT * FROM "+queryIdent(table))
+			prepared, err := sqliteReplaceStage(metricSQLPlan{SQLPlan: combined}, combined.SQLiteReductionStage, "SELECT * FROM "+queryIdent(table))
 			return &prepared.SQLPlan, population, err
 		}
 		if _, err = tx.ExecContext(ctx, "DROP TABLE IF EXISTS temp."+queryIdent(table)); err != nil {

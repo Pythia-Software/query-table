@@ -8,7 +8,7 @@ import (
 	qt "github.com/Pythia-Software/query-table/backends/go"
 )
 
-func assertMiddleMetricFailed(t *testing.T, metrics []qt.SQLiteMetricV2, sum, count float64, message string) {
+func assertMiddleMetricFailed(t *testing.T, metrics []qt.MetricResult, sum, count float64, message string) {
 	t.Helper()
 	if len(metrics) != 3 {
 		t.Fatalf("metrics=%d", len(metrics))
@@ -25,34 +25,30 @@ func assertMiddleMetricFailed(t *testing.T, metrics []qt.SQLiteMetricV2, sum, co
 func TestV2MiddleMetricFailureIsIsolated(t *testing.T) {
 	db, d := setupV2(t)
 	d.MaxGroups = 2
-	rows := qt.ServerQueryV2{Version: 2, Profile: qt.SQLiteExpressionProfile, WireQuery: qt.WireQuery{Select: []string{"id"}, Limit: 10}}
 	for name, middle := range map[string]struct {
 		spec    qt.AggSpec
 		message string
 	}{
-		"group budget": {qt.AggSpec{ID: "middle", Expression: "SUM([n])", GroupBy: []string{"flag"}}, "group population exceeds host budget"},
+		"group budget":  {qt.AggSpec{ID: "middle", Expression: "SUM([n])", GroupBy: []string{"flag"}}, "group population exceeds host budget"},
 		"invalid input": {qt.AggSpec{ID: "middle", Expression: "SUM([text])"}, "numeric aggregate requires numeric input"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			metrics := qt.MetricQuery{Version: 2, Profile: qt.SQLiteExpressionProfile, Limit: 10, Metrics: []qt.AggSpec{{ID: "sum", Expression: "SUM([n])"}, middle.spec, {ID: "count", Expression: "COUNT()"}}}
-			r, err := d.ExecuteV2(context.Background(), db, &rows, &metrics, qt.PlanOptions{})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(r.Rows.Rows) != 4 {
+			q := v3Request(qt.WireQuery{Select: []string{"id"}, Limit: 10}, true, qt.AggSpec{ID: "sum", Expression: "SUM([n])"}, middle.spec, qt.AggSpec{ID: "count", Expression: "COUNT()"})
+			r := executeV3(t, db, d, q, qt.PlanOptions{})
+			if len(r.Rows) != 4 {
 				t.Fatal(r.Rows)
 			}
-			assertMiddleMetricFailed(t, r.Metrics.Metrics, 12, 4, middle.message)
+			assertMiddleMetricFailed(t, r.Metrics, 12, 4, middle.message)
 		})
 	}
 	// Request-level failures still fail the request.
-	metrics := qt.MetricQuery{Version: 2, Profile: qt.SQLiteExpressionProfile, Metrics: []qt.AggSpec{{ID: "sum", Expression: "SUM([n])"}, {ID: "sum", Expression: "COUNT()"}}}
+	metrics := metricsV3(nil, nil, 0, 0, qt.AggSpec{ID: "sum", Expression: "SUM([n])"}, qt.AggSpec{ID: "sum", Expression: "COUNT()"})
 	var diag *qt.PlanDiagnostic
-	if _, err := d.ExecuteV2(context.Background(), db, nil, &metrics, qt.PlanOptions{}); !errors.As(err, &diag) || diag.Code != "duplicate_metric" {
+	if _, err := d.Execute(context.Background(), db, metrics, qt.PlanOptions{}); !errors.As(err, &diag) || diag.Code != "duplicate_metric" {
 		t.Fatalf("duplicate IDs: %v", err)
 	}
-	metrics = qt.MetricQuery{Version: 2, Profile: qt.SQLiteExpressionProfile, Metrics: []qt.AggSpec{{ID: "sum", Expression: "SUM([n])", Scope: "visible"}}}
-	if _, err := d.ExecuteV2(context.Background(), db, nil, &metrics, qt.PlanOptions{}); err == nil {
+	metrics = metricsV3(nil, nil, 0, 0, qt.AggSpec{ID: "sum", Expression: "SUM([n])", Scope: "visible"})
+	if _, err := d.Execute(context.Background(), db, metrics, qt.PlanOptions{}); err == nil {
 		t.Fatal("bad scope accepted")
 	}
 }

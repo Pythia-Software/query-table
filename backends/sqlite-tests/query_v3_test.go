@@ -31,7 +31,7 @@ func groupedRequest() qt.QueryRequestV3 {
 	return qt.QueryRequestV3{Version: 3, Profile: qt.SQLiteExpressionProfile, Now: time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC).UnixMilli(), Rows: true,
 		Source:   qt.WireQuery{Limit: 1, Offset: 2},
 		Grouping: &qt.GroupingDefinition{Keys: []string{"k"}, Summaries: []qt.SummaryColumn{{ID: "num", Op: "count"}, {ID: "total", Op: "sum", Field: "n"}, {ID: "average", Op: "avg", Field: "n"}, {ID: "median", Op: "formula", Expression: "MEDIAN([n])"}, {ID: "example", Op: "row", Field: "label"}, {ID: "example_id", Op: "row", Field: "id"}}, Representative: &qt.RepresentativeRow{OrderBy: []qt.OrderBy{{Field: "n", Dir: "desc", Nulls: "last"}}}},
-		Result:   qt.WireQuery{Select: []string{"k", "num", "total", "average", "median", "example", "example_id"}, OrderBy: qt.OrderBys{{Field: "total", Dir: "desc"}}, Limit: 10},
+		Result:   qt.WireQuery{Select: []string{"k", "num", "total", "average", "median", "example", "example_id"}, OrderBy: []qt.OrderBy{{Field: "total", Dir: "desc"}}, Limit: 10},
 	}
 }
 func TestV3GroupingStagesAndRepresentative(t *testing.T) {

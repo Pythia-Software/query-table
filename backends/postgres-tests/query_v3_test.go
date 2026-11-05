@@ -54,7 +54,7 @@ func fixture(t *testing.T) (*sql.DB, qt.QueryDatasetV3) {
 	return db, qt.QueryDatasetV3{Schema: schema, SourceSQL: "SELECT * FROM fixture", Dialect: "postgres", Scope: "one", Dataset: "fixture"}
 }
 func groupedQuery() qt.QueryRequestV3 {
-	return qt.QueryRequestV3{Version: 3, Profile: qt.ServerExpressionProfile, Now: time.Now().UnixMilli(), Rows: true, Source: qt.WireQuery{Limit: 1, Offset: 3}, Grouping: &qt.GroupingDefinition{Keys: []string{"k"}, Summaries: []qt.SummaryColumn{{ID: "num", Op: "count"}, {ID: "total", Op: "sum", Field: "n"}, {ID: "median", Op: "formula", Expression: "MEDIAN([n])"}, {ID: "example", Op: "row", Field: "label"}, {ID: "example_id", Op: "row", Field: "id"}}, Representative: &qt.RepresentativeRow{OrderBy: []qt.OrderBy{{Field: "n", Dir: "desc", Nulls: "last"}}}}, Result: qt.WireQuery{Select: []string{"k", "num", "total", "median", "example", "example_id"}, OrderBy: qt.OrderBys{{Field: "total", Dir: "desc"}}, Limit: 10}}
+	return qt.QueryRequestV3{Version: 3, Profile: qt.ServerExpressionProfile, Now: time.Now().UnixMilli(), Rows: true, Source: qt.WireQuery{Limit: 1, Offset: 3}, Grouping: &qt.GroupingDefinition{Keys: []string{"k"}, Summaries: []qt.SummaryColumn{{ID: "num", Op: "count"}, {ID: "total", Op: "sum", Field: "n"}, {ID: "median", Op: "formula", Expression: "MEDIAN([n])"}, {ID: "example", Op: "row", Field: "label"}, {ID: "example_id", Op: "row", Field: "id"}}, Representative: &qt.RepresentativeRow{OrderBy: []qt.OrderBy{{Field: "n", Dir: "desc", Nulls: "last"}}}}, Result: qt.WireQuery{Select: []string{"k", "num", "total", "median", "example", "example_id"}, OrderBy: []qt.OrderBy{{Field: "total", Dir: "desc"}}, Limit: 10}}
 }
 func TestPostgresGroupedExecution(t *testing.T) {
 	db, d := fixture(t)
@@ -107,7 +107,7 @@ func TestPostgresNarrowRowsAndArrays(t *testing.T) {
 	}
 	d.Schema.Fields["tags"] = qt.FieldSpec{Name: "tags", Kind: qt.FieldTextArray, Expr: "r.tags"}
 	q := qt.QueryRequestV3{Version: 3, Profile: qt.ServerExpressionProfile, Now: time.Now().UnixMilli(), Rows: true,
-		Result: qt.WireQuery{Select: []string{"id", "tags"}, OrderBy: qt.OrderBys{{Field: "n", Dir: "desc"}}, Limit: 1}}
+		Result: qt.WireQuery{Select: []string{"id", "tags"}, OrderBy: []qt.OrderBy{{Field: "n", Dir: "desc"}}, Limit: 1}}
 	plan, err := d.SourcePlan(context.Background(), q, qt.PlanOptions{})
 	if err != nil || !reflect.DeepEqual(plan.Fields, []string{"id", "n", "tags"}) {
 		t.Fatal(plan.Fields, err)

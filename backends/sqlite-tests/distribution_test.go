@@ -11,8 +11,11 @@ import (
 	qt "github.com/Pythia-Software/query-table/backends/go"
 )
 
-func distributionQuery(kind, input string) qt.MetricQuery {
+func distributionQuery(kind, input string) qt.QueryRequestV3 {
 	q := metricV2("")
+	// v3 requests name the op the client sends with a distribution, "count";
+	// an op-less spec fails SourcePlan with "invalid select field name".
+	q.Metrics[0].Op = "count"
 	q.Metrics[0].Distribution = &qt.MetricDistribution{Kind: kind, Input: input}
 	return q
 }
@@ -34,9 +37,9 @@ func TestSQLiteBoxDistribution(t *testing.T) {
 		t.Fatal(m)
 	}
 	q = distributionQuery("box", "[n]+1")
-	q.Limit = 2
-	q.Offset = 1
-	q.OrderBy = []qt.OrderBy{{Field: "n", Dir: "desc"}}
+	q.Result.Limit = 2
+	q.Result.Offset = 1
+	q.Result.OrderBy = []qt.OrderBy{{Field: "n", Dir: "desc"}}
 	q.Metrics[0].Scope = "shownRows"
 	m = runMetric(t, db, d, q)
 	if m.ProcessedRows != 2 || m.Buckets[0].Value != float64(4) {
@@ -65,9 +68,9 @@ func TestSQLiteHistogramDistribution(t *testing.T) {
 		t.Fatal(m)
 	}
 	q = distributionQuery("histogram", "[n]")
-	q.Limit = 2
-	q.Offset = 1
-	q.OrderBy = []qt.OrderBy{{Field: "n", Dir: "desc"}}
+	q.Result.Limit = 2
+	q.Result.Offset = 1
+	q.Result.OrderBy = []qt.OrderBy{{Field: "n", Dir: "desc"}}
 	q.Metrics[0].Scope = "shownRows"
 	q.Metrics[0].Distribution.Bins = 2
 	m = runMetric(t, db, d, q)
@@ -81,7 +84,7 @@ func TestSQLiteDistributionEmptyNullAndConstant(t *testing.T) {
 	for _, kind := range []string{"box", "histogram"} {
 		for _, predicate := range []qt.WhereTerm{{Field: "id", Op: "=", Value: "missing"}, {Field: "id", Op: "=", Value: "c"}, {Field: "id", Op: "=", Value: "b"}} {
 			q := distributionQuery(kind, "[n]")
-			q.Where = []qt.WhereTerm{predicate}
+			q.Result.Where = []qt.WhereTerm{predicate}
 			m := runMetric(t, db, d, q)
 			b := m.Buckets[0]
 			if b.Error != "" {
@@ -117,7 +120,7 @@ func TestSQLiteDistributionEmptyNullAndConstant(t *testing.T) {
 			}
 		}
 		q := distributionQuery(kind, "[n]")
-		q.Where = []qt.WhereTerm{{Field: "id", Op: "=", Value: "missing"}}
+		q.Result.Where = []qt.WhereTerm{{Field: "id", Op: "=", Value: "missing"}}
 		q.Metrics[0].GroupBy = []string{"flag"}
 		m := runMetric(t, db, d, q)
 		if len(m.Buckets) != 0 || m.GroupCount != 0 {
@@ -138,7 +141,7 @@ func TestSQLiteDistributionErrorsAndBudgets(t *testing.T) {
 		q.Metrics[0].GroupBy = []string{"flag"}
 		d.MaxGroups = 2
 		q.Metrics[0].GroupLimit = 1
-		if r, e := d.ExecuteV2(context.Background(), db, nil, &q, qt.PlanOptions{}); metricFailure(t, r, e) != "group population exceeds host budget" {
+		if r, e := d.Execute(context.Background(), db, q, qt.PlanOptions{}); metricFailure(t, r, e) != "group population exceeds host budget" {
 			t.Fatal("group budget ignored")
 		}
 		d.MaxGroups = 0
@@ -147,13 +150,21 @@ func TestSQLiteDistributionErrorsAndBudgets(t *testing.T) {
 	d.SourceSQL = "WITH RECURSIVE samples(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM samples WHERE n<100001) SELECT n,CAST(n AS TEXT) AS id FROM samples"
 	d.SourceArgs = nil
 	d.Schema.Fields = map[string]qt.FieldSpec{"id": d.Schema.Fields["id"], "n": d.Schema.Fields["n"]}
-	m := runMetric(t, db, d, q)
-	if m.Buckets[0].Error != "resource_limit" || m.Buckets[0].Distribution != nil {
-		t.Fatal(m)
+	// v3 checks the MaxSamplesPerGroup budget (default 100000) before reducing
+	// and fails the metric, where v2 reported resource_limit on its bucket.
+	r, e := d.Execute(context.Background(), db, q, qt.PlanOptions{})
+	if message := metricFailure(t, r, e); !strings.Contains(message, "100,000-sample budget") {
+		t.Fatal(message)
 	}
-	// Histograms retain only counters, so the same population remains exact.
+	// SQLite's direct reducer retains a histogram's inputs, so histograms count
+	// against MaxSamplesPerGroup too and the population needs a larger budget.
 	q = distributionQuery("histogram", "[n]")
-	m = runMetric(t, db, d, q)
+	r, e = d.Execute(context.Background(), db, q, qt.PlanOptions{})
+	if message := metricFailure(t, r, e); message != "The histogram distribution exceeded the 100,000-sample budget" {
+		t.Fatal(message)
+	}
+	d.MaxSamplesPerGroup = 200000
+	m := runMetric(t, db, d, q)
 	h := m.Buckets[0].Distribution.(*qt.MetricHistogramDistribution)
 	var total int64
 	for _, n := range h.Counts {
@@ -165,17 +176,17 @@ func TestSQLiteDistributionErrorsAndBudgets(t *testing.T) {
 }
 func TestSQLiteDistributionValidation(t *testing.T) {
 	db, d := setupV2(t)
-	for _, change := range []func(*qt.MetricQuery){func(q *qt.MetricQuery) { q.Metrics[0].Distribution.Kind = "unknown" }, func(q *qt.MetricQuery) { q.Metrics[0].Distribution.Input = "SUM([n])" }, func(q *qt.MetricQuery) { q.Metrics[0].Distribution.Input = "[text]" }, func(q *qt.MetricQuery) { q.Metrics[0].Distribution.Bins = 31 }, func(q *qt.MetricQuery) { q.Metrics[0].Distribution.Whiskers = "other" }, func(q *qt.MetricQuery) { q.Metrics[0].ExpressionY = "COUNT()" }, func(q *qt.MetricQuery) { q.Metrics[0].GroupBy = []string{"flag", "text"} }} {
+	for _, change := range []func(*qt.QueryRequestV3){func(q *qt.QueryRequestV3) { q.Metrics[0].Distribution.Kind = "unknown" }, func(q *qt.QueryRequestV3) { q.Metrics[0].Distribution.Input = "SUM([n])" }, func(q *qt.QueryRequestV3) { q.Metrics[0].Distribution.Input = "[text]" }, func(q *qt.QueryRequestV3) { q.Metrics[0].Distribution.Bins = 31 }, func(q *qt.QueryRequestV3) { q.Metrics[0].Distribution.Whiskers = "other" }, func(q *qt.QueryRequestV3) { q.Metrics[0].ExpressionY = "COUNT()" }, func(q *qt.QueryRequestV3) { q.Metrics[0].GroupBy = []string{"flag", "text"} }} {
 		q := distributionQuery("histogram", "[n]")
 		change(&q)
-		r, e := d.ExecuteV2(context.Background(), db, nil, &q, qt.PlanOptions{})
+		r, e := d.Execute(context.Background(), db, q, qt.PlanOptions{})
 		metricFailure(t, r, e)
 	}
 	f := d.Schema.Fields["n"]
 	f.AggregateOps = []string{}
 	d.Schema.Fields["n"] = f
 	q := distributionQuery("box", "[n]")
-	r, e := d.ExecuteV2(context.Background(), db, nil, &q, qt.PlanOptions{})
+	r, e := d.Execute(context.Background(), db, q, qt.PlanOptions{})
 	metricFailure(t, r, e)
 }
 
@@ -213,34 +224,34 @@ func TestSQLiteDistributionComputedAndSnapshot(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer tx.Rollback()
-	handshake, e := d.DescribeComputedIn(ctx, tx, []string{"shift"}, qt.PlanOptions{})
+	handshake, e := describeComputedIn(ctx, tx, d, []string{"shift"}, qt.PlanOptions{})
 	if e != nil {
 		t.Fatal(e)
 	}
 	q := distributionQuery("box", "[@computed/shift]")
 	q.ExpectedRevisions = handshake.ResolvedRevisions
-	q.Metrics = append(q.Metrics, qt.AggSpec{ID: "h", Distribution: &qt.MetricDistribution{Kind: "histogram", Input: "[@computed/shift]", Bins: 2}})
+	q.Metrics = append(q.Metrics, qt.AggSpec{ID: "h", Op: "count", Distribution: &qt.MetricDistribution{Kind: "histogram", Input: "[@computed/shift]", Bins: 2}})
 	if _, e = db.Exec("UPDATE runs SET n=100 WHERE id='a'"); e != nil {
 		t.Fatal(e)
 	}
-	r, e := d.ExecuteV2In(ctx, tx, nil, &q, qt.PlanOptions{})
+	r, e := d.ExecuteIn(ctx, tx, q, qt.PlanOptions{})
 	if e != nil {
 		t.Fatal(e)
 	}
-	s := r.Metrics.Metrics[0].Buckets[0].Distribution.(*qt.MetricBoxDistribution).Summary
-	h := r.Metrics.Metrics[1].Buckets[0].Distribution.(*qt.MetricHistogramDistribution)
+	s := r.Metrics[0].Buckets[0].Distribution.(*qt.MetricBoxDistribution).Summary
+	h := r.Metrics[1].Buckets[0].Distribution.(*qt.MetricHistogramDistribution)
 	if s.Min != 12 || s.Median != 14 || s.Max != 16 || !reflect.DeepEqual(h.Edges, []float64{12, 14, 16}) {
 		t.Fatal(s, h)
 	}
 	q.ExpectedRevisions = map[string]string{"shift": "wrong"}
-	if _, e = d.ExecuteV2In(ctx, tx, nil, &q, qt.PlanOptions{}); e == nil {
+	if _, e = d.ExecuteIn(ctx, tx, q, qt.PlanOptions{}); e == nil {
 		t.Fatal("stale computed revision accepted")
 	}
 	f := d.Schema.Fields["n"]
 	f.AggregateOps = []string{}
 	d.Schema.Fields["n"] = f
 	q.ExpectedRevisions = handshake.ResolvedRevisions
-	r, e = d.ExecuteV2In(ctx, tx, nil, &q, qt.PlanOptions{})
+	r, e = d.ExecuteIn(ctx, tx, q, qt.PlanOptions{})
 	metricFailure(t, r, e)
 }
 func TestSQLiteHistogramGlobalErrorBeforeTopN(t *testing.T) {
@@ -281,11 +292,11 @@ func TestSQLiteDistributionFrontendParity(t *testing.T) {
 	}
 	samples = append(samples, tails)
 	type fixture struct {
-		Samples  []float64               `json:"samples"`
-		Kind     string                  `json:"kind"`
-		Whiskers string                  `json:"whiskers"`
-		Bins     int                     `json:"bins"`
-		Bucket   qt.SQLiteMetricV2Bucket `json:"bucket"`
+		Samples  []float64       `json:"samples"`
+		Kind     string          `json:"kind"`
+		Whiskers string          `json:"whiskers"`
+		Bins     int             `json:"bins"`
+		Bucket   qt.MetricBucket `json:"bucket"`
 	}
 	fixtures := []fixture{}
 	for _, values := range samples {

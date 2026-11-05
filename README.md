@@ -54,7 +54,7 @@ npm install @pythia-software/query-table-core @pythia-software/query-table-react
 npm install @pythia-software/query-table-core @pythia-software/query-table-react @pythia-software/query-table-ui react react-dom
 ```
 
-For the Go SQL compiler:
+For the Go v3 query executor (SQLite and PostgreSQL):
 
 ```bash
 go get github.com/Pythia-Software/query-table/backends/go
@@ -141,7 +141,7 @@ supported by the published packages.
         QueryState · encode/decode · applyQuery · adapters
               │                                          │
               ▼                                          ▼
-   @pythia-software/query-table-react  (headless hooks)        Compile(WireQuery, Schema)
+   @pythia-software/query-table-react  (headless hooks)        QueryDatasetV3.Execute(QueryRequestV3)
         useQueryTable · useSelection ·            → parameterized SQL
         useSelect · useSavedQueries               (allowlist = injection boundary)
               │
@@ -160,7 +160,7 @@ your own markup, or just `@pythia-software/query-table-core` for the wire types 
 | `@pythia-software/query-table-core` | Pure TS. `QueryState`, `FieldDef`, encode/decode, client-side `applyQuery`, adapter interfaces. No React, no DOM. | — |
 | `@pythia-software/query-table-react` | Headless hooks that own query state, URL/storage sync, fetch orchestration, selection, columns. No markup. | core, react (peer) |
 | `@pythia-software/query-table-ui` | The opinionated components. Themeable via CSS variables **or** a `classNames` slot map (Tailwind-friendly). | core, React hooks, React + React DOM (peers) |
-| `backends/go` | `querytable` Go module: compiles a `WireQuery` to parameterized SQL against a schema allowlist, and reads and writes query link tokens. | — |
+| `backends/go` | `querytable` Go module: executes v3 query requests (`QueryDatasetV3`, `NewQueryV3Handler`) as parameterized SQLite/PostgreSQL SQL against a schema allowlist, stores computed fields and query snapshots, and reads and writes query link tokens. | — |
 | `@pythia-software/query-table-duckdb` | Driver-independent DuckDB SQL planner and transport for native and Wasm execution, including v3 grouping and metrics. | core |
 | `@pythia-software/query-table-codegen` | CLI and JS API that emit the TS catalog + Go schema from a JSON schema document. | core |
 | `demo` | Runnable Vite playground over an in-memory dataset, for seeing UI changes live and manual testing. | core, react, ui |
@@ -326,13 +326,13 @@ Metrics are saved with the query and edited in a transactional, resizable workbe
 
 Displays include values, tables (two-group pivots and multi-group flat tables), lists, bars, lines, pie/ring charts, paired-measure scatterplots, box plots, and histograms. Names, axis labels, temporal output units/patterns, legends, list bars, and whole-rem desired/minimum card sizes are configurable. Caller-supplied palette layers keep the same typed category consistent across charts. The implementation uses native inputs, SVG, Intl, and the existing worker infrastructure, with no new runtime dependencies.
 
-Existing simple `AggregationClause` definitions and v1 aggregation transports remain supported. Advanced remote metrics require an explicitly advertised v2 metric transport. Server-computed SELECT and global sorting use an authoritative profile/revision/capability handshake and stable-row-ID sidecars. The Go library compiles validated, parameterized PostgreSQL plans; hosts provide authorized endpoints, execution, result mapping, and snapshot consistency.
+Existing simple `AggregationClause` definitions remain supported. Remote metrics run through the v3 transport, one `fetchQueryV3` request per batch. Server-computed SELECT and global sorting use an authoritative profile/revision/capability handshake, with computed values validated by stable row identity. The Go library's `QueryDatasetV3` executes the same v3 requests as validated, parameterized SQLite or PostgreSQL SQL inside a host transaction; hosts provide authorization, the authorized source SELECT, deadlines, and any retained snapshot binding.
 
 Every metric kind can drill into its records: `onInspect` plus `inspectBucketQuery` builds the exact query for a bucket, bin or cohort, and `groupSourceQuery` does the same for a grouped row. Hosts that keep reusable presets can apply, recognise and remove them with [query patches](docs/query-patches.md).
 
 See [the production metrics guide](docs/metrics.md) for definitions, React/UI usage, scopes, drilldown, formatting, palette customization, and transports, and [the PostgreSQL compiler guide](docs/backend-metrics.md) for backend integration. The [approved playground](docs/mockups/metric-playground.html) and [design notes](docs/metric-playground-design.md) preserve the original design reference. The demo starts with a varied, persistent production dashboard.
 
-The Go module also supports SQLite row queries, Unicode/RE2 filters, JSON arrays, autocomplete, and revision-safe computed storage. Its distinct `qt-sqlite-v1` v2 profile adds composed formulas, paired metrics, shown-row scope, computed projection/sorting, exact median and box plots, shared-edge histograms, and transaction-based execution. See [the SQLite integration guide](docs/backend-sqlite.md) for registration, capabilities, numeric limits, and Pharos cutover guidance.
+With `Dialect: "sqlite"` the same executor serves SQLite: Unicode/RE2 filters, JSON arrays, distinct-value autocomplete, and revision-safe computed storage, under the distinct `qt-sqlite-v1` profile with composed formulas, paired metrics, shown-row scope, computed projection/sorting, exact median and box plots, and shared-edge histograms. See [the SQLite integration guide](docs/backend-sqlite.md) for function registration, capabilities, numeric limits, and Pharos guidance.
 
 ---
 

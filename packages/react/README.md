@@ -53,8 +53,9 @@ the complete selection, including IDs outside the displayed page.
 `table.selection.retain(ids)` atomically intersects the current selection with
 an iterable. Both operations reset the Shift-click range anchor.
 
-Without `transport.fetchDistinctValues`, `table.filterValues(field, search)`
-uses `clientRows` for autocomplete. For `textarray` fields it suggests individual
+With a transport, `table.filterValues(field, search, signal?)` sends a v3
+`distinct` request (core's `fetchDistinctValuesV3`) for server-filterable fields;
+aborting the signal cancels it. Without one it uses `clientRows` for autocomplete. For `textarray` fields it suggests individual
 array elements, deduplicated and matched case-insensitively by substring. Local
 suggestions are capped at 50 values, with `hasMore` indicating additional matches.
 
@@ -108,11 +109,11 @@ api.setDefinition(previous => ({ query: { ...previous.query, offset: 0 }, hostSt
 `hostState` is `{ version, params: Record<string, string[]> }`. It rides in
 `QueryState.hostState`, so history, saves, `encodeQuery` links and durable
 `@…` snapshots carry it with the query, within the existing size budgets.
-Every request the table sends carries the `hostState` it runs with
-(`ServerQuery`, `ServerQueryV2`, `QueryRequestV3`, `MetricQuery`,
-`AggregationRequest` and distinct-value requests), so the host's transport
-never sees one definition's table query with another's host state; the Go
-request types accept and expose it without interpreting it.
+Every `QueryRequestV3` the table sends carries the `hostState` it runs with,
+including filter suggestions, row lookups and field statistics (opt-in with
+`remoteFieldStats: true`, since each reduces the whole dataset), so the host's
+transport never sees one definition's table query with another's host state;
+the Go request types accept and expose it without interpreting it.
 
 - One `setDefinition` is one history entry and one execution. Edits through
   `setQuery` keep the current host state unless they set one.
@@ -160,7 +161,7 @@ for transport and schema examples.
 
 ## Shared computed column definitions
 
-Pass a stable `computedColumnStore` (for example, `httpComputedColumnStore("/api/computed-columns")` from core) to `useQueryTable`. `api.computed` exposes the catalogue, compile/preview, save with revision checking, and reload operations. Queries store only `@computed/<id>` SELECT references. Local evaluation uses browser workers. With `fetchRowsV2` and an authoritative `computedExecution` envelope, computed SELECT and global sorting run on the server and values attach through validated stable-row-ID sidecars. Without a store, definitions are in memory for the mounted hook. See the repository’s `docs/computed-columns.md` for the complete integration contract and PostgreSQL adapter.
+Pass a stable `computedColumnStore` (for example, `httpComputedColumnStore("/api/computed-columns")` from core) to `useQueryTable`. `api.computed` exposes the catalogue, compile/preview, save with revision checking, and reload operations. Queries store only `@computed/<id>` SELECT references. Local evaluation uses browser workers. With an authoritative `computedExecution` envelope, computed SELECT and global sorting run on the v3 server and values arrive inline in the rows, validated against the requested revisions. Without a store, definitions are in memory for the mounted hook. See the repository’s `docs/computed-columns.md` for the complete integration contract and PostgreSQL adapter.
 
 ### Canonical keys and unavailable filters
 
@@ -183,7 +184,7 @@ and reject them through `validateQuery` so users can repair the selected tags.
 
 ## Metric execution and drafts
 
-`api.aggregations.preview(clauses, signal)` evaluates a draft without modifying the query. `replace(clauses, expected?)` commits the entire dashboard as one undoable change and can reject a stale editor baseline. Presentation-only changes reuse computation. Advanced remote execution uses `fetchMetrics` plus explicit v2 `metricCapabilities`; v1 transports continue to support representable simple metrics. All-matching scope requires the complete client dataset or a server metric service. Shown-row fallback uses committed inputs and reports missing dependencies.
+`api.aggregations.preview(clauses, signal)` evaluates a draft without modifying the query. `replace(clauses, expected?)` commits the entire dashboard as one undoable change and can reject a stale editor baseline. Presentation-only changes reuse computation. With a transport, every metric batch is one v3 request (`rows: false`); a clause using a population control the server's `queryCapabilities` does not advertise fails on its own. All-matching scope requires the complete client dataset or a transport. Without a transport, shown-row metrics use the committed page and report missing dependencies.
 
 See [the metrics integration guide](../../docs/metrics.md) for scopes, cancellation, worker-isolated regex, capability negotiation, computed revisions, and snapshot requirements.
 
@@ -194,14 +195,11 @@ while `clientRows` continues through local filtering, sorting, and paging.
 selection. Computed grouping choices in `api.computed.catalogue` use the metric
 transport and handshake, including definition revisions; row selection,
 filtering, sorting, and value access keep their row capabilities.
-Use `metricRowsReady(query)` to confirm that the external row window
-matches the current query and origin before local shown-row evaluation or
-previews. Remote `allMatching` metrics run while that gate is false.
-
-A V2 transport must explicitly advertise `metricCapabilities.shownRows: true`
-to execute supported shown-row clauses remotely. False or omitted uses the
-committed page, provided its inputs are loaded. See the
-[migration example](../../docs/metrics.md#independent-remote-metrics).
+A metric transport executes every clause, shown-row ones included, on the
+server. Use `metricRowsReady(query)` to confirm that a local row window matches
+the current query and origin before local shown-row evaluation or previews
+(tables without a metric transport). See the
+[example](../../docs/metrics.md#independent-remote-metrics).
 
 Standalone `useAggregations` calls with a complete client dataset derive the
 shown page when readiness options are omitted. An explicit `rowsReady: false`

@@ -84,7 +84,7 @@ func (d QueryDatasetV3) Execute(ctx context.Context, db *sql.DB, q QueryRequestV
 // sorting, paging and metrics over that projection. All temporary tables are
 // dropped before success; cancellation/budget failures never return a page.
 func (d QueryDatasetV3) ExecuteIn(ctx context.Context, tx *sql.Tx, q QueryRequestV3, o PlanOptions) (out QueryResultV3, err error) {
-	out = QueryResultV3{Version: 3, Now: q.Now, Rows: []map[string]any{}, Metrics: []SQLiteMetricV2{}}
+	out = QueryResultV3{Version: 3, Now: q.Now, Rows: []map[string]any{}, Metrics: []MetricResult{}}
 	if err := q.Validate(); err != nil {
 		return out, err
 	}
@@ -94,6 +94,12 @@ func (d QueryDatasetV3) ExecuteIn(ctx context.Context, tx *sql.Tx, q QueryReques
 	}
 	if _, err = d.sampleLimit(); err != nil {
 		return out, err
+	}
+	if q.Distinct != nil {
+		if o, err = d.options(ctx, tx, q, o); err != nil {
+			return out, err
+		}
+		return d.executeDistinct(ctx, tx, q, o)
 	}
 	if q.Result.Limit < 1 || q.Result.Limit > maxRows || len(q.Metrics) > 20 {
 		return out, diagnostic("resource_limit", "invalid result window or metric budget")
@@ -106,6 +112,9 @@ func (d QueryDatasetV3) ExecuteIn(ctx context.Context, tx *sql.Tx, q QueryReques
 	if err != nil {
 		return out, err
 	}
+	if err = validateQueryMetrics(q); err != nil {
+		return out, err
+	}
 	tables := []string{}
 	defer func() {
 		err = errors.Join(err, d.dropQueryTables(ctx, tx, tables))
@@ -113,6 +122,9 @@ func (d QueryDatasetV3) ExecuteIn(ctx context.Context, tx *sql.Tx, q QueryReques
 			out = QueryResultV3{}
 		}
 	}()
+	if q.Grouping == nil && !d.stageUngrouped {
+		return d.executeUngrouped(ctx, tx, q, o, plan, maxGroups, &tables)
+	}
 	direct, total, err := d.sqliteDirectGroups(ctx, tx, q, o, plan, maxPop, maxGroups, maxBytes, &tables)
 	if err != nil {
 		return out, err
@@ -249,12 +261,7 @@ func (d QueryDatasetV3) ExecuteIn(ctx context.Context, tx *sql.Tx, q QueryReques
 	for _, name := range names {
 		out.Schema.Fields = append(out.Schema.Fields, ProjectedField{name, schemaFieldType(result.Fields[name].Kind)})
 	}
-	out.Execution = SQLiteComputedExecution{Profile: q.Profile, PlanToken: q.PlanToken, Snapshot: q.Snapshot, ResolvedRevisions: plan.ResolvedRevisions, Fields: map[string]SQLiteComputedFieldCapability{}}
-	for _, column := range plan.Columns {
-		if strings.HasPrefix(column.Field, "@computed/") {
-			out.Execution.Fields[column.Field] = plan.ComputedCapabilities[column.Field]
-		}
-	}
+	out.Execution = queryExecution(q, plan)
 	if q.Rows {
 		selected := append([]string{}, resultQuery.Select...)
 		if len(selected) == 0 {
@@ -273,21 +280,10 @@ func (d QueryDatasetV3) ExecuteIn(ctx context.Context, tx *sql.Tx, q QueryReques
 			return out, err
 		}
 	}
-	metricQuery := MetricQuery{Version: 2, Where: resultQuery.Where, OrderBy: []OrderBy(resultQuery.OrderBy), Limit: resultQuery.Limit, Offset: resultQuery.Offset}
-	ids := map[string]bool{}
+	metricQuery := metricRequest{Version: 2, Where: resultQuery.Where, OrderBy: []OrderBy(resultQuery.OrderBy), Limit: resultQuery.Limit, Offset: resultQuery.Offset}
 	for _, spec := range q.Metrics {
-		if err = (WireQuery{Aggregations: []AggSpec{spec}, Limit: q.Result.Limit, Offset: q.Result.Offset, Where: q.Result.Where, OrderBy: q.Result.OrderBy}).Validate(); err != nil {
-			return out, err
-		}
-		if spec.Scope != "" && spec.Scope != "allMatching" && spec.Scope != "shownRows" {
-			return out, diagnostic("scope", "invalid metric scope")
-		}
-		if ids[spec.ID] {
-			return out, diagnostic("duplicate_metric", "duplicate metric ID")
-		}
-		ids[spec.ID] = true
-		metric, e := isolateMetric(ctx, tx, spec.ID, spec.Scope, func() (SQLiteMetricV2, error) {
-			return d.executeMetric(ctx, tx, spec, metricQuery, result, stageOptions, out.Total, maxGroups, &tables)
+		metric, e := isolateMetric(ctx, tx, spec.ID, spec.Scope, func() (MetricResult, error) {
+			return d.executeMetric(ctx, tx, spec, metricQuery, result, nil, stageOptions, out.Total, maxGroups, &tables)
 		})
 		if e != nil {
 			return out, e
@@ -295,6 +291,31 @@ func (d QueryDatasetV3) ExecuteIn(ctx context.Context, tx *sql.Tx, q QueryReques
 		out.Metrics = append(out.Metrics, metric)
 	}
 	return out, ctx.Err()
+}
+func validateQueryMetrics(q QueryRequestV3) error {
+	ids := map[string]bool{}
+	for _, spec := range q.Metrics {
+		if err := validateMetricSpecs([]AggSpec{spec}); err != nil {
+			return err
+		}
+		if spec.Scope != "" && spec.Scope != "allMatching" && spec.Scope != "shownRows" {
+			return diagnostic("scope", "invalid metric scope")
+		}
+		if ids[spec.ID] {
+			return diagnostic("duplicate_metric", "duplicate metric ID")
+		}
+		ids[spec.ID] = true
+	}
+	return nil
+}
+func queryExecution(q QueryRequestV3, plan SourceDependencyPlan) ComputedExecution {
+	out := ComputedExecution{Profile: q.Profile, PlanToken: q.PlanToken, Snapshot: q.Snapshot, ResolvedRevisions: plan.ResolvedRevisions, Fields: map[string]ComputedFieldCapability{}}
+	for _, column := range plan.Columns {
+		if strings.HasPrefix(column.Field, "@computed/") {
+			out.Fields[column.Field] = plan.ComputedCapabilities[column.Field]
+		}
+	}
+	return out
 }
 func containsString(names []string, name string) bool {
 	for _, n := range names {
@@ -367,7 +388,7 @@ func readQueryRows(ctx context.Context, tx *sql.Tx, p SQLPlan, grouped bool, dia
 			code := sqliteErrorCode(values[2*i+1])
 			if code != "" {
 				if !grouped && !strings.HasPrefix(column.Field, "@computed/") {
-					return out, diagnostic(code, "invalid source value for "+column.Field)
+					return out, diagnostic("invalid_source_value", "invalid source value for "+column.Field)
 				}
 				value = map[string]any{"computedError": code}
 			}
@@ -438,7 +459,7 @@ func (d QueryDatasetV3) stageGroups(ctx context.Context, tx *sql.Tx, table strin
 			if summary.Op == "row" {
 				continue
 			}
-			expression := MetricExpression(summarySpec(summary, g.Keys))
+			expression := metricExpression(summarySpec(summary, g.Keys))
 			if sampledExpression(expression) {
 				fused = nil
 				break
@@ -451,13 +472,13 @@ func (d QueryDatasetV3) stageGroups(ctx context.Context, tx *sql.Tx, table strin
 	if prepared != nil {
 		countPlan = *prepared
 	} else {
-		countPlan, err = compileMetricOutputs(ctx, MetricQuery{Version: 2}, countSpec, s, o, d.Dialect == "sqlite", fused)
+		countPlan, err = compileMetricOutputs(ctx, metricRequest{Version: 2}, countSpec, s, o, d.Dialect == "sqlite", fused)
 	}
 	if err != nil && len(fused) > 0 && ctx.Err() == nil {
 		// The combined plan can exceed a compiler budget that each summary fits
 		// on its own; those summaries then run independently.
 		fused = nil
-		countPlan, err = compileMetricOutputs(ctx, MetricQuery{Version: 2}, countSpec, s, o, d.Dialect == "sqlite", nil)
+		countPlan, err = compileMetricOutputs(ctx, metricRequest{Version: 2}, countSpec, s, o, d.Dialect == "sqlite", nil)
 	}
 	if err != nil {
 		return result, err
@@ -490,7 +511,7 @@ func (d QueryDatasetV3) stageGroups(ctx context.Context, tx *sql.Tx, table strin
 	identity.typedValue = d.Dialect == "sqlite"
 	result.Fields[GroupIdentityField] = identity
 	for _, summary := range g.Summaries {
-		if sampledExpression(MetricExpression(summarySpec(summary, g.Keys))) {
+		if sampledExpression(metricExpression(summarySpec(summary, g.Keys))) {
 			limit, _ := d.sampleLimit()
 			var excessive int64
 			if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+queryIdent(table)+" WHERE count>"+d.param(1), limit).Scan(&excessive); err != nil {
@@ -521,7 +542,7 @@ func (d QueryDatasetV3) stageGroups(ctx context.Context, tx *sql.Tx, table strin
 		} else if isReduced {
 			typ = column.Type
 		} else {
-			summaryPlan, err = compileMetricDialect(ctx, MetricQuery{Version: 2}, summarySpec(summary, g.Keys), s, o, d.Dialect == "sqlite")
+			summaryPlan, err = compileMetricDialect(ctx, metricRequest{Version: 2}, summarySpec(summary, g.Keys), s, o, d.Dialect == "sqlite")
 			if err != nil {
 				return result, err
 			}

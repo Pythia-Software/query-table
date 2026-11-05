@@ -7,7 +7,7 @@ import {
 } from "./FilterValuePresentation";
 // QueryBuilder — the chip toolbar: WHERE filters, SELECT columns, ORDER BY
 // (multi-sort, reorderable), and LIMIT/OFFSET paging. Type-aware filter inputs
-// (enum/static <select>, value autocomplete via Transport.fetchDistinctValues).
+// (enum/static <select>, value autocomplete via api.filterValues).
 // Hosts the Save / saved-queries entry point.
 //
 // Combines a chip layout, autocomplete, draggable column chips, a grouped
@@ -184,9 +184,10 @@ function useFieldHasNull<Row>(
   useEffect(() => {
     if (!fieldName) return;
     let cancelled = false;
+    const ac = new AbortController();
 
     void api
-      .filterValues(fieldName, "")
+      .filterValues(fieldName, "", ac.signal)
       .then((r) => {
         if (!cancelled && typeof r.hasNull === "boolean") {
           setHasNull(r.hasNull);
@@ -198,6 +199,7 @@ function useFieldHasNull<Row>(
 
     return () => {
       cancelled = true;
+      ac.abort();
     };
   }, [api.filterValues, fieldName]);
 

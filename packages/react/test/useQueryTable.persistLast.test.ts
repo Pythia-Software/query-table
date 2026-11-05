@@ -5,14 +5,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   memoryStorageAdapter,
   normalizeQueryState,
-  type AggregationResult,
   type FieldSchema,
+  type QueryRequestV3,
+  type QueryResultV3,
   type QueryState,
-  type ServerQuery,
   type StorageAdapter,
   type Transport,
 } from "@pythia-software/query-table-core";
 import { useQueryTable, type QueryTableApi, type UseQueryTableOptions } from "../src/useQueryTable";
+import { MEMORY_V3_CAPABILITIES, serveQueryV3 } from "./v3Transport";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -27,18 +28,20 @@ const schema: FieldSchema<Row> = {
 };
 const filtered = (tool: string): QueryState => normalizeQueryState({ select: [{ field: "id" }, { field: "tool" }], where: [{ field: "tool", op: "=", value: tool }] });
 
-/** A transport whose responses the test releases or rejects by tool name. */
-function controllable() {
+/** A transport whose row pages the test releases or rejects by tool name.
+ * Metric requests are answered by `metrics` (served immediately by default). */
+function controllable(metrics: (request: QueryRequestV3) => Promise<QueryResultV3> = async (request) => serveQueryV3<Row>([], schema, request)) {
   const pending = new Map<string, Array<{ resolve: (rows: Row[]) => void; reject: (error: Error) => void }>>();
-  const toolOf = (query: ServerQuery) => {
-    const term = query.where.find((term) => "field" in term && term.field === "tool");
+  const toolOf = (request: QueryRequestV3) => {
+    const term = request.result.where.find((term) => "field" in term && term.field === "tool");
     return term && "value" in term ? String(term.value) : "all";
   };
   const transport: Transport<Row> = {
-    fetchRows: (query) => new Promise((resolve, reject) => {
-      const tool = toolOf(query);
+    queryCapabilities: MEMORY_V3_CAPABILITIES,
+    fetchQueryV3: (request) => !request.rows ? metrics(request) : new Promise((resolve, reject) => {
+      const tool = toolOf(request);
       pending.set(tool, [...pending.get(tool) ?? [], {
-        resolve: (rows) => resolve({ rows, total: rows.length }),
+        resolve: (rows) => resolve(serveQueryV3(rows, schema, request)),
         reject,
       }]);
     }),
@@ -208,15 +211,12 @@ describe("persistLast: succeeded", () => {
 
   it("treats a failed metric as an incomplete success", async () => {
     const storage = recording();
-    const server = controllable();
     let metricsFail = true;
-    const transport: Transport<Row> = {
-      ...server.transport,
-      fetchAggregations: async (): Promise<AggregationResult> => {
-        if (metricsFail) throw Error("metric backend down");
-        return { metrics: [{ id: "n", buckets: [{ keys: [], value: 1, count: 1 }] }] };
-      },
-    };
+    const server = controllable(async (request) => {
+      if (metricsFail) throw Error("metric backend down");
+      return serveQueryV3<Row>([{ id: 1, tool: "A" }], schema, request);
+    });
+    const transport = server.transport;
     const query = { ...filtered("A"), aggregations: [{ id: "n", op: "count" as const, groupBy: [] }] };
     const { current } = mount({ transport, storage, initialQuery: query });
     await wait(0);

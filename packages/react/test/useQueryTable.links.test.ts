@@ -3,8 +3,9 @@ import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createQueryLinkService, createPropertyView, memoryPropertyViewStorage, memoryQuerySnapshotCache, memoryStorageAdapter, EMPTY_QUERY, ITEM_DETAILS_COLUMN, encodeQuery,
-  type QuerySnapshot, type QuerySnapshotStore, type FieldSchema, type QueryState, type Transport } from "@pythia-software/query-table-core";
+  type QuerySnapshot, type QuerySnapshotStore, type FieldSchema, type QueryState } from "@pythia-software/query-table-core";
 import { useQueryTable, type QueryTableApi } from "../src/useQueryTable";
+import { memoryV3Transport } from "./v3Transport";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 type Row = { id: number; name: string };
@@ -114,9 +115,9 @@ it("blocks fetch, persistence and URL rewriting until a remote reference resolve
   const resolve = vi.fn(() => new Promise<QuerySnapshot | null>(r => {complete=r;}));
   const snapshots: QuerySnapshotStore = {resolve,save:vi.fn(async (_key,s)=>s)};
   const storage = {...memoryStorageAdapter(),snapshots,saveLast:vi.fn(async()=>{})};
-  const fetchRows = vi.fn(async()=>({rows,total:1}));
+  const transport = memoryV3Transport(rows, schema); const fetchRows = transport.fetchQueryV3;
   window.history.replaceState(null,"",`/runs?q=@${code}`);
-  const api = mount({schema,storage,transport:{fetchRows},syncUrl:true,debounceMs:0,links:{cache:memoryQuerySnapshotCache()}});
+  const api = mount({schema,storage,transport,syncUrl:true,debounceMs:0,links:{cache:memoryQuerySnapshotCache()}});
   await settle();
   expect(api().loading).toBe(true); expect(fetchRows).not.toHaveBeenCalled(); expect(storage.saveLast).not.toHaveBeenCalled();
   expect(new URL(window.location.href).searchParams.get("q")).toBe("@"+code);
@@ -139,10 +140,10 @@ it.each(["undo", "redo"] as const)("empty-history %s preserves a loading query l
     save: vi.fn(async (_source, snapshot) => snapshot),
   };
   const storage = { ...memoryStorageAdapter(), snapshots, saveLast: vi.fn(async () => {}) };
-  const fetchRows = vi.fn(async () => ({ rows, total: 1 }));
+  const transport = memoryV3Transport(rows, schema); const fetchRows = transport.fetchQueryV3;
   window.history.replaceState(null, "", `/runs?q=@${code}&section=incoming#table`);
   const incoming = window.location.href;
-  const api = mount({ schema, storage, transport: { fetchRows }, syncUrl: true, debounceMs: 0, links: { cache: memoryQuerySnapshotCache() } });
+  const api = mount({ schema, storage, transport, syncUrl: true, debounceMs: 0, links: { cache: memoryQuerySnapshotCache() } });
   await settle();
   const query = api().query;
   expect(api().canUndo).toBe(false); expect(api().canRedo).toBe(false);
@@ -165,9 +166,9 @@ it.each(["undo", "redo"] as const)("empty-history %s preserves a loading query l
 it.each(["undo", "redo"] as const)("empty-history %s preserves a failed query link", async action => {
   window.history.replaceState(null, "", "/runs?q=corrupt&section=incoming#table");
   const incoming = window.location.href;
-  const fetchRows = vi.fn(async () => ({ rows, total: 1 }));
+  const transport = memoryV3Transport(rows, schema); const fetchRows = transport.fetchQueryV3;
   const storage = { ...memoryStorageAdapter(), saveLast: vi.fn(async () => {}) };
-  const api = mount({ schema, storage, transport: { fetchRows }, syncUrl: true, debounceMs: 0 });
+  const api = mount({ schema, storage, transport, syncUrl: true, debounceMs: 0 });
   await settle();
   const error = api().restoration.error, query = api().query;
   expect(error).toBeInstanceOf(Error);
@@ -237,9 +238,9 @@ it.each([false, true])("waits for remote query restoration before syncing stored
     save: vi.fn(async (_key, snapshot) => snapshot),
   };
   const storage = { ...memoryStorageAdapter(), snapshots, saveLast: vi.fn(async () => {}) };
-  const fetchRows = vi.fn<NonNullable<Transport<Row>["fetchRows"]>>(async () => ({ rows, total: 1 }));
+  const transport = memoryV3Transport(rows, schema); const fetchRows = transport.fetchQueryV3;
   window.history.replaceState(null, "", `/runs?q=@${code}`);
-  const api = mount({ schema, storage, transport: { fetchRows }, itemDetails: { storage: propertyStorage },
+  const api = mount({ schema, storage, transport, itemDetails: { storage: propertyStorage },
     syncUrl: true, debounceMs: 0, links: { cache: memoryQuerySnapshotCache() } });
   await settle();
   expect(api().itemDetails!.properties.loading).toBe(false);
@@ -256,7 +257,7 @@ it.each([false, true])("waits for remote query restoration before syncing stored
   expect(api().error).toBeNull();
   expect(api().rows).toEqual(rows);
   expect(fetchRows).toHaveBeenCalledOnce();
-  expect(fetchRows.mock.calls[0]![0].limit).toBe(25);
+  expect(fetchRows.mock.calls[0]![0].result.limit).toBe(25);
   expect(snapshots.save).not.toHaveBeenCalled();
   if (embedded) {
     expect(api().query).toEqual(linkedQuery);
@@ -339,9 +340,9 @@ it("keeps a failed remote link blocked after stored detail views hydrate", async
   let fail!: (error: Error) => void;
   const code = "d".repeat(22);
   const snapshots: QuerySnapshotStore = { resolve: () => new Promise((_resolve, reject) => { fail = reject; }), save: async (_key, value) => value };
-  const fetchRows = vi.fn(async () => ({ rows, total: 1 }));
+  const transport = memoryV3Transport(rows, schema); const fetchRows = transport.fetchQueryV3;
   window.history.replaceState(null, "", `/runs?q=@${code}`);
-  const api = mount({ schema, transport: { fetchRows }, storage: { ...memoryStorageAdapter(), snapshots },
+  const api = mount({ schema, transport, storage: { ...memoryStorageAdapter(), snapshots },
     itemDetails: { storage: propertyStorage }, syncUrl: true, debounceMs: 0, links: { cache: memoryQuerySnapshotCache() } });
   await settle();
   await act(async () => fail(Error("offline")));
@@ -354,8 +355,8 @@ it("keeps a failed remote link blocked after stored detail views hydrate", async
 
 it("expired local references fail visibly without executing defaults", async () => {
   window.history.replaceState(null,"","/runs?q=@"+"a".repeat(22));
-  const fetchRows = vi.fn(async()=>({rows,total:1}));
-  const api = mount({schema,transport:{fetchRows},syncUrl:true,debounceMs:0,links:{cache:memoryQuerySnapshotCache()}});
+  const transport = memoryV3Transport(rows, schema); const fetchRows = transport.fetchQueryV3;
+  const api = mount({schema,transport,syncUrl:true,debounceMs:0,links:{cache:memoryQuerySnapshotCache()}});
   await settle();
   expect(api().error?.message).toContain("unavailable"); expect(fetchRows).not.toHaveBeenCalled();
   expect(api().rows).toEqual([]);
@@ -401,9 +402,9 @@ it("ignores hash/router history entries after its own inline and durable URL wri
   const cache = memoryQuerySnapshotCache();
   const get = vi.spyOn(cache,"get");
   const loadDefaultSaved = vi.fn(async()=>null);
-  const fetchRows = vi.fn(async()=>({rows,total:1}));
+  const transport = memoryV3Transport(rows, schema); const fetchRows = transport.fetchQueryV3;
   const storage = {...memoryStorageAdapter(),loadDefaultSaved,snapshots};
-  const api = mount({schema,storage,transport:{fetchRows},syncUrl:true,links:{cache},debounceMs:0});
+  const api = mount({schema,storage,transport,syncUrl:true,links:{cache},debounceMs:0});
   await settle(); act(()=>api().setQuery({...EMPTY_QUERY,limit:25})); await settle();
   for (const durable of [false,true]) {
     if (durable) await act(async()=>{await api().links.create();});
@@ -421,8 +422,8 @@ it("ignores hash/router history entries after its own inline and durable URL wri
 });
 
 it("keeps a parameter-less view and undo history on unrelated navigation", async () => {
-  const fetchRows = vi.fn(async()=>({rows,total:1}));
-  const api = mount({schema,initialQuery:EMPTY_QUERY,transport:{fetchRows},syncUrl:true,links:{maxUrlBytes:10},debounceMs:0});
+  const transport = memoryV3Transport(rows, schema); const fetchRows = transport.fetchQueryV3;
+  const api = mount({schema,initialQuery:EMPTY_QUERY,transport,syncUrl:true,links:{maxUrlBytes:10},debounceMs:0});
   act(()=>api().setQuery({...EMPTY_QUERY,limit:25}));await settle();
   expect(new URL(window.location.href).searchParams.has("q")).toBe(false);
   const displayed = api().rows;fetchRows.mockClear();
@@ -449,8 +450,8 @@ it("restores once with an inline storage adapter and keeps subsequent edits", as
 
 it.each(["loadLast", "loadDefaultSaved"] as const)("executes defaults when optional %s rejects", async method => {
   const storage = { ...memoryStorageAdapter(), [method]: vi.fn(async () => { throw Error("offline"); }) };
-  const fetchRows = vi.fn(async () => ({ rows, total: 1 }));
-  const api = mount({ schema, storage, transport: { fetchRows }, syncUrl: true, debounceMs: 0 });
+  const transport = memoryV3Transport(rows, schema); const fetchRows = transport.fetchQueryV3;
+  const api = mount({ schema, storage, transport, syncUrl: true, debounceMs: 0 });
   await settle();
   expect(api().error).toBeNull();
   expect(api().rows).toEqual(rows);
@@ -486,8 +487,8 @@ it("restores stored defaults with an empty query URL parameter", async () => {
 
 it("blocks execution for duplicate empty query parameters", async () => {
   window.history.replaceState(null, "", "/runs?q=&q=");
-  const fetchRows = vi.fn(async () => ({ rows, total: 1 }));
-  const api = mount({ schema, transport: { fetchRows }, syncUrl: true, debounceMs: 0 });
+  const transport = memoryV3Transport(rows, schema); const fetchRows = transport.fetchQueryV3;
+  const api = mount({ schema, transport, syncUrl: true, debounceMs: 0 });
   await settle();
   expect(api().error?.message).toContain("conflicting");
   expect(fetchRows).not.toHaveBeenCalled();

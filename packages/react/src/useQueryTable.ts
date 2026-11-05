@@ -1,7 +1,7 @@
 import { useQueryFilters } from "./useQueryFilters";
 import { useGroupingController, type GroupingApi, type GroupingSourceApi } from "./useGrouping";
-import { createGroupingModel, prepareGrouping, withoutGrouping,
-  sourceExecutionSchema, toQueryRequestV3, validateQueryResultV3, metricPopulationError } from "@pythia-software/query-table-core";
+import { createGroupingModel, prepareGrouping, withoutGrouping, sourceExecutionSchema, toQueryRequestV3, validateQueryResultV3,
+  fetchDistinctValuesV3, fetchFieldStatsV3, fetchRowV3, isPushdownFilter, type AuxiliaryRequestOptions } from "@pythia-software/query-table-core";
 import { ITEM_DETAILS_COLUMN, itemPageFields } from "@pythia-software/query-table-core";
 import { useItemDetails, initialDetailModes, type ItemDetailsApi, type ItemDetailsOptions } from "./useItemDetails";
 // useQueryTable — the one hook that owns everything.
@@ -12,10 +12,6 @@ import { useItemDetails, initialDetailModes, type ItemDetailsApi, type ItemDetai
 // never hand-edits QueryState. @pythia-software/query-table-ui is a thin layer over this; you
 // can also build an entirely custom table on it.
 
-import {
-  executionRevision,
-  validateComputedResponse,
-} from "./computedExecution";
 import {
   useComputedColumns,
   type ComputedColumnsApi,
@@ -47,7 +43,6 @@ import {
   metricDependencies,
   isComputedField,
   computedFieldName,
-  toServerQueryV2,
   groupKeyField,
   groupKeyFields,
 } from "@pythia-software/query-table-core";
@@ -77,6 +72,8 @@ import {
   type RequestActivityApi,
 } from "./useRequestActivity";
 import { useAggregations } from "./useAggregations";
+import { executionRevision } from "./computedExecution";
+import { executeV3Metrics as runV3Metrics } from "./metricExecution";
 import { useSelection, type SelectionApi } from "./useSelection";
 import { useSelect, type SelectApi } from "./useSelect";
 import { useColumnDrag, type ColumnDragApi } from "./useColumnDrag";
@@ -144,6 +141,11 @@ export interface UseQueryTableOptions<Row> {
   links?: QueryLinkOptions;
   /** Enable schema-driven click popovers, item modals and row expansion. */
   itemDetails?: boolean | ItemDetailsOptions<Row>;
+  /** Ask the transport for field statistics (distinct count, min, max) when
+   * the column picker or a metric filter editor opens. Each request reduces
+   * the whole dataset, so it is off by default; complete clientRows always
+   * provide them. */
+  remoteFieldStats?: boolean;
   /** Debounce (ms) between a query change and the fetch it triggers. Default 200. */
   debounceMs?: number;
   /** Injected clock for deterministic saved-query timestamps. Default Date.now. */
@@ -303,8 +305,9 @@ export interface QueryTableApi<Row> {
   error: Error | null;
   refresh: () => void;
   autoRefresh: AutoRefreshApi;
-  /** Refresh one legacy row, or schedule a full V2 page refresh so computed
-   * values and page membership remain coherent. Track V2 completion via loading/error. */
+  /** Refresh one row in place through a v3 identity lookup. A grouped page or
+   * one with computed columns or sorts refreshes as a whole instead, so computed
+   * values and page membership remain coherent; track that through loading/error. */
   refreshRow: (id: RowId) => Promise<void>;
 
   // aggregation metrics (the dashboard panel above the table)
@@ -340,10 +343,12 @@ export interface QueryTableApi<Row> {
   mergeFilters: (sourceIndex: number, targetIndex: number) => void;
   /** Reset the complete query state back to schema defaults. */
   resetAll: () => void;
-  /** Keystroke-driven filter-value autocomplete (Transport.fetchDistinctValues). */
+  /** Keystroke-driven filter-value autocomplete (a v3 `distinct` request, or
+   * the complete clientRows). Aborting the signal cancels the request. */
   filterValues: (
     field: string,
     search: string,
+    signal?: AbortSignal,
   ) => Promise<DistinctValuesResult>;
   /** Dataset-wide field statistics for catalogue and picker affordances. */
   fieldStats: (
@@ -538,7 +543,6 @@ function writeHostParameters(url: string, host: HostQueryOptions, state: HostQue
     for (const value of state?.params[name] ?? []) next.searchParams.append(name, value);
   return next.toString();
 }
-const HOST_REQUEST_METHODS = new Set(["fetchRows", "fetchRowsV2", "fetchQueryV3", "fetchMetrics", "fetchAggregations", "fetchDistinctValues"]);
 /** Requests carry the host state of the query they execute. The wrapper is
  * rebuilt with every host state, alongside the query, so a request never
  * pairs one definition's table query with another's host state. */
@@ -549,7 +553,7 @@ function withHostTransport<T extends object>(transport: T | undefined, hostState
   return new Proxy(Object.create(transport) as T, {
     get(_target, key) {
       const method = Reflect.get(transport, key, transport) as unknown;
-      if (!HOST_REQUEST_METHODS.has(String(key)) || typeof method !== "function") return method;
+      if (key !== "fetchQueryV3" || typeof method !== "function") return method;
       if (!wrappers.has(key))
         wrappers.set(key, (request: object, signal?: AbortSignal) =>
           (method as (request: object, signal?: AbortSignal) => unknown).call(transport, { ...request, hostState }, signal));
@@ -663,7 +667,7 @@ export function useQueryTable<Row>(
   const sourceCatalogue = useMemo(() => sourceExecutionSchema(sourceSchema, opts.computedExecution), [sourceSchema, opts.computedExecution]);
   const sourceRows = providedRows;
   const groupingModel = useMemo(() => createGroupingModel(sourceCatalogue), [sourceCatalogue]);
-  const remoteGrouping = !!transport?.fetchQueryV3 && transport.queryCapabilities?.version === 3 && transport.queryCapabilities.groupedRows;
+  const remoteGrouping = !!transport && transport.queryCapabilities.version === 3 && transport.queryCapabilities.groupedRows;
   const groupingSupported = ((!transport && sourceRows !== undefined) || remoteGrouping) && opts.grouping !== false;
   const groupKey = JSON.stringify(query.grouping ?? null);
   // Capture the grouped evaluation clock with its population. Debounced rows,
@@ -936,7 +940,6 @@ export function useQueryTable<Row>(
   // Fetch (debounced + abortable). Transport mode, or client-side applyQuery.
   const queryKey = useMemo(() => JSON.stringify(query), [query]);
   const serverRowQuery = useMemo(() => {
-    const execution = opts.computedExecution;
     const detailConfig = typeof opts.itemDetails === "object" ? opts.itemDetails : undefined;
     const page = query.itemDetails?.page ?? detailConfig?.page;
     const pageEnabled = Boolean(opts.itemDetails) && (query.itemDetails?.modes ?? initialDetailModes(detailConfig)).includes("page")
@@ -946,29 +949,7 @@ export function useQueryTable<Row>(
     // transport for those dependencies through its usual SELECT planning.
     const requestQuery = pageFields.length ? { ...executionQuery, select: [...(query.select.length ? query.select : defaults.select),
       ...pageFields.filter(name => displaySchema.fields.some(field => field.name === name)).map(field => ({ field }))] } : executionQuery;
-    const v2Request =
-      execution && transport?.fetchRowsV2
-        ? toServerQueryV2(requestQuery, displaySchema, execution)
-        : undefined;
-    const request = v2Request ?? toServerQuery(requestQuery, displaySchema);
-    if (v2Request)
-      for (const definition of computed.definitions) {
-        if (
-          (execution?.fields[computedFieldName(definition.id)]?.select ||
-            v2Request.orderBy.some(
-              (term) => term.field === computedFieldName(definition.id),
-            )) &&
-          executionRevision(execution, definition.id) !== undefined &&
-          executionRevision(execution, definition.id) !== definition.revision
-        )
-          v2Request.diagnostics.push({
-            from: 0,
-            to: 1,
-            code: "definition_changed",
-            message:
-              "Computed definitions changed. Refresh the server execution handshake.",
-          });
-      }
+    const request = toServerQuery(requestQuery, displaySchema);
     // A shown-row metric may refer to columns outside the visible projection.
     for (const clause of query.aggregations ?? [])
       if (clause.scope === "shownRows") {
@@ -995,26 +976,28 @@ export function useQueryTable<Row>(
   }, [
     queryKey,
     displaySchema,
-    transport,
-    computedRevisions,
     schema,
     resolveComputed,
-    opts.computedExecution,
     opts.itemDetails,
     defaults,
   ]);
+  // Revisions of definitions the server also executes: a local edit to one
+  // invalidates its server values.
+  const serverDefinitionKey = JSON.stringify(computed.definitions.flatMap(definition =>
+    executionRevision(opts.computedExecution, definition.id) !== undefined ? [[definition.id, definition.revision]] : []));
   // Keep presentation-only query changes out of the expensive row pipeline.
   // Widths do not leave the client at all, and SELECT does not affect client-side
   // filtering/sorting/paging. The full queryKey still drives URL + persistence.
   const rowQueryKey = useMemo(
     () =>
       transport
-        ? `server:${JSON.stringify(serverRowQuery)}:${transport.fetchQueryV3 ? JSON.stringify([groupKey, groupingNow,
-          query.select.map(column => column.field), query.where, query.orderBy, query.limit, query.offset]) : ""}`
+        ? `server:${JSON.stringify(serverRowQuery)}:${serverDefinitionKey}:${JSON.stringify([groupKey, groupingNow,
+          query.select.map(column => column.field), query.where, query.orderBy, query.limit, query.offset])}`
         : `client:${JSON.stringify([query.where, query.orderBy, query.limit, query.offset])}`,
     [
       transport,
       serverRowQuery,
+      serverDefinitionKey,
       groupKey,
       groupingNow,
       query.select,
@@ -1042,71 +1025,27 @@ export function useQueryTable<Row>(
       try {
         validateExecution(query);
         if (transport) {
-          if (transport.fetchQueryV3 && transport.queryCapabilities?.version === 3 &&
-            (query.grouping || query.select.some(column => isComputedField(column.field)) || query.orderBy.some(term => isComputedField(term.field)) ||
-              query.where.some(term => predicatesOf(term).some(predicate => isComputedField(predicate.field))) ||
-              !transport.fetchRows && !(transport.fetchRowsV2 && opts.computedExecution))) {
-            const request = toQueryRequestV3({ ...query, aggregations: [], select: [...query.select.filter(column => isComputedField(column.field)),
-              ...serverRowQuery.select.map(field => ({ field }))] }, sourceSchema,
-              transport.queryCapabilities, opts.computedExecution, { now: groupingNow ?? (opts.evaluationNow ?? Date.now)() });
-            if (request.diagnostics.length) throw Error(request.diagnostics.join(" "));
-            const result = await transport.fetchQueryV3(request, ac.signal);
-            validateQueryResultV3(result, request, query.grouping ? schema : sourceCatalogue);
-            if (!cancelled) {
-              setCommittedFields(request.result.select); setServerExecution(result.execution);
-              setServerComputed(new Map(result.rows.map(row => [row[schema.idField] as RowId,
-                Object.fromEntries(Object.entries(row).filter(([name]) => isComputedField(name)).map(([name, value]) =>
-                  [name.slice(10), value && typeof value === "object" && "computedError" in value
-                    ? { value: null, error: { code: String(value.computedError) } } : { value: value as import("@pythia-software/query-table-core").MetricValue }]))])));
-              setRows(result.rows as Row[]); setTotal(result.total); setCommittedPage(pageContext);
-              setCommittedSource({ schema, transport, clientRows });
-            }
-            return;
+          const request = toQueryRequestV3({ ...query, aggregations: [], select: [...query.select.filter(column => isComputedField(column.field)),
+            ...serverRowQuery.select.map(field => ({ field }))] }, sourceSchema,
+            transport.queryCapabilities, opts.computedExecution, { now: groupingNow ?? (opts.evaluationNow ?? Date.now)() });
+          if (request.diagnostics.length) throw Error(request.diagnostics.join(" "));
+          // The server executes its own revision; never show values of a definition changed since the handshake.
+          const executed = new Set([...request.result.select, ...request.result.orderBy.map(term => term.field),
+            ...[...request.source.where, ...request.result.where].flatMap(term => predicatesOf(term).map(predicate => predicate.field))]);
+          for (const definition of computed.definitions) {
+            const revision = executionRevision(opts.computedExecution, definition.id);
+            if (executed.has(computedFieldName(definition.id)) && revision !== undefined && revision !== definition.revision)
+              throw Error("Computed definitions changed. Refresh the server execution handshake.");
           }
-          const useV2 = "version" in serverRowQuery && transport.fetchRowsV2;
-          if (!useV2 && !transport.fetchRows)
-            throw Error("Row execution requires fetchRows, negotiated fetchRowsV2, or negotiated fetchQueryV3.");
-          if (
-            "diagnostics" in serverRowQuery &&
-            Array.isArray(serverRowQuery.diagnostics) &&
-            serverRowQuery.diagnostics.length
-          )
-            throw Error(
-              serverRowQuery.diagnostics.map((d) => d.message).join(" "),
-            );
-          if (!useV2 && query.orderBy.some((s) => isComputedField(s.field)))
-            throw Error(
-              "Global computed sorting requires a server execution handshake and fetchRowsV2.",
-            );
-          const res = useV2
-            ? await transport.fetchRowsV2!(
-                serverRowQuery as ReturnType<typeof toServerQueryV2<Row>>,
-                ac.signal,
-              )
-            : await transport.fetchRows!(serverRowQuery, ac.signal);
-          if (useV2)
-            validateComputedResponse(
-              serverRowQuery as ReturnType<typeof toServerQueryV2<Row>>,
-              res as import("@pythia-software/query-table-core").FetchRowsResultV2<Row>,
-              schema,
-            );
+          const result = await transport.fetchQueryV3(request, ac.signal);
+          validateQueryResultV3(result, request, query.grouping ? schema : sourceCatalogue);
           if (!cancelled) {
-            setCommittedFields(serverRowQuery.select);
-            setServerExecution(
-              useV2
-                ? (
-                    res as import("@pythia-software/query-table-core").FetchRowsResultV2<Row>
-                  ).execution
-                : undefined,
-            );
-            if ("computed" in res && Array.isArray(res.computed))
-              setServerComputed(
-                new Map(res.computed.map((c) => [c.id, c.values])),
-              );
-            else setServerComputed(new Map());
-            setRows(res.rows);
-            setTotal(res.total);
-            setCommittedPage(pageContext);
+            setCommittedFields(request.result.select); setServerExecution(result.execution);
+            setServerComputed(new Map(result.rows.map(row => [row[schema.idField] as RowId,
+              Object.fromEntries(Object.entries(row).filter(([name]) => isComputedField(name)).map(([name, value]) =>
+                [name.slice(10), value && typeof value === "object" && "computedError" in value
+                  ? { value: null, error: { code: String(value.computedError) } } : { value: value as import("@pythia-software/query-table-core").MetricValue }]))])));
+            setRows(result.rows as Row[]); setTotal(result.total); setCommittedPage(pageContext);
             setCommittedSource({ schema, transport, clientRows });
           }
         } else {
@@ -1243,37 +1182,13 @@ export function useQueryTable<Row>(
   const metricSourceCatalogue = useMemo(() => sourceExecutionSchema(sourceSchema, v3MetricExecution),
     [sourceSchema, v3MetricExecution]);
   const executeV3Metrics = useCallback(async (metricQuery: QueryState, signal?: AbortSignal) => {
-    if (!metricTransport?.fetchQueryV3 || metricTransport.queryCapabilities?.version !== 3) throw Error("The v3 query executor is unavailable.");
-    const capabilities = metricTransport.queryCapabilities;
-    // Unsupported population controls fail their own cards, never the batch.
-    const refused = new Map<string, string>();
-    for (const clause of metricQuery.aggregations ?? []) {
-      const issue = metricPopulationError(clause, { filters: capabilities.metricFilters, minCount: capabilities.metricMinCount, minCountMeasures: capabilities.metricMinCountMeasures });
-      if (issue) refused.set(clause.id, issue);
-    }
-    const runnable = (metricQuery.aggregations ?? []).filter(clause => !refused.has(clause.id));
-    let metrics: AggregationResult["metrics"] = [];
-    if (runnable.length) {
-      const scoped = { ...metricQuery, aggregations: runnable };
-      const request = toQueryRequestV3(query.grouping ? { ...scoped, grouping: query.grouping } : scoped,
-        sourceSchema, capabilities, v3MetricExecution, { now: groupingNow ?? (opts.evaluationNow ?? Date.now)(), rows: false });
-      if (request.diagnostics.length) throw Error(request.diagnostics.join(" "));
-      const result = await metricTransport.fetchQueryV3(request, signal);
-      validateQueryResultV3(result, request, query.grouping ? schema : metricSourceCatalogue);
-      metrics = result.metrics;
-    }
-    if (!refused.size) return { metrics };
-    const byId = new Map(metrics.map(metric => [metric.id, metric]));
-    return { metrics: (metricQuery.aggregations ?? []).flatMap((clause): AggregationResult["metrics"] => {
-      const issue = refused.get(clause.id);
-      if (issue) return [{ id: clause.id, buckets: [], error: issue }];
-      const metric = byId.get(clause.id);
-      return metric ? [metric] : [];
-    }) };
+    if (!metricTransport) throw Error("The v3 query executor is unavailable.");
+    return runV3Metrics(metricTransport, query.grouping ? { ...metricQuery, grouping: query.grouping } : metricQuery,
+      sourceSchema, query.grouping ? schema : metricSourceCatalogue, v3MetricExecution, groupingNow ?? (opts.evaluationNow ?? Date.now)(), signal);
   }, [metricTransport, sourceSchema, metricSourceCatalogue, schema, v3MetricExecution, groupKey, groupingNow, opts.evaluationNow]);
   const previewGrouping = useCallback(async (draft: QueryState, signal?: AbortSignal) => {
     if (!active || !storageReady || restoration.loading || restoration.error) throw Error("Wait for query restoration before previewing groups.");
-    if (!transport?.fetchQueryV3 || !transport.queryCapabilities?.groupedRows || !draft.grouping) throw Error("The server group preview is unavailable.");
+    if (!transport?.queryCapabilities.groupedRows || !draft.grouping) throw Error("The server group preview is unavailable.");
     const request = toQueryRequestV3({ ...draft, aggregations: [] }, sourceSchema, transport.queryCapabilities,
       opts.computedExecution, { now: groupingNow ?? (opts.evaluationNow ?? Date.now)() });
     if (request.diagnostics.length) throw Error(request.diagnostics.join(" "));
@@ -1290,10 +1205,7 @@ export function useQueryTable<Row>(
     nonce,
     validateExecution,
     {
-      ...(metricTransport?.fetchQueryV3 && metricTransport.queryCapabilities?.version === 3 &&
-        (query.grouping || query.aggregations?.some(metric => metric.dateGrouping) ||
-          query.where.some(term => predicatesOf(term).some(predicate => isComputedField(predicate.field))))
-        ? { executeV3: executeV3Metrics, queryContextKey: groupKey } : {}),
+      ...(metricTransport ? { executeV3: executeV3Metrics, queryContextKey: groupKey } : {}),
       ...(groupingNow !== undefined ? { now: groupingNow, strictLocalMetrics: true } : {}),
       shownRows: rows,
       rowsReady: metricRowsReady,
@@ -1460,10 +1372,29 @@ export function useQueryTable<Row>(
     [setQuery],
   );
 
+  // Filter suggestions, field statistics and row lookups are v3 requests in
+  // the table's negotiated execution context.
+  // Read at request time, so inline host options never change the identity
+  // of the lookup and suggestion callbacks (which would restart their effects).
+  const auxiliaryRef = useRef({ evaluationNow: opts.evaluationNow, execution: opts.computedExecution });
+  auxiliaryRef.current = { evaluationNow: opts.evaluationNow, execution: opts.computedExecution };
+  const auxiliaryOptions = useCallback((): AuxiliaryRequestOptions => {
+    const { evaluationNow, execution } = auxiliaryRef.current;
+    return { now: (evaluationNow ?? Date.now)(), ...(execution ? { execution } : {}) };
+  }, []);
+  const remoteDistinct = useCallback(async (field: string, search: string, signal?: AbortSignal): Promise<DistinctValuesResult> => {
+    const definition = sourceCatalogue.fields.find(f => f.name === field);
+    if (!metadataTransport || !definition || !isPushdownFilter(definition)) return { values: [], hasMore: false };
+    return fetchDistinctValuesV3(metadataTransport, sourceCatalogue, field, search.slice(0, 2000), { ...auxiliaryOptions(), limit: AUTOCOMPLETE_LIMIT }, signal);
+  }, [metadataTransport, sourceCatalogue, auxiliaryOptions]);
+  const remoteFieldStats = useCallback(async (fields: string[], signal?: AbortSignal): Promise<Record<string, FieldStats>> =>
+    metadataTransport && opts.remoteFieldStats ? fetchFieldStatsV3(metadataTransport, sourceCatalogue, fields, auxiliaryOptions(), signal) : {},
+  [metadataTransport, sourceCatalogue, auxiliaryOptions, opts.remoteFieldStats]);
+
   const filterValues = useCallback(
-    async (field: string, search: string): Promise<DistinctValuesResult> => {
+    async (field: string, search: string, signal?: AbortSignal): Promise<DistinctValuesResult> => {
       // A calendar key's values are interval starts, not source values.
-      if (!metadataTransport?.fetchDistinctValues || query.grouping && !query.grouping.keys.includes(field)) {
+      if (!metadataTransport || query.grouping && !query.grouping.keys.includes(field)) {
         const f = byName.get(field);
         if (!f || !clientRows) return { values: [], hasMore: false };
 
@@ -1476,25 +1407,20 @@ export function useQueryTable<Row>(
           hasNull: fieldHasNull,
         };
       }
-      return metadataTransport.fetchDistinctValues({ field, search });
+      return remoteDistinct(field, search, signal);
     },
-    [metadataTransport, byName, clientRows, groupKey],
+    [metadataTransport, remoteDistinct, byName, clientRows, groupKey],
   );
 
   const fieldStats = useCallback<QueryTableApi<Row>["fieldStats"]>(
     async (fields, signal) => {
       const requested = [...new Set(fields)];
-      if (metadataTransport?.fetchFieldStats && !query.grouping) {
-        const backendFields = requested.filter(
-          (name) => byName.get(name)?.source.kind === "backend",
-        );
-        return backendFields.length
-          ? metadataTransport.fetchFieldStats(backendFields, signal)
-          : {};
-      }
+      if (metadataTransport && !query.grouping)
+        return remoteFieldStats(requested.filter((name) => byName.get(name)?.source.kind === "backend"), signal);
       if (!clientRows) return {};
 
-      const result: Record<string, FieldStats> = {};
+      // Field names are data: entries keep one such as __proto__ an own key.
+      const result: [string, FieldStats][] = [];
       for (const name of requested) {
         if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
         const field = byName.get(name);
@@ -1504,12 +1430,22 @@ export function useQueryTable<Row>(
           const value = readFieldValue(field, row);
           if (value !== null) distinct.add(JSON.stringify(value));
         }
-        result[name] = { distinct: distinct.size };
+        result.push([name, { distinct: distinct.size }]);
       }
-      return result;
+      return Object.fromEntries(result);
     },
-    [metadataTransport, byName, clientRows, groupKey],
+    [metadataTransport, remoteFieldStats, byName, clientRows, groupKey],
   );
+  // A lookup filters the identity with "=": the server refuses it when the
+  // field's filtering is off or "=" is not among its operators. An identity
+  // the catalogue does not declare is left to the server.
+  const identityLookup = useMemo(() => {
+    const identity = sourceCatalogue.fields.find(field => field.name === sourceCatalogue.idField);
+    return !identity || isPushdownFilter(identity) && opsForField(identity).includes("=");
+  }, [sourceCatalogue]);
+  const fetchRow = useCallback(async (id: RowId, signal?: AbortSignal, select?: string[]) =>
+    fetchRowV3<Row>(metadataTransport!, sourceCatalogue, id, { ...auxiliaryOptions(), ...(select?.length ? { select } : {}) }, signal),
+  [metadataTransport, sourceCatalogue, auxiliaryOptions]);
 
   // Single refresh seam: re-runs the internal query (setNonce) and fires the
   // consumer's onRefresh, if any. Both the manual `api.refresh()` and every
@@ -1592,20 +1528,20 @@ export function useQueryTable<Row>(
 
   const refreshRow = useCallback(
     async (id: RowId) => {
-      if (opts.computedExecution && transport?.fetchRowsV2) {
-        // Base rows and computed sidecars belong to one committed page. A
-        // single-row fetch cannot replace either independently, and changes
-        // to a computed sort may also change page membership.
+      if (!transport) return;
+      if (!identityLookup || query.grouping || committedFields.some(isComputedField) || query.orderBy.some((term) => isComputedField(term.field))) {
+        // Grouped rows and computed values belong to one committed page, and a
+        // computed sort may also change page membership. Without an identity
+        // lookup the page is the only way to read the row again.
         refresh();
         return;
       }
-      if (!transport?.fetchRow) return;
-      const updated = await transport.fetchRow(id);
+      const updated = await fetchRow(id, undefined, committedFields);
       setRows((prev) =>
         prev.map((r) => (rowId(r) === id ? (updated ?? r) : r)),
       );
     },
-    [transport, rowId, opts.computedExecution, refresh],
+    [transport, fetchRow, rowId, groupKey, committedFields, query.orderBy, refresh, identityLookup],
   );
 
   const visibleFields = useMemo(
@@ -1702,11 +1638,23 @@ export function useQueryTable<Row>(
     return typeof value === "string" || (typeof value === "number" && Number.isFinite(value)) ? value : null;
   }, [sourceSchema]);
 
+  // An item lookup reads the detail catalogue's properties too, including
+  // backend fields defined only in itemDetails.schema.
+  const detailCatalogue = typeof opts.itemDetails === "object" ? opts.itemDetails.schema : undefined;
+  const lookupCatalogue = useMemo(() => !detailCatalogue ? sourceCatalogue : { ...sourceCatalogue,
+    fields: [...sourceCatalogue.fields, ...detailCatalogue.fields.filter(field => !sourceCatalogue.fields.some(f => f.name === field.name))] },
+  [sourceCatalogue, detailCatalogue]);
+  const lookupCatalogueRef = useRef(lookupCatalogue);
+  lookupCatalogueRef.current = lookupCatalogue;
+  const fetchItem = useCallback(async (id: RowId, signal?: AbortSignal) =>
+    fetchRowV3<Row>(metadataTransport!, lookupCatalogueRef.current, id, auxiliaryOptions(), signal),
+  [metadataTransport, auxiliaryOptions]);
   const itemDetails = useItemDetails({
     schema: query.grouping ? sourceSchema : displaySchema,
     query: sourceQuery, setQuery: setSourceQuery, options: opts.itemDetails,
     rows: query.grouping ? sourceRows ?? [] : rows, clientRows: sourceRows,
-    rowId: sourceRowId, transport: metadataTransport, refreshKey: nonce, links, queryParameter: parameter,
+    // Without an identity lookup, item details read the rows on the page.
+    rowId: sourceRowId, fetchRow: metadataTransport && identityLookup ? fetchItem : undefined, refreshKey: nonce, links, queryParameter: parameter,
     queryReady: storageReady && !restoration.loading && !restoration.error,
   });
 
@@ -1745,7 +1693,7 @@ export function useQueryTable<Row>(
     current.grouping ? typeof next === "function" ? next(current) : next : current), [setQuery]);
   const groupDetails = useItemDetails({
     schema: groupDetailSchema, query, setQuery: setGroupQuery, options: groupDetailOptions, rows, clientRows: undefined,
-    rowId, transport: undefined, refreshKey: nonce, links, queryParameter: parameter,
+    rowId, fetchRow: undefined, refreshKey: nonce, links, queryParameter: parameter,
     queryReady: storageReady && !restoration.loading && !restoration.error,
     lookupRow: (id) => {
       const row = groupRecords.current.rows.get(id);
@@ -1817,25 +1765,20 @@ export function useQueryTable<Row>(
   };
   // Source filter controls key their metadata reads by these identities, so
   // they must not change on every render of a grouped view.
-  const sourceFilterValues = useCallback<GroupingSourceApi<Row>["filterValues"]>(async (name, search) => {
-    if (metadataTransport?.fetchDistinctValues) return metadataTransport.fetchDistinctValues({ field: name, search });
+  const sourceFilterValues = useCallback<GroupingSourceApi<Row>["filterValues"]>(async (name, search, signal) => {
+    if (metadataTransport) return remoteDistinct(name, search, signal);
     const field = groupingModel.sourceField(name);
     return field && sourceRows ? { ...distinctValuesFromRows(field, sourceRows, search), hasNull: fieldHasNullInRows(field, sourceRows) } : { values: [], hasMore: false };
-  }, [metadataTransport, groupingModel, sourceRows]);
+  }, [metadataTransport, remoteDistinct, groupingModel, sourceRows]);
   const sourceFieldStats = useCallback<GroupingSourceApi<Row>["fieldStats"]>(async (names, signal) => {
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     const requested = [...new Set(names)];
-    if (metadataTransport?.fetchFieldStats) {
-      const backendFields = requested.filter(
-        name => sourceCatalogue.fields.find(field => field.name === name)?.source.kind === "backend",
-      );
-      return backendFields.length ? metadataTransport.fetchFieldStats(backendFields, signal) : {};
-    }
+    if (metadataTransport) return remoteFieldStats(requested, signal);
     return Object.fromEntries(requested.flatMap(name => {
       const field = groupingModel.sourceField(name);
       return field && sourceRows ? [[name, { distinct: new Set(sourceRows.map(row => JSON.stringify(readFieldValue(field, row)))).size }]] : [];
     }));
-  }, [metadataTransport, groupingModel, sourceRows, sourceCatalogue]);
+  }, [metadataTransport, remoteFieldStats, groupingModel, sourceRows]);
   const sourceApi: GroupingSourceApi<Row> = {
     ...sourceFilters, loading, rowId: sourceRowId, query: sourceQuery, setQuery: setSourceQuery,
     ...(itemDetails ? { itemDetails } : {}),

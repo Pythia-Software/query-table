@@ -21,16 +21,12 @@ type sqliteReductionCache struct {
 	fusions map[string]*sqliteReductionFusion
 	cross   map[string]*sqliteCrossFieldReduction
 	tables  map[string]string
-	proofs  *sqliteSourceProofScope // nil without a host generation
-	// population, when set, receives the matching population counted by the
-	// first fused integer reduction over it (-1 until then).
-	population *int64
 }
 
 var sqliteReductionSequence atomic.Uint64
 
-func sqliteReductionKey(p MetricSQLPlan) string { return sqliteStageKey(p, p.SQLiteReductionStage) }
-func sqliteStageKey(p MetricSQLPlan, i int) string {
+func sqliteReductionKey(p metricSQLPlan) string { return sqliteStageKey(p, p.SQLiteReductionStage) }
+func sqliteStageKey(p metricSQLPlan, i int) string {
 	if i <= 0 || i >= len(p.Stages) {
 		return ""
 	}
@@ -103,14 +99,14 @@ type sqliteReductionFusion struct {
 	reductions  map[string]bool
 }
 
-func sqliteFusionKey(p MetricSQLPlan) string {
+func sqliteFusionKey(p metricSQLPlan) string {
 	rowKey := sqliteStageKey(p, p.SQLiteReductionStage-1)
 	if rowKey == "" || len(p.SQLiteReductionColumns) == 0 {
 		return ""
 	}
 	return rowKey + "\x00" + p.SQLiteReductionFrom
 }
-func newSQLiteReductionCache(batch MetricBatchPlan) *sqliteReductionCache {
+func newSQLiteReductionCache(batch metricBatchPlan) *sqliteReductionCache {
 	c := &sqliteReductionCache{shared: map[string]bool{}, fusions: map[string]*sqliteReductionFusion{}, cross: map[string]*sqliteCrossFieldReduction{}, tables: map[string]string{}}
 	first := map[string]string{}
 	for _, p := range batch.Metrics {
@@ -142,7 +138,7 @@ func newSQLiteReductionCache(batch MetricBatchPlan) *sqliteReductionCache {
 	}
 	return c
 }
-func (c *sqliteReductionCache) plan(ctx context.Context, tx *sql.Tx, p MetricSQLPlan) (MetricSQLPlan, error) {
+func (c *sqliteReductionCache) plan(ctx context.Context, tx *sql.Tx, p metricSQLPlan) (metricSQLPlan, error) {
 	key := sqliteReductionKey(p)
 	if key == "" {
 		return p, nil
@@ -185,7 +181,7 @@ func (c *sqliteReductionCache) plan(ctx context.Context, tx *sql.Tx, p MetricSQL
 	}
 	return p, nil
 }
-func (c *sqliteReductionCache) reuseStage(ctx context.Context, tx *sql.Tx, p MetricSQLPlan, i int, key string) (MetricSQLPlan, error) {
+func (c *sqliteReductionCache) reuseStage(ctx context.Context, tx *sql.Tx, p metricSQLPlan, i int, key string) (metricSQLPlan, error) {
 	table, ok := c.tables[key]
 	if !ok {
 		table = fmt.Sprintf("_qt_reduction_%d", sqliteReductionSequence.Add(1))
@@ -197,7 +193,7 @@ func (c *sqliteReductionCache) reuseStage(ctx context.Context, tx *sql.Tx, p Met
 	}
 	return sqliteReplaceStage(p, i, "SELECT * FROM "+table)
 }
-func sqliteReplaceStage(p MetricSQLPlan, i int, statement string) (MetricSQLPlan, error) {
+func sqliteReplaceStage(p metricSQLPlan, i int, statement string) (metricSQLPlan, error) {
 	prefix := sqlStageCTEs(p.Stages) + "\n"
 	if !strings.HasPrefix(p.SQL, prefix) {
 		return p, fmt.Errorf("invalid compiler stage envelope")

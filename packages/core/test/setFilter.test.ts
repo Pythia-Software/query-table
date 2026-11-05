@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyQuery, createSetFilter, decodeQuery, EMPTY_QUERY, encodeQuery, mapSetFilterValues, memoryStorageAdapter, normalizeQueryState, readSetFilter, setFilterTarget, stripSetFilter, toAggregationQuery, toServerQuery, type FieldDef, type FieldSchema, type SetFilterMode } from "../src/index";
+import { applyQuery, createSetFilter, decodeQuery, EMPTY_QUERY, encodeQuery, mapSetFilterValues, memoryStorageAdapter, normalizeQueryState, readSetFilter, setFilterTarget, stripSetFilter, toQueryRequestV3, toServerQuery, type FieldDef, type FieldSchema, type SetFilterMode } from "../src/index";
 
 const schema: FieldSchema<{ tags: string[] | null }> = {
   name: "tags", idField: "tags", fields: [{ name: "tags", label: "Tags", type: "textarray", source: { kind: "backend" }, filter: { editor: "set", arrayCaseSensitive: true } }],
@@ -14,7 +14,8 @@ describe("explicit set filters", () => {
     const server = toServerQuery(query, schema);
     expect(server.where).toEqual(where.map(stripSetFilter));
     expect(JSON.stringify(server)).not.toContain("setFilter");
-    expect(toAggregationQuery(query, schema).where).toEqual(server.where);
+    expect(toQueryRequestV3(query, schema, { version: 3, profile: "p", groupedRows: false, calendarGrouping: false, computedSourceFilters: false,
+      regex: false, maxRows: 100, maxGroups: 100, maxPopulation: 100 }, undefined, { rows: false }).source.where).toEqual(server.where);
     expect(readSetFilter(decodeQuery(encodeQuery(query)).where, 0)).toEqual({ field: "tags", metadata: { id: "editor-1", mode, values: mode === "empty" ? [] : ["a", "b"] }, count: where.length, target: "array" });
   });
 

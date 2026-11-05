@@ -20,11 +20,11 @@ func TestMetricPopulationValidation(t *testing.T) {
 		"long field":        {ID: "m", Op: "count", Where: []WhereTerm{{Field: strings.Repeat("f", 257), Op: "=", Value: "a"}}},
 		"long value":        {ID: "m", Op: "count", Where: []WhereTerm{{Field: "g", Op: "=", Value: strings.Repeat("v", maxFilterValueBytes+1)}}},
 	} {
-		if err := (WireQuery{Aggregations: []AggSpec{spec}}).Validate(); err == nil {
+		if err := validateMetricSpecs([]AggSpec{spec}); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
 	}
-	if err := (WireQuery{Aggregations: []AggSpec{{ID: "m", Op: "count", GroupBy: []string{"g"}, MinCount: MetricMinCount{Min: MaxMetricMinCount}, Where: where[:MaxWhereClauses]}}}).Validate(); err != nil {
+	if err := validateMetricSpecs([]AggSpec{{ID: "m", Op: "count", GroupBy: []string{"g"}, MinCount: MetricMinCount{Min: MaxMetricMinCount}, Where: where[:MaxWhereClauses]}}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -32,7 +32,7 @@ func TestMetricPopulationValidation(t *testing.T) {
 func TestMetricPopulationRefusals(t *testing.T) {
 	compile := func(spec AggSpec) error {
 		spec.ID = "m"
-		_, err := CompileMetrics(context.Background(), MetricQuery{Version: 2, Limit: 1, Metrics: []AggSpec{spec}}, metricSchema(), metricOptions())
+		_, err := compileTestMetrics(context.Background(), metricRequest{Version: 2, Limit: 1, Metrics: []AggSpec{spec}}, metricSchema(), metricOptions())
 		return err
 	}
 	code := func(err error) string {
@@ -55,14 +55,8 @@ func TestMetricPopulationRefusals(t *testing.T) {
 	field := s.Fields["g"]
 	field.ServerFilter = false
 	s.Fields["g"] = field
-	if _, err := CompileMetrics(context.Background(), MetricQuery{Version: 2, Limit: 1, Metrics: []AggSpec{{ID: "m", Op: "count", Where: []WhereTerm{{Field: "g", Op: "=", Value: "a"}}}}}, s, metricOptions()); err == nil {
+	if _, err := compileTestMetrics(context.Background(), metricRequest{Version: 2, Limit: 1, Metrics: []AggSpec{{ID: "m", Op: "count", Where: []WhereTerm{{Field: "g", Op: "=", Value: "a"}}}}}, s, metricOptions()); err == nil {
 		t.Fatal("non-pushdown metric filter accepted")
-	}
-	// The legacy single-aggregate compiler never drops population controls.
-	for _, spec := range []AggSpec{{ID: "m", Op: "count", GroupBy: []string{"g"}, MinCount: MetricMinCount{Min: 2}}, {ID: "m", Op: "count", Where: []WhereTerm{{Field: "g", Op: "=", Value: "a"}}}} {
-		if _, err := CompileAggregation(spec, s); err == nil || !strings.Contains(err.Error(), "CompileMetrics") {
-			t.Fatalf("v1 accepted %#v: %v", spec, err)
-		}
 	}
 }
 
@@ -79,12 +73,8 @@ func TestMetricPopulationPlans(t *testing.T) {
 	if strings.Contains(plain.SQL, "hidden_groups") {
 		t.Fatal("plans without minCount keep their result shape")
 	}
-	sqlite, err := CompileSQLiteMetrics(context.Background(), MetricQuery{Version: 2, Limit: 1, Metrics: []AggSpec{{ID: "m", Op: "count", GroupBy: []string{"g"}, MinCount: MetricMinCount{Min: 2}}}}, metricSchema(), metricOptions())
+	sqlite, err := compileTestSQLiteMetrics(context.Background(), metricRequest{Version: 2, Limit: 1, Metrics: []AggSpec{{ID: "m", Op: "count", GroupBy: []string{"g"}, MinCount: MetricMinCount{Min: 2}}}}, metricSchema(), metricOptions())
 	if err != nil || !strings.Contains(sqlite.Metrics[0].SQL, "hidden_groups") {
 		t.Fatalf("sqlite minCount plan: %v", err)
-	}
-	combined, err := CompileCombinedMetrics(context.Background(), MetricQuery{Version: 2, Limit: 1, Metrics: []AggSpec{{ID: "a", Op: "count", GroupBy: []string{"g"}}, {ID: "b", Op: "count", GroupBy: []string{"g"}, MinCount: MetricMinCount{Min: 2}}}}, metricSchema(), metricOptions())
-	if err != nil || strings.Count(combined.SQL, "AS hidden_groups FROM (") != 2 || !strings.Contains(combined.SQL, "FILTER (WHERE r.count IS NOT NULL)") {
-		t.Fatalf("combined envelope: %v\n%s", err, combined.SQL)
 	}
 }

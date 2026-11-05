@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   FieldSchema, ItemDetailMode, ItemPropertyMode, ItemPageOptions, ItemDetailsState, PropertyViewStorage,
-  QueryState, RelationshipAdapter, RowId, Transport, PropertyViewState, ScopedJsonInspectionState, AttentionRegistry, AttentionProvider,
+  QueryState, RelationshipAdapter, RowId, PropertyViewState, ScopedJsonInspectionState, AttentionRegistry, AttentionProvider,
 } from "@pythia-software/query-table-core";
 import { isPropertyFieldLoaded, jsonInspectionScopeKey, MAX_JSON_INSPECTIONS } from "@pythia-software/query-table-core";
 import { usePropertyView, type PropertyViewApi } from "./usePropertyView";
@@ -28,7 +28,7 @@ export interface ItemDetailsOptions<Row> {
   storage?: PropertyViewStorage;
   objectType?: string;
   relationships?: RelationshipAdapter;
-  /** Defaults to complete clientRows or Transport.fetchRow, then the current projected row. */
+  /** Defaults to complete clientRows or a v3 identity lookup, then the current projected row. */
   loadRow?: (id: RowId, signal: AbortSignal) => Promise<ItemDetailRecord<Row> | null>;
 }
 export interface ItemDetailsApi<Row> {
@@ -115,8 +115,15 @@ function useDetailProperties<Row>(mode: ItemPropertyMode, schema: FieldSchema<Ro
 }
 
 /** Independent, type-level property controllers for each detail modality. */
+/** The fields a projected row carries: a key of the field's name, or of the
+ * first segment of its path (`payload` for `payload.name`). */
+function projectedFields<Row>(schema: FieldSchema<Row>, row: Row): string[] {
+  const keys = new Set(Object.keys(row as object));
+  return schema.fields.filter((field) => keys.has(field.name) ||
+    keys.has((field.source.kind === "backend" ? field.source.path ?? field.name : field.name).split(".")[0]!)).map((field) => field.name);
+}
 export function useItemDetails<Row>({
-  schema, query, setQuery, options, rows, clientRows, rowId, transport, refreshKey, links, queryReady = true, queryParameter, lookupRow, subject,
+  schema, query, setQuery, options, rows, clientRows, rowId, fetchRow, refreshKey, links, queryReady = true, queryParameter, lookupRow, subject,
 }: {
   schema: FieldSchema<Row>;
   query: QueryState;
@@ -125,7 +132,8 @@ export function useItemDetails<Row>({
   rows: Row[];
   clientRows: Row[] | undefined;
   rowId: (row: Row) => RowId | null;
-  transport: Transport<Row> | undefined;
+  /** Loads one source row by identity (the table's transport). */
+  fetchRow: ((id: RowId, signal: AbortSignal) => Promise<Row | null>) | undefined;
   refreshKey: number;
   links?: QueryLinksApi;
   queryParameter?: string;
@@ -170,7 +178,9 @@ export function useItemDetails<Row>({
   // render. Data-source/type changes and explicit refresh/retry still reload.
   const hasCustomLoad = Boolean(customLoad);
   const sourceType = config?.objectType ?? detailSchema.name;
-  const fallbackRows = !customLoad && !clientRows && !transport?.fetchRow ? rows : undefined;
+  const fallbackRows = !customLoad && !clientRows && !fetchRow ? rows : undefined;
+  const detailSchemaRef = useRef(detailSchema);
+  detailSchemaRef.current = detailSchema;
   const loadRow = useCallback(async (id: RowId, signal: AbortSignal): Promise<ItemDetailRecord<Row> | null> => {
     if (lookupRef.current) return lookupRef.current(id) ?? null;
     if (customLoadRef.current) return customLoadRef.current(id, signal);
@@ -178,13 +188,14 @@ export function useItemDetails<Row>({
       const row = clientRows.find((row) => rowId(row) === id);
       return row ? { row } : null;
     }
-    if (transport?.fetchRow) {
-      const row = await transport.fetchRow(id, signal);
-      return row ? { row } : null;
+    if (fetchRow) {
+      // A lookup projects the selectable backend fields; the rest are not loaded.
+      const row = await fetchRow(id, signal);
+      return row ? { row, loadedFields: projectedFields(detailSchemaRef.current, row) } : null;
     }
     const row = rows.find((row) => rowId(row) === id);
-    return row ? { row, loadedFields: Object.keys(row as object) } : null;
-  }, [hasLookup, hasCustomLoad, sourceType, clientRows, transport?.fetchRow, fallbackRows, rowId]);
+    return row ? { row, loadedFields: projectedFields(detailSchemaRef.current, row) } : null;
+  }, [hasLookup, hasCustomLoad, sourceType, clientRows, fetchRow, fallbackRows, rowId]);
   const [retryKey, setRetryKey] = useState(0);
   const [result, setResult] = useState<{
     source: typeof loadRow | undefined; epoch: string; id: RowId | undefined; record: ItemDetailRecord<Row> | null; loading: boolean; error: Error | null;

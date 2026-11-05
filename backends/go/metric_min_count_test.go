@@ -45,7 +45,7 @@ func TestMetricMinCountJSON(t *testing.T) {
 		"too many": {Min: MaxMetricMinCount + 1, Sum: "x"},
 		"long":     {Min: 2, Sum: strings.Repeat("f", 257)},
 	} {
-		if err := (WireQuery{Aggregations: []AggSpec{{ID: "m", Op: "count", GroupBy: []string{"g"}, MinCount: m}}}).Validate(); err == nil {
+		if err := validateMetricSpecs([]AggSpec{{ID: "m", Op: "count", GroupBy: []string{"g"}, MinCount: m}}); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
 	}
@@ -54,7 +54,7 @@ func TestMetricMinCountJSON(t *testing.T) {
 func TestMetricMinCountMeasurePlans(t *testing.T) {
 	compile := func(spec AggSpec) (SQLPlan, error) {
 		spec.ID = "m"
-		p, err := CompileMetrics(context.Background(), MetricQuery{Version: 2, Limit: 1, Metrics: []AggSpec{spec}}, metricSchema(), metricOptions())
+		p, err := compileTestMetrics(context.Background(), metricRequest{Version: 2, Limit: 1, Metrics: []AggSpec{spec}}, metricSchema(), metricOptions())
 		if err != nil {
 			return SQLPlan{}, err
 		}
@@ -86,7 +86,7 @@ func TestMetricMinCountMeasurePlans(t *testing.T) {
 	x := s.Fields["x"]
 	x.AggregateOps = []string{"count"}
 	s.Fields["x"] = x
-	if _, err := CompileMetrics(context.Background(), MetricQuery{Version: 2, Limit: 1, Metrics: []AggSpec{{ID: "m", Op: "count", GroupBy: []string{"g"}, MinCount: MetricMinCount{Min: 2, Sum: "x"}}}}, s, metricOptions()); err == nil {
+	if _, err := compileTestMetrics(context.Background(), metricRequest{Version: 2, Limit: 1, Metrics: []AggSpec{{ID: "m", Op: "count", GroupBy: []string{"g"}, MinCount: MetricMinCount{Min: 2, Sum: "x"}}}}, s, metricOptions()); err == nil {
 		t.Fatal("restricted SUM accepted for a minimum")
 	}
 	rows, err := compile(AggSpec{Op: "sum", Field: "x", GroupBy: []string{"g"}, MinCount: MetricMinCount{Min: 2}})
@@ -108,12 +108,8 @@ func TestMetricMinCountMeasurePlans(t *testing.T) {
 	if err != nil || !strings.Contains(distinct.SQL, "COUNT(DISTINCT") {
 		t.Fatalf("distinct minimum plan: %v", err)
 	}
-	if _, err = CompileSQLiteMetrics(context.Background(), MetricQuery{Version: 2, Limit: 1, Metrics: []AggSpec{{ID: "m", Op: "count", GroupBy: []string{"g"}, MinCount: MetricMinCount{Min: 2, Sum: "x"}}}}, metricSchema(), metricOptions()); err != nil {
+	if _, err = compileTestSQLiteMetrics(context.Background(), metricRequest{Version: 2, Limit: 1, Metrics: []AggSpec{{ID: "m", Op: "count", GroupBy: []string{"g"}, MinCount: MetricMinCount{Min: 2, Sum: "x"}}}}, metricSchema(), metricOptions()); err != nil {
 		t.Fatal(err)
-	}
-	// V1 never drops a measured minimum.
-	if _, err = CompileAggregation(AggSpec{ID: "m", Op: "count", GroupBy: []string{"g"}, MinCount: MetricMinCount{Min: 2, Sum: "x"}}, metricSchema()); err == nil {
-		t.Fatal("v1 accepted a measured minimum")
 	}
 }
 

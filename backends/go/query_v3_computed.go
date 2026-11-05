@@ -12,7 +12,7 @@ import (
 // transaction as execution. The full editable catalogue remains host-owned;
 // this envelope advertises only healthy transitive graphs and current revisions.
 func (d QueryDatasetV3) DescribeComputedPartialIn(ctx context.Context, tx *sql.Tx, ids []string, o PlanOptions) (ComputedDescription, error) {
-	out := ComputedDescription{Execution: SQLiteComputedExecution{Profile: d.Capabilities().Profile, ResolvedRevisions: map[string]string{}, Fields: map[string]SQLiteComputedFieldCapability{}}, Diagnostics: map[string]*PlanDiagnostic{}}
+	out := ComputedDescription{Execution: ComputedExecution{Profile: d.Capabilities().Profile, ResolvedRevisions: map[string]string{}, Fields: map[string]ComputedFieldCapability{}}, Diagnostics: map[string]*PlanDiagnostic{}}
 	if _, _, _, _, err := d.limits(); err != nil {
 		return out, err
 	}
@@ -26,7 +26,7 @@ func (d QueryDatasetV3) DescribeComputedPartialIn(ctx context.Context, tx *sql.T
 	}
 	original := options.Resolver
 	var infrastructure error
-	policyDataset := SQLiteV2Dataset{Schema: d.Schema, ComputedGroupable: d.ComputedGroupable}
+	policyDataset := sqliteV2Dataset{Schema: d.Schema, ComputedGroupable: d.ComputedGroupable}
 	for _, id := range ids {
 		if err = ctx.Err(); err != nil {
 			return ComputedDescription{}, err

@@ -110,7 +110,7 @@ func representativeQuery(order ...qt.OrderBy) qt.QueryRequestV3 {
 		{ID: "row_at", Op: "row", Field: "at"},
 		{ID: "row_label", Op: "row", Field: "label"},
 	}, Representative: &qt.RepresentativeRow{OrderBy: order}}
-	q.Result = qt.WireQuery{Select: []string{"k", "num", "row_id", "row_n", "row_at", "row_label"}, OrderBy: qt.OrderBys{{Field: "k", Dir: "asc", Nulls: "last"}}, Limit: 10}
+	q.Result = qt.WireQuery{Select: []string{"k", "num", "row_id", "row_n", "row_at", "row_label"}, OrderBy: []qt.OrderBy{{Field: "k", Dir: "asc", Nulls: "last"}}, Limit: 10}
 	return q
 }
 

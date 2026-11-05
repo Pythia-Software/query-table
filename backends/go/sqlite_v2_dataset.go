@@ -6,16 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
-	"reflect"
 	"strings"
 	"time"
 )
 
-// SQLiteV2Dataset executes plans over a host-authorized SELECT. SourceArgs use
-// numbered ?1..?N bindings. Scope/Dataset select the authorized definition store.
-// The host owns authentication, token signing, timeouts, indexes, and pool setup.
-type SQLiteV2Dataset struct {
+// sqliteV2Dataset reduces ungrouped SQLite metric batches for QueryDatasetV3
+// over its authorized SELECT. SourceArgs use numbered ?1..?N bindings.
+// Scope/Dataset select the authorized definition store.
+type sqliteV2Dataset struct {
 	Schema            Schema
 	SourceSQL         string
 	SourceArgs        []any
@@ -26,117 +24,16 @@ type SQLiteV2Dataset struct {
 	// Limits fail explicitly; no approximate or silently truncated populations.
 	MaxRows, MaxGroups, MaxPopulation int
 	// PredicateRelations optionally supplies host relations for base-field
-	// filter predicates in ExecuteV2In rows, populations and metric filters.
+	// filter predicates in populations and metric filters.
 	// Nil compiles every predicate normally. See SQLitePredicateRelations.
 	PredicateRelations SQLitePredicateRelations
-	// SourceGeneration and SourceProofs optionally let executions reuse
-	// facts proven about the whole authorized source; see SQLiteSourceProofs.
-	// Both must be set. SourceGeneration must identify exactly the data
-	// SourceSQL can read in the transaction passed to ExecuteV2In: read it
-	// inside that transaction, for example from a row every writing
-	// transaction advances, and change it whenever any row, table, view or
-	// schema the source reads may have changed. Do not derive it from time or
-	// from a connection-local counter such as PRAGMA data_version. SourceSQL
-	// must be deterministic for a generation and SourceArgs. Empty disables
-	// caching; every execution then proves its own population, as before.
-	SourceGeneration string
-	SourceProofs     *SQLiteSourceProofs
-}
-type SQLiteMetricCapabilities struct {
-	Version        int  `json:"version"`
-	Expressions    bool `json:"expressions"`
-	ShownRows      bool `json:"shownRows"`
-	Distributions  bool `json:"distributions"`
-	ComputedFields bool `json:"computedFields"`
-	Filters        bool `json:"filters"`
-	MinCount       bool `json:"minCount"`
-	// MinCountMeasures: a minCount of distinct values or of a summed field.
-	MinCountMeasures bool   `json:"minCountMeasures"`
-	MaxGroups        int    `json:"maxGroups"`
-	Profile          string `json:"profile"`
 }
 
-func (d SQLiteV2Dataset) Capabilities() SQLiteMetricCapabilities {
-	groups := d.MaxGroups
-	if groups == 0 {
-		groups = 2000
-	}
-	return SQLiteMetricCapabilities{Version: 2, Expressions: true, ShownRows: true, Distributions: true, ComputedFields: true, Filters: true, MinCount: true, MinCountMeasures: true, MaxGroups: groups, Profile: SQLiteExpressionProfile}
+type sqliteMetricsV2Result struct {
+	Metrics []MetricResult `json:"metrics"`
 }
 
-type SQLiteValueError struct {
-	Code string `json:"code"`
-}
-type SQLiteComputedValue struct {
-	Value any               `json:"value"`
-	Error *SQLiteValueError `json:"error,omitempty"`
-}
-type SQLiteComputedRow struct {
-	ID     any                            `json:"id"`
-	Values map[string]SQLiteComputedValue `json:"values"`
-}
-type SQLiteComputedFieldCapability struct {
-	Filter  bool   `json:"filter,omitempty"`
-	Type    string `json:"type"`
-	Select  bool   `json:"select"`
-	Sort    bool   `json:"sort"`
-	Measure bool   `json:"measure"`
-	Group   bool   `json:"group"`
-}
-
-// A fingerprint is not authorization. Hosts may attach a signed planToken and
-// a snapshot only when they actually bind subsequent requests to that snapshot.
-type SQLiteComputedExecution struct {
-	Profile           string                                   `json:"profile"`
-	PlanToken         string                                   `json:"planToken"`
-	ResolvedRevisions map[string]string                        `json:"resolvedRevisions"`
-	Fields            map[string]SQLiteComputedFieldCapability `json:"fields"`
-	Fingerprint       string                                   `json:"fingerprint,omitempty"`
-	Snapshot          string                                   `json:"snapshot,omitempty"`
-}
-type SQLiteRowsV2Result struct {
-	Version   int                     `json:"version"`
-	Rows      []map[string]any        `json:"rows"`
-	Total     int64                   `json:"total"`
-	Computed  []SQLiteComputedRow     `json:"computed"`
-	Execution SQLiteComputedExecution `json:"execution"`
-}
-type SQLiteMetricV2Bucket struct {
-	Distribution    MetricDistributionResult `json:"distribution,omitempty"`
-	NullCount       *int64                   `json:"nullCount,omitempty"`
-	InputErrorCount *int64                   `json:"inputErrorCount,omitempty"`
-	Keys            []any                    `json:"keys"`
-	Value           any                      `json:"value"`
-	Count           int64                    `json:"count"`
-	Error           string                   `json:"error,omitempty"`
-	Y               *any                     `json:"y,omitempty"`
-	YError          string                   `json:"yError,omitempty"`
-	// A measured minCount's value for calendar filtering; never serialized.
-	minMeasure      any
-	minMeasureError bool
-}
-type SQLiteMetricV2 struct {
-	ID            string                 `json:"id"`
-	Buckets       []SQLiteMetricV2Bucket `json:"buckets"`
-	Scope         string                 `json:"scope"`
-	ProcessedRows int64                  `json:"processedRows"`
-	GroupCount    int64                  `json:"groupCount"`
-	Coverage      string                 `json:"coverage,omitempty"`
-	// Error reports a metric that could not be computed. Sibling metrics and
-	// rows in the same request are unaffected.
-	Error string `json:"error,omitempty"`
-	// HiddenGroups counts groups removed by AggSpec.MinCount; nil when unset.
-	HiddenGroups *int64 `json:"hiddenGroups,omitempty"`
-}
-type SQLiteMetricsV2Result struct {
-	Metrics []SQLiteMetricV2 `json:"metrics"`
-}
-type SQLiteV2ExecutionResult struct {
-	Rows    *SQLiteRowsV2Result    `json:"rows,omitempty"`
-	Metrics *SQLiteMetricsV2Result `json:"metrics,omitempty"`
-}
-
-func (d SQLiteV2Dataset) options(tx *sql.Tx, o PlanOptions) PlanOptions {
+func (d sqliteV2Dataset) options(tx *sql.Tx, o PlanOptions) PlanOptions {
 	o.SourceSQL = d.SourceSQL
 	o.SourceArgs = append([]any{}, d.SourceArgs...)
 	o.ComputedGroupable = d.ComputedGroupable
@@ -160,7 +57,7 @@ func (d SQLiteV2Dataset) options(tx *sql.Tx, o PlanOptions) PlanOptions {
 	})
 	return o
 }
-func (d SQLiteV2Dataset) limits() (int, int, int, error) {
+func (d sqliteV2Dataset) limits() (int, int, int, error) {
 	rows, groups, pop := d.MaxRows, d.MaxGroups, d.MaxPopulation
 	if rows == 0 {
 		rows = 10000
@@ -183,229 +80,96 @@ func (d SQLiteV2Dataset) limits() (int, int, int, error) {
 	return rows, groups, pop, nil
 }
 
-// ExecuteV2 executes any row/metric combination atomically in one short read
-// transaction. To join other host operations, use ExecuteV2In with their Tx.
-func (d SQLiteV2Dataset) ExecuteV2(ctx context.Context, db *sql.DB, rows *ServerQueryV2, metrics *MetricQuery, o PlanOptions) (SQLiteV2ExecutionResult, error) {
-	// A fresh transaction cannot implement a snapshot retained from another request.
-	if rows != nil && rows.Snapshot != "" || metrics != nil && metrics.Snapshot != "" {
-		return SQLiteV2ExecutionResult{}, diagnostic("snapshot_transaction_required", "snapshot requests require caller-owned ExecuteV2In transaction")
-	}
-	return sqliteRead(ctx, db, func(tx *sql.Tx) (SQLiteV2ExecutionResult, error) { return d.ExecuteV2In(ctx, tx, rows, metrics, o) })
-}
-func (d SQLiteV2Dataset) ExecuteV2In(ctx context.Context, tx *sql.Tx, rows *ServerQueryV2, metrics *MetricQuery, o PlanOptions) (out SQLiteV2ExecutionResult, err error) {
+// executeMetrics reduces a batch of ungrouped SQLite metrics directly over
+// SourceSQL. total is the matching population the v3 executor already counted
+// in tx; no population budget applies here. Identical plans share one result
+// and compatible scalar reductions share one scan.
+func (d sqliteV2Dataset) executeMetrics(ctx context.Context, tx *sql.Tx, metrics metricRequest, o PlanOptions, total int64) (out []MetricResult, err error) {
 	maxRows, maxGroups, maxPopulation, e := d.limits()
 	if e != nil {
-		return out, e
+		return nil, e
 	}
 	if tx == nil {
-		return out, fmt.Errorf("nil SQLite transaction")
-	}
-	if rows == nil && metrics == nil {
-		return out, diagnostic("query_required", "row or metric request required")
-	}
-	if rows != nil && metrics != nil {
-		if !sqliteV2SameSlice(rows.Where, metrics.Where) || !sqliteV2SameSlice([]OrderBy(rows.OrderBy), metrics.OrderBy) || rows.Limit != metrics.Limit || rows.Offset != metrics.Offset || rows.Snapshot != metrics.Snapshot || rows.PlanToken != metrics.PlanToken || !maps.Equal(rows.ExpectedRevisions, metrics.ExpectedRevisions) {
-			return out, diagnostic("view_mismatch", "combined rows and metrics require identical filters, ordering, window, revisions and token/snapshot bindings")
-		}
+		return nil, fmt.Errorf("nil SQLite transaction")
 	}
 	o = d.options(tx, o)
 	o.relations = newSQLiteRelations(ctx, tx, d.PredicateRelations)
-	var rowPlan SQLPlan
-	var batch MetricBatchPlan
-	var failures []error
-	var where []WhereTerm
-	if rows != nil {
-		copy := *rows
-		copy.Select = append([]string{}, rows.Select...)
-		if copy.Limit < 1 || copy.Limit > maxRows {
-			return out, diagnostic("resource_limit", "v2 rows require a positive bounded limit")
-		}
-		found := false
-		for _, n := range copy.Select {
-			found = found || n == d.Schema.IDField
-		}
-		if !found {
-			copy.Select = append(copy.Select, d.Schema.IDField)
-		}
-		rowPlan, e = CompileSQLiteRowsV2(ctx, copy, d.Schema, o)
-		if e != nil {
-			return out, e
-		}
-		where = copy.Where
+	if metrics.Limit > maxRows {
+		return nil, diagnostic("resource_limit", "metric row window exceeds host budget")
 	}
-	if metrics != nil {
-		if metrics.Limit > maxRows {
-			return out, diagnostic("resource_limit", "metric row window exceeds host budget")
-		}
-		batch, failures, e = compileMetricsPartial(ctx, *metrics, d.Schema, o, true)
-		if e != nil {
-			return out, e
-		}
-		where = metrics.Where
-	}
-	// Bound the population before expensive formulas, sorting and reductions. The
-	// count itself scans at most budget+1 source rows in the authorized snapshot.
-	filter, _, e := compileSQLiteWhere(where, d.Schema, SQLiteOptions{Now: o.Now}, o.relations)
+	batch, failures, e := compileMetricsPartial(ctx, metrics, d.Schema, o, true)
 	if e != nil {
-		return out, e
-	}
-	pred := ""
-	if filter.SQL != "" {
-		pred = " WHERE " + sqliteNumberParameters(filter.SQL, len(d.SourceArgs))
-	}
-	countSQL := "SELECT COUNT(*) FROM (SELECT 1 FROM (" + d.SourceSQL + ") AS r" + pred + fmt.Sprintf(" LIMIT %d)", maxPopulation+1)
-	args := append(append([]any{}, d.SourceArgs...), filter.Args...)
-	proofs := d.sourceProofScope(maxPopulation)
-	total, counted := int64(0), false
-	_, bounded := proofs.rows()
-	if filter.SQL == "" {
-		// An unfiltered population is the whole source this generation counted.
-		total, counted = proofs.rows()
-	}
-	// When this generation's whole source is within the budget, so is every
-	// filtered subset. Metrics then count their population only when one
-	// needs it, preferably from a fused integer reduction over it.
-	deferred := !counted && bounded && rows == nil
-	if !counted && !deferred {
-		if e = tx.QueryRowContext(ctx, countSQL, args...).Scan(&total); e != nil {
-			return out, e
-		}
-		counted = true
-	}
-	if total > int64(maxPopulation) {
-		return out, diagnostic("resource_limit", "matching population exceeds host budget")
-	}
-	reduced := int64(-1)
-	population := func() (int64, error) {
-		if !counted && reduced >= 0 {
-			total, counted = reduced, true
-		}
-		if !counted {
-			if err := tx.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
-				return 0, err
-			}
-			counted = true
-		}
-		if total > int64(maxPopulation) {
-			return 0, diagnostic("resource_limit", "matching population exceeds host budget")
-		}
-		return total, nil
+		return nil, e
 	}
 	// The frontend validates every revision in its handshake, including fields
 	// hidden in this view. Resolve and check the complete requested envelope.
 	revisions := o.ExpectedRevisions
-	if rows != nil && rows.ExpectedRevisions != nil {
-		revisions = rows.ExpectedRevisions
-	}
-	if metrics != nil && metrics.ExpectedRevisions != nil {
+	if metrics.ExpectedRevisions != nil {
 		revisions = metrics.ExpectedRevisions
 	}
-	verified, capabilities, e := d.verifyV2Revisions(ctx, o, revisions)
-	if e != nil {
-		return out, e
+	if _, _, e = d.verifyV2Revisions(ctx, o, revisions); e != nil {
+		return nil, e
 	}
-	capabilityOptions := o
-	capabilityOptions.ExpectedRevisions = revisions
-	if rows != nil {
-		for id, revision := range rowPlan.ResolvedRevisions {
-			verified[id] = revision
-			name := "@computed/" + id
-			preview, err := CompileSQLiteRowExpression(ctx, "["+name+"]", d.Schema, capabilityOptions)
-			if err != nil {
-				return out, err
-			}
-			capabilities[name] = d.capabilityForPlan(name, preview)
+	out = []MetricResult{}
+	memo := map[string]MetricResult{}
+	reductions := newSQLiteReductionCache(batch)
+	reductions.addCrossFields(ctx, batch, metrics, d.Schema, o)
+	defer func() {
+		if cleanupErr := reductions.close(tx); cleanupErr != nil {
+			out = nil
+			err = errors.Join(err, cleanupErr)
 		}
-		rowPlan.ResolvedRevisions = verified
-		r, err := d.readV2Rows(ctx, tx, rowPlan, total, rows.Snapshot)
+	}()
+	direct, _, _, directErr := d.directDistributions(ctx, tx, metrics, failures, o, maxGroups, maxPopulation)
+	if directErr != nil {
+		return nil, directErr
+	}
+	next := 0
+	for i, spec := range metrics.Metrics {
+		if failures[i] != nil {
+			message, _ := metricClauseError(ctx, failures[i])
+			out = append(out, failedMetric(spec.ID, spec.Scope, message))
+			continue
+		}
+		p := batch.Metrics[next]
+		next++
+		if m, ok := direct[i]; ok {
+			out = append(out, m)
+			continue
+		}
+		key := p.Fingerprint + "\x00" + p.Scope
+		if previous, ok := memo[key]; ok {
+			previous = cloneSQLiteMetric(previous)
+			previous.ID = p.ID
+			out = append(out, previous)
+			continue
+		}
+		created := reductions.mark()
+		m, err := isolateMetric(ctx, tx, p.ID, p.Scope, func() (MetricResult, error) {
+			p, err := reductions.plan(ctx, tx, p)
+			if err != nil {
+				return MetricResult{}, err
+			}
+			return d.readV2Metric(ctx, tx, p, spec, total, metrics, maxGroups)
+		})
 		if err != nil {
-			return SQLiteV2ExecutionResult{}, err
+			return nil, err
 		}
-		r.Execution.PlanToken = rows.PlanToken
-		r.Execution.Fields = capabilities
-		out.Rows = &r
-	}
-	if metrics != nil {
-		r := SQLiteMetricsV2Result{Metrics: []SQLiteMetricV2{}}
-		memo := map[string]SQLiteMetricV2{}
-		reductions := newSQLiteReductionCache(batch)
-		reductions.proofs = proofs
-		if !counted {
-			reductions.population = &reduced
+		if m.Error != "" {
+			// The savepoint rollback dropped reductions created for this metric.
+			reductions.forget(created)
+		} else {
+			memo[key] = m
 		}
-		reductions.addCrossFields(ctx, batch, *metrics, d.Schema, o)
-		defer func() {
-			if cleanupErr := reductions.close(tx); cleanupErr != nil {
-				out = SQLiteV2ExecutionResult{}
-				err = errors.Join(err, cleanupErr)
-			}
-		}()
-		direct, streamed, ok, directErr := d.directDistributions(ctx, tx, *metrics, failures, o, maxGroups, maxPopulation)
-		if directErr != nil {
-			return SQLiteV2ExecutionResult{}, directErr
-		}
-		if ok && !counted {
-			total, counted = streamed, true
-		}
-		next := 0
-		for i, spec := range metrics.Metrics {
-			if failures[i] != nil {
-				message, _ := metricClauseError(ctx, failures[i])
-				r.Metrics = append(r.Metrics, failedMetric(spec.ID, spec.Scope, message))
-				continue
-			}
-			p := batch.Metrics[next]
-			next++
-			if m, ok := direct[i]; ok {
-				r.Metrics = append(r.Metrics, m)
-				continue
-			}
-			key := p.Fingerprint + "\x00" + p.Scope
-			if previous, ok := memo[key]; ok {
-				previous = cloneSQLiteMetric(previous)
-				previous.ID = p.ID
-				r.Metrics = append(r.Metrics, previous)
-				continue
-			}
-			created := reductions.mark()
-			var populationErr error
-			m, err := isolateMetric(ctx, tx, p.ID, p.Scope, func() (SQLiteMetricV2, error) {
-				p, err := reductions.plan(ctx, tx, p)
-				if err != nil {
-					return SQLiteMetricV2{}, err
-				}
-				total, err := population()
-				if err != nil {
-					populationErr = err
-					return SQLiteMetricV2{}, err
-				}
-				return d.readV2Metric(ctx, tx, p, spec, total, *metrics, maxGroups)
-			})
-			if populationErr != nil {
-				// A deferred population failure fails the request, as the
-				// preflight count would have.
-				return SQLiteV2ExecutionResult{}, populationErr
-			}
-			if err != nil {
-				return SQLiteV2ExecutionResult{}, err
-			}
-			if m.Error != "" {
-				// The savepoint rollback dropped reductions created for this metric.
-				reductions.forget(created)
-			} else {
-				memo[key] = m
-			}
-			r.Metrics = append(r.Metrics, m)
-		}
-		out.Metrics = &r
+		out = append(out, m)
 	}
 	return out, nil
 }
 
 // verifyV2Revisions checks the complete handshake, including unused fields.
-func (d SQLiteV2Dataset) verifyV2Revisions(ctx context.Context, o PlanOptions, revisions map[string]string) (map[string]string, map[string]SQLiteComputedFieldCapability, error) {
+func (d sqliteV2Dataset) verifyV2Revisions(ctx context.Context, o PlanOptions, revisions map[string]string) (map[string]string, map[string]ComputedFieldCapability, error) {
 	verified := map[string]string{}
-	capabilities := map[string]SQLiteComputedFieldCapability{}
+	capabilities := map[string]ComputedFieldCapability{}
 	capabilityOptions := o
 	capabilityOptions.ExpectedRevisions = revisions
 	if len(revisions) > 64 {
@@ -424,7 +188,7 @@ func (d SQLiteV2Dataset) verifyV2Revisions(ctx context.Context, o PlanOptions, r
 		}
 		verified[id] = revision
 		name := "@computed/" + id
-		preview, err := CompileSQLiteRowExpression(ctx, "["+name+"]", d.Schema, capabilityOptions)
+		preview, err := compileSQLiteRowExpression(ctx, "["+name+"]", d.Schema, capabilityOptions)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -433,12 +197,6 @@ func (d SQLiteV2Dataset) verifyV2Revisions(ctx context.Context, o PlanOptions, r
 	return verified, capabilities, nil
 }
 
-func sqliteError(v any) *SQLiteValueError {
-	if v == nil {
-		return nil
-	}
-	return &SQLiteValueError{Code: fmt.Sprint(v)}
-}
 func sqliteScanRows(rows *sql.Rows) ([]any, error) {
 	cols, e := rows.Columns()
 	if e != nil {
@@ -452,65 +210,7 @@ func sqliteScanRows(rows *sql.Rows) ([]any, error) {
 	e = rows.Scan(targets...)
 	return values, e
 }
-func (d SQLiteV2Dataset) readV2Rows(ctx context.Context, tx *sql.Tx, p SQLPlan, total int64, snapshot string) (SQLiteRowsV2Result, error) {
-	out := SQLiteRowsV2Result{Version: 2, Total: total, Rows: []map[string]any{}, Computed: []SQLiteComputedRow{}, Execution: SQLiteComputedExecution{Profile: p.Profile, Fingerprint: p.Fingerprint, ResolvedRevisions: p.ResolvedRevisions, Fields: map[string]SQLiteComputedFieldCapability{}, Snapshot: snapshot}}
-	rows, e := tx.QueryContext(ctx, p.SQL, p.Args...)
-	if e != nil {
-		return out, e
-	}
-	defer rows.Close()
-	seen := map[string]bool{}
-	for _, c := range p.Columns {
-		if strings.HasPrefix(c.Field, "@computed/") {
-			out.Execution.Fields[c.Field] = d.computedCapability(c.Field, c.Type)
-		}
-	}
-	for rows.Next() {
-		v, e := sqliteScanRows(rows)
-		if e != nil {
-			return out, e
-		}
-		row := map[string]any{}
-		computed := map[string]SQLiteComputedValue{}
-		for i, c := range p.Columns {
-			value := v[2*i]
-			err := sqliteError(v[2*i+1])
-			if strings.HasPrefix(c.Field, "@computed/") {
-				value = sqliteV2TypedValue(value, c.Type)
-				computed[strings.TrimPrefix(c.Field, "@computed/")] = SQLiteComputedValue{value, err}
-			} else {
-				if err != nil {
-					return out, diagnostic(err.Code, "invalid source value for "+c.Field)
-				}
-				f := d.Schema.Fields[c.Field]
-				if f.Kind == FieldDatetime {
-					f.SQLiteDatetimeFormat = "rfc3339"
-				}
-				value, e = sqliteOutput(value, f)
-				if e != nil {
-					return out, e
-				}
-				row[c.Field] = value
-			}
-		}
-		id := row[d.Schema.IDField]
-		if id == nil || id == "" {
-			return out, diagnostic("identity_required", "row identity is NULL")
-		}
-		key, e := json.Marshal(id)
-		if e != nil {
-			return out, e
-		}
-		if seen[string(key)] {
-			return out, diagnostic("duplicate_identity", "source contains duplicate row identities")
-		}
-		seen[string(key)] = true
-		out.Rows = append(out.Rows, row)
-		out.Computed = append(out.Computed, SQLiteComputedRow{id, computed})
-	}
-	return out, rows.Err()
-}
-func (d SQLiteV2Dataset) readV2Metric(ctx context.Context, tx *sql.Tx, p MetricSQLPlan, spec AggSpec, total int64, q MetricQuery, maxGroups int) (SQLiteMetricV2, error) {
+func (d sqliteV2Dataset) readV2Metric(ctx context.Context, tx *sql.Tx, p metricSQLPlan, spec AggSpec, total int64, q metricRequest, maxGroups int) (MetricResult, error) {
 	processed := total
 	if p.Scope == "shownRows" {
 		processed -= int64(q.Offset)
@@ -521,7 +221,7 @@ func (d SQLiteV2Dataset) readV2Metric(ctx context.Context, tx *sql.Tx, p MetricS
 			processed = int64(q.Limit)
 		}
 	}
-	out := SQLiteMetricV2{ID: p.ID, Scope: p.Scope, ProcessedRows: processed, Coverage: "exact", Buckets: []SQLiteMetricV2Bucket{}}
+	out := MetricResult{ID: p.ID, Scope: p.Scope, ProcessedRows: processed, Coverage: "exact", Buckets: []MetricBucket{}}
 	rows, e := tx.QueryContext(ctx, p.SQL, p.Args...)
 	if e != nil {
 		return out, e
@@ -567,7 +267,7 @@ func (d SQLiteV2Dataset) readV2Metric(ctx context.Context, tx *sql.Tx, p MetricS
 		for _, c := range p.Columns {
 			v[c.ValueAlias] = typedQueryValue(v[c.ValueAlias], c.Type)
 		}
-		b := SQLiteMetricV2Bucket{Keys: []any{}, Value: v["value"], Count: v["count"].(int64), Error: sqliteErrorCode(v["error"])}
+		b := MetricBucket{Keys: []any{}, Value: v["value"], Count: v["count"].(int64), Error: sqliteErrorCode(v["error"])}
 		// Calendar metrics compile a measured minimum without Min and hide
 		// groups themselves, after filling empty intervals.
 		if measure, ok := v["min_measure"]; ok && !spec.MinCount.Active() {
@@ -627,113 +327,11 @@ func (d SQLiteV2Dataset) readV2Metric(ctx context.Context, tx *sql.Tx, p MetricS
 	}
 	return out, rows.Err()
 }
-func (d SQLiteV2Dataset) computedCapability(name, typ string) SQLiteComputedFieldCapability {
+func (d sqliteV2Dataset) computedCapability(name, typ string) ComputedFieldCapability {
 	if typ == "null" {
 		typ = "text"
 	}
-	return SQLiteComputedFieldCapability{Type: typ, Select: true, Sort: true, Measure: true, Group: d.ComputedGroupable[strings.TrimPrefix(name, "@computed/")]}
-}
-
-// DescribeComputedIn validates current canonical definitions and their transitive
-// graph in a host-owned snapshot. IDs come from the authorized catalogue. Hosts
-// sign the returned envelope if plan tokens are part of their protocol.
-func (d SQLiteV2Dataset) DescribeComputedIn(ctx context.Context, tx *sql.Tx, ids []string, o PlanOptions) (SQLiteComputedExecution, error) {
-	out := SQLiteComputedExecution{Profile: SQLiteExpressionProfile, ResolvedRevisions: map[string]string{}, Fields: map[string]SQLiteComputedFieldCapability{}}
-	if _, _, _, e := d.limits(); e != nil {
-		return out, e
-	}
-	if tx == nil {
-		return out, fmt.Errorf("nil SQLite transaction")
-	}
-	if len(ids) > 64 {
-		return out, diagnostic("dependency_limit", "too many computed fields")
-	}
-	o = d.options(tx, o)
-	original := o.Resolver
-	o.ExpectedRevisions = out.ResolvedRevisions
-	o.Resolver = DefinitionResolverFunc(func(ctx context.Context, id string) (ComputedColumn, error) {
-		c, e := original.ResolveComputed(ctx, id)
-		if e == nil {
-			out.ResolvedRevisions[id] = c.Revision
-		}
-		return c, e
-	})
-	for _, id := range ids {
-		if strings.HasPrefix(id, "@computed/") {
-			id = strings.TrimPrefix(id, "@computed/")
-		}
-		name := "@computed/" + id
-		p, e := CompileSQLiteRowExpression(ctx, "["+strings.ReplaceAll(name, "]", "]]")+"]", d.Schema, o)
-		if e != nil {
-			return SQLiteComputedExecution{}, e
-		}
-		out.Fields[name] = d.capabilityForPlan(name, p)
-	}
-	return out, nil
-}
-
-// ComputedDescription keeps the editable catalogue separate from the valid
-// execution envelope. Only successfully compiled transitive graphs advertise
-// capabilities/revisions; infrastructure and context errors fail the request.
-type ComputedDescription struct {
-	Execution   SQLiteComputedExecution    `json:"execution"`
-	Diagnostics map[string]*PlanDiagnostic `json:"diagnostics"`
-}
-
-func (d SQLiteV2Dataset) DescribeComputedPartialIn(ctx context.Context, tx *sql.Tx, ids []string, o PlanOptions) (ComputedDescription, error) {
-	out := ComputedDescription{Execution: SQLiteComputedExecution{Profile: SQLiteExpressionProfile, Fields: map[string]SQLiteComputedFieldCapability{}, ResolvedRevisions: map[string]string{}}, Diagnostics: map[string]*PlanDiagnostic{}}
-	if err := ctx.Err(); err != nil {
-		return out, err
-	}
-	if _, _, _, err := d.limits(); err != nil {
-		return out, err
-	}
-	if tx == nil {
-		return out, fmt.Errorf("nil SQLite transaction")
-	}
-	if len(ids) > 64 {
-		return out, diagnostic("dependency_limit", "too many computed fields")
-	}
-	o = d.options(tx, o)
-	original := o.Resolver
-	var infrastructure error
-	o.Resolver = DefinitionResolverFunc(func(ctx context.Context, id string) (ComputedColumn, error) {
-		column, err := original.ResolveComputed(ctx, id)
-		var issue *PlanDiagnostic
-		if err != nil && !errors.As(err, &issue) {
-			infrastructure = err
-		}
-		return column, err
-	})
-	for _, id := range ids {
-		if err := ctx.Err(); err != nil {
-			return ComputedDescription{}, err
-		}
-		id = strings.TrimPrefix(id, "@computed/")
-		if !computedID.MatchString(id) {
-			return ComputedDescription{}, diagnostic("definition_invalid", "invalid computed ID")
-		}
-		valid, err := d.DescribeComputedIn(ctx, tx, []string{id}, o)
-		if infrastructure != nil {
-			return ComputedDescription{}, infrastructure
-		}
-		if err != nil {
-			var issue *PlanDiagnostic
-			if !errors.As(err, &issue) {
-				return ComputedDescription{}, err
-			}
-			copy := *issue
-			out.Diagnostics[id] = &copy
-			continue
-		}
-		for name, field := range valid.Fields {
-			out.Execution.Fields[name] = field
-		}
-		for name, revision := range valid.ResolvedRevisions {
-			out.Execution.ResolvedRevisions[name] = revision
-		}
-	}
-	return out, nil
+	return ComputedFieldCapability{Type: typ, Select: true, Sort: true, Measure: true, Group: d.ComputedGroupable[strings.TrimPrefix(name, "@computed/")]}
 }
 
 func sqliteV2TypedValue(v any, typ string) any {
@@ -760,14 +358,7 @@ func sqliteErrorCode(v any) string {
 	return fmt.Sprint(v)
 }
 
-func sqliteV2SameSlice[T any](a, b []T) bool {
-	if len(a) == 0 && len(b) == 0 {
-		return true
-	}
-	return reflect.DeepEqual(a, b)
-}
-
-func (d SQLiteV2Dataset) capabilityForPlan(name string, p SQLPlan) SQLiteComputedFieldCapability {
+func (d sqliteV2Dataset) capabilityForPlan(name string, p SQLPlan) ComputedFieldCapability {
 	c := d.computedCapability(name, p.Columns[0].Type)
 	for _, dep := range p.Dependencies {
 		if f, ok := d.Schema.Fields[dep]; ok && f.AggregateOps != nil && len(f.AggregateOps) == 0 {
@@ -779,12 +370,12 @@ func (d SQLiteV2Dataset) capabilityForPlan(name string, p SQLPlan) SQLiteCompute
 
 // Reuse identical plans only within the transaction after validating every plan.
 // Return independent results so callers cannot mutate a sibling metric.
-func cloneSQLiteMetric(m SQLiteMetricV2) SQLiteMetricV2 {
+func cloneSQLiteMetric(m MetricResult) MetricResult {
 	if m.HiddenGroups != nil {
 		hidden := *m.HiddenGroups
 		m.HiddenGroups = &hidden
 	}
-	m.Buckets = append([]SQLiteMetricV2Bucket{}, m.Buckets...)
+	m.Buckets = append([]MetricBucket{}, m.Buckets...)
 	for i := range m.Buckets {
 		b := &m.Buckets[i]
 		b.Keys = append([]any{}, b.Keys...)

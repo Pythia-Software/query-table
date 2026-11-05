@@ -162,10 +162,12 @@ public final class QueryTableController: ObservableObject {
             "This query includes a filter that cannot run on the backend. Native tables currently require backend filters to preserve accurate totals and pagination."
           )
         }
-        var server = snapshot.serverQuery(schema: schema)
+        var request = snapshot.queryRequestV3(
+          schema: schema, capabilities: adapter.queryCapabilities, metrics: false)
         let dependencies = try await computed.dependencies(for: columns)
-        server.select = Array(Set(server.select + dependencies)).sorted()
-        let result = try await adapter.fetchRows(query: server)
+        request.source.select = Array(Set(request.source.select + dependencies)).sorted()
+        request.result = request.source
+        let result = try await Self.execute(request, adapter: adapter, schema: schema)
         guard
           result.rows.allSatisfy({ row in
             let value =
@@ -209,8 +211,9 @@ public final class QueryTableController: ObservableObject {
     metricTask = Task { [weak self] in
       do {
         if debounce { try await Task.sleep(nanoseconds: 250_000_000) }
-        let result = try await adapter.fetchAggregations(
-          query: snapshot.aggregationQuery(schema: schema))
+        let request = snapshot.queryRequestV3(
+          schema: schema, capabilities: adapter.queryCapabilities, rows: false)
+        let result = try await Self.execute(request, adapter: adapter, schema: schema)
         guard let self, ticket == self.generation, !Task.isCancelled else { return }
         self.metrics = result.metrics
       } catch {
@@ -229,7 +232,7 @@ public final class QueryTableController: ObservableObject {
   }
 
   /// Fetches an independent bounded sample with every formula input projected.
-  public func sampleRows(dependencies: [String], count: Int) async throws -> FetchRowsResult {
+  public func sampleRows(dependencies: [String], count: Int) async throws -> RowSample {
     let snapshot = query
     guard
       snapshot.whereTerms.allSatisfy({
@@ -239,22 +242,65 @@ public final class QueryTableController: ObservableObject {
       throw QueryTableError.unsupported("Preview requires filters that run on the backend.")
     }
     let count = min(10_000, max(1, count))
-    var server = snapshot.serverQuery(schema: schema)
-    server.select = Array(Set(dependencies + [schema.idField])).sorted()
-    server.offset = 0
+    var request = snapshot.queryRequestV3(
+      schema: schema, capabilities: adapter.queryCapabilities, metrics: false)
+    request.source.select = Array(Set(dependencies + [schema.idField])).sorted()
+    request.source.offset = 0
     var rows: [QueryRow] = []
     var total = 0
     while rows.count < count {
       try Task.checkCancellation()
-      server.limit = min(500, count - rows.count)
-      let page = try await adapter.fetchRows(query: server)
+      request.source.limit = min(500, count - rows.count)
+      request.result = request.source
+      let page = try await Self.execute(request, adapter: adapter, schema: schema)
       try Task.checkCancellation()
       total = page.total
       rows.append(contentsOf: page.rows.prefix(count - rows.count))
       if page.rows.isEmpty || rows.count >= total { break }
-      server.offset += page.rows.count
+      request.source.offset += page.rows.count
     }
-    return FetchRowsResult(rows: rows, total: total)
+    return RowSample(rows: rows, total: total)
+  }
+
+  /// Filter autocomplete through the request's `distinct` section.
+  public func suggestions(field: String, search: String, limit: Int = 30) async throws
+    -> DistinctResultV3
+  {
+    let request = QueryRequestV3.distinctValues(
+      field: field, search: search, limit: limit, schema: schema,
+      capabilities: adapter.queryCapabilities)
+    let result = try await Self.execute(request, adapter: adapter, schema: schema)
+    guard let distinct = result.distinct else {
+      throw QueryTableError.invalidResponse("The server returned no distinct values.")
+    }
+    return distinct
+  }
+
+  /// Refetches one row by identity with a rows request; nil when it no longer exists.
+  public func fetchRow(id: JSONValue, select: [String]? = nil) async throws -> QueryRow? {
+    let request = QueryRequestV3.rowLookup(
+      id: id, select: select ?? QueryState().serverQuery(schema: schema).select, schema: schema,
+      capabilities: adapter.queryCapabilities)
+    let result = try await Self.execute(request, adapter: adapter, schema: schema)
+    guard result.rows.count < 2, result.total < 2 else {
+      throw QueryTableError.invalidResponse("identity must be unique")
+    }
+    if let row = result.rows.first,
+      (row[schema.idField] ?? schema.field(named: schema.idField)?.value(in: row))?.displayString != id.displayString
+    {
+      throw QueryTableError.invalidResponse("The server returned a different row.")
+    }
+    return result.rows.first
+  }
+
+  /// Refuses diagnosed requests before sending and validates every response.
+  nonisolated private static func execute(
+    _ request: QueryRequestV3, adapter: any QueryTransport, schema: FieldSchema
+  ) async throws -> QueryResultV3 {
+    if let issue = request.diagnostics.first { throw QueryTableError.invalidQuery(issue) }
+    let result = try await adapter.fetchQueryV3(request)
+    try result.validate(for: request, schema: schema)
+    return result
   }
 
   public func selectVisibleRows() { selectedIDs.formUnion(rows.map { rowID($0) }) }

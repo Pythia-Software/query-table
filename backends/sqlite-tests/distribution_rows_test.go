@@ -4,8 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	qt "github.com/Pythia-Software/query-table/backends/go"
@@ -13,10 +13,10 @@ import (
 
 func distributionSpecs() []qt.AggSpec {
 	box := func(id, input string, groups ...string) qt.AggSpec {
-		return qt.AggSpec{ID: id, GroupBy: groups, Distribution: &qt.MetricDistribution{Kind: "box", Input: input}}
+		return qt.AggSpec{ID: id, GroupBy: groups, Op: "count", Distribution: &qt.MetricDistribution{Kind: "box", Input: input}}
 	}
 	histogram := func(id, input string, bins int, groups ...string) qt.AggSpec {
-		return qt.AggSpec{ID: id, GroupBy: groups, Distribution: &qt.MetricDistribution{Kind: "histogram", Input: input, Bins: bins}}
+		return qt.AggSpec{ID: id, GroupBy: groups, Op: "count", Distribution: &qt.MetricDistribution{Kind: "histogram", Input: input, Bins: bins}}
 	}
 	tukey := box("tukey", "[n2]", "enum")
 	tukey.Distribution.Whiskers = "tukey"
@@ -52,41 +52,43 @@ func TestRowsDistributionParity(t *testing.T) {
 	}
 	defer tx.Rollback()
 	stageMemoryRows(t, tx, s, rows)
-	d := qt.SQLiteV2Dataset{Schema: s, SourceSQL: "SELECT * FROM memory"}
+	d := qt.QueryDatasetV3{Dialect: "sqlite", Schema: s, SourceSQL: "SELECT * FROM memory"}
 	specs := distributionSpecs()
-	compare := func(q qt.MetricQuery) {
+	compare := func(q qt.QueryRequestV3) {
 		t.Helper()
-		compareMemory(t, tx, d, rows, q, qt.PlanOptions{})
+		compareStaged(t, tx, d, q, qt.PlanOptions{})
 		compareDirect(t, tx, d, q)
 	}
 	for _, spec := range specs {
-		compare(qt.MetricQuery{Version: 2, Metrics: []qt.AggSpec{spec}})
+		compare(metricsV3(nil, nil, 0, 0, []qt.AggSpec{spec}...))
 	}
-	q := qt.MetricQuery{Version: 2, Metrics: specs}
+	q := metricsV3(nil, nil, 0, 0, specs...)
 	compare(q)
 	// An empty population still has one ungrouped bucket.
-	q.Where = []qt.WhereTerm{{Field: "id", Op: "=", Value: "missing"}}
+	q.Result.Where = []qt.WhereTerm{{Field: "id", Op: "=", Value: "missing"}}
 	compare(q)
 	// One sample, and one repeated value: a degenerate histogram extent.
-	q.Where = []qt.WhereTerm{{Field: "n", Op: "=", Value: "1.5"}}
+	q.Result.Where = []qt.WhereTerm{{Field: "n", Op: "=", Value: "1.5"}}
 	compare(q)
-	q.Where = []qt.WhereTerm{{Field: "id", Op: "=", Value: "r007"}}
+	q.Result.Where = []qt.WhereTerm{{Field: "id", Op: "=", Value: "r007"}}
 	compare(q)
 	d.MaxGroups = 3
-	q.Where = nil
+	q.Result.Where = nil
 	compare(q)
 	d.MaxGroups = 0
 	// Source arguments precede table and metric filter parameters.
 	d.SourceSQL, d.SourceArgs = "SELECT * FROM memory WHERE id <> ? AND id <> ?", []any{"r005", "r011"}
-	q.Where = []qt.WhereTerm{{Field: "n2", Op: "!=", Value: "11"}}
-	if r, err := d.ExecuteV2In(context.Background(), tx, nil, &q, qt.PlanOptions{}); err != nil || r.Metrics.Metrics[0].ProcessedRows == 0 {
+	q.Result.Where = []qt.WhereTerm{{Field: "n2", Op: "!=", Value: "11"}}
+	if r, err := d.ExecuteIn(context.Background(), tx, q, qt.PlanOptions{}); err != nil || r.Metrics[0].ProcessedRows == 0 {
 		t.Fatal(r, err)
 	}
 	compareDirect(t, tx, d, q)
 	d.MaxPopulation = 50
-	if _, err := d.ExecuteV2In(context.Background(), tx, nil, &q, qt.PlanOptions{}); err == nil {
+	// v3 applies MaxPopulation to staged execution only.
+	if _, err := qt.TestOnlyStageUngrouped(d).ExecuteIn(context.Background(), tx, q, qt.PlanOptions{}); err == nil {
 		t.Fatal("population budget ignored")
 	}
+	assertStagedPopulationBudget(t, tx, d, q, qt.PlanOptions{})
 	compareDirect(t, tx, d, q)
 }
 
@@ -126,12 +128,12 @@ func TestRowsDistributionErrorParity(t *testing.T) {
 			}
 			defer tx.Rollback()
 			stageMemoryRows(t, tx, s, rows)
-			d := qt.SQLiteV2Dataset{Schema: s, SourceSQL: "SELECT * FROM memory"}
-			q := qt.MetricQuery{Version: 2}
+			d := qt.QueryDatasetV3{Dialect: "sqlite", Schema: s, SourceSQL: "SELECT * FROM memory"}
+			q := metricsV3(nil, nil, 0, 0)
 			for _, kind := range []string{"box", "histogram"} {
 				for _, field := range []string{"n", "n2"} {
 					for _, groups := range [][]string{nil, {"enum"}} {
-						spec := qt.AggSpec{ID: fmt.Sprint(kind, field, len(groups)), GroupBy: groups, Distribution: &qt.MetricDistribution{Kind: kind, Input: "[" + field + "]"}}
+						spec := qt.AggSpec{ID: fmt.Sprint(kind, field, len(groups)), GroupBy: groups, Op: "count", Distribution: &qt.MetricDistribution{Kind: kind, Input: "[" + field + "]"}}
 						if kind == "box" && len(groups) > 0 {
 							spec.Distribution.Whiskers = "tukey"
 						}
@@ -139,7 +141,7 @@ func TestRowsDistributionErrorParity(t *testing.T) {
 					}
 				}
 			}
-			compareMemory(t, tx, d, rows, q, qt.PlanOptions{})
+			compareStaged(t, tx, d, q, qt.PlanOptions{})
 			compareDirect(t, tx, d, q)
 		})
 	}
@@ -158,45 +160,42 @@ func TestRowsDistributionBoxSampleBudget(t *testing.T) {
 	}
 	defer tx.Rollback()
 	stageMemoryRows(t, tx, s, rows)
-	d := qt.SQLiteV2Dataset{Schema: s, SourceSQL: "SELECT * FROM memory", MaxPopulation: len(rows)}
-	q := qt.MetricQuery{Version: 2, Metrics: []qt.AggSpec{
-		{ID: "box", Distribution: &qt.MetricDistribution{Kind: "box", Input: "[n]"}},
-		{ID: "grouped", GroupBy: []string{"enum"}, Distribution: &qt.MetricDistribution{Kind: "box", Input: "[n]"}},
-		{ID: "histogram", Distribution: &qt.MetricDistribution{Kind: "histogram", Input: "[n]"}},
-	}}
-	compareMemory(t, tx, d, rows, q, qt.PlanOptions{})
+	d := qt.QueryDatasetV3{Dialect: "sqlite", Schema: s, SourceSQL: "SELECT * FROM memory", MaxPopulation: len(rows)}
+	q := metricsV3(nil, nil, 0, 0,
+		qt.AggSpec{ID: "box", Op: "count", Distribution: &qt.MetricDistribution{Kind: "box", Input: "[n]"}},
+		qt.AggSpec{ID: "grouped", GroupBy: []string{"enum"}, Op: "count", Distribution: &qt.MetricDistribution{Kind: "box", Input: "[n]"}},
+	)
+	compareStaged(t, tx, d, q, qt.PlanOptions{})
 	compareDirect(t, tx, d, q)
-	got, err := qt.ExecuteV2Rows(context.Background(), nil, d, rows, q, qt.PlanOptions{})
-	if err != nil || got.Metrics.Metrics[0].Buckets[0].Error != "resource_limit" || got.Metrics.Metrics[1].Buckets[0].Error != "" {
-		t.Fatal(got, err)
+	got := executeV3Tx(t, tx, d, q, qt.PlanOptions{})
+	// v3 checks MaxSamplesPerGroup (default 100000) before reducing and fails
+	// the over-budget metric; v2 reported resource_limit on its bucket.
+	if got.Metrics[0].Error != "The box distribution exceeded the 100,000-sample budget" || got.Metrics[1].Error != "" || got.Metrics[1].Buckets[0].Error != "" {
+		t.Fatal(mustJSON(t, got.Metrics))
 	}
 }
 
 func TestRowsDistributionFallbacks(t *testing.T) {
 	s := rowsSchema()
-	rows := rowsFixture()
-	d := qt.SQLiteV2Dataset{Schema: s}
-	for _, spec := range []qt.AggSpec{
-		{ID: "formula", Distribution: &qt.MetricDistribution{Kind: "box", Input: "[n]*2"}},
-		{ID: "shown", Scope: "shownRows", Distribution: &qt.MetricDistribution{Kind: "box", Input: "[n]"}},
-		{ID: "computed", GroupBy: []string{"enum"}, Distribution: &qt.MetricDistribution{Kind: "box", Input: "[n]"}, Where: []qt.WhereTerm{{Field: "@computed/x", Op: "=", Value: "1"}}},
-	} {
-		q := qt.MetricQuery{Version: 2, Limit: 10, Metrics: []qt.AggSpec{spec}}
-		if _, err := qt.ExecuteV2Rows(context.Background(), nil, d, rows, q, qt.PlanOptions{}); !errors.Is(err, qt.ErrRowsUnsupported) {
-			t.Fatal(spec.ID, err)
-		}
+	db := openRowsDB(t)
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
 	}
+	defer tx.Rollback()
+	stageMemoryRows(t, tx, s, rowsFixture())
+	d := qt.QueryDatasetV3{Dialect: "sqlite", Schema: s, SourceSQL: "SELECT * FROM memory"}
 	// Invalid clauses fail the metric, not the request.
-	q := qt.MetricQuery{Version: 2, Metrics: []qt.AggSpec{{ID: "text", Distribution: &qt.MetricDistribution{Kind: "box", Input: "[text]"}}}}
-	got, err := qt.ExecuteV2Rows(context.Background(), nil, d, rows, q, qt.PlanOptions{})
-	if err != nil || got.Metrics.Metrics[0].Error == "" {
+	q := metricsV3(nil, nil, 0, 0, qt.AggSpec{ID: "text", Op: "count", Distribution: &qt.MetricDistribution{Kind: "box", Input: "[text]"}})
+	got, err := d.ExecuteIn(context.Background(), tx, q, qt.PlanOptions{})
+	if err != nil || got.Metrics[0].Error == "" {
 		t.Fatal(got, err)
 	}
 }
 
 // compareDirect compares the direct SQLite distribution path with compiled
 // plans: "[field]*1" has the same samples and errors but is a formula.
-func compareDirect(tb testing.TB, tx *sql.Tx, d qt.SQLiteV2Dataset, q qt.MetricQuery) {
+func compareDirect(tb testing.TB, tx *sql.Tx, d qt.QueryDatasetV3, q qt.QueryRequestV3) {
 	tb.Helper()
 	compiled := q
 	compiled.Metrics = append([]qt.AggSpec{}, q.Metrics...)
@@ -207,8 +206,8 @@ func compareDirect(tb testing.TB, tx *sql.Tx, d qt.SQLiteV2Dataset, q qt.MetricQ
 			compiled.Metrics[i].Distribution = &distribution
 		}
 	}
-	got, ge := d.ExecuteV2In(context.Background(), tx, nil, &q, qt.PlanOptions{})
-	want, we := d.ExecuteV2In(context.Background(), tx, nil, &compiled, qt.PlanOptions{})
+	got, ge := d.ExecuteIn(context.Background(), tx, q, qt.PlanOptions{})
+	want, we := d.ExecuteIn(context.Background(), tx, compiled, qt.PlanOptions{})
 	if ge != nil || we != nil {
 		if fmt.Sprint(ge) != fmt.Sprint(we) {
 			tb.Fatalf("errors: direct %v compiled %v", ge, we)
@@ -225,23 +224,53 @@ func compareDirect(tb testing.TB, tx *sql.Tx, d qt.SQLiteV2Dataset, q qt.MetricQ
 func TestDirectDistributionScanAndFallback(t *testing.T) {
 	s := rowsSchema()
 	rows := rowsFixture()
-	db := openRowsDB(t)
+	log := &statementLog{}
+	db := hookedDB(t, log, "SELECT 1")
 	tx, err := db.Begin()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
 	stageMemoryRows(t, tx, s, rows)
-	d := qt.SQLiteV2Dataset{Schema: s, SourceSQL: "SELECT * FROM memory"}
-	q := qt.MetricQuery{Version: 2, Metrics: distributionSpecs()[:12]}
+	d := qt.QueryDatasetV3{Dialect: "sqlite", Schema: s, SourceSQL: "SELECT * FROM memory"}
+	q := metricsV3(nil, nil, 0, 0, distributionSpecs()[:12]...)
 	guards := sqliteCalls["qt_v2_field_error"]
-	before := guards.Load()
-	if _, err = d.ExecuteV2In(context.Background(), tx, nil, &q, qt.PlanOptions{}); err != nil {
-		t.Fatal(err)
+	// v3 also sends a population COUNT and a compiled sample-budget probe per
+	// distribution, which call field guards; attribute guard calls to the
+	// statement that ran them (the connection runs one statement at a time).
+	type statement struct {
+		sql    string
+		guards int64
+	}
+	var statements []statement
+	// execute returns the guard calls of each direct scan, and those of the
+	// statements after the last one (compiled fallback plans).
+	execute := func() (direct []int64, after int64) {
+		t.Helper()
+		statements = nil
+		log.reset(func(query string) error {
+			statements = append(statements, statement{query, guards.Load()})
+			return nil
+		})
+		if _, err := d.ExecuteIn(context.Background(), tx, q, qt.PlanOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		end := guards.Load()
+		log.reset(nil)
+		for i, s := range statements {
+			if strings.HasPrefix(s.sql, "WITH qt_direct_source") {
+				next := end
+				if i+1 < len(statements) {
+					next = statements[i+1].guards
+				}
+				direct, after = append(direct, next-s.guards), end-next
+			}
+		}
+		return direct, after
 	}
 	// Twelve metrics read the population once, natively, without guards.
-	if calls := guards.Load() - before; calls != 0 {
-		t.Fatal("direct distributions called field guards", calls)
+	if direct, after := execute(); len(direct) != 1 || direct[0] != 0 || after != 0 {
+		t.Fatal("direct distributions: scans and their guard calls", direct, after)
 	}
 	compareDirect(t, tx, d, q)
 	// Storage the reducers cannot read exactly retains compiled plans.
@@ -256,12 +285,9 @@ func TestDirectDistributionScanAndFallback(t *testing.T) {
 		if _, err = tx.Exec(update); err != nil {
 			t.Fatal(err)
 		}
-		before = guards.Load()
-		if _, err = d.ExecuteV2In(context.Background(), tx, nil, &q, qt.PlanOptions{}); err != nil {
-			t.Fatal(err)
-		}
-		if guards.Load() == before {
-			t.Fatal("fallback did not use compiled plans", update)
+		// The direct scan declines; compiled plans after it call guards.
+		if direct, after := execute(); len(direct) != 1 || after == 0 {
+			t.Fatal("fallback did not use compiled plans", update, direct, after)
 		}
 		compareDirect(t, tx, d, q)
 		if _, err = tx.Exec("ROLLBACK TO storage"); err != nil {
@@ -270,36 +296,32 @@ func TestDirectDistributionScanAndFallback(t *testing.T) {
 	}
 }
 
-// One native scan serves every direct distribution and, when proofs defer the
-// population count, also counts it.
+// One native scan serves every direct distribution. v3 counts the population
+// with its own statement first (v2's cached source proofs could defer it).
 func TestDirectDistributionSharedScan(t *testing.T) {
 	log := &statementLog{}
-	db, plain := crossFieldDataset(t, log)
-	d := withProofs(plain, "g1", &qt.SQLiteSourceProofs{})
+	db, d := crossFieldDataset(t, log)
 	where := []qt.WhereTerm{{Field: "n0", Op: ">", Value: "5"}}
 	var matching int64
 	if err := db.QueryRow("SELECT COUNT(*) FROM source WHERE tenant='allowed' AND n0>5").Scan(&matching); err != nil {
 		t.Fatal(err)
 	}
-	q := qt.MetricQuery{Version: 2, Profile: qt.SQLiteExpressionProfile, Where: where, Metrics: []qt.AggSpec{
-		{ID: "box", GroupBy: []string{"k"}, Distribution: &qt.MetricDistribution{Kind: "box", Input: "[n1]"}},
-		{ID: "histogram", Distribution: &qt.MetricDistribution{Kind: "histogram", Input: "[n2]"}},
-		{ID: "filtered", GroupBy: []string{"k"}, Where: []qt.WhereTerm{{Field: "n3", Op: "<", Value: "20"}}, Distribution: &qt.MetricDistribution{Kind: "box", Input: "[n1]", Whiskers: "tukey"}},
-	}}
-	// Warm the generation's whole-source proofs, which defer the count.
-	warm := proofQuery(true)
-	if _, err := d.ExecuteV2(context.Background(), db, nil, &warm, qt.PlanOptions{}); err != nil {
-		t.Fatal(err)
-	}
+	q := metricsV3(where, nil, 0, 0,
+		qt.AggSpec{ID: "box", GroupBy: []string{"k"}, Op: "count", Distribution: &qt.MetricDistribution{Kind: "box", Input: "[n1]"}},
+		qt.AggSpec{ID: "histogram", Op: "count", Distribution: &qt.MetricDistribution{Kind: "histogram", Input: "[n2]"}},
+		qt.AggSpec{ID: "filtered", GroupBy: []string{"k"}, Where: []qt.WhereTerm{{Field: "n3", Op: "<", Value: "20"}}, Op: "count", Distribution: &qt.MetricDistribution{Kind: "box", Input: "[n1]", Whiskers: "tukey"}},
+	)
 	log.reset(nil)
-	got, err := d.ExecuteV2(context.Background(), db, nil, &q, qt.PlanOptions{})
+	got, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if log.count("WITH qt_direct_source") != 1 || log.count(populationMarker) != 0 || log.count("WITH qt0") != 0 {
-		t.Fatal("expected one shared scan", log.seen)
+	// Besides the shared scan, v3 sends the population COUNT and one compiled
+	// sample-budget probe per distribution (v2 did neither); no other plans.
+	if log.count("WITH qt_direct_source") != 1 || log.count(populationMarker) != 1 || log.count("WITH qt0") != 1+len(q.Metrics) {
+		t.Fatal("expected one population count and one shared scan", strings.Join(log.seen, "\n---\n"))
 	}
-	for _, m := range got.Metrics.Metrics {
+	for _, m := range got.Metrics {
 		if m.Error != "" || m.ProcessedRows != matching || len(m.Buckets) == 0 || m.Buckets[0].Distribution == nil {
 			t.Fatal(m)
 		}

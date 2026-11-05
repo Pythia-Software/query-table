@@ -46,9 +46,9 @@ func literalTerm(c WhereClause) WhereTerm {
 	return WhereTerm{Field: c.Field, Op: c.Op, Value: c.Value, Negated: c.Negated}
 }
 
-func compileWithRelations(t *testing.T, p SQLitePredicateRelations, where ...WhereTerm) (SQLiteWhereResult, []string) {
+func compileWithRelations(t *testing.T, p SQLitePredicateRelations, where ...WhereTerm) (sqliteWhereResult, []string) {
 	t.Helper()
-	got, keys, err := compileSQLiteWhere(where, sqliteTestSchema(), SQLiteOptions{Now: time.Unix(0, 0)}, newSQLiteRelations(context.Background(), nil, p))
+	got, keys, err := compileSQLiteWhere(where, sqliteTestSchema(), sqliteOptions{Now: time.Unix(0, 0)}, newSQLiteRelations(context.Background(), nil, p))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestSQLitePredicateRelationsLeaveOrdinaryCompilationUnchanged(t *testing.T)
 		{Field: "text", Op: "contains", Value: "Needle", Negated: true},
 		{Any: []WhereClause{{Field: "text", Op: "starts_with", Value: "a"}, {All: []WhereClause{{Field: "n", Op: ">", Value: "2"}, {Field: "tags", Op: "includes", Value: "x"}}}}},
 	}
-	plain, err := CompileSQLiteWhere(where, sqliteTestSchema(), SQLiteOptions{Now: time.Unix(0, 0)})
+	plain, err := compileSQLiteWhereV1(where, sqliteTestSchema(), sqliteOptions{Now: time.Unix(0, 0)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestSQLitePredicateRelationsLeaveOrdinaryCompilationUnchanged(t *testing.T)
 	if !reflect.DeepEqual(got, plain) || len(keys) != 0 {
 		t.Fatalf("declined provider changed SQL:\n%#v\n%#v", got, plain)
 	}
-	none, _, err := compileSQLiteWhere(where, sqliteTestSchema(), SQLiteOptions{Now: time.Unix(0, 0)}, newSQLiteRelations(context.Background(), nil, nil))
+	none, _, err := compileSQLiteWhere(where, sqliteTestSchema(), sqliteOptions{Now: time.Unix(0, 0)}, newSQLiteRelations(context.Background(), nil, nil))
 	if err != nil || !reflect.DeepEqual(none, plain) {
 		t.Fatalf("nil provider changed SQL: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestSQLitePredicateRelationConsultation(t *testing.T) {
 	computed.Name = "@computed/x"
 	s.Fields["@computed/x"] = computed
 	for i := 0; i < 2; i++ {
-		if _, _, err := compileSQLiteWhere(where, s, SQLiteOptions{}, relations); err != nil {
+		if _, _, err := compileSQLiteWhere(where, s, sqliteOptions{}, relations); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -154,7 +154,7 @@ func TestSQLitePredicateRelationConsultation(t *testing.T) {
 
 	// Host failures fail the compilation and are not clause diagnostics.
 	failing := &relationProvider{err: errors.New("index offline")}
-	_, _, err := compileSQLiteWhere(where[2:], sqliteTestSchema(), SQLiteOptions{}, newSQLiteRelations(context.Background(), nil, failing))
+	_, _, err := compileSQLiteWhere(where[2:], sqliteTestSchema(), sqliteOptions{}, newSQLiteRelations(context.Background(), nil, failing))
 	var relationErr *sqliteRelationError
 	if !errors.As(err, &relationErr) || !strings.Contains(err.Error(), "index offline") {
 		t.Fatalf("provider error %v", err)

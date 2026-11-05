@@ -43,18 +43,15 @@ function mount(transport: Transport<Row>, query: QueryState = EMPTY_QUERY) {
   return { result, store };
 }
 
-it.each(["v2", "v3", "legacy"])("loads tables and bounded unsaved previews through %s", async protocol => {
-  const fetchRowsV2 = vi.fn<NonNullable<Transport<Row>["fetchRowsV2"]>>(async query => ({
-    version: 2, ...applyServer(query), computed: [], execution,
-  }));
-  const fetchQueryV3 = vi.fn<NonNullable<Transport<Row>["fetchQueryV3"]>>(async query => ({
-    version: 3, now: query.now, sourceTotal: rows.length,
-    ...applyServer(query.result), schema: { name: schema.name, idField: "id", fields: schema.fields.map(({ name, type }) => ({ name, type })) },
-    metrics: [], execution,
-  }));
-  const fetchRows = vi.fn<NonNullable<Transport<Row>["fetchRows"]>>(async query => applyServer(query));
-  const transport: Transport<Row> = protocol === "v2" ? { fetchRowsV2, fetchQueryV3, queryCapabilities: capabilities }
-    : protocol === "v3" ? { fetchQueryV3, queryCapabilities: capabilities } : { fetchRows };
+const v3Result = (query: Parameters<Transport<Row>["fetchQueryV3"]>[0], result: ComputedExecution = execution) => ({
+  version: 3 as const, now: query.now, sourceTotal: rows.length,
+  ...applyServer(query.result), schema: { name: schema.name, idField: "id", fields: schema.fields.map(({ name, type }) => ({ name, type })) },
+  metrics: [], execution: result,
+});
+
+it("loads tables and bounded unsaved previews through v3", async () => {
+  const fetchQueryV3 = vi.fn<Transport<Row>["fetchQueryV3"]>(async query => v3Result(query));
+  const transport: Transport<Row> = { fetchQueryV3, queryCapabilities: capabilities };
   const { result, store } = mount(transport, { ...EMPTY_QUERY, limit: 1, offset: 10,
     where: [{ field: "id", op: ">=", value: "1" }], orderBy: [{ field: "id", dir: "asc" }] });
   await settle(); await settle();
@@ -62,29 +59,27 @@ it.each(["v2", "v3", "legacy"])("loads tables and bounded unsaved previews throu
   expect(result.current.rows).toHaveLength(1);
   await act(async () => { await store.save(schema.name, { id: "saved", label: "Saved", expression: { language: "qt-expr", version: 1, source: "[other]" } }, null); });
   await settle();
-  fetchRowsV2.mockClear(); fetchQueryV3.mockClear(); fetchRows.mockClear();
+  fetchQueryV3.mockClear();
   const preview = await result.current.computed.preview("UPPER([@computed/saved])", 1001);
   expect(preview.processed).toBe(1000);
   expect(preview.total).toBe(1000);
   expect(preview.groups[0]?.result.value).toBe("INPUT1");
-  const requests = protocol === "v2" ? fetchRowsV2.mock.calls.map(([q]) => q)
-    : protocol === "v3" ? fetchQueryV3.mock.calls.map(([q]) => q.result) : fetchRows.mock.calls.map(([q]) => q);
+  const requests = fetchQueryV3.mock.calls.map(([q]) => q.result);
   expect(requests.map(({ offset, limit }) => [offset, limit])).toEqual([[0, 500], [500, 500]]);
   expect(requests.every(q => JSON.stringify(q.select) === '["id","other"]')).toBe(true);
   expect(requests.every(q => q.where[0] && "field" in q.where[0] && q.where[0].field === "id" && q.orderBy[0]?.field === "id")).toBe(true);
-  if (protocol === "v2") expect(fetchQueryV3).not.toHaveBeenCalled();
-  expect(JSON.stringify(requests)).not.toContain("UPPER");
+  expect(JSON.stringify(fetchQueryV3.mock.calls)).not.toContain("UPPER");
 });
 
 it("rejects cancelled and superseded previews when a transport ignores abort", async () => {
   let held = false;
   const pending: (() => void)[] = [];
   const signals: AbortSignal[] = [];
-  const fetchRowsV2: NonNullable<Transport<Row>["fetchRowsV2"]> = async (query, signal) => {
+  const fetchQueryV3: Transport<Row>["fetchQueryV3"] = async (query, signal) => {
     if (held) await new Promise<void>(resolve => { pending.push(resolve); signals.push(signal!); });
-    return { version: 2, ...applyServer(query), computed: [], execution };
+    return v3Result(query);
   };
-  const { result } = mount({ fetchRowsV2 }); await settle(); await settle(); held = true;
+  const { result } = mount({ fetchQueryV3, queryCapabilities: capabilities }); await settle(); await settle(); held = true;
   const first = result.current.computed.preview("[name]", 1);
   const rejected = expect(first).rejects.toMatchObject({ name: "AbortError" });
   const second = result.current.computed.preview("[other]", 1);
@@ -98,9 +93,9 @@ it("rejects cancelled and superseded previews when a transport ignores abort", a
 });
 
 it("rejects preview diagnostics and mismatched execution before local evaluation", async () => {
-  const transport: Transport<Row> = { fetchRowsV2: vi.fn<NonNullable<Transport<Row>["fetchRowsV2"]>>(async query => ({ version: 2,
-    ...applyServer(query), computed: [], execution: { ...execution, snapshot: "wrong" } })) };
-  await expect(fetchPreviewRows(transport, EMPTY_QUERY, schema, execution, [], 1, new AbortController().signal)).rejects.toThrow("identity changed");
+  const transport: Transport<Row> = { queryCapabilities: capabilities,
+    fetchQueryV3: vi.fn<Transport<Row>["fetchQueryV3"]>(async query => v3Result(query, { ...execution, snapshot: "wrong" })) };
+  await expect(fetchPreviewRows(transport, EMPTY_QUERY, schema, execution, [], 1, new AbortController().signal)).rejects.toThrow("mismatched");
   const invalid: Transport<Row> = { fetchQueryV3: vi.fn(), queryCapabilities: capabilities };
   await expect(fetchPreviewRows(invalid, { ...EMPTY_QUERY, where: [{ field: "missing", op: "=", value: "x" }] }, schema, execution, [], 1, new AbortController().signal)).rejects.toThrow("unsupported");
   expect(invalid.fetchQueryV3).not.toHaveBeenCalled();
@@ -110,11 +105,11 @@ it("previews grouped result inputs through V3 and honors its page limit", async 
   const grouping = { representative: null, keys: ["name"], summaries: [{ id: "num", op: "count" as const }], source: EMPTY_QUERY };
   const projected = createGroupingModel(schema).resultSchema(grouping.keys, grouping.summaries);
   const groupedRows = Array.from({ length: 3 }, (_, i) => ({ __qt_group_id__: `group${i}`, name: `name${i}`, num: i + 1 }));
-  const fetchQueryV3 = vi.fn<NonNullable<Transport<Row>["fetchQueryV3"]>>(async request => ({
+  const fetchQueryV3 = vi.fn<Transport<Row>["fetchQueryV3"]>(async request => ({
     version: 3, now: request.now, sourceTotal: 6, rows: groupedRows.slice(request.result.offset, request.result.offset + request.result.limit), total: 3,
     schema: { name: projected.name, idField: projected.idField, fields: projected.fields.map(({ name, type }) => ({ name, type })) }, metrics: [], execution,
   }));
-  const transport: Transport<Row> = { fetchRowsV2: vi.fn(), fetchQueryV3, queryCapabilities: { ...capabilities, maxRows: 2 } };
+  const transport: Transport<Row> = { fetchQueryV3, queryCapabilities: { ...capabilities, maxRows: 2 } };
   const { result } = mount(transport, { ...EMPTY_QUERY, grouping, select: [{ field: "name" }, { field: "num" }], limit: 2 });
   await settle(); await settle();
   expect(result.current.error).toBeNull();
@@ -126,7 +121,6 @@ it("previews grouped result inputs through V3 and honors its page limit", async 
   expect(fetchQueryV3.mock.calls.map(([request]) => [request.result.offset, request.result.limit])).toEqual([[0, 2], [2, 1]]);
   expect(fetchQueryV3.mock.calls.every(([request]) => request.grouping?.keys[0] === "name")).toBe(true);
   expect(new Set(fetchQueryV3.mock.calls.map(([request]) => request.now)).size).toBe(1);
-  expect(transport.fetchRowsV2).not.toHaveBeenCalled();
 });
 
 it("retains canonical computed sorting and rejects stale preview revisions", async () => {
@@ -135,16 +129,16 @@ it("retains canonical computed sorting and rejects stale preview revisions", asy
     "@computed/saved": { type: "text", select: true, sort: true, filter: true, group: true, measure: true },
   } };
   const query: QueryState = { ...EMPTY_QUERY, select: [{ field: "other" }], orderBy: [{ field: "@computed/saved", dir: "desc" }] };
-  const fetchRowsV2 = vi.fn<NonNullable<Transport<Row>["fetchRowsV2"]>>(async request => ({
-    version: 2, rows: [rows[0]!], total: 1, computed: [], execution: canonical,
+  const fetchQueryV3 = vi.fn<Transport<Row>["fetchQueryV3"]>(async request => ({
+    version: 3, now: request.now, sourceTotal: 1, rows: [rows[0]!], total: 1, metrics: [], execution: canonical,
+    schema: { name: schema.name, idField: "id", fields: schema.fields.map(({ name, type }) => ({ name, type })) },
   }));
-  await fetchPreviewRows({ fetchRowsV2 }, query, schema, canonical, [saved], 1, new AbortController().signal);
-  expect(fetchRowsV2.mock.calls[0]?.[0].orderBy).toEqual(query.orderBy);
-  expect(fetchRowsV2.mock.calls[0]?.[0].expectedRevisions).toEqual({ saved: "current" });
-  await expect(fetchPreviewRows({ fetchRowsV2 }, query, schema, canonical, [{ ...saved, revision: "new" }], 1, new AbortController().signal)).rejects.toThrow();
-  expect(fetchRowsV2).toHaveBeenCalledOnce();
-  const fetchRows = vi.fn();
-  await expect(fetchPreviewRows({ fetchRowsV2, fetchRows }, { ...query,
-    where: [{ field: "@computed/saved", op: "=", value: "x" }] }, schema, canonical, [saved], 1, new AbortController().signal)).rejects.toThrow();
-  expect(fetchRows).not.toHaveBeenCalled();
+  const transport: Transport<Row> = { fetchQueryV3, queryCapabilities: capabilities };
+  await fetchPreviewRows(transport, query, schema, canonical, [saved], 1, new AbortController().signal);
+  expect(fetchQueryV3.mock.calls[0]?.[0].result.orderBy).toEqual(query.orderBy);
+  expect(fetchQueryV3.mock.calls[0]?.[0].expectedRevisions).toEqual({ saved: "current" });
+  await expect(fetchPreviewRows(transport, query, schema, canonical, [{ ...saved, revision: "new" }], 1, new AbortController().signal)).rejects.toThrow("Computed definitions changed");
+  await expect(fetchPreviewRows(transport, { ...query, orderBy: [],
+    where: [{ field: "@computed/saved", op: "=", value: "x" }] }, schema, canonical, [{ ...saved, revision: "new" }], 1, new AbortController().signal)).rejects.toThrow("Computed definitions changed");
+  expect(fetchQueryV3).toHaveBeenCalledOnce();
 });

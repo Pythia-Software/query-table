@@ -13,7 +13,6 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -51,17 +50,8 @@ type demoServer struct {
 	completed, canceled atomic.Int64
 	snapshotError       error
 }
-type metricTiming struct {
-	ID       string `json:"id"`
-	SQLMS    int64  `json:"sqlMs"`
-	PlanMS   int64  `json:"planMs"`
-	Stages   int    `json:"stages"`
-	SQLBytes int    `json:"sqlBytes"`
-}
 type timing struct {
-	Metrics                           []metricTiming
 	DBDelayMS, SQLMS, ResponseDelayMS int64
-	Statements                        int
 }
 type handler func(context.Context, *sql.Tx, *http.Request, *timing) (any, error)
 
@@ -104,9 +94,7 @@ func main() {
 	must(s.newSnapshot(ctx))
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/postgres/bootstrap", s.bootstrap)
-	mux.Handle("POST /api/postgres/rows", s.withTransaction(s.rows))
-	mux.Handle("POST /api/postgres/metrics", s.withTransaction(s.metrics))
-	mux.Handle("POST /api/postgres/distinct", s.withTransaction(s.distinct))
+	mux.Handle("POST /api/postgres/query", s.withTransaction(s.query))
 	mux.Handle("/api/postgres/computed", s.computedHandler())
 	mux.Handle("/api/postgres/query-snapshots", qt.NewQuerySnapshotsHandler(qt.SQLQuerySnapshotStore{DB: db}, func(r *http.Request, name string, write bool) (string, error) {
 		if name != dataset {
@@ -179,8 +167,6 @@ func (s *demoServer) newSnapshot(ctx context.Context) error {
 		return err
 	}
 	columns := []qt.ComputedColumn{}
-	revisions := map[string]string{}
-	caps := map[string]any{}
 	for _, id := range ids {
 		c, e := resolver.ResolveComputed(ctx, id)
 		if e != nil {
@@ -188,25 +174,19 @@ func (s *demoServer) newSnapshot(ctx context.Context) error {
 			return e
 		}
 		columns = append(columns, c)
-		revisions[id] = c.Revision
 	}
-	groupable := map[string]bool{}
-	for _, id := range ids {
-		groupable[id] = true
+	description, err := s.dataset(columns).DescribeComputedPartialIn(ctx, tx, ids, qt.PlanOptions{Resolver: resolver})
+	if err != nil {
+		tx.Rollback()
+		return err
 	}
-	for _, c := range columns {
-		plan, e := qt.CompileComputedRows(ctx, qt.WireQuery{Select: []string{"@computed/" + c.ID}, Limit: 1}, s.schema, qt.PlanOptions{SourceSQL: sourceSQL, Resolver: resolver, ExpectedRevisions: revisions, ComputedGroupable: groupable})
-		cap := map[string]any{"type": "number", "select": false, "sort": false, "measure": false, "group": false}
-		if e == nil {
-			typ := plan.Columns[0].Type
-			if typ == "null" {
-				typ = "text"
-			}
-			cap = map[string]any{"type": typ, "select": true, "sort": true, "measure": true, "group": true}
-		} else {
-			cap["reason"] = e.Error()
-		}
-		caps["@computed/"+c.ID] = cap
+	revisions := description.Execution.ResolvedRevisions
+	caps := map[string]any{}
+	for name, capability := range description.Execution.Fields {
+		caps[name] = capability
+	}
+	for id, issue := range description.Diagnostics {
+		caps["@computed/"+id] = map[string]any{"type": "number", "select": false, "sort": false, "measure": false, "group": false, "reason": issue.Error()}
 	}
 	hash := hmac.New(sha256.New, s.secret)
 	data, _ := json.Marshal(revisions)
@@ -228,12 +208,19 @@ func (s *demoServer) newSnapshot(ctx context.Context) error {
 func (s *demoServer) execution() map[string]any {
 	return map[string]any{"profile": qt.ServerExpressionProfile, "planToken": s.token, "snapshot": s.snapshot, "resolvedRevisions": s.revisions, "fields": s.capabilities}
 }
-func (s *demoServer) options(tx *sql.Tx) qt.PlanOptions {
+
+// One demo dataset: the library executes every v3 request against the source,
+// including the computed definitions of the current snapshot.
+func (s *demoServer) dataset(columns []qt.ComputedColumn) qt.QueryDatasetV3 {
 	groups := map[string]bool{}
-	for _, c := range s.columns {
+	for _, c := range columns {
 		groups[c.ID] = true
 	}
-	return qt.PlanOptions{SourceSQL: sourceSQL, Resolver: qt.SQLComputedDefinitionResolver{Tx: tx, Scope: scope, Dataset: dataset}, Now: s.reference, Identity: dataset + ":" + s.snapshot, ComputedGroupable: groups,
+	return qt.QueryDatasetV3{Schema: s.schema, SourceSQL: sourceSQL, Scope: scope, Dataset: dataset, Dialect: "postgres",
+		ComputedGroupable: groups, MaxRows: 1000, MaxGroups: 10000, MaxPopulation: 2000000, MaxSamplesPerGroup: 1000000}
+}
+func (s *demoServer) options(tx *sql.Tx) qt.PlanOptions {
+	return qt.PlanOptions{Resolver: qt.SQLComputedDefinitionResolver{Tx: tx, Scope: scope, Dataset: dataset}, Now: s.reference, Identity: dataset + ":" + s.snapshot,
 		ValidateSnapshot: func(ctx context.Context, token string) error {
 			if token != s.snapshot {
 				return errors.New("snapshot expired; reload the demo connection")
@@ -268,7 +255,7 @@ func (s *demoServer) bootstrap(w http.ResponseWriter, r *http.Request) {
 	defer s.mu.RUnlock()
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"dataset": dataset, "rows": s.rowCount, "bytes": s.bytes, "postgresVersion": s.version, "execution": s.execution(), "columns": s.columns,
-		"completed": s.completed.Load(), "canceled": s.canceled.Load(), "maxRows": 1000, "maxGroups": 10000, "profile": qt.ServerExpressionProfile})
+		"completed": s.completed.Load(), "canceled": s.canceled.Load(), "capabilities": s.dataset(s.columns).Capabilities()})
 }
 func delayHeader(r *http.Request, name string) (int64, error) {
 	v := r.Header.Get(name)
@@ -356,7 +343,10 @@ func (s *demoServer) withTransaction(run handler) http.Handler {
 			writeError(w, errors.New("snapshot refresh failed; reconnect to retry"), 503)
 			return
 		}
-		tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+		// Read-write only for the executor's temporary tables (grouped rows and
+		// calendar metrics). No request SQL is accepted, and it never commits
+		// changes to base records.
+		tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
 		if err != nil {
 			writeError(w, err, 503)
 			return
@@ -399,7 +389,6 @@ func (s *demoServer) withTransaction(run handler) http.Handler {
 		w.Header().Set("X-Demo-SQL-Ms", strconv.FormatInt(t.SQLMS, 10))
 		w.Header().Set("X-Demo-DB-Delay-Ms", strconv.FormatInt(t.DBDelayMS, 10))
 		w.Header().Set("X-Demo-Response-Delay-Ms", strconv.FormatInt(t.ResponseDelayMS, 10))
-		w.Header().Set("X-Demo-Statements", strconv.Itoa(t.Statements))
 		w.Header().Set("X-Demo-Server-Ms", strconv.FormatInt(time.Since(start).Milliseconds(), 10))
 		if err != nil {
 			log.Printf("%s: %v", r.URL.Path, err)
@@ -417,7 +406,7 @@ func (s *demoServer) withTransaction(run handler) http.Handler {
 		}
 		s.completed.Add(1)
 		_, _ = w.Write(payload)
-		log.Printf("%s: SQL %dms, DB delay %dms, response delay %dms, %d statements", r.URL.Path, t.SQLMS, t.DBDelayMS, t.ResponseDelayMS, t.Statements)
+		log.Printf("%s: SQL %dms, DB delay %dms, response delay %dms", r.URL.Path, t.SQLMS, t.DBDelayMS, t.ResponseDelayMS)
 	})
 }
 
@@ -431,297 +420,16 @@ func (s *demoServer) requestCanceled(w http.ResponseWriter, r *http.Request, ctx
 	writeError(w, ctx.Err(), http.StatusGatewayTimeout)
 }
 
-func queryMaps(ctx context.Context, tx *sql.Tx, query string, args []any, t *timing) ([]map[string]any, error) {
-	t.Statements++
-	rows, err := tx.QueryContext(ctx, query, args...)
+func (s *demoServer) query(ctx context.Context, tx *sql.Tx, r *http.Request, _ *timing) (any, error) {
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	names, err := rows.Columns()
+	q, err := qt.DecodeQueryRequestV3(body)
 	if err != nil {
 		return nil, err
 	}
-	out := []map[string]any{}
-	for rows.Next() {
-		values := make([]any, len(names))
-		ptrs := make([]any, len(names))
-		for i := range values {
-			ptrs[i] = &values[i]
-		}
-		if err = rows.Scan(ptrs...); err != nil {
-			return nil, err
-		}
-		item := map[string]any{}
-		for i, name := range names {
-			v := jsonValue(values[i])
-			if timestamp, ok := v.(time.Time); ok {
-				v = timestamp.UTC().Format(time.RFC3339Nano)
-			}
-			item[name] = v
-		}
-		out = append(out, item)
-		if len(out) > 10000 {
-			return nil, errors.New("more than 10000 returned groups; narrow the query")
-		}
-	}
-	return out, rows.Err()
-}
-func number(value any) int64 {
-	switch v := value.(type) {
-	case int64:
-		return v
-	case int32:
-		return int64(v)
-	case float64:
-		return int64(v)
-	case string:
-		n, _ := strconv.ParseInt(v, 10, 64)
-		return n
-	}
-	return 0
-}
-func (s *demoServer) count(ctx context.Context, tx *sql.Tx, where []qt.WhereTerm, t *timing) (int64, error) {
-	compiled, _, err := qt.CompileAt(qt.WireQuery{Where: where}, s.schema, 1, s.reference)
-	if err != nil {
-		return 0, err
-	}
-	query := "SELECT COUNT(*) AS count FROM qt_demo.runs r"
-	if compiled.WhereSQL != "" {
-		query += " WHERE " + compiled.WhereSQL
-	}
-	items, err := queryMaps(ctx, tx, query, compiled.Args, t)
-	if err != nil {
-		return 0, err
-	}
-	return number(items[0]["count"]), nil
-}
-func (s *demoServer) rows(ctx context.Context, tx *sql.Tx, r *http.Request, t *timing) (any, error) {
-	var q qt.ServerQueryV2
-	if e := readJSON(r, &q); e != nil {
-		return nil, e
-	}
-	if q.Limit < 1 || q.Limit > 1000 {
-		return nil, errors.New("row page limit must be 1..1000")
-	}
-	if !contains(q.Select, "id") {
-		q.Select = append(q.Select, "id")
-	}
-	plan, err := qt.CompileRowsV2(ctx, q, s.schema, s.options(tx))
-	if err != nil {
-		return nil, err
-	}
-	// Compile again with only reached bindings. MATERIALIZED safe-expression
-	// stages should not repeatedly carry unrelated wide source columns.
-	plan, err = qt.CompileRowsV2(ctx, q, narrowSchema(s.schema, plan.Dependencies, q.Where), s.options(tx))
-	if err != nil {
-		return nil, err
-	}
-	total, err := s.count(ctx, tx, q.Where, t)
-	if err != nil {
-		return nil, err
-	}
-	data, err := queryMaps(ctx, tx, plan.SQL, plan.Args, t)
-	if err != nil {
-		return nil, err
-	}
-	rows := []map[string]any{}
-	computed := []map[string]any{}
-	for _, raw := range data {
-		row := map[string]any{}
-		side := map[string]any{}
-		for _, c := range plan.Columns {
-			value := raw[c.ValueAlias]
-			e := raw[c.ErrorAlias]
-			if strings.HasPrefix(c.Field, "@computed/") {
-				v := map[string]any{"value": value}
-				if e != nil {
-					v["error"] = map[string]any{"code": e}
-				}
-				side[strings.TrimPrefix(c.Field, "@computed/")] = v
-			} else {
-				if e != nil {
-					return nil, fmt.Errorf("field %s: %v", c.Field, e)
-				}
-				row[c.Field] = value
-			}
-		}
-		rows = append(rows, row)
-		computed = append(computed, map[string]any{"id": row["id"], "values": side})
-	}
-	return map[string]any{"version": 2, "rows": rows, "total": total, "computed": computed, "execution": s.execution()}, nil
-}
-func contains(values []string, value string) bool {
-	for _, v := range values {
-		if v == value {
-			return true
-		}
-	}
-	return false
-}
-
-func (s *demoServer) metrics(ctx context.Context, tx *sql.Tx, r *http.Request, t *timing) (any, error) {
-	var q qt.MetricQuery
-	if err := readJSON(r, &q); err != nil {
-		return nil, err
-	}
-	if q.Limit < 1 || q.Limit > 1000 {
-		return nil, errors.New("row page limit must be 1..1000")
-	}
-	// Validate the entire request before splitting its plans into card-local errors.
-	envelope := q
-	envelope.Metrics = nil
-	if _, err := qt.CompileMetrics(ctx, envelope, s.schema, s.options(tx)); err != nil {
-		return nil, err
-	}
-	if len(q.Metrics) > 20 {
-		return nil, errors.New("at most 20 metrics")
-	}
-	ids := map[string]bool{}
-	for _, spec := range q.Metrics {
-		if spec.ID == "" || ids[spec.ID] {
-			return nil, errors.New("metric IDs must be nonempty and unique")
-		}
-		ids[spec.ID] = true
-	}
-	total, err := s.count(ctx, tx, q.Where, t)
-	if err != nil {
-		return nil, err
-	}
-	entries := []map[string]any{}
-	for _, spec := range q.Metrics {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		scopeName := spec.Scope
-		if scopeName == "" {
-			scopeName = "allMatching"
-		}
-		processed := total
-		if scopeName == "shownRows" {
-			processed = max(0, min(int64(q.Limit), total-int64(q.Offset)))
-		}
-		entry := map[string]any{"id": spec.ID, "scope": scopeName, "processedRows": processed, "coverage": "exact", "buckets": []any{}}
-		one := q
-		one.Metrics = []qt.AggSpec{spec}
-		if spec.GroupLimit == 0 {
-			one.Metrics[0].GroupLimit = 10000
-		}
-		if spec.Distribution != nil && spec.Distribution.Kind == "box" && processed > 1000000 {
-			entry["error"] = "Exact box plots are limited to 1,000,000 input rows in this demo; narrow the scope."
-			entries = append(entries, entry)
-			continue
-		}
-		planStart := time.Now()
-		plan, e := qt.CompileMetrics(ctx, one, s.schema, s.options(tx))
-		if e != nil {
-			entry["error"] = e.Error()
-			entries = append(entries, entry)
-			continue
-		}
-		plan, e = qt.CompileMetrics(ctx, one, narrowSchema(s.schema, plan.Metrics[0].Dependencies, append(append([]qt.WhereTerm{}, q.Where...), spec.Where...)), s.options(tx))
-		if e != nil {
-			entry["error"] = e.Error()
-			entries = append(entries, entry)
-			continue
-		}
-		if _, e = tx.ExecContext(ctx, "SAVEPOINT metric"); e != nil {
-			return nil, e
-		}
-		planMS := time.Since(planStart).Milliseconds()
-		sqlStart := time.Now()
-		data, e := queryMaps(ctx, tx, plan.Metrics[0].SQL, plan.Metrics[0].Args, t)
-		sqlMS := time.Since(sqlStart).Milliseconds()
-		t.Metrics = append(t.Metrics, metricTiming{spec.ID, sqlMS, planMS, len(plan.Metrics[0].Stages), len(plan.Metrics[0].SQL)})
-		log.Printf("metric %s: SQL %dms, planner %dms, %d stages, %d SQL bytes", spec.ID, sqlMS, planMS, len(plan.Metrics[0].Stages), len(plan.Metrics[0].SQL))
-		if e != nil {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			if _, rollbackErr := tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT metric"); rollbackErr != nil {
-				return nil, rollbackErr
-			}
-			entry["error"] = e.Error()
-			entries = append(entries, entry)
-			continue
-		}
-		if _, e = tx.ExecContext(ctx, "RELEASE SAVEPOINT metric"); e != nil {
-			return nil, e
-		}
-		buckets := []map[string]any{}
-		groupCount, hidden := int64(0), int64(0)
-		for _, raw := range data {
-			if spec.MinCount.Active() {
-				hidden = number(raw["hidden_groups"])
-				if raw["count"] == nil {
-					continue // every group was below minCount
-				}
-			}
-			groupCount = number(raw["group_count"])
-			keys := []any{}
-			for i := range spec.GroupBy {
-				keys = append(keys, raw[fmt.Sprintf("group%d", i)])
-			}
-			bucket := map[string]any{"keys": keys, "value": raw["value"], "count": raw["count"]}
-			for _, pair := range [][2]string{{"error", "error"}, {"y", "y"}, {"y_error", "yError"}, {"null_count", "nullCount"}, {"distribution", "distribution"}} {
-				if v, ok := raw[pair[0]]; ok && v != nil {
-					bucket[pair[1]] = v
-				}
-			}
-			buckets = append(buckets, bucket)
-		}
-		if groupCount+hidden > 10000 {
-			entry["error"] = "More than 10,000 groups; narrow the scope or choose coarser grouping."
-		} else {
-			entry["buckets"] = buckets
-			entry["groupCount"] = groupCount
-			if spec.MinCount.Active() {
-				entry["hiddenGroups"] = hidden
-			}
-		}
-		entries = append(entries, entry)
-	}
-	return map[string]any{"metrics": entries, "debug": map[string]any{"metrics": t.Metrics}}, nil
-}
-func (s *demoServer) distinct(ctx context.Context, tx *sql.Tx, r *http.Request, t *timing) (any, error) {
-	var q struct {
-		Field, Search string
-		Limit         int
-	}
-	if e := readJSON(r, &q); e != nil {
-		return nil, e
-	}
-	limit := q.Limit
-	if limit < 1 {
-		limit = 50
-	}
-	if limit > 100 {
-		limit = 100
-	}
-	compiled, _, err := qt.CompileDistinct(q.Field, q.Search, s.schema, 1)
-	if err != nil {
-		return nil, err
-	}
-	query := "SELECT DISTINCT " + compiled.Expr + " AS value FROM qt_demo.runs r"
-	if compiled.SearchSQL != "" {
-		query += " WHERE " + compiled.SearchSQL
-	}
-	query += " ORDER BY value NULLS LAST LIMIT " + strconv.Itoa(limit+1)
-	items, err := queryMaps(ctx, tx, query, compiled.Args, t)
-	if err != nil {
-		return nil, err
-	}
-	values := []string{}
-	for _, item := range items {
-		if v := item["value"]; v != nil {
-			values = append(values, fmt.Sprint(v))
-		}
-	}
-	hasMore := len(values) > limit
-	if hasMore {
-		values = values[:limit]
-	}
-	return map[string]any{"values": values, "hasMore": hasMore}, nil
+	return s.dataset(s.columns).ExecuteIn(ctx, tx, q, s.options(tx))
 }
 func (s *demoServer) computedHandler() http.Handler {
 	store := refreshingStore{server: s}
@@ -763,29 +471,6 @@ func (store refreshingStore) Save(ctx context.Context, scopeName, datasetName st
 		log.Printf("definition %s saved; snapshot refresh failed: %v", c.ID, err)
 	}
 	return c, nil
-}
-
-// Keep filter bindings (filter planning does not list them as expression
-// dependencies), plus the ID as a minimal source for COUNT(). The complete
-// allowlist is validated in the first compilation; source SQL stays trusted.
-func narrowSchema(schema qt.Schema, dependencies []string, where []qt.WhereTerm) qt.Schema {
-	names := map[string]bool{schema.IDField: true}
-	for _, name := range dependencies {
-		names[name] = true
-	}
-	for _, term := range where {
-		for _, predicate := range term.Predicates() {
-			names[predicate.Field] = true
-		}
-	}
-	fields := map[string]qt.FieldSpec{}
-	for name, field := range schema.Fields {
-		if names[name] {
-			fields[name] = field
-		}
-	}
-	schema.Fields = fields
-	return schema
 }
 
 func (s *demoServer) ensureSnapshot() error {

@@ -22,6 +22,8 @@ type statementHookConnector struct {
 	dsn        string
 	hook       func(string) error
 	beforeExec func(context.Context, driver.Conn, string) error
+	// args, when set, observes each query's arguments.
+	args func(string, []driver.NamedValue)
 }
 
 func (c statementHookConnector) Driver() driver.Driver { return c.base }
@@ -30,7 +32,7 @@ func (c statementHookConnector) Connect(context.Context) (driver.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	return statementHookConn{Conn: conn, ConnBeginTx: conn.(driver.ConnBeginTx), hook: c.hook, beforeExec: c.beforeExec}, nil
+	return statementHookConn{Conn: conn, ConnBeginTx: conn.(driver.ConnBeginTx), hook: c.hook, beforeExec: c.beforeExec, args: c.args}, nil
 }
 
 type statementHookConn struct {
@@ -38,6 +40,7 @@ type statementHookConn struct {
 	driver.ConnBeginTx
 	hook       func(string) error
 	beforeExec func(context.Context, driver.Conn, string) error
+	args       func(string, []driver.NamedValue)
 }
 
 func (c statementHookConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
@@ -55,6 +58,9 @@ func (c statementHookConn) QueryContext(ctx context.Context, query string, args 
 	if err := c.hook(query); err != nil {
 		return nil, err
 	}
+	if c.args != nil {
+		c.args(query, args)
+	}
 	return c.Conn.(driver.QueryerContext).QueryContext(ctx, query, args)
 }
 
@@ -62,6 +68,24 @@ type statementLog struct {
 	mu   sync.Mutex
 	seen []string
 	fail func(string) error
+	// queryArgs holds the arguments of the latest query with each text.
+	queryArgs map[string][]any
+}
+
+func (l *statementLog) recordArgs(query string, args []driver.NamedValue) {
+	values := make([]any, len(args))
+	for i, arg := range args {
+		values[i] = sql.Named(arg.Name, arg.Value)
+		if arg.Name == "" {
+			values[i] = arg.Value
+		}
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.queryArgs == nil {
+		l.queryArgs = map[string][]any{}
+	}
+	l.queryArgs[query] = values
 }
 
 func (l *statementLog) hook(query string) error {
@@ -119,7 +143,7 @@ func hookedDBWithExecHook(t *testing.T, log *statementLog, setup string, beforeE
 	t.Helper()
 	original, _ := setupV3(t)
 	dsn := filepath.ToSlash(filepath.Join(t.TempDir(), "hooked.db"))
-	db := sql.OpenDB(statementHookConnector{base: original.Driver(), dsn: dsn, hook: log.hook, beforeExec: beforeExec})
+	db := sql.OpenDB(statementHookConnector{base: original.Driver(), dsn: dsn, hook: log.hook, beforeExec: beforeExec, args: log.recordArgs})
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { db.Close() })
 	if _, err := db.Exec(setup); err != nil {
@@ -155,7 +179,7 @@ func representativeRequest(order ...qt.OrderBy) qt.QueryRequestV3 {
 		{ID: "row_at", Op: "row", Field: "at"},
 		{ID: "row_label", Op: "row", Field: "label"},
 	}, Representative: &qt.RepresentativeRow{OrderBy: order}}
-	q.Result = qt.WireQuery{Select: []string{"k", "num", "row_id", "row_n", "row_at", "row_label"}, OrderBy: qt.OrderBys{{Field: "k", Dir: "asc", Nulls: "last"}}, Limit: 10}
+	q.Result = qt.WireQuery{Select: []string{"k", "num", "row_id", "row_n", "row_at", "row_label"}, OrderBy: []qt.OrderBy{{Field: "k", Dir: "asc", Nulls: "last"}}, Limit: 10}
 	return q
 }
 
@@ -358,7 +382,7 @@ func TestV3StagedValuesAreNotRevalidated(t *testing.T) {
 		qt.SummaryColumn{ID: "row_at", Op: "row", Field: "at"},
 		qt.SummaryColumn{ID: "lazy", Op: "formula", Expression: "IF(TRUE,SUM([n]),SUM([n]/0))"},
 		qt.SummaryColumn{ID: "bad", Op: "formula", Expression: "SUM([n]/0)"})
-	q.Result = qt.WireQuery{Select: []string{"k", "num", "total", "first", "last", "row_at", "lazy", "bad", "example"}, Where: []qt.WhereTerm{{Field: "num", Op: ">=", Value: "1"}}, OrderBy: qt.OrderBys{{Field: "first", Dir: "desc", Nulls: "last"}}, Limit: 10}
+	q.Result = qt.WireQuery{Select: []string{"k", "num", "total", "first", "last", "row_at", "lazy", "bad", "example"}, Where: []qt.WhereTerm{{Field: "num", Op: ">=", Value: "1"}}, OrderBy: []qt.OrderBy{{Field: "first", Dir: "desc", Nulls: "last"}}, Limit: 10}
 	q.Metrics = []qt.AggSpec{{ID: "latest", Op: "max", Field: "first"}, {ID: "sum", Op: "sum", Field: "lazy", Scope: "shownRows"}, {ID: "bad", Op: "sum", Field: "bad"}, {ID: "by_first", Op: "count", GroupBy: []string{"first"}}}
 	calls := afterStaging(log)
 	out, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
@@ -388,7 +412,7 @@ func TestV3StagedValuesAreNotRevalidated(t *testing.T) {
 			t.Fatalf("row %d: got %#v want %#v", i, row, want[i])
 		}
 	}
-	metrics := map[string]qt.SQLiteMetricV2{}
+	metrics := map[string]qt.MetricResult{}
 	for _, m := range out.Metrics {
 		metrics[m.ID] = m
 	}
@@ -405,13 +429,13 @@ func TestV3StagedValuesAreNotRevalidated(t *testing.T) {
 		t.Fatalf("by_first: %#v", m)
 	}
 
-	// Ungrouped rows, sorting and metrics read the staged values directly too.
+	// Staged ungrouped rows, sorting and metrics read the staged values too.
 	q = groupedRequest()
 	q.Grouping = nil
-	q.Result = qt.WireQuery{Select: []string{"id", "at", "label"}, OrderBy: qt.OrderBys{{Field: "at", Dir: "desc", Nulls: "last"}}, Limit: 3}
+	q.Result = qt.WireQuery{Select: []string{"id", "at", "label"}, OrderBy: []qt.OrderBy{{Field: "at", Dir: "desc", Nulls: "last"}}, Limit: 3}
 	q.Metrics = []qt.AggSpec{{ID: "first", Op: "min", Field: "at", GroupBy: []string{"k"}}, {ID: "total", Op: "sum", Field: "n", Scope: "shownRows"}}
 	calls = afterStaging(log)
-	out, err = d.Execute(context.Background(), db, q, qt.PlanOptions{})
+	out, err = qt.TestOnlyStageUngrouped(d).Execute(context.Background(), db, q, qt.PlanOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -419,6 +443,10 @@ func TestV3StagedValuesAreNotRevalidated(t *testing.T) {
 		if n := calls(name); n != 0 {
 			t.Fatalf("ungrouped %s ran %d times after staging", name, n)
 		}
+	}
+	// Direct execution validates the source where it reads it, with equal results.
+	if direct, err := d.Execute(context.Background(), db, q, qt.PlanOptions{}); err != nil || !reflect.DeepEqual(direct, out) {
+		t.Fatalf("direct %#v err=%v, staged %#v", direct, err, out)
 	}
 	if got := []any{out.Rows[0]["id"], out.Rows[0]["at"], out.Rows[1]["id"], out.Rows[2]["id"]}; !reflect.DeepEqual(got, []any{"4", "2026-11-01T07:15:00.000Z", "3", "2"}) {
 		t.Fatal(out.Rows)
@@ -460,8 +488,8 @@ func TestV3StagedTextKeepsFormulaBound(t *testing.T) {
 	log := &statementLog{}
 	db, d := hookedV3(t, log, `('1','a',1,NULL,'tie'),('2','a',2,NULL,'`+longText+`'),('3','b',3,NULL,'tie')`)
 	q := groupedRequest()
-	q.Grouping = &qt.GroupingDefinition{Keys: []string{"label"}, Summaries: []qt.SummaryColumn{{ID: "num", Op: "count"}, {ID: "chosen", Op: "row", Field: "label"}}, Representative: &qt.RepresentativeRow{OrderBy: qt.OrderBys{{Field: "id", Dir: "asc"}}}}
-	q.Result = qt.WireQuery{Select: []string{"label", "num", "chosen"}, OrderBy: qt.OrderBys{{Field: "num", Dir: "desc"}}, Limit: 10}
+	q.Grouping = &qt.GroupingDefinition{Keys: []string{"label"}, Summaries: []qt.SummaryColumn{{ID: "num", Op: "count"}, {ID: "chosen", Op: "row", Field: "label"}}, Representative: &qt.RepresentativeRow{OrderBy: []qt.OrderBy{{Field: "id", Dir: "asc"}}}}
+	q.Result = qt.WireQuery{Select: []string{"label", "num", "chosen"}, OrderBy: []qt.OrderBy{{Field: "num", Dir: "desc"}}, Limit: 10}
 	out, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -470,8 +498,8 @@ func TestV3StagedTextKeepsFormulaBound(t *testing.T) {
 		!reflect.DeepEqual(out.Rows[1]["label"], map[string]any{"computedError": "text_range"}) || out.Rows[1]["chosen"] != longText {
 		t.Fatalf("long text group: %d rows, first %#v", len(out.Rows), out.Rows[0])
 	}
-	q.Grouping = &qt.GroupingDefinition{Keys: []string{"k"}, Summaries: []qt.SummaryColumn{{ID: "ties", Op: "formula", Expression: `SUM(IF([label]="tie",1,0))`}, {ID: "chosen", Op: "row", Field: "label"}}, Representative: &qt.RepresentativeRow{OrderBy: qt.OrderBys{{Field: "id", Dir: "desc"}}}}
-	q.Result = qt.WireQuery{Select: []string{"k", "ties", "chosen"}, OrderBy: qt.OrderBys{{Field: "k", Dir: "asc"}}, Limit: 10}
+	q.Grouping = &qt.GroupingDefinition{Keys: []string{"k"}, Summaries: []qt.SummaryColumn{{ID: "ties", Op: "formula", Expression: `SUM(IF([label]="tie",1,0))`}, {ID: "chosen", Op: "row", Field: "label"}}, Representative: &qt.RepresentativeRow{OrderBy: []qt.OrderBy{{Field: "id", Dir: "desc"}}}}
+	q.Result = qt.WireQuery{Select: []string{"k", "ties", "chosen"}, OrderBy: []qt.OrderBy{{Field: "k", Dir: "asc"}}, Limit: 10}
 	q.Metrics = []qt.AggSpec{{ID: "chosen", Op: "count", GroupBy: []string{"chosen"}}}
 	out, err = d.Execute(context.Background(), db, q, qt.PlanOptions{})
 	if err != nil {
@@ -535,7 +563,7 @@ func TestV3StagedSortsAndEnums(t *testing.T) {
 	db, d := hookedV3(t, &statementLog{}, v3Rows)
 	q := groupedRequest()
 	q.Grouping = nil
-	q.Result = qt.WireQuery{Select: []string{"id"}, Limit: 2, OrderBy: qt.OrderBys{{Field: "n", Dir: "desc"}}}
+	q.Result = qt.WireQuery{Select: []string{"id"}, Limit: 2, OrderBy: []qt.OrderBy{{Field: "n", Dir: "desc"}}}
 	plan, err := d.SourcePlan(context.Background(), q, qt.PlanOptions{})
 	if err != nil || !reflect.DeepEqual(plan.Fields, []string{"id", "n"}) {
 		t.Fatal(plan.Fields, err)
@@ -553,7 +581,7 @@ func TestV3StagedSortsAndEnums(t *testing.T) {
 	label := d.Schema.Fields["label"]
 	label.SQLiteSortField, label.SortExpr = "n", "r.n"
 	d.Schema.Fields["label"] = label
-	q.Result.OrderBy = qt.OrderBys{{Field: "label", Dir: "desc"}}
+	q.Result.OrderBy = []qt.OrderBy{{Field: "label", Dir: "desc"}}
 	out, err = d.Execute(context.Background(), db, q, qt.PlanOptions{})
 	if err != nil || out.Rows[0]["id"] != "4" || out.Rows[1]["id"] != "6" {
 		t.Fatal(out.Rows, err)
@@ -563,7 +591,7 @@ func TestV3StagedSortsAndEnums(t *testing.T) {
 	d.Schema.Fields["k"] = k
 	q = groupedRequest()
 	q.Grouping.Summaries = []qt.SummaryColumn{{ID: "chosen", Op: "row", Field: "k"}, {ID: "smallest", Op: "min", Field: "k"}, {ID: "total", Op: "sum", Field: "n"}}
-	q.Result = qt.WireQuery{Select: []string{"k", "chosen", "smallest"}, Where: []qt.WhereTerm{{Field: "smallest", Op: "=", Value: "a"}}, OrderBy: qt.OrderBys{{Field: "total", Dir: "desc"}}, Limit: 10}
+	q.Result = qt.WireQuery{Select: []string{"k", "chosen", "smallest"}, Where: []qt.WhereTerm{{Field: "smallest", Op: "=", Value: "a"}}, OrderBy: []qt.OrderBy{{Field: "total", Dir: "desc"}}, Limit: 10}
 	out, err = d.Execute(context.Background(), db, q, qt.PlanOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -615,7 +643,7 @@ var fusedSummaries = []qt.SummaryColumn{
 func fusionRequest(summaries []qt.SummaryColumn) qt.QueryRequestV3 {
 	q := groupedRequest()
 	q.Grouping = &qt.GroupingDefinition{Keys: []string{"k"}, Summaries: summaries}
-	q.Result = qt.WireQuery{OrderBy: qt.OrderBys{{Field: "k", Dir: "asc", Nulls: "last"}}, Limit: 20}
+	q.Result = qt.WireQuery{OrderBy: []qt.OrderBy{{Field: "k", Dir: "asc", Nulls: "last"}}, Limit: 20}
 	return q
 }
 
@@ -704,7 +732,16 @@ func TestV3FusedSummariesMatchIndependentExecution(t *testing.T) {
 	q.Grouping = nil
 	q.Result = qt.WireQuery{Select: []string{"id"}, Limit: 1}
 	for _, s := range fusedSummaries {
-		q.Metrics = append(q.Metrics, qt.AggSpec{ID: s.ID, Expression: qt.MetricExpression(qt.AggSpec{Op: s.Op, Field: s.Field, Expression: s.Expression}), GroupBy: []string{"k"}})
+		// Each summary as the formula the removed qt.MetricExpression built.
+		expression := s.Expression
+		if s.Op != "formula" {
+			argument := ""
+			if s.Field != "" {
+				argument = "[" + s.Field + "]"
+			}
+			expression = strings.ToUpper(s.Op) + "(" + argument + ")"
+		}
+		q.Metrics = append(q.Metrics, qt.AggSpec{ID: s.ID, Expression: expression, GroupBy: []string{"k"}})
 	}
 	metrics, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
 	if err != nil {
@@ -735,9 +772,9 @@ func TestV3FusedSummariesPreserveGroupedResults(t *testing.T) {
 		return qt.ComputedColumn{ID: id, Label: "Inverse", Revision: "1", Expression: qt.ComputedExpression{Language: "qt-expr", Version: 1, Source: "1/([m]-2)"}}, nil
 	})}
 	q := fusionRequest(append([]qt.SummaryColumn{{ID: "chosen", Op: "row", Field: "id"}, {ID: "chosen_at", Op: "row", Field: "at"}}, fusedSummaries...))
-	q.Grouping.Representative = &qt.RepresentativeRow{OrderBy: qt.OrderBys{{Field: "n", Dir: "desc", Nulls: "last"}}}
+	q.Grouping.Representative = &qt.RepresentativeRow{OrderBy: []qt.OrderBy{{Field: "n", Dir: "desc", Nulls: "last"}}}
 	q.Result = qt.WireQuery{Select: []string{"k", "rows", "sum", "chosen", "chosen_at", "first"}, Where: []qt.WhereTerm{{Field: "rows", Op: ">=", Value: "2"}},
-		OrderBy: qt.OrderBys{{Field: "max", Dir: "desc"}}, Limit: 2, Offset: 1}
+		OrderBy: []qt.OrderBy{{Field: "max", Dir: "desc"}}, Limit: 2, Offset: 1}
 	q.Metrics = []qt.AggSpec{{ID: "all", Op: "sum", Field: "rows"}, {ID: "shown", Op: "sum", Field: "rows", Scope: "shownRows"}, {ID: "by_low", Op: "max", Field: "both", GroupBy: []string{"low"}}}
 	out, reductions := fusedAndIndependent(t, log, db, d, q, qt.PlanOptions{})
 	if reductions != 1 || out.Total != 5 || len(out.Rows) != 2 {

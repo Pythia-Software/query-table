@@ -20,7 +20,7 @@ func TestPostgresUngroupedComputedErrorCells(t *testing.T) {
 	db, d := fixture(t)
 	q := groupedQuery()
 	q.Grouping = nil
-	q.Result = qt.WireQuery{Select: []string{"id", "@computed/inv"}, OrderBy: qt.OrderBys{{Field: "id", Dir: "asc"}}, Limit: 10}
+	q.Result = qt.WireQuery{Select: []string{"id", "@computed/inv"}, OrderBy: []qt.OrderBy{{Field: "id", Dir: "asc"}}, Limit: 10}
 	q.ExpectedRevisions = map[string]string{"inv": "1"}
 	o := qt.PlanOptions{Resolver: qt.DefinitionResolverFunc(func(_ context.Context, id string) (qt.ComputedColumn, error) {
 		return qt.ComputedColumn{ID: id, Label: "Inverse", Revision: "1", Expression: qt.ComputedExpression{Language: "qt-expr", Version: 1, Source: "1/([n]-1)"}}, nil
@@ -56,7 +56,7 @@ func TestPostgresGroupIdentityBatches(t *testing.T) {
 			d.MaxGroups = groups
 			q := groupedQuery()
 			q.Grouping = &qt.GroupingDefinition{Keys: []string{"n", "k"}}
-			q.Result = qt.WireQuery{Select: []string{"k", "n"}, OrderBy: qt.OrderBys{{Field: "n", Dir: "asc"}}, Limit: groups}
+			q.Result = qt.WireQuery{Select: []string{"k", "n"}, OrderBy: []qt.OrderBy{{Field: "n", Dir: "asc"}}, Limit: groups}
 			out, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
 			if err != nil {
 				t.Fatal(err)
@@ -129,14 +129,18 @@ func TestPostgresStagingBudgetsBeforeMaterialization(t *testing.T) {
 		d.MaxStagingBytes = 32
 		created = 0
 		var diag *qt.PlanDiagnostic
-		if _, err := d.Execute(context.Background(), db, q, qt.PlanOptions{}); !errors.As(err, &diag) || diag.Code != "resource_limit" {
+		if _, err := qt.TestOnlyStageUngrouped(d).Execute(context.Background(), db, q, qt.PlanOptions{}); !errors.As(err, &diag) || diag.Code != "resource_limit" {
 			t.Fatalf("oversized source: %v", err)
 		}
 		if created != 0 {
 			t.Fatalf("oversized source materialized %d temp tables", created)
 		}
+		// Direct ungrouped execution copies nothing, so no staging budget applies.
+		if out, err := d.Execute(context.Background(), db, q, qt.PlanOptions{}); err != nil || created != 0 || len(out.Rows) != 1 || out.Rows[0]["k"] != value {
+			t.Fatalf("direct oversized source: %#v created=%d err=%v", out, created, err)
+		}
 		d.MaxStagingBytes = int64(len(value) + 1)
-		out, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
+		out, err := qt.TestOnlyStageUngrouped(d).Execute(context.Background(), db, q, qt.PlanOptions{})
 		if err != nil || len(out.Rows) != 1 || out.Rows[0]["k"] != value {
 			t.Fatalf("exact byte boundary: %#v err=%v", out, err)
 		}
@@ -146,8 +150,11 @@ func TestPostgresStagingBudgetsBeforeMaterialization(t *testing.T) {
 	d.MaxStagingBytes = 1000
 	d.MaxPopulation = 1
 	created = 0
-	if _, err := d.Execute(context.Background(), db, q, qt.PlanOptions{}); err == nil || created != 0 {
+	if _, err := qt.TestOnlyStageUngrouped(d).Execute(context.Background(), db, q, qt.PlanOptions{}); err == nil || created != 0 {
 		t.Fatalf("population budget created=%d err=%v", created, err)
+	}
+	if out, err := d.Execute(context.Background(), db, q, qt.PlanOptions{}); err != nil || created != 0 || out.Total != 2 || out.SourceTotal != 2 {
+		t.Fatalf("direct population created=%d out=%#v err=%v", created, out, err)
 	}
 }
 
@@ -191,7 +198,7 @@ func TestFormulaGroupErrorsHaveDistinctIdentities(t *testing.T) {
 	}
 	q := groupedQuery()
 	q.ExpectedRevisions = map[string]string{"inv": "1"}
-	q.Grouping = &qt.GroupingDefinition{Keys: []string{"@computed/inv"}, Summaries: []qt.SummaryColumn{{ID: "num", Op: "count"}, {ID: "total", Op: "sum", Field: "n"}, {ID: "example", Op: "row", Field: "label"}}, Representative: &qt.RepresentativeRow{OrderBy: qt.OrderBys{{Field: "id", Dir: "asc"}}}}
+	q.Grouping = &qt.GroupingDefinition{Keys: []string{"@computed/inv"}, Summaries: []qt.SummaryColumn{{ID: "num", Op: "count"}, {ID: "total", Op: "sum", Field: "n"}, {ID: "example", Op: "row", Field: "label"}}, Representative: &qt.RepresentativeRow{OrderBy: []qt.OrderBy{{Field: "id", Dir: "asc"}}}}
 	q.Result = qt.WireQuery{Select: []string{"@computed/inv", "num", "total", "example"}, Limit: 10}
 	d.ComputedGroupable = map[string]bool{"inv": true}
 	options := qt.PlanOptions{Resolver: qt.DefinitionResolverFunc(func(_ context.Context, id string) (qt.ComputedColumn, error) {
@@ -237,7 +244,7 @@ func TestPostgresShownRowsMetricRetainsErrorBindings(t *testing.T) {
 	db, d := fixture(t)
 	q := groupedQuery()
 	q.Grouping = nil
-	q.Result = qt.WireQuery{Select: []string{"id", "n"}, OrderBy: qt.OrderBys{{Field: "id", Dir: "asc"}}, Limit: 2}
+	q.Result = qt.WireQuery{Select: []string{"id", "n"}, OrderBy: []qt.OrderBy{{Field: "id", Dir: "asc"}}, Limit: 2}
 	q.Metrics = []qt.AggSpec{{ID: "shown", Expression: "SUM([n])", Scope: "shownRows"}}
 	out, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
 	if err != nil || len(out.Metrics) != 1 || out.Metrics[0].Buckets[0].Value != float64(4) {
