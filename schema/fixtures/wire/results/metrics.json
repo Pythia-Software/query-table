@@ -1,0 +1,233 @@
+{
+  "sourceTotal": 1204,
+  "version": 3,
+  "now": 1772964000123,
+  "rows": [],
+  "total": 1204,
+  "schema": {
+    "name": "runs",
+    "idField": "id",
+    "fields": []
+  },
+  "metrics": [
+    {
+      "id": "monthly",
+      "buckets": [
+        {
+          "keys": [
+            "2026-01-01T00:00:00.000Z"
+          ],
+          "value": 1520.75,
+          "count": 40
+        },
+        {
+          "keys": [
+            "2026-02-01T00:00:00.000Z"
+          ],
+          "value": null,
+          "count": 0
+        }
+      ],
+      "scope": "allMatching",
+      "processedRows": 1204,
+      "groupCount": 6,
+      "coverage": "exact",
+      "hiddenGroups": 4
+    },
+    {
+      "id": "filtered",
+      "buckets": [
+        {
+          "keys": [
+            "done"
+          ],
+          "value": 30,
+          "count": 30
+        },
+        {
+          "keys": [
+            null
+          ],
+          "value": 2,
+          "count": 2
+        }
+      ],
+      "scope": "allMatching",
+      "processedRows": 1204,
+      "groupCount": 7,
+      "coverage": "exact",
+      "hiddenGroups": 1,
+      "other": {
+        "keys": [],
+        "value": 12,
+        "count": 12
+      }
+    },
+    {
+      "id": "weekday",
+      "buckets": [
+        {
+          "keys": [
+            1
+          ],
+          "value": 100,
+          "count": 100
+        },
+        {
+          "keys": [
+            7
+          ],
+          "value": 0,
+          "count": 0
+        }
+      ],
+      "scope": "allMatching",
+      "processedRows": 1204,
+      "groupCount": 7
+    },
+    {
+      "id": "summed",
+      "buckets": [
+        {
+          "keys": [
+            "done",
+            true
+          ],
+          "value": 0,
+          "count": 3,
+          "error": "Average of no numeric values."
+        }
+      ],
+      "scope": "allMatching",
+      "processedRows": 1204,
+      "groupCount": 1
+    },
+    {
+      "id": "broken",
+      "buckets": [],
+      "scope": "allMatching",
+      "processedRows": 0,
+      "groupCount": 0,
+      "error": "Field secret cannot be measured with sum."
+    },
+    {
+      "id": "box",
+      "buckets": [
+        {
+          "distribution": {
+            "kind": "box",
+            "summary": {
+              "n": 5,
+              "min": 1,
+              "q1": 2,
+              "median": 3,
+              "q3": 4,
+              "max": 40,
+              "mean": 10,
+              "low": 1,
+              "high": 4,
+              "outliers": [
+                40
+              ],
+              "outlierCount": 1,
+              "whiskers": "tukey",
+              "method": "exact-linear"
+            }
+          },
+          "nullCount": 2,
+          "inputErrorCount": 1,
+          "keys": [
+            "done"
+          ],
+          "value": null,
+          "count": 8
+        },
+        {
+          "distribution": {
+            "kind": "box",
+            "summary": null
+          },
+          "nullCount": 0,
+          "inputErrorCount": 0,
+          "keys": [
+            "new"
+          ],
+          "value": null,
+          "count": 0
+        }
+      ],
+      "scope": "shownRows",
+      "processedRows": 25,
+      "groupCount": 2,
+      "coverage": "partial"
+    },
+    {
+      "id": "histogram",
+      "buckets": [
+        {
+          "distribution": {
+            "kind": "histogram",
+            "edges": [
+              0,
+              10,
+              20,
+              30
+            ],
+            "counts": [
+              4,
+              0,
+              2
+            ],
+            "n": 6
+          },
+          "nullCount": 1,
+          "keys": [],
+          "value": null,
+          "count": 7
+        }
+      ],
+      "scope": "allMatching",
+      "processedRows": 1204,
+      "groupCount": 1
+    },
+    {
+      "id": "scatter",
+      "buckets": [
+        {
+          "keys": [
+            "a"
+          ],
+          "value": 120.5,
+          "count": 3,
+          "y": 3
+        },
+        {
+          "keys": [
+            "b"
+          ],
+          "value": 4,
+          "count": 1,
+          "y": 1,
+          "yError": "Division by zero."
+        },
+        {
+          "keys": [
+            "c"
+          ],
+          "value": null,
+          "count": 0,
+          "y": null
+        }
+      ],
+      "scope": "allMatching",
+      "processedRows": 1204,
+      "groupCount": 3
+    }
+  ],
+  "execution": {
+    "profile": "qt-fixture-v1",
+    "planToken": "",
+    "resolvedRevisions": {},
+    "fields": {}
+  }
+}

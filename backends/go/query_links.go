@@ -96,13 +96,6 @@ type LinkQuery struct {
 	HostState *HostQueryState `json:"hostState,omitempty"`
 }
 
-// HostQueryState is QueryState.hostState: named lists of strings a host
-// interprets itself. Query Table carries it through links unchanged.
-type HostQueryState struct {
-	Version int                 `json:"version"`
-	Params  map[string][]string `json:"params"`
-}
-
 // EncodeQueryLink is encodeQuery: it normalizes q, packs it into the compact
 // v2 wire form and returns a "2j." (base64url JSON) or "2d." (base64url raw
 // DEFLATE) token, whichever is shorter. decodeQueryStrict and DecodeQueryLink

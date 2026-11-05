@@ -1,0 +1,60 @@
+{
+  "version": 3,
+  "profile": "qt-fixture-v1",
+  "now": 1772964000123,
+  "expectedRevisions": {},
+  "source": {
+    "select": [],
+    "where": [],
+    "orderBy": [],
+    "limit": 1,
+    "offset": 0
+  },
+  "result": {
+    "select": [],
+    "where": [],
+    "orderBy": [],
+    "limit": 1,
+    "offset": 0
+  },
+  "rows": false,
+  "metrics": [
+    {
+      "id": "amount:distinct",
+      "op": "count_distinct",
+      "field": "amount",
+      "groupBy": []
+    },
+    {
+      "id": "amount:min",
+      "op": "min",
+      "field": "amount",
+      "groupBy": []
+    },
+    {
+      "id": "amount:max",
+      "op": "max",
+      "field": "amount",
+      "groupBy": []
+    },
+    {
+      "id": "name:distinct",
+      "op": "count_distinct",
+      "field": "name",
+      "groupBy": []
+    },
+    {
+      "id": "name:min",
+      "op": "min",
+      "field": "name",
+      "groupBy": []
+    },
+    {
+      "id": "name:max",
+      "op": "max",
+      "field": "name",
+      "groupBy": []
+    }
+  ],
+  "diagnostics": []
+}

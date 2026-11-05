@@ -221,24 +221,7 @@ export function groupPreview(
   };
 }
 
-/** Server-issued capabilities are hints for client planning, never authorization. */
-export interface ComputedFieldCapabilities {
-
-  /** Host-approved canonical predicates; omitted retains the closed default. */
-  filter?: boolean;
-  type: import('./schema').FieldType;
-  select: boolean;
-  sort: boolean;
-  measure: boolean;
-  group: boolean;
-  reason?: string;
-}
-export interface ComputedExecution {
-  profile: string;
-  planToken: string;
-  resolvedRevisions: Record<string,string>;
-  fields: Record<string,ComputedFieldCapabilities>;
-  fingerprint?: string;
-  snapshot?: string;
-}
+/** Server-issued capabilities are hints for client planning, never
+ * authorization. The execution envelope is generated from the wire schema. */
+export type { ComputedFieldCapabilities, ComputedExecution } from "./wire.generated";
 export type RowComputedValues = Record<string,{value: import('./metricTypes').MetricValue; error?: {code:string}}>;

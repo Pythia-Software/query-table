@@ -1,4 +1,4 @@
-import type { MetricKey, MetricValue, MetricScope, MetricDistributionResult, MetricHistogramBin } from "./metricTypes";
+import type { MetricValue, MetricHistogramBin } from "./metricTypes";
 import { deflateSync, Inflate } from "fflate";
 import { createSetFilter, readSetFilter } from "./setFilter";
 // encode.ts — URL serialization + the server-bound query subset.
@@ -21,7 +21,7 @@ import { createSetFilter, readSetFilter } from "./setFilter";
 
 import { EMPTY_QUERY, MAX_QUERY_TOKEN_LENGTH, normalizeQueryState, parseHostQueryState, predicatesOf, suppliedPredicateCount } from "./query";
 import { stripSetFilter } from "./setFilter";
-import type { QueryState, WhereTerm, OrderByClause, SelectColumn, AggregationClause, SetFilterMode, HostQueryState } from "./query";
+import type { QueryState, WhereTerm, OrderByClause, SelectColumn, AggregationClause, SetFilterMode } from "./query";
 import type { FieldSchema, FieldDef } from "./schema";
 import type { CellDisplay } from "./cellDisplay";
 import { indexFields, isFilterable, isPushdownFilter, isSortable, resolveFieldName, selectedFields } from "./schema";
@@ -281,22 +281,11 @@ function normalizeOrderBy(o: CompactQuery["o"]): OrderByClause[] {
 
 // ---- server-bound subset --------------------------------------------------
 
-/** The backend request derived from a QueryState + its schema. Mirrors the Go
- *  `WireQuery`. View-only state (column widths) is intentionally absent. */
-export interface ServerQuery {
-  /** field names to return — visible columns ∪ fields referenced by where/orderBy. */
-  select: string[];
-  /** only terms whose every predicate is on a pushdown-filterable field. */
-  where: WhereTerm[];
-  /** only terms on server-sortable fields, with `field` already remapped to the
-   *  field's server sort key (FieldDef.sort.field) when set. */
-  orderBy: OrderByClause[];
-  limit: number;
-  offset: number;
-  /** The table's host-owned state when `hostQuery` is configured; hosts run
-   *  their own clauses from it. Query Table does not interpret it. */
-  hostState?: HostQueryState;
-}
+/** The backend request stage derived from a QueryState + its schema (the Go
+ *  `WireQuery`), generated from schema/query-wire.schema.json. View-only state
+ *  (column widths) is intentionally absent. */
+export type { ServerQuery } from "./wire.generated";
+import type { ServerQuery, MetricBucketV3, MetricResultV3 } from "./wire.generated";
 
 /** Project a QueryState into the server request, dropping client-only filters,
  *  client-only sorts, and remapping sort fields through `sort.field`. */
@@ -362,17 +351,10 @@ function termIsPushdown<Row>(
 
 // ---- metric results --------------------------------------------------------
 
-/** One group's result. `keys` has one entry per AggregationClause.groupBy field,
- *  in axis order (`[]` for a grand total); a null key is the NULL/empty bucket. */
-export interface AggregationBucket {
-  keys: MetricKey[];
-  error?: string;
-  y?: MetricValue;
-  yError?: string;
+/** One group's result: the wire bucket (`MetricBucketV3`) plus state the
+ *  client derives after a transport returns. */
+export interface AggregationBucket extends MetricBucketV3 {
   components?: {expression:string; value:MetricValue}[];
-  nullCount?: number;
-  inputErrorCount?: number;
-  distribution?: MetricDistributionResult;
   /** Client-side only: set by the metric UI when one histogram bin of this
    *  cohort is inspected (`count`/`value` are then the bin's count). Never part
    *  of a transport result. */
@@ -383,28 +365,10 @@ export interface AggregationBucket {
   /** Occurrences summarised by a cyclic slot (`dateGrouping.occurrence`):
    *  those with a value, the samples of its mean and box. */
   occurrences?: number;
-  /** The metric: a number for count/sum/avg, or the column's value for min/max
-   *  (which may be a string for text/datetime). null when undefined (e.g. avg of
-   *  an all-null column). */
-  value: MetricValue;
-  /** COUNT(*) of rows in the group — always present, even when `value` isn't a
-   *  count, so the panel can show group sizes / shares. */
-  count: number;
 }
 
-export interface AggregationResultEntry {
-  /** Exact omitted additive quantity; unavailable for ratios/averages/distinct. */
+export interface AggregationResultEntry extends MetricResultV3 {
   other?: AggregationBucket;
-  error?: string;
-  scope?: MetricScope;
-  processedRows?: number;
-  groupCount?: number;
-  coverage?: "exact" | "partial";
-  /** Groups removed by AggregationClause.minCount (present whenever it is set).
-   *  They are not part of `groupCount`, `buckets` or `other`. */
-  hiddenGroups?: number;
-  /** Echoes AggregationClause.id. */
-  id: string;
   buckets: AggregationBucket[];
 }
 

@@ -24,6 +24,7 @@ struct QueryTableChecks {
       print("PASS \(message)")
     }
     try await RelativeTimeCheck.run(check: check)
+    try WireFixtureCheck.run(check: check)
     let schema = FieldSchema(
       name: "checks", idField: "id",
       fields: [
@@ -85,6 +86,21 @@ struct QueryTableChecks {
     )
     try check(
       QueryState.decodeToken(try query.encodedToken()) == query, "Compact query token round trip")
+    // (status = PASS AND amount > 10) OR name = Beta selects rows 1 and 2.
+    let conjunctions = QueryState(whereTerms: [
+      .group(OrGroup(any: [
+        .all(WhereConjunction(all: [
+          .init(field: "status", op: "=", value: "PASS"), .init(field: "amount", op: ">", value: "10"),
+        ])),
+        .literal(.init(field: "name", op: "=", value: "Beta")),
+      ]))
+    ])
+    let branchToken = QueryState.decodeToken(try conjunctions.encodedToken())
+    let restoredRows = try await local.rows(branchToken.serverQuery(schema: schema))
+    try check(
+      branchToken.whereTerms == conjunctions.whereTerms
+        && restoredRows.rows.map { $0["id"] } == [.number(1), .number(2)],
+      "Query tokens keep OR groups with AND branches")
     let server = query.serverQuery(schema: schema)
     try check(server.select == ["id", "name"], "Projection retains stable row ID")
     let first = try await local.rows(server)
@@ -98,6 +114,16 @@ struct QueryTableChecks {
     try check(
       negated.rows.count == 1 && negated.rows[0]["id"] == .number(1),
       "Negation excludes NULL values")
+    let branches = WhereTerm.group(OrGroup(any: [
+      .all(WhereConjunction(all: [
+        .init(field: "status", op: "=", value: "PASS"), .init(field: "amount", op: ">", value: "30"),
+      ])),
+      .literal(.init(field: "name", op: "=", value: "Beta")),
+    ]))
+    let branched = try await local.rows(.init(whereTerms: [branches]))
+    try check(
+      branched.rows.map { $0["id"] } == [.number(2)],
+      "OR of AND branches matches a row only when every literal of one branch matches")
     let longerNames = try await local.rows(.init(whereTerms: [
       .predicate(.init(field: "name", op: "length_gt", value: "4"))
     ]))
@@ -176,6 +202,30 @@ struct QueryTableChecks {
     try check(tightLookup.source.limit == 1, "Row lookup stays within a one-row budget")
     let metrics = try await local.metrics([.init(id: "total", op: "sum", field: "amount")])
     try check(metrics.first?.buckets.first?.value == .number(60), "Metric covers full dataset")
+    var groupedRequest = QueryRequestV3(
+      profile: local.queryCapabilities.profile, now: 0, source: ServerQuery(limit: 5))
+    groupedRequest.grouping = GroupingDefinition(keys: [.field("status")], summaries: [])
+    var groupedRefusal: Error?
+    do { _ = try await local.fetchQueryV3(groupedRequest) } catch { groupedRefusal = error }
+    try check(groupedRefusal != nil, "The local transport refuses grouped requests instead of returning rows")
+    var emptyBranch: Error?
+    do {
+      _ = try await local.fetchQueryV3(QueryRequestV3(
+        profile: local.queryCapabilities.profile, now: 0,
+        source: ServerQuery(whereTerms: [.group(OrGroup(any: [.all(WhereConjunction(all: [])), .literal(.init(field: "name", op: "=", value: "Alpha"))]))], limit: 5)))
+    } catch { emptyBranch = error }
+    try check(emptyBranch != nil, "An empty conjunction is refused instead of matching every row")
+    let emptyWhere = MetricSpecV3(id: "rows", op: "count", groupBy: [], whereTerms: [])
+    let plainMetric = try await local.fetchQueryV3(QueryRequestV3(
+      profile: local.queryCapabilities.profile, now: 0, source: ServerQuery(limit: 1), rows: false, metrics: [emptyWhere]))
+    try check(plainMetric.metrics.first?.buckets.first?.count == rows.count, "An empty metric filter runs as a plain metric")
+    let lenient = try JSONDecoder().decode(
+      AggregationBucket.self, from: Data(#"{"keys":[],"count":2}"#.utf8))
+    let envelope = try JSONDecoder().decode(
+      QueryExecutionV3.self, from: Data(#"{"profile":"p","resolvedRevisions":{},"fields":{}}"#.utf8))
+    try check(
+      lenient.value == .null && envelope.planToken == "",
+      "An omitted bucket value or plan token decodes as before")
     let lookup = QueryRequestV3.rowLookup(
       id: .number(2), select: ["name"], schema: schema, capabilities: local.queryCapabilities)
     let found = try await local.fetchQueryV3(lookup)
@@ -243,6 +293,15 @@ struct QueryTableChecks {
     try await waitUntil { !controller.isLoading }
     try check(
       controller.rows.count == 3 && controller.error == nil, "Controller fetches through adapter")
+    controller.edit { $0.whereTerms = [branches, .predicate(.init(field: "name", op: "=", value: "Alpha"))] }
+    controller.groupFilter(from: 1, with: 0)
+    controller.groupFilter(from: 0, with: 1)
+    controller.ungroupFilter(at: 0)
+    try check(
+      controller.query.whereTerms.first == branches && controller.query.whereTerms.count == 2,
+      "The editor never flattens OR groups with AND branches")
+    controller.edit { $0.whereTerms = [] }
+    try await waitUntil { !controller.isLoading }
     controller.addFilter(field: "status", value: "PASS")
     try await waitUntil { !controller.isLoading }
     try check(

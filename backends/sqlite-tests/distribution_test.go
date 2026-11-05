@@ -54,17 +54,17 @@ func TestSQLiteHistogramDistribution(t *testing.T) {
 	m := runMetric(t, db, d, q)
 	for _, b := range m.Buckets {
 		h := b.Distribution.(*qt.MetricHistogramDistribution)
-		if !reflect.DeepEqual(h.Edges, []float64{2, 4, 6}) {
+		if !reflect.DeepEqual([]float64(h.Edges), []float64{2, 4, 6}) {
 			t.Fatal(h)
 		}
-		if b.Keys[0] == true && !reflect.DeepEqual(h.Counts, []int64{1, 1}) || b.Keys[0] == false && !reflect.DeepEqual(h.Counts, []int64{0, 1}) || b.Keys[0] == nil && !reflect.DeepEqual(h.Counts, []int64{0, 0}) {
+		if b.Keys[0] == true && !reflect.DeepEqual([]int64(h.Counts), []int64{1, 1}) || b.Keys[0] == false && !reflect.DeepEqual([]int64(h.Counts), []int64{0, 1}) || b.Keys[0] == nil && !reflect.DeepEqual([]int64(h.Counts), []int64{0, 0}) {
 			t.Fatal(b)
 		}
 	}
 	q.Metrics[0].GroupLimit = 1
 	q.Metrics[0].Sort = []qt.MetricSort{{Key: "group0", Dir: "asc"}}
 	m = runMetric(t, db, d, q)
-	if m.GroupCount != 3 || m.Buckets[0].Keys[0] != false || !reflect.DeepEqual(m.Buckets[0].Distribution.(*qt.MetricHistogramDistribution).Edges, []float64{2, 4, 6}) {
+	if m.GroupCount != 3 || m.Buckets[0].Keys[0] != false || !reflect.DeepEqual([]float64(m.Buckets[0].Distribution.(*qt.MetricHistogramDistribution).Edges), []float64{2, 4, 6}) {
 		t.Fatal(m)
 	}
 	q = distributionQuery("histogram", "[n]")
@@ -75,7 +75,7 @@ func TestSQLiteHistogramDistribution(t *testing.T) {
 	q.Metrics[0].Distribution.Bins = 2
 	m = runMetric(t, db, d, q)
 	h := m.Buckets[0].Distribution.(*qt.MetricHistogramDistribution)
-	if !reflect.DeepEqual(h.Edges, []float64{2, 3, 4}) || !reflect.DeepEqual(h.Counts, []int64{1, 1}) || m.ProcessedRows != 2 {
+	if !reflect.DeepEqual([]float64(h.Edges), []float64{2, 3, 4}) || !reflect.DeepEqual([]int64(h.Counts), []int64{1, 1}) || m.ProcessedRows != 2 {
 		t.Fatal(m)
 	}
 }
@@ -98,7 +98,7 @@ func TestSQLiteDistributionEmptyNullAndConstant(t *testing.T) {
 					}
 				} else {
 					h := b.Distribution.(*qt.MetricHistogramDistribution)
-					if !reflect.DeepEqual(h.Edges, []float64{4, 4}) || !reflect.DeepEqual(h.Counts, []int64{1}) {
+					if !reflect.DeepEqual([]float64(h.Edges), []float64{4, 4}) || !reflect.DeepEqual([]int64(h.Counts), []int64{1}) {
 						t.Fatal(h)
 					}
 				}
@@ -240,7 +240,7 @@ func TestSQLiteDistributionComputedAndSnapshot(t *testing.T) {
 	}
 	s := r.Metrics[0].Buckets[0].Distribution.(*qt.MetricBoxDistribution).Summary
 	h := r.Metrics[1].Buckets[0].Distribution.(*qt.MetricHistogramDistribution)
-	if s.Min != 12 || s.Median != 14 || s.Max != 16 || !reflect.DeepEqual(h.Edges, []float64{12, 14, 16}) {
+	if s.Min != 12 || s.Median != 14 || s.Max != 16 || !reflect.DeepEqual([]float64(h.Edges), []float64{12, 14, 16}) {
 		t.Fatal(s, h)
 	}
 	q.ExpectedRevisions = map[string]string{"shift": "wrong"}

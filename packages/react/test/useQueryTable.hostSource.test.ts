@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { EMPTY_QUERY, applyQuery, createGroupingModel, encodeQuery, evaluateMetrics, memoryStorageAdapter, memoryQuerySnapshotCache,
   type QueryState, type FieldSchema, type QueryRequestV3,
-  type QueryResultV3, type Transport, type QueryCapabilitiesV3, type QuerySnapshot } from "@pythia-software/query-table-core";
+  type QueryResultV3, type Transport, type QueryCapabilitiesV3, type QuerySnapshot, type GroupingState } from "@pythia-software/query-table-core";
 import { useQueryTable, type QueryTableApi, type UseQueryTableOptions } from "../src/useQueryTable";
 import { memoryV3Transport, metricRequests, rowRequests } from "./v3Transport";
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -161,7 +161,7 @@ it("executes grouped rows and shown-group metrics through the negotiated v3 tran
   const capabilities:QueryCapabilitiesV3={version:3,groupedRows:true,calendarGrouping:true,computedSourceFilters:true,regex:false,maxRows:10000,maxGroups:2000,maxPopulation:250000,profile:"qt-sqlite-v1"};
   const fetchQueryV3=vi.fn(async(request:QueryRequestV3):Promise<QueryResultV3>=>{
     const source={...EMPTY_QUERY,...request.source,select:request.source.select.map(field=>({field}))};
-    const query:QueryState={...EMPTY_QUERY,...request.result,select:request.result.select.map(field=>({field})),aggregations:request.metrics,...(request.grouping?{grouping:{...request.grouping,source}}:{})};
+    const query:QueryState={...EMPTY_QUERY,...request.result,select:request.result.select.map(field=>({field})),aggregations:request.metrics,...(request.grouping?{grouping:{...request.grouping,source} as GroupingState}:{})};
     const resultSchema=request.grouping?createGroupingModel(schema).resultSchema(request.grouping.keys,request.grouping.summaries):schema;
     const result=applyQuery(rows,query,schema,{now:request.now});
     return {version:3,now:request.now,sourceTotal:rows.length,rows:request.rows?result.rows:[],total:result.total,schema:{name:resultSchema.name,idField:resultSchema.idField,fields:resultSchema.fields.map(field=>({name:field.name,type:field.type}))},metrics:evaluateMetrics(rows,query,schema,{now:request.now}).metrics,execution:{profile:request.profile,planToken:"",resolvedRevisions:{},fields:{}}};
@@ -181,7 +181,7 @@ it("computes link columns on the client and never sends them to the v3 server",a
   const fetchQueryV3=vi.fn(async(request:QueryRequestV3):Promise<QueryResultV3>=>{
     if(JSON.stringify(request).includes('"link"'))throw Error("The server received a link column.");
     const source={...EMPTY_QUERY,...request.source,select:request.source.select.map(field=>({field}))};
-    const query:QueryState={...EMPTY_QUERY,...request.result,select:request.result.select.map(field=>({field})),...(request.grouping?{grouping:{...request.grouping,source}}:{})};
+    const query:QueryState={...EMPTY_QUERY,...request.result,select:request.result.select.map(field=>({field})),...(request.grouping?{grouping:{...request.grouping,source} as GroupingState}:{})};
     const resultSchema=createGroupingModel(schema).resultSchema(request.grouping!.keys,request.grouping!.summaries);
     const result=applyQuery(rows,query,schema,{now:request.now});
     return {version:3,now:request.now,sourceTotal:rows.length,rows:request.rows?result.rows.map(row=>Object.fromEntries(request.result.select.concat(resultSchema.idField).map(name=>[name,(row as Record<string,unknown>)[name]]))):[],total:result.total,schema:{name:resultSchema.name,idField:resultSchema.idField,fields:resultSchema.fields.map(field=>({name:field.name,type:field.type}))},metrics:[],execution:{profile:request.profile,planToken:"",resolvedRevisions:{},fields:{}}};
@@ -272,7 +272,7 @@ it("refuses unsupported metric population controls per card on the v3 transport"
   const capabilities:QueryCapabilitiesV3={version:3,groupedRows:true,calendarGrouping:true,computedSourceFilters:true,regex:false,metricMinCount:true,maxRows:10000,maxGroups:2000,maxPopulation:250000,profile:"qt-sqlite-v1"};
   const fetchQueryV3=vi.fn(async(request:QueryRequestV3):Promise<QueryResultV3>=>{
     const source={...EMPTY_QUERY,...request.source,select:request.source.select.map(field=>({field}))};
-    const query:QueryState={...EMPTY_QUERY,...request.result,select:request.result.select.map(field=>({field})),aggregations:request.metrics,...(request.grouping?{grouping:{...request.grouping,source}}:{})};
+    const query:QueryState={...EMPTY_QUERY,...request.result,select:request.result.select.map(field=>({field})),aggregations:request.metrics,...(request.grouping?{grouping:{...request.grouping,source} as GroupingState}:{})};
     const resultSchema=request.grouping?createGroupingModel(schema).resultSchema(request.grouping.keys,request.grouping.summaries):schema;
     const result=applyQuery(rows,query,schema,{now:request.now});
     return {version:3,now:request.now,sourceTotal:rows.length,rows:request.rows?result.rows:[],total:result.total,schema:{name:resultSchema.name,idField:resultSchema.idField,fields:resultSchema.fields.map(field=>({name:field.name,type:field.type}))},metrics:evaluateMetrics(rows,query,schema,{now:request.now}).metrics,execution:{profile:request.profile,planToken:"",resolvedRevisions:{},fields:{}}};

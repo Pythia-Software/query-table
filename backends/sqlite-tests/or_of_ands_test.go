@@ -143,7 +143,7 @@ func TestOrOfAndsTenPairsMatchTheUnion(t *testing.T) {
 		t.Fatal(err)
 	}
 	var decoded qt.WireQuery
-	if err := json.Unmarshal(body, &decoded); err != nil || !reflect.DeepEqual(decoded.Where, []qt.WhereTerm{term}) {
+	if err := json.Unmarshal(body, &decoded); err != nil || !reflect.DeepEqual([]qt.WhereTerm(decoded.Where), []qt.WhereTerm{term}) {
 		t.Fatalf("JSON round trip %s: %v %#v", body, err, decoded.Where)
 	}
 

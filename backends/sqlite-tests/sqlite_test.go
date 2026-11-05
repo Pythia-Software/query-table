@@ -170,7 +170,7 @@ func TestScopeDistinctAndStatistics(t *testing.T) {
 		return r.Distinct
 	}
 	got := distinct("tags", "ÉCO", 1)
-	if !reflect.DeepEqual(got.Values, []string{"école"}) || !got.HasNull {
+	if !reflect.DeepEqual([]string(got.Values), []string{"école"}) || !got.HasNull {
 		t.Fatal(got)
 	}
 	// '' is NULL in SQLite text storage, never a suggestion.

@@ -9,22 +9,6 @@ import (
 	"time"
 )
 
-// MetricDisplayHint retains only the paired-mode validation hint; all visual settings are ignored.
-type MetricDisplayHint struct {
-	Kind string `json:"kind"`
-}
-type MetricSort struct {
-	Key   string `json:"key"`
-	Dir   string `json:"dir"`
-	Nulls string `json:"nulls,omitempty"`
-}
-type MetricDistribution struct {
-	Kind     string `json:"kind"`
-	Input    string `json:"input"`
-	Whiskers string `json:"whiskers,omitempty"`
-	Bins     int    `json:"bins,omitempty"`
-}
-
 // metricRequest is the internal metric batch the v3 executor compiles. Presentation is intentionally
 // ignored by the compiler. Diagnostics/residual filters must never be discarded.
 type metricRequest struct {

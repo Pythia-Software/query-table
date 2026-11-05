@@ -92,7 +92,7 @@ func TestV2ReductionReuse(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !reflect.DeepEqual(result.Metrics, expected) {
+		if !reflect.DeepEqual([]qt.MetricResult(result.Metrics), expected) {
 			t.Fatalf("batch %v differs: got %+v want %+v", indices, result.Metrics, expected)
 		}
 		calls := metricProbeCalls.Load()

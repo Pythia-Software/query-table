@@ -17,30 +17,10 @@ import { parseCellDisplay, type CellDisplay } from "./cellDisplay";
 // per-column width) can be serialized together when a consumer explicitly opts
 // into URL synchronization.
 
-/** All filter operators across both source projects, unioned. Every value can
- *  be NULL, so `is_null`/`is_not_null` are valid for every field type. */
-export type FilterOp =
-  // comparison — number / datetime (and =,!= for any scalar)
-  | "="
-  | "!="
-  | ">"
-  | ">="
-  | "<"
-  | "<="
-  // text matching
-  | "contains"
-  | "starts_with"
-  | "ends_with"
-  | "matches_regex"
-  | "not_matches_regex"
-  | "length_gt"
-  | "length_lt"
-  | "length_eq"
-  // array (textarray) containment
-  | "includes"
-  // nullity — valid for EVERY type; for arrays, "empty" vs "non-empty"
-  | "is_null"
-  | "is_not_null";
+/** All filter operators. Every value can be NULL, so `is_null`/`is_not_null`
+ *  are valid for every field type. Generated from the wire schema. */
+export type { FilterOp, OrderByClause, AggOp, HostQueryState } from "./wire.generated";
+import type { FilterOp, OrderByClause, AggOp, HostQueryState, WireWhereClause } from "./wire.generated";
 
 /** A single filter predicate (a "literal" in CNF terms). `value` is always the
  *  raw string the UI captured; coercion to number/bool/date happens at
@@ -55,11 +35,8 @@ export type FilterOp =
  *  `=`→`!=`, `is_null`→`is_not_null`, `matches_regex`→`not_matches_regex`) — see
  *  `negateClause` in ops.ts. NOT is null-exclusive: a NULL/empty value satisfies
  *  neither the predicate nor its negation, matching `not_matches_regex`. */
-export interface WhereClause {
-  field: string; // FieldDef.name
-  op: FilterOp;
-  value: string;
-  negated?: boolean;
+export interface WhereClause extends WireWhereClause {
+  /** Presentation only; stripped before a request is sent. */
   setFilter?: SetFilterMetadata;
 }
 
@@ -153,20 +130,6 @@ export function branchesOf(term: WhereTerm): WhereClause[][] {
   return term.any.map((member: WhereBranch) => isWhereConjunction(member) ? member.all : [member]);
 }
 
-/** One ORDER BY term. Array order in `QueryState.orderBy` is the sort priority. */
-export interface OrderByClause {
-  field: string; // FieldDef.name (server may sort a different expr via FieldDef.sort.field)
-  dir: "asc" | "desc";
-  /** NULL placement. Omitted = "last" (the historical default both projects used,
-   *  preserved so old `?q=` links round-trip identically). */
-  nulls?: "first" | "last";
-  /** Sort by the first capture group of a regex match (or by the whole match
-   *  when the pattern has no capture group). A non-match produces NULL. Regex
-   *  syntax is interpreted by the executor (JavaScript locally, PostgreSQL on
-   *  the bundled Go backend), so portable patterns should use their common
-   *  syntax subset. */
-  extract?: { regex: string };
-}
 
 /** One column in the SELECT list, plus the view state that travels with it.
  *  Order in `QueryState.select` is the left-to-right display order. */
@@ -180,11 +143,7 @@ export interface SelectColumn {
   display?: CellDisplay;
 }
 
-/** A single aggregate operation. `count` is the only op that needs no measure
- *  column (it counts rows); the rest reduce one column's values. The server-side
- *  matrix (backends/go aggOpAllowed + the TS AGG_OPS_BY_TYPE) decides which ops a
- *  field's type permits. */
-export type AggOp = "count" | "count_distinct" | "sum" | "avg" | "min" | "max";
+
 
 /** One optional "metric" pinned above the table: a single aggregate over a single
  *  measure column, optionally broken down by one or more group columns.
@@ -257,18 +216,6 @@ export interface ItemDetailsState {
   jsonInspections?: ScopedJsonInspectionState[];
 }
 
-/**
- * Query state a host owns and registers with `useQueryTable({ hostQuery })`,
- * such as a keyword clause it runs itself. It travels with the table query
- * through saves, links, history and resets as one definition. `params` are
- * named lists of strings, like URL search parameters; the host's own
- * `normalize` interprets them. Version 0 marks a payload that could not be
- * read, and is always rejected on restore.
- */
-export interface HostQueryState {
-  version: number;
-  params: Record<string, string[]>;
-}
 export const MAX_HOST_QUERY_PARAMS = 64;
 export const MAX_HOST_QUERY_VALUES = 64;
 export const MAX_HOST_QUERY_VALUE_LENGTH = 4000;

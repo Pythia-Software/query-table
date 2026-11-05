@@ -29,6 +29,9 @@ public struct LocalQueryTransport: QueryTransport {
     guard request.profile == Self.profile else {
       throw QueryTableError.invalidQuery("Requested query profile is unavailable")
     }
+    guard request.grouping == nil else {
+      throw QueryTableError.unsupported("The local transport executes ungrouped queries only")
+    }
     let reference = Date(timeIntervalSince1970: Double(request.now) / 1000)
     let matching = try filtered(request.source.whereTerms, now: reference)
     // Distinct values read the source population only; their result stage
@@ -114,10 +117,17 @@ public struct LocalQueryTransport: QueryTransport {
         $0 == .null || (field.type == "textarray" && $0 == .array([]))
       })
   }
-  private func aggregations(_ clauses: [AggregationClause], over matching: [QueryRow]) throws
+  private func aggregations(_ clauses: [MetricSpecV3], over matching: [QueryRow]) throws
     -> [AggregationResultEntry]
   {
     try clauses.map { a -> AggregationResultEntry in
+      guard
+        a.expression == nil && a.expressionY == nil && (a.whereTerms ?? []).isEmpty && a.minCount == nil
+          && a.distribution == nil && a.dateGrouping == nil && (a.sort ?? []).isEmpty
+          && a.groupLimit == nil && (a.scope ?? "allMatching") == "allMatching"
+      else {
+        throw QueryTableError.unsupported("The local transport executes plain metrics only")
+      }
       guard ["count", "count_distinct", "sum", "avg", "min", "max"].contains(a.op) else {
         throw QueryTableError.invalidQuery("Unknown aggregation: \(a.op)")
       }
@@ -152,9 +162,10 @@ public struct LocalQueryTransport: QueryTransport {
         default: value = .null
         }
         return AggregationBucket(
-          keys: keys.map { $0 == .null ? nil : $0.displayString }, value: value,
+          keys: keys, value: value,
           count: records.count)
-      }.sorted { $0.keys.map { $0 ?? "" }.lexicographicallyPrecedes($1.keys.map { $0 ?? "" }) }
+      }.map { ($0, $0.keyLabels.map { $0 ?? "" }) }  // Label each bucket once.
+        .sorted { $0.1.lexicographicallyPrecedes($1.1) }.map(\.0)
       return AggregationResultEntry(
         id: a.id, buckets: buckets, scope: "allMatching", processedRows: matching.count,
         groupCount: buckets.count)
@@ -166,6 +177,11 @@ public struct LocalQueryTransport: QueryTransport {
     // filters also fail on an empty dataset and under negation/OR.
     var times: [TimeKey: Date] = [:]
     func key(_ p: WhereClause) -> TimeKey { TimeKey(field: p.field, op: p.op, value: p.value) }
+    // The wire schema requires a branch in every OR group and a literal in every
+    // conjunction; an empty one would otherwise match every row.
+    guard terms.allSatisfy({ term in !term.branches.isEmpty && term.branches.allSatisfy { !$0.isEmpty } }) else {
+      throw QueryTableError.invalidQuery("An OR group or conjunction is empty")
+    }
     for p in terms.flatMap(\.predicates) {
       guard let f = schema.field(named: p.field), f.filterOperators.contains(p.op) else {
         throw QueryTableError.invalidQuery("Unsupported field or operator: \(p.field) \(p.op)")
@@ -188,7 +204,9 @@ public struct LocalQueryTransport: QueryTransport {
       }
     }
     return rows.filter { row in
-      terms.allSatisfy { term in term.predicates.contains { matches($0, row: row, time: times[key($0)]) } }
+      terms.allSatisfy { term in
+        term.branches.contains { $0.allSatisfy { matches($0, row: row, time: times[key($0)]) } }
+      }
     }
   }
   private func matches(_ clause: WhereClause, row: QueryRow, time: Date?) -> Bool {

@@ -14,6 +14,7 @@ import {
   type QueryState,
   type ServerQuery,
   type Transport,
+  type GroupingState,
 } from "@pythia-software/query-table-core";
 
 export const MEMORY_V3_CAPABILITIES: QueryCapabilitiesV3 = {
@@ -60,7 +61,7 @@ export function serveQueryV3<Row>(rows: Row[], schema: FieldSchema<Row>, request
       distinct: { values: values.slice(0, limit), hasMore: values.length > limit, hasNull } };
   }
   const query: QueryState = { ...stage(request.result), aggregations: request.metrics,
-    ...(request.grouping ? { grouping: { ...request.grouping, source: stage(request.source) } } : {}) };
+    ...(request.grouping ? { grouping: { ...request.grouping, source: stage(request.source) } as GroupingState } : {}) };
   const resultSchema = (request.grouping ? createGroupingModel(schema).resultSchema(request.grouping.keys, request.grouping.summaries) : schema) as FieldSchema;
   const input = request.grouping ? rows : population;
   const page = applyQuery(input, query, schema, now);

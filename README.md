@@ -153,6 +153,10 @@ supported by the published packages.
 Take only what you need: drop-in `@pythia-software/query-table-ui`, or `@pythia-software/query-table-react` with
 your own markup, or just `@pythia-software/query-table-core` for the wire types in another stack.
 
+The v3 query wire is defined once, in [`schema/query-wire.schema.json`](schema/query-wire.schema.json);
+the TypeScript, Go and Swift wire types are generated from it and checked against shared golden
+fixtures. See [the wire protocol guide](docs/wire-protocol.md).
+
 ### Packages
 
 | Package | What it is | Depends on |

@@ -1,0 +1,80 @@
+{
+  "sourceTotal": 1204,
+  "version": 3,
+  "now": 1772964000123,
+  "rows": [
+    {
+      "@computed/margin": 0.25,
+      "amount": 12.5,
+      "id": 17,
+      "name": "Café",
+      "status": "done",
+      "tags": [
+        "red",
+        "blue"
+      ]
+    },
+    {
+      "@computed/margin": {
+        "computedError": "division_by_zero"
+      },
+      "amount": 0,
+      "id": 18,
+      "name": null,
+      "status": "new",
+      "tags": []
+    }
+  ],
+  "total": 2,
+  "schema": {
+    "name": "runs",
+    "idField": "id",
+    "fields": [
+      {
+        "name": "amount",
+        "type": "number"
+      },
+      {
+        "name": "id",
+        "type": "number"
+      },
+      {
+        "name": "name",
+        "type": "text"
+      },
+      {
+        "name": "status",
+        "type": "enum"
+      },
+      {
+        "name": "tags",
+        "type": "textarray"
+      },
+      {
+        "name": "@computed/margin",
+        "type": "number"
+      }
+    ]
+  },
+  "metrics": [],
+  "execution": {
+    "profile": "qt-fixture-v1",
+    "planToken": "plan-7",
+    "resolvedRevisions": {
+      "margin": "r3"
+    },
+    "fields": {
+      "@computed/margin": {
+        "filter": true,
+        "type": "number",
+        "select": true,
+        "sort": true,
+        "measure": true,
+        "group": false,
+        "reason": "Grouping by a ratio is not supported."
+      }
+    },
+    "fingerprint": "fp-1",
+    "snapshot": "s-42"
+  }
+}

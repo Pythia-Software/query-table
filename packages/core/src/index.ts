@@ -120,6 +120,13 @@ export { parseRelativeDuration, MAX_RELATIVE_TIME_MS } from "./relativeTime";
 export type { QueryEvaluationOptions } from "./relativeTime";
 
 export * from "./metricTypes";
+// Wire-only shapes of the v3 protocol (schema/query-wire.schema.json).
+export type {
+  MetricSpecV3, MetricBucketV3, MetricResultV3, MetricDisplayHint, MetricMinCount, MetricMinCountDistinct, MetricMinCountSum,
+  MetricBoxDistribution, MetricHistogramDistribution, ProjectedSchemaV3, ProjectedFieldV3, RegexExtract,
+  WireWhereClause, WireWhereConjunction, WireWhereBranch, WireOrGroup, WireWhereTerm, WireMetricDateGrouping, WireMetricSort,
+  WireSummaryColumn, WireRepresentativeRow, WireGroupingDefinition,
+} from "./wire.generated";
 export {
   METRIC_FUNCTIONS,
   compileMetric,

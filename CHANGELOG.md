@@ -16,8 +16,68 @@
   table Remove from Group By (on a key column, when there are several keys)
   and Ungroup. The actions go through the grouping controller, so validation,
   undo and restoring the previous grouped layout behave as in the query editor.
+- One canonical wire schema for the v3 query protocol,
+  `schema/query-wire.schema.json` (JSON Schema 2020-12). The TypeScript, Go
+  and Swift wire types are generated from it (`npm run wire:generate`;
+  `npm run wire:check`, now part of `npm run check`, fails on stale output),
+  and golden request and result fixtures in `schema/fixtures/wire` are
+  validated with ajv and decoded and re-encoded identically by Go and Swift.
+  See [the wire protocol guide](docs/wire-protocol.md). Public TypeScript
+  names (`QueryRequestV3`, `QueryResultV3`, `QueryCapabilitiesV3`,
+  `ServerQuery`, `ComputedExecution`, ...) are kept as re-exports of the
+  generated types (see the breaking shape changes below); the wire-only
+  shapes are also exported (`MetricSpecV3`, `MetricBucketV3`,
+  `MetricResultV3`, `ProjectedSchemaV3`, `WireWhereTerm`, ...).
+
+### Fixed
+
+- Encoding drift between the three wire implementations, found while
+  unifying them on the schema:
+  - Go omitted empty `select`, `where` and `orderBy`, a zero `limit` or
+    `offset`, an empty metric `groupBy` and empty request `diagnostics`, and
+    an empty predicate `value` (such as on `is_null`), all of which are
+    required. Go now always writes them, as TypeScript and Swift do. Nil
+    required lists and maps encode as `[]`/`{}`, never `null`: such fields
+    are `WireList[T]`/`WireMap[V]`, to which a `[]T`/`map[string]V` assigns
+    unchanged (convert back, as in `[]T(v.Rows)`, to compare with
+    `reflect.DeepEqual`), so a host's struct that embeds a wire type keeps its
+    own fields. `MetricResult` now carries `other`, which TypeScript declares
+    but Go could not decode or re-encode.
+  - Swift decoded bucket keys as display strings, so numeric and boolean keys
+    (`dayOfWeek`, `hourOfDay`, booleans) re-encoded as strings, and it dropped
+    `y`, `yError`, `distribution`, `nullCount`, `inputErrorCount`, the
+    entry's `other` and a capability's `reason`.
+  - Swift could not decode OR groups with conjunction branches
+    (`{"any": [{"all": [...]}]}`).
+  - Swift results built with `QueryResultV3(answering:)` omitted
+    `execution.planToken` when the request had none; it is now always
+    written (empty for none), as Go does.
+  - Request keys follow one order (the schema's) in TypeScript and Go.
 
 ### Changed
+
+- **Breaking (TypeScript):** `ServerQuery` no longer declares `hostState`.
+  No builder set it and the Go decoder rejects it on a stage; host state is
+  `QueryRequestV3.hostState`.
+- **Breaking (TypeScript):** the wire types now describe the wire, not
+  client state. `QueryRequestV3.metrics` is `MetricSpecV3[]` (an
+  `AggregationClause` without presentation), `QueryRequestV3.grouping` is a
+  `WireGroupingDefinition` (nullable `representative`, `WireSummaryColumn`
+  summaries) and `QueryResultV3.metrics` is `MetricResultV3[]`. Code that
+  turns a request back into client state needs a conversion or cast.
+- **Breaking (Swift):** the wire structs are generated. `AggregationBucket.keys`
+  is `[JSONValue]` (the display strings are `keyLabels`),
+  `QueryExecutionV3.planToken` is a `String` (empty for none; an omitted
+  token or bucket `value` still decodes, as `""` and `.null`), `hostState` is
+  `[String: JSONValue]?`, as the server requires an object,
+  `QueryRequestV3.metrics` is `[MetricSpecV3]` (the initializer still accepts
+  `[AggregationClause]`, sent without `label`), `WhereTerm` gains a
+  `.group(OrGroup)` case for OR groups with conjunction branches, and the
+  local transport refuses metric features it does not execute (expressions,
+  `where`, `minCount`, distributions, calendar grouping, sorting and limits)
+  and grouped requests. Swift normalizes a WHERE as TypeScript does,
+  including OR groups with conjunction branches, so a link selects the same
+  rows in both clients.
 
 - **Breaking:** v3 is the only query protocol. `Transport` is exactly
   `{ queryCapabilities, fetchQueryV3 }`, both required. `fetchRows`,

@@ -3,12 +3,14 @@ import {
   fetchDistinctValuesV3,
   fetchFieldStatsV3,
   fetchRowV3,
+  normalizeQueryState,
   readDistinctResultV3,
   readFieldStatsResultV3,
   readRowResultV3,
   rowLookupFields,
   toDistinctRequestV3,
   toFieldStatsRequestV3,
+  toQueryRequestV3,
   toRowRequestV3,
   validateQueryResultV3,
   type ComputedExecution,
@@ -141,5 +143,16 @@ describe("identity lookups under a one-row budget", () => {
     const projected = { schema: { name: "runs", idField: "id", fields: request.result.select.map(name => ({ name, type: runsSchema.fields.find(f => f.name === name)!.type })) } };
     expect(readRowResultV3(response(request, { ...projected, rows: [row], total: 1, sourceTotal: 1 }), request, runsSchema)).toEqual(row);
     expect(() => readRowResultV3(response(request, { ...projected, rows: [row], total: 2, sourceTotal: 2 }), request, runsSchema)).toThrow("Row identity must be unique.");
+  });
+});
+
+describe("metrics this client cannot read", () => {
+  it("refuses a placeholder op instead of running it", () => {
+    // A newer client's operation decodes as count with the original kept aside.
+    const query = normalizeQueryState({ aggregations: [{ id: "m", op: "future", groupBy: [] }] });
+    expect(query.aggregations![0]).toMatchObject({ op: "count", unsupportedOp: "future" });
+    const request = toQueryRequestV3(query, runsSchema, capabilities, undefined, { now: 1, rows: false });
+    expect(request.diagnostics).toContain("Metric m uses an unsupported operation: future.");
+    expect(request.metrics[0]).not.toHaveProperty("unsupportedOp");
   });
 });

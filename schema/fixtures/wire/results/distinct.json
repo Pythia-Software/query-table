@@ -1,0 +1,27 @@
+{
+  "sourceTotal": 0,
+  "version": 3,
+  "now": 1772964000123,
+  "rows": [],
+  "total": 0,
+  "schema": {
+    "name": "runs",
+    "idField": "id",
+    "fields": []
+  },
+  "metrics": [],
+  "execution": {
+    "profile": "qt-fixture-v1",
+    "planToken": "",
+    "resolvedRevisions": {},
+    "fields": {}
+  },
+  "distinct": {
+    "values": [
+      "done",
+      "done-ish"
+    ],
+    "hasMore": true,
+    "hasNull": true
+  }
+}

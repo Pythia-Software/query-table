@@ -22,6 +22,8 @@ func TestDecodeQueryRequestV3Distinct(t *testing.T) {
 		"large limit":   {`"limit":50`, `"limit":501`},
 		"missing field": {`"field":"k","search"`, `"field":"","search"`},
 		"long search":   {`"search":"ab"`, `"search":"` + strings.Repeat("é", 2001) + `"`},
+		"array host":    {`{"tenant":"one"}`, `["one"]`},
+		"null host":     {`{"tenant":"one"}`, `null`},
 	} {
 		if _, err := DecodeQueryRequestV3([]byte(strings.Replace(body, replace[0], replace[1], 1))); !errors.As(err, &diag) || diag.Code != "query" {
 			t.Errorf("%s: %v", name, err)

@@ -11,36 +11,56 @@ import (
 
 // MetricDistributionResult is the v2 wire union supported by both renderers.
 type MetricDistributionResult interface{ metricDistributionResult() }
-type MetricBoxSummary struct {
-	N            int64     `json:"n"`
-	Min          float64   `json:"min"`
-	Q1           float64   `json:"q1"`
-	Median       float64   `json:"median"`
-	Q3           float64   `json:"q3"`
-	Max          float64   `json:"max"`
-	Mean         float64   `json:"mean"`
-	Low          float64   `json:"low"`
-	High         float64   `json:"high"`
-	Outliers     []float64 `json:"outliers"`
-	OutlierCount int64     `json:"outlierCount"`
-	Whiskers     string    `json:"whiskers"`
-	Method       string    `json:"method"`
-}
-type MetricBoxDistribution struct {
-	Kind    string            `json:"kind"`
-	Summary *MetricBoxSummary `json:"summary"`
-}
 
 func (*MetricBoxDistribution) metricDistributionResult() {}
 
-type MetricHistogramDistribution struct {
-	Kind   string    `json:"kind"`
-	Edges  []float64 `json:"edges"`
-	Counts []int64   `json:"counts"`
-	N      int64     `json:"n"`
-}
-
 func (*MetricHistogramDistribution) metricDistributionResult() {}
+
+// UnmarshalJSON reads the distribution union by its kind and keeps a
+// present null y, so a decoded result re-encodes unchanged.
+func (b *MetricBucket) UnmarshalJSON(data []byte) error {
+	type plain MetricBucket
+	var in struct {
+		*plain
+		Distribution json.RawMessage `json:"distribution"`
+		Y            json.RawMessage `json:"y"`
+	}
+	in.plain = (*plain)(b)
+	if err := json.Unmarshal(data, &in); err != nil {
+		return err
+	}
+	b.Distribution, b.Y = nil, nil
+	if in.Y != nil {
+		var y any
+		if err := json.Unmarshal(in.Y, &y); err != nil {
+			return err
+		}
+		b.Y = &y
+	}
+	if in.Distribution == nil || string(in.Distribution) == "null" {
+		return nil
+	}
+	var head struct {
+		Kind string `json:"kind"`
+	}
+	if err := json.Unmarshal(in.Distribution, &head); err != nil {
+		return err
+	}
+	var target MetricDistributionResult
+	switch head.Kind {
+	case "box":
+		target = &MetricBoxDistribution{}
+	case "histogram":
+		target = &MetricHistogramDistribution{}
+	default:
+		return fmt.Errorf("unknown distribution kind %q", head.Kind)
+	}
+	if err := json.Unmarshal(in.Distribution, target); err != nil {
+		return err
+	}
+	b.Distribution = target
+	return nil
+}
 
 // SQLiteMaxBoxSamples bounds exact box memory per group, including Tukey tails.
 // Larger populations produce resource_limit, never sampled quartiles.

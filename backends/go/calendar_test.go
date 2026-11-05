@@ -68,7 +68,7 @@ func TestCalendarEmptySeriesDoesNotWalkRange(t *testing.T) {
 		spec := AggSpec{ID: "empty", Op: "count", GroupBy: []string{"at", "k"}}
 		err := fillCalendarBuckets(ctx, &result, config, spec, metricRequest{}, time.Now(), time.UTC, 2000)
 		cancel()
-		if err != nil || !reflect.DeepEqual(result.Buckets, buckets) {
+		if err != nil || !reflect.DeepEqual([]MetricBucket(result.Buckets), buckets) {
 			t.Fatalf("empty series: buckets=%#v err=%v", result.Buckets, err)
 		}
 		config.End = "0900-01-01"

@@ -457,6 +457,13 @@ describe("metric population capability negotiation", () => {
       ["page", "The query contains unsupported result ordering."],
     ]);
   });
+  it("fails only the card whose operation this client cannot read", async () => {
+    const transport = v3Transport(request => request.metrics.map((m) => ({ id: m.id, buckets: [{ keys: [], value: 2, count: 2 }] })));
+    const result = await executeMetrics({ ...EMPTY_QUERY, aggregations: [
+      { id: "sum", op: "sum", field: "x", groupBy: [] }, { id: "p99", op: "count", groupBy: [], unsupportedOp: "p99" }] }, { schema, transport });
+    expect(transport.fetchQueryV3.mock.calls.map(([request]) => request.metrics.map((m) => m.id))).toEqual([["sum"]]);
+    expect(result.metrics.map((m) => [m.id, m.error ?? null])).toEqual([["sum", null], ["p99", "Metric p99 uses an unsupported operation: p99."]]);
+  });
   it("sends a distinct or summed minimum only to servers that advertise it", async () => {
     const measured = { id: "measured", op: "count" as const, groupBy: ["group"], minCount: { min: 2, distinct: "name" } };
     const calls: QueryRequestV3[] = [];
