@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import Ajv2020 from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
 import {
-  ERROR_CODES, EMPTY_QUERY, isQueryError, loadSchema, queryErrorFromBody, toDistinctRequestV3, toFieldStatsRequestV3, toQueryRequestV3, toRowRequestV3,
+  ERROR_CODES, EMPTY_QUERY, isErrorCode, isQueryError, loadSchema, queryErrorFromBody, toDistinctRequestV3, toFieldStatsRequestV3, toQueryRequestV3, toRowRequestV3,
   type QueryCapabilitiesV3, type QueryState,
 } from "../src/index";
 
@@ -100,7 +100,7 @@ describe("wire schema conformance", () => {
     expect(validate("QueryErrorBody", body)).toEqual([]);
     expect(serialize(body)).toBe(text);
     const error = queryErrorFromBody(body, 400)!;
-    expect(isQueryError(error) && ERROR_CODES.includes(error.code)).toBe(true);
+    expect(isQueryError(error) && isErrorCode(error.code)).toBe(true);
     expect(error.toJSON()).toEqual(body.error);
   });
 

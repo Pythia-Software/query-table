@@ -324,7 +324,7 @@
         "groupCount": { "type": "integer", "x-go-repr": "int64", "x-go-omit": "none", "description": "Groups before groupLimit, excluding hidden groups." },
         "coverage": { "type": "string", "enum": ["exact", "partial"] },
         "error": { "type": "string", "description": "The metric could not be computed; siblings are unaffected." },
-        "errorCode": { "$ref": "#/$defs/ErrorCode", "description": "The machine-readable code of error; present with it." },
+        "errorCode": { "$ref": "#/$defs/ErrorCode", "x-ts-type": "ErrorCode | (string & {})", "description": "The machine-readable code of error; present with it. A newer server may send a code this client does not know." },
         "hiddenGroups": { "type": "integer", "x-go-repr": "*int64", "description": "Groups removed by minCount; present whenever it is set." },
         "other": { "$ref": "#/$defs/MetricBucket", "x-go-repr": "*MetricBucket", "description": "The exact omitted additive quantity beyond groupLimit, when an executor computes it." }
       }
@@ -411,7 +411,7 @@
     "ErrorCode": {
       "description": "Every machine-readable error code the server or a client can produce. x-codes gives each code's HTTP status (null: never sent by a server), whether a retry can succeed (yes, no, or refresh: after refreshing the handshake or reloading) and its meaning; docs/errors.md is generated from it. Decoders must accept codes they do not know.",
       "type": "string",
-      "enum": ["invalid_json", "invalid_request", "method_not_allowed", "forbidden", "not_found", "request_too_large", "conflict", "quota_exceeded", "timeout", "cancelled", "unavailable", "internal", "version", "invalid_query", "profile_mismatch", "definition_changed", "definition_unavailable", "definition_invalid", "datetime_value", "residual_query", "dataset", "schema", "source_required", "resolver_required", "resolver_scope", "snapshot_transaction_required", "snapshot_validation_required", "plan_token_validation_required", "numeric_domain_required", "unknown_field", "select_required", "filter", "filter_disabled", "sort", "collation_required", "unsupported_regex", "unsupported_literal", "unsupported_type", "invalid_source_value", "numeric_range", "encoding", "identity_required", "duplicate_identity", "scope", "window_required", "syntax", "unsupported_syntax", "unsupported_function", "arity", "type_error", "aggregate_required", "aggregate_context", "aggregate_disabled", "paired_expression_required", "dependency_cycle", "invalid_metric", "duplicate_metric", "metric_sort", "distribution", "date_grouping", "unsupported_date_grouping", "min_count_grouping", "min_count_field", "min_count_distribution", "group_disabled", "grouping", "representative", "resource_limit", "complexity_limit", "dependency_limit", "expansion_limit", "source_limit", "stage_limit", "schema_limit", "capability_unsupported", "unexpanded_series", "invalid", "too_large", "unsupported_version"],
+      "enum": ["invalid_json", "invalid_request", "method_not_allowed", "forbidden", "not_found", "request_too_large", "conflict", "quota_exceeded", "timeout", "cancelled", "unavailable", "internal", "version", "invalid_query", "profile_mismatch", "definition_changed", "execution_expired", "definition_unavailable", "definition_invalid", "datetime_value", "residual_query", "dataset", "schema", "source_required", "resolver_required", "resolver_scope", "snapshot_transaction_required", "snapshot_validation_required", "plan_token_validation_required", "numeric_domain_required", "unknown_field", "select_required", "filter", "filter_disabled", "sort", "collation_required", "unsupported_regex", "unsupported_literal", "unsupported_type", "invalid_source_value", "numeric_range", "encoding", "identity_required", "duplicate_identity", "scope", "window_required", "syntax", "unsupported_syntax", "unsupported_function", "arity", "type_error", "aggregate_required", "aggregate_context", "aggregate_disabled", "paired_expression_required", "dependency_cycle", "invalid_metric", "duplicate_metric", "metric_sort", "distribution", "date_grouping", "unsupported_date_grouping", "min_count_grouping", "min_count_field", "min_count_distribution", "group_disabled", "grouping", "representative", "resource_limit", "complexity_limit", "dependency_limit", "expansion_limit", "source_limit", "stage_limit", "schema_limit", "capability_unsupported", "unexpanded_series", "invalid", "too_large", "unsupported_version"],
       "x-codes": {
         "invalid_json": { "status": 400, "retry": "no", "description": "The request body is not one well-formed JSON value." },
         "invalid_request": { "status": 400, "retry": "no", "description": "The request is malformed outside the query itself: a missing or invalid dataset or code parameter, or an invalid stored body." },
@@ -429,6 +429,7 @@
         "invalid_query": { "status": 400, "retry": "no", "description": "A query stage, metric list or distinct request is malformed: an unknown property, a wrong shape, or an out-of-range limit, offset, list length or name." },
         "profile_mismatch": { "status": 409, "retry": "refresh", "description": "The request's profile is not the server's profile; refresh the capabilities handshake." },
         "definition_changed": { "status": 409, "retry": "refresh", "description": "A computed definition's revision differs from expectedRevisions, or the revision envelope is invalid; refresh the execution handshake." },
+        "execution_expired": { "status": 409, "retry": "refresh", "description": "The host rejected the request's data snapshot or plan token, such as an expired or another session's; refresh the execution handshake." },
         "definition_unavailable": { "status": 400, "retry": "no", "description": "A referenced computed definition is missing or not accessible to the caller." },
         "definition_invalid": { "status": 400, "retry": "no", "description": "A computed definition does not compile." },
         "datetime_value": { "status": 400, "retry": "no", "description": "A datetime value or the evaluation clock is invalid or outside the supported range." },
@@ -499,7 +500,7 @@
       "description": "One machine-readable error.",
       "type": "object", "required": ["code", "message"],
       "properties": {
-        "code": { "$ref": "#/$defs/ErrorCode" },
+        "code": { "$ref": "#/$defs/ErrorCode", "x-ts-type": "ErrorCode | (string & {})", "description": "A newer server may send a code this client does not know; narrow with isErrorCode." },
         "message": { "type": "string", "description": "Human-readable; not stable." },
         "field": { "type": "string", "description": "The field the error is about, when there is one." },
         "offset": { "type": "integer", "description": "Where in the expression source the problem starts, when a server or client reports it (UTF-16 code units in TypeScript). The Go server does not set it yet." },

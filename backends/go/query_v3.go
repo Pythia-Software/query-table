@@ -195,10 +195,10 @@ func (d QueryDatasetV3) limits() (int, int, int, int64, error) {
 		bytes = 64 << 20
 	}
 	if rows < 1 || rows > 10000 || groups < 1 || groups > 100000 || pop < 1 || pop > 10000000 || bytes < 1 || bytes > 1<<30 {
-		return 0, 0, 0, 0, diagnostic(ErrorCodeResourceLimit, "invalid host execution budgets")
+		return 0, 0, 0, 0, diagnostic(ErrorCodeDataset, "invalid host execution budgets")
 	}
 	if d.Dialect != "sqlite" && d.Dialect != "postgres" {
-		return 0, 0, 0, 0, diagnostic(ErrorCodeProfileMismatch, "choose sqlite or postgres")
+		return 0, 0, 0, 0, diagnostic(ErrorCodeDataset, "choose sqlite or postgres")
 	}
 	return rows, groups, pop, bytes, nil
 }
@@ -645,7 +645,7 @@ func (d QueryDatasetV3) sampleLimit() (int, error) {
 		limit = SQLiteMaxMedianSamples
 	}
 	if limit < 1 || limit > 1000000 {
-		return 0, diagnostic(ErrorCodeResourceLimit, "invalid exact sample budget")
+		return 0, diagnostic(ErrorCodeDataset, "invalid exact sample budget")
 	}
 	return limit, nil
 }

@@ -130,6 +130,7 @@ the stored object).
 | `invalid_query` | 400 | no | A query stage, metric list or distinct request is malformed: an unknown property, a wrong shape, or an out-of-range limit, offset, list length or name. |
 | `profile_mismatch` | 409 | after refresh | The request's profile is not the server's profile; refresh the capabilities handshake. |
 | `definition_changed` | 409 | after refresh | A computed definition's revision differs from expectedRevisions, or the revision envelope is invalid; refresh the execution handshake. |
+| `execution_expired` | 409 | after refresh | The host rejected the request's data snapshot or plan token, such as an expired or another session's; refresh the execution handshake. |
 | `definition_unavailable` | 400 | no | A referenced computed definition is missing or not accessible to the caller. |
 | `definition_invalid` | 400 | no | A computed definition does not compile. |
 | `datetime_value` | 400 | no | A datetime value or the evaluation clock is invalid or outside the supported range. |

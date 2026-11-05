@@ -131,7 +131,7 @@ extension QueryRequestV3 {
     }
     refusals.append(contentsOf: envelope.revisionRefusals)
     if let first = refusals.first {
-      throw QueryTableError.refused(first.code, refusals.map(\.message).joined(separator: " "))
+      throw QueryTableError.refused(first.code, refusalMessage(refusals))
     }
     return QueryRequestV3(
       profile: capabilities.profile, now: epochMilliseconds(now),
@@ -183,7 +183,7 @@ struct ExecutionEnvelope {
     planToken = execution.flatMap { $0.planToken.isEmpty ? nil : $0.planToken }
     snapshot = execution?.snapshot
     if throwing, let first = refusals.first {
-      throw QueryTableError.refused(first.code, refusals.map(\.message).joined(separator: " "))
+      throw QueryTableError.refused(first.code, refusalMessage(refusals))
     }
   }
 }
@@ -417,9 +417,7 @@ extension QueryState {
     }
     refusals.append(contentsOf: envelope.revisionRefusals)
     if let first = refusals.first {
-      var unique = Set<String>()
-      let message = refusals.map(\.message).filter { unique.insert($0).inserted }.joined(separator: " ")
-      throw QueryTableError.refused(first.code, message)
+      throw QueryTableError.refused(first.code, refusalMessage(refusals))
     }
     return QueryRequestV3(
       profile: capabilities.profile, now: QueryRequestV3.epochMilliseconds(now), source: stage,
@@ -444,4 +442,10 @@ extension AggregationClause {
     else { return ["Field \(name) cannot be measured with \(op)."] }
     return []
   }
+}
+
+/// Every refusal message once, in order, as TypeScript's refuse joins them.
+func refusalMessage(_ refusals: [(code: ErrorCode, message: String)]) -> String {
+  var unique = Set<String>()
+  return refusals.map(\.message).filter { unique.insert($0).inserted }.joined(separator: " ")
 }

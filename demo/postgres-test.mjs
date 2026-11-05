@@ -195,7 +195,9 @@ try {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ...quick, snapshot: "expired" }),
   });
-  assert.equal(mismatch.status, 422);
+  // A rejected snapshot asks the client to refresh its handshake.
+  assert.equal(mismatch.status, 409);
+  assert.equal((await mismatch.json()).error.code, "execution_expired");
   console.log(
     "Fractional filters, both delay stages, proxy cancellation, and snapshot rejection passed",
   );

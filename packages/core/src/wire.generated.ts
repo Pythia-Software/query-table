@@ -273,8 +273,8 @@ export interface MetricResultV3 {
   coverage?: "exact" | "partial";
   /** The metric could not be computed; siblings are unaffected. */
   error?: string;
-  /** The machine-readable code of error; present with it. */
-  errorCode?: ErrorCode;
+  /** The machine-readable code of error; present with it. A newer server may send a code this client does not know. */
+  errorCode?: ErrorCode | (string & {});
   /** Groups removed by minCount; present whenever it is set. */
   hiddenGroups?: number;
   /** The exact omitted additive quantity beyond groupLimit, when an executor computes it. */
@@ -370,6 +370,7 @@ export const ERROR_CODES = [
   "invalid_query",
   "profile_mismatch",
   "definition_changed",
+  "execution_expired",
   "definition_unavailable",
   "definition_invalid",
   "datetime_value",
@@ -438,7 +439,8 @@ export type ErrorCode = (typeof ERROR_CODES)[number];
 
 /** One machine-readable error. */
 export interface QueryErrorDetail {
-  code: ErrorCode;
+  /** A newer server may send a code this client does not know; narrow with isErrorCode. */
+  code: ErrorCode | (string & {});
   /** Human-readable; not stable. */
   message: string;
   /** The field the error is about, when there is one. */

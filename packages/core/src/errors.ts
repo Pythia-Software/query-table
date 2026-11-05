@@ -26,14 +26,15 @@ export interface QueryErrorOptions {
  * client-side refusal before any request is sent. Messages are for people;
  * match on `code`. */
 export class QueryError extends Error {
-  /** An ErrorCode, or a newer code this build does not know. */
-  readonly code: ErrorCode;
+  /** An ErrorCode, or a newer code this build does not know (narrow with
+   * isErrorCode before an exhaustive switch). */
+  readonly code: ErrorCode | (string & {});
   readonly field?: string;
   readonly offset?: number;
   readonly metricId?: string;
   readonly status?: number;
   readonly capability?: keyof QueryCapabilitiesV3;
-  constructor(code: ErrorCode, message: string, options: QueryErrorOptions = {}) {
+  constructor(code: ErrorCode | (string & {}), message: string, options: QueryErrorOptions = {}) {
     super(message);
     this.name = "QueryError";
     this.code = code;
@@ -72,7 +73,7 @@ export function errorCodeForStatus(status: number): ErrorCode {
 export function parseQueryErrorBody(body: unknown): QueryErrorDetail | null {
   const error = (body as Partial<QueryErrorBody> | null)?.error;
   if (!error || typeof error !== "object" || typeof error.code !== "string" || !error.code || typeof error.message !== "string") return null;
-  return { code: error.code as ErrorCode, message: error.message,
+  return { code: error.code, message: error.message,
     ...(typeof error.field === "string" ? { field: error.field } : {}),
     ...(Number.isSafeInteger(error.offset) ? { offset: error.offset } : {}),
     ...(typeof error.metricId === "string" ? { metricId: error.metricId } : {}) };

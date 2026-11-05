@@ -251,7 +251,7 @@ func TestPostgresHostGroupBudget(t *testing.T) {
 		out, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
 		if budget < 0 || budget > 100_000 {
 			var diag *qt.PlanDiagnostic
-			if !errors.As(err, &diag) || diag.Code != "resource_limit" || diag.Message != "invalid host execution budgets" {
+			if !errors.As(err, &diag) || diag.Code != "dataset" || diag.Message != "invalid host execution budgets" {
 				t.Fatalf("budget %d: expected host budget diagnostic, got %v", budget, err)
 			}
 			continue

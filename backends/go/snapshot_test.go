@@ -44,7 +44,8 @@ func TestSnapshotBindingRequired(t *testing.T) {
 		}
 		return expected
 	}
-	if _, err := d.SourcePlan(ctx, rows, options); !errors.Is(err, expected) {
+	// The host's refusal stays in the chain, and clients see execution_expired.
+	if _, err := d.SourcePlan(ctx, rows, options); !errors.Is(err, expected) || ErrorDetail(err).Code != ErrorCodeExecutionExpired || ErrorDetail(err).Message == "snapshot expired" {
 		t.Fatal(err)
 	}
 	if _, err := d.SourcePlan(ctx, metrics, options); !errors.Is(err, expected) {

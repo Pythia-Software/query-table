@@ -1028,7 +1028,7 @@ public struct AggregationResultEntry: Codable, Equatable, Sendable {
   public var coverage: String?
   /// The metric could not be computed; siblings are unaffected.
   public var error: String?
-  /// The machine-readable code of error; present with it.
+  /// The machine-readable code of error; present with it. A newer server may send a code this client does not know.
   public var errorCode: ErrorCode?
   /// Groups removed by minCount; present whenever it is set.
   public var hiddenGroups: Int?
@@ -1361,6 +1361,8 @@ public enum ErrorCode: String, Codable, Equatable, Sendable, CaseIterable {
   case profileMismatch = "profile_mismatch"
   /// A computed definition's revision differs from expectedRevisions, or the revision envelope is invalid; refresh the execution handshake.
   case definitionChanged = "definition_changed"
+  /// The host rejected the request's data snapshot or plan token, such as an expired or another session's; refresh the execution handshake.
+  case executionExpired = "execution_expired"
   /// A referenced computed definition is missing or not accessible to the caller.
   case definitionUnavailable = "definition_unavailable"
   /// A computed definition does not compile.
@@ -1497,6 +1499,7 @@ public enum ErrorCode: String, Codable, Equatable, Sendable, CaseIterable {
 
 /// One machine-readable error.
 public struct QueryErrorDetail: Codable, Equatable, Sendable {
+  /// A newer server may send a code this client does not know; narrow with isErrorCode.
   public var code: ErrorCode
   /// Human-readable; not stable.
   public var message: String

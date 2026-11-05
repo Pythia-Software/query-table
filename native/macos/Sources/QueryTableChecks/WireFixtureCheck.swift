@@ -48,7 +48,7 @@ enum WireFixtureCheck {
       QueryErrorBody.self, from: Data(#"{"error":{"code":"from_the_future","message":"later"}}"#.utf8))
     try check(
       future.error.code == .unknown && ErrorCode(rawValue: "resource_limit") == .resourceLimit
-        && ErrorCode.allCases.count == 80,
+        && ErrorCode.allCases.count == 81,
       "Unknown error codes decode as .unknown")
   }
 }

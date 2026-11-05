@@ -78,12 +78,12 @@ func TestV3HTTPExecutionErrors(t *testing.T) {
 		{"database", func(_ *qt.QueryRequestV3, d *qt.QueryDatasetV3, _ *qt.PlanOptions) {
 			d.SourceSQL = "SELECT * FROM private_host_catalog"
 		}, 500, `{"error":{"code":"internal","message":"could not execute query"}}` + "\n"},
-		{"host failure", func(q *qt.QueryRequestV3, _ *qt.QueryDatasetV3, o *qt.PlanOptions) {
+		{"host rejection", func(q *qt.QueryRequestV3, _ *qt.QueryDatasetV3, o *qt.PlanOptions) {
 			q.PlanToken = "plan"
 			o.ValidatePlanToken = func(context.Context, string) error {
 				return errors.New("private_host_catalog /private/database/path generated SQL qt_v3_secret")
 			}
-		}, 500, `{"error":{"code":"internal","message":"could not execute query"}}` + "\n"},
+		}, 409, `{"error":{"code":"execution_expired","message":"the execution snapshot or plan token was rejected; refresh the execution handshake"}}` + "\n"},
 		{"deadline", func(q *qt.QueryRequestV3, _ *qt.QueryDatasetV3, o *qt.PlanOptions) {
 			q.PlanToken = "plan"
 			o.ValidatePlanToken = func(context.Context, string) error {

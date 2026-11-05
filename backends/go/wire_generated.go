@@ -254,7 +254,8 @@ type MetricResult struct {
 	Coverage   string `json:"coverage,omitempty"`
 	// The metric could not be computed; siblings are unaffected.
 	Error string `json:"error,omitempty"`
-	// The machine-readable code of error; present with it.
+	// The machine-readable code of error; present with it. A newer server may send
+	// a code this client does not know.
 	ErrorCode ErrorCode `json:"errorCode,omitempty"`
 	// Groups removed by minCount; present whenever it is set.
 	HiddenGroups *int64 `json:"hiddenGroups,omitempty"`
@@ -389,6 +390,9 @@ const (
 	// A computed definition's revision differs from expectedRevisions, or the
 	// revision envelope is invalid; refresh the execution handshake.
 	ErrorCodeDefinitionChanged ErrorCode = "definition_changed"
+	// The host rejected the request's data snapshot or plan token, such as an
+	// expired or another session's; refresh the execution handshake.
+	ErrorCodeExecutionExpired ErrorCode = "execution_expired"
 	// A referenced computed definition is missing or not accessible to the caller.
 	ErrorCodeDefinitionUnavailable ErrorCode = "definition_unavailable"
 	// A computed definition does not compile.
@@ -550,7 +554,8 @@ func (c ErrorCode) HTTPStatus() int {
 		return 408
 	case ErrorCodeConflict,
 		ErrorCodeProfileMismatch,
-		ErrorCodeDefinitionChanged:
+		ErrorCodeDefinitionChanged,
+		ErrorCodeExecutionExpired:
 		return 409
 	case ErrorCodeRequestTooLarge:
 		return 413
@@ -602,6 +607,7 @@ func ErrorCodes() []ErrorCode {
 		ErrorCodeInvalidQuery,
 		ErrorCodeProfileMismatch,
 		ErrorCodeDefinitionChanged,
+		ErrorCodeExecutionExpired,
 		ErrorCodeDefinitionUnavailable,
 		ErrorCodeDefinitionInvalid,
 		ErrorCodeDatetimeValue,
@@ -670,6 +676,8 @@ func ErrorCodes() []ErrorCode {
 
 // QueryErrorDetail: One machine-readable error.
 type QueryErrorDetail struct {
+	// A newer server may send a code this client does not know; narrow with
+	// isErrorCode.
 	Code ErrorCode `json:"code"`
 	// Human-readable; not stable.
 	Message string `json:"message"`

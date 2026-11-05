@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  EMPTY_QUERY, QueryDecodeError, QueryError, decodeQueryStrict, errorCodeForStatus, evaluateMetrics, isErrorCode, isQueryError, loadSchema,
+  EMPTY_QUERY, QueryDecodeError, QueryError, decodeQueryStrict, errorCodeForStatus, evaluateMetrics, isErrorCode, isQueryError, loadSchema, queryErrorFromBody,
   httpComputedColumnStore, queryErrorFromResponse, toQueryRequestV3, type QueryCapabilitiesV3,
 } from "../src/index";
 
@@ -88,5 +88,15 @@ describe("local metric failures", () => {
     expect(invalid.metrics[0]).toMatchObject({ id: "bad", errorCode: "invalid_metric" });
     const budget = evaluateMetrics(rows, { ...EMPTY_QUERY, aggregations: [{ id: "n", op: "count", groupBy: [] }] }, schema, { maxRows: 1 });
     expect(budget.metrics[0]).toMatchObject({ id: "n", error: "Metric row budget exceeded.", errorCode: "resource_limit" });
+  });
+});
+
+describe("codes from newer servers", () => {
+  it("keeps an unknown code as a string a client can narrow", () => {
+    const error = queryErrorFromBody({ error: { code: "from_the_future", message: "newer" } }, 400)!;
+    expect(error.code).toBe("from_the_future");
+    expect(isErrorCode(error.code)).toBe(false);
+    const known: string = error.code;
+    expect(known).toBe("from_the_future");
   });
 });
