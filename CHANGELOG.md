@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.0 — 2026-11-05
+
 ### Added
 
 - Live fit to content. `QueryState.fit: "content"` keeps every column without
@@ -35,10 +37,12 @@
   retry can succeed. Go exports one constant per code
   (`ErrorCodeResourceLimit`, ...), `ErrorCodes()`, `ErrorCode.HTTPStatus()`,
   `ErrorDetail(err)` and `WriteQueryError(w, err)`. TypeScript exports
-  `ERROR_CODES`, `ErrorCode`, `QueryError` (`code`, `field`, `offset`,
+  `ERROR_CODES`, `ErrorCode`, `isErrorCode`, `QueryError` (`code`, `field`, `offset`,
   `metricId`, `status`, `capability`), `isQueryError`, `queryErrorFromResponse`
   for fetch-based transports, `queryErrorFromBody` and `errorCodeForStatus`;
-  `QueryDecodeError` is a `QueryError`. Swift has `ErrorCode` (unknown codes
+  `QueryDecodeError` is a `QueryError`. Wire code fields are typed
+  `ErrorCode | (string & {})`, so a code from a newer server still
+  type-checks; narrow it with `isErrorCode`. Swift has `ErrorCode` (unknown codes
   decode as `.unknown`), `QueryErrorDetail`, `QueryErrorBody`, and
   `QueryTableError.server(_:status:)`, `.refused(_:_:)` and `.code`;
   `HTTPQueryTransport` decodes the error body of a non-2xx response. A metric
@@ -96,7 +100,11 @@
   the code: a too-large body is 413 (was 400), `resource_limit` and the other
   budget codes are 422 (were 400), `definition_changed` and
   `profile_mismatch` are 409 (were 400), and host-configuration errors such as
-  `snapshot_transaction_required` are 500 (were 400).
+  `snapshot_transaction_required`, invalid host budgets and an unknown
+  `Dialect` are 500 `dataset` errors (were 400). When a host's
+  `ValidateSnapshot` or `ValidatePlanToken` refuses with a plain error, the
+  client gets 409 `execution_expired` and refreshes the execution handshake;
+  the host's error stays in the chain for `errors.Is` and is not sent.
 - **Breaking (Go):** `PlanDiagnostic.Code` is an `ErrorCode` (was `string`),
   `PlanDiagnostic` gains `MetricID`, and `QueryLinkErrorCode` is an alias of
   `ErrorCode`. The code `query` is renamed `invalid_query`. The plain-error
