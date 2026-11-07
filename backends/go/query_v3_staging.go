@@ -60,3 +60,25 @@ func (d QueryDatasetV3) checkCalendarStaging(ctx context.Context, tx *sql.Tx, so
 	}
 	return nil
 }
+
+// SQLite's rowid allocator supplies the same unique ordinal without wrapping
+// the typed source in a window query. That wrapper can prevent flattening and
+// make large projections build additional transient B-trees. Unaffinitized
+// payload columns preserve the typed projection's INTEGER/REAL/TEXT storage.
+// The caller registers table ownership before either DDL or INSERT can fail.
+func (d QueryDatasetV3) stageCalendarSource(ctx context.Context, tx *sql.Tx, table string, p SQLPlan) error {
+	if d.Dialect != "sqlite" {
+		_, err := tx.ExecContext(ctx, "CREATE TEMP TABLE "+queryIdent(table)+" AS SELECT *,ROW_NUMBER() OVER () AS qt_calendar_row FROM ("+p.SQL+") AS qt_calendar_source", p.Args...)
+		return err
+	}
+	columns := []string{}
+	for _, column := range p.Columns {
+		columns = append(columns, queryIdent(column.ValueAlias), queryIdent(column.ErrorAlias))
+	}
+	payload := strings.Join(columns, ",")
+	if _, err := tx.ExecContext(ctx, "CREATE TEMP TABLE "+queryIdent(table)+" (qt_calendar_row INTEGER PRIMARY KEY,"+payload+")"); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, "INSERT INTO "+queryIdent(table)+" ("+payload+") "+p.SQL, p.Args...)
+	return err
+}

@@ -406,14 +406,42 @@ group sorting, and top-N still run per plan. Calendar metrics, and every metric
 of a grouped request, run individually. No result or reduction crosses requests
 or snapshots.
 
-Plain numeric base-field metrics over INTEGER/NULL storage may use a guarded
-SQLite reduction. Every group's storage types and absolute integer totals must
-prove exact arithmetic before the result is used; other domains retain the
-general exact decimal plan. Simple stored-column sources may reduce directly;
-opaque host bindings retain materialization to avoid repeated evaluation. See [the performance and migration notes](sqlite-performance-handoff.md)
+Numeric base-field metrics and eligible aggregate leaves of formulas over
+INTEGER/NULL storage may use a guarded SQLite reduction, including singleton
+cards and batches with identical inputs. Every group's storage types and
+absolute integer totals must prove exact arithmetic before the result is used;
+other domains retain the general exact decimal plan. Simple stored-column
+sources may reduce directly;
+opaque host bindings retain the general plan for newly eligible paths, while
+existing multi-input batches retain materialization to avoid repeated evaluation.
+See [the performance and migration notes](sqlite-performance-handoff.md)
 for eligibility, fallback semantics and portable benchmarks. These proofs run
 on every execution; the earlier opt-in per-generation proof cache was removed
 with the v2 API.
+
+Plain ungrouped `allMatching` COUNT() reuses the population count from the same
+transaction when it has no metric predicate or measured minimum. The compiled
+result and minCount checks still run. SQLite calendar staging uses an INTEGER
+PRIMARY KEY ordinal; bounded timestamp ranges receive calendar keys in one
+set-based update, using the same Go timezone boundaries as the per-row fallback.
+See [real Pharos performance measurements](sqlite-pharos-performance.md) for
+workloads, guarantees, remaining costs and opt-in reproduction commands.
+
+Stored-source inspection also permits cheap typed source checks to be inlined,
+while retaining a single materialized datetime value and its error sidecar.
+The complete `SQLiteV2Functions()` registration includes the direct datetime
+value/error decoders used by this path. Already-staged integer summaries can
+reuse the guarded reducer with their error sidecars checked. Representatives
+use one ranking window and a separate narrow per-group identity proof.
+
+Frequent SQLite page requests compile against the complete dependencies already
+discovered by `SourcePlan`; base-only count/source plans omit unrelated schema
+bindings. Stored text/enum autocomplete can search complete bounded value counts
+and derive `hasNull` from the same scan, avoiding per-row lowercase calls.
+Eligibility requires stored-source and BINARY grouping proofs. High-cardinality,
+opaque, computed, array, malformed-text and unsupported-collation cases retain
+the general executor. No results are cached across requests. The Pharos report
+above includes the recurring-query benchmarks and their frequency-data limits.
 
 Shared reductions use uniquely named temporary tables in the same transaction.
 The executor drops them before returning, using a separate bounded cleanup

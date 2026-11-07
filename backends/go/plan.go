@@ -49,6 +49,12 @@ type PlanOptions struct {
 	// relations to that execution's transaction. Only executors set it, and
 	// only while compiling over row-level schemas keyed by the source identity.
 	relations *sqliteRelations
+	// Set only after EXPLAIN proves this execution's raw source projections
+	// and predicates are stored reads. Values still need their typed checks.
+	sqliteStoredSource bool
+	// A failed direct integer proof also rules out repeating it after staging
+	// the same numeric domain (notably fractional summaries).
+	sqliteIntegerDeclined bool
 }
 type SQLStage struct {
 	Name, SQL    string
@@ -163,7 +169,7 @@ func newPlanDialect(ctx context.Context, s Schema, o PlanOptions, sqlite bool) (
 		}
 		// Executor-staged columns are stored values; host bindings are opaque.
 		reads := -1
-		if f.typedValue {
+		if f.typedValue || o.sqliteStoredSource {
 			reads = 1
 		}
 		v := fmt.Sprintf("f%d", i)
@@ -491,7 +497,11 @@ func (b *planBuilder) sourceValue(name string) (ValueSQL, error) {
 		v = raw // Staged text already passed this storage and encoding check.
 	} else if b.sqlite {
 		errSQL := "COALESCE(" + raw.Error + ",qt_v2_field_error(" + raw.Value + ",'source_text'))"
-		v = b.emit("CASE WHEN "+errSQL+" IS NULL THEN "+raw.Value+" END"+b.collation(), errSQL, "text")
+		emit := b.emit
+		if b.options.sqliteStoredSource {
+			emit = b.emitNative
+		}
+		v = emit("CASE WHEN "+errSQL+" IS NULL THEN "+raw.Value+" END"+b.collation(), errSQL, "text")
 	} else {
 		v = b.emit("("+raw.Value+") COLLATE \"C\"", raw.Error, "text")
 	}

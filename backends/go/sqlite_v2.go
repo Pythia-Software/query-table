@@ -38,6 +38,10 @@ func (b *planBuilder) sqliteField(name string, v ValueSQL) (ValueSQL, error) {
 		return v, diagnostic(ErrorCodeUnsupportedType, "arrays are outside the expression profile")
 	}
 	raw := v.Value
+	emitChecked := b.emit
+	if b.options.sqliteStoredSource {
+		emitChecked = b.emitNative
+	}
 	if f.typedValue {
 		// The executor staged this value through the checks below and kept its
 		// error sidecar: reuse the pair, including normalized datetimes. Staged
@@ -52,15 +56,25 @@ func (b *planBuilder) sqliteField(name string, v ValueSQL) (ValueSQL, error) {
 		return out, nil
 	}
 	if v.Type == "datetime" {
+		if b.options.sqliteStoredSource {
+			format := b.param(f.SQLiteDatetimeFormat, "text")
+			// The common valid value crosses the driver once, without a JSON
+			// envelope. Only failed/noncanonical inputs need the error decoder.
+			value := b.emit("qt_v2_datetime_value("+raw+","+format+")", v.Error, "datetime")
+			errSQL := "COALESCE(" + value.Error + ",CASE WHEN " + raw + " IS NOT NULL AND " + value.Value + " IS NULL THEN qt_v2_datetime_error(" + raw + "," + format + ") END)"
+			out := b.emitNative(value.Value+" COLLATE BINARY", errSQL, "datetime")
+			b.fields[name], b.checked[name] = out, true
+			return out, nil
+		}
 		payload := b.emit("qt_v2_datetime("+raw+","+b.param(f.SQLiteDatetimeFormat, "text")+")", "NULL", "text")
-		out := b.emit("json_extract("+payload.Value+",'$.value') COLLATE BINARY", "COALESCE("+v.Error+",json_extract("+payload.Value+",'$.error'))", "datetime")
+		out := emitChecked("json_extract("+payload.Value+",'$.value') COLLATE BINARY", "COALESCE("+v.Error+",json_extract("+payload.Value+",'$.error'))", "datetime")
 		b.fields[name] = out
 		b.checked[name] = true
 		return out, nil
 	}
 	// Storage failures remain per-value diagnostics for lazy formula branches.
 	errSQL := "COALESCE(" + v.Error + ",qt_v2_field_error(" + raw + ",'" + v.Type + "'))"
-	out := b.emit("CASE WHEN "+errSQL+" IS NULL THEN "+raw+" END"+b.collation(), errSQL, v.Type)
+	out := emitChecked("CASE WHEN "+errSQL+" IS NULL THEN "+raw+" END"+b.collation(), errSQL, v.Type)
 	b.fields[name] = out
 	b.checked[name] = true
 	return out, nil

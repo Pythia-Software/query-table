@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -161,4 +162,63 @@ func sameSet(values []string, want ...string) bool {
 		}
 	}
 	return len(values) == len(want) && len(seen) == len(want)
+}
+
+func TestV3DistinctStoredMatchesGeneral(t *testing.T) {
+	for _, mode := range []string{"stored", "opaque", "collation", "invalid UTF8", "NUL values", "long values", "high domain"} {
+		t.Run(mode, func(t *testing.T) {
+			log := &statementLog{}
+			db, d := hookedV3(t, log, `('1','Red',1,NULL,'x'),('2','red',1,NULL,'x'),('3','ÉCOLE',1,NULL,'x'),('4','école',1,NULL,'x'),('5',NULL,1,NULL,'x'),('6','',1,NULL,'x')`)
+			switch mode {
+			case "long values":
+				if _, err := db.Exec("INSERT INTO source VALUES('long',?,1,NULL,'x')", strings.Repeat("x", qt.SQLiteMaxFunctionTextBytes+1)); err != nil {
+					t.Fatal(err)
+				}
+			case "NUL values":
+				if _, err := db.Exec("INSERT INTO source VALUES('nul',?,1,NULL,'x')", "a\x00b"); err != nil {
+					t.Fatal(err)
+				}
+			case "opaque":
+				d.SourceSQL = "SELECT *,qt_test_metric_probe(k) AS probed FROM source"
+				field := d.Schema.Fields["k"]
+				field.Expr = "r.probed"
+				d.Schema.Fields["k"] = field
+			case "collation":
+				field := d.Schema.Fields["k"]
+				field.Expr, field.SortExpr = "r.k COLLATE NOCASE", "r.k COLLATE NOCASE"
+				d.Schema.Fields["k"] = field
+			case "invalid UTF8":
+				if _, err := db.Exec("INSERT INTO source VALUES('invalid',CAST(X'ff' AS TEXT),1,NULL,'x')"); err != nil {
+					t.Fatal(err)
+				}
+			case "high domain":
+				// The first 64 rows look repetitive. The complete proof must
+				// decline the many values after them without truncating results.
+				if _, err := db.Exec(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<64)
+INSERT INTO source SELECT 'repeat-'||i,'repeat',1,NULL,'x' FROM n;
+WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<4097)
+INSERT INTO source SELECT 'wide-'||i,'value-'||i,1,NULL,'x' FROM n`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, search := range []string{"", "RE", "é", "%", "\x00b", "missing"} {
+				q := pharosBenchmarkRequest()
+				q.Distinct = &qt.DistinctRequestV3{Field: "k", Search: search, Limit: 2}
+				log.reset(nil)
+				before := sqliteCalls["qt_lower"].Load()
+				metricProbeCalls.Store(0)
+				got, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
+				lowerCalls, opaqueCalls := sqliteCalls["qt_lower"].Load()-before, metricProbeCalls.Load()
+				if mode == "stored" && !strings.ContainsRune(search, 0) && lowerCalls != 0 {
+					t.Fatalf("stored suggestions repeated row-level lowercase %d times", lowerCalls)
+				}
+				log.reset(declineDirect)
+				metricProbeCalls.Store(0)
+				want, wantErr := d.Execute(context.Background(), db, q, qt.PlanOptions{})
+				if !reflect.DeepEqual(got, want) || (err == nil) != (wantErr == nil) || err != nil && err.Error() != wantErr.Error() || mode == "opaque" && metricProbeCalls.Load() != opaqueCalls {
+					t.Fatalf("search %q: candidate %#v / %v; general %#v / %v; opaque %d/%d", search, got, err, want, wantErr, opaqueCalls, metricProbeCalls.Load())
+				}
+			}
+		})
+	}
 }

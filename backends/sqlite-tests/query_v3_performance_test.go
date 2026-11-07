@@ -104,8 +104,8 @@ func (l *statementLog) reset(fail func(string) error) {
 	l.seen, l.fail = nil, fail
 }
 
-// reductions counts grouped reductions over the staged source: statements
-// that read the request's first temporary table and group it.
+// reductions counts scalar summary reductions over the staged source,
+// excluding the representative's separate identity validation.
 func (l *statementLog) reductions() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -114,7 +114,7 @@ func (l *statementLog) reductions() int {
 		if source == "" && strings.HasPrefix(query, `CREATE TEMP TABLE "`) {
 			source = query[len(`CREATE TEMP TABLE `):]
 			source = source[:strings.Index(source[1:], `"`)+2]
-		} else if source != "" && strings.Contains(query, source) && strings.Contains(query, " GROUP BY ") {
+		} else if source != "" && strings.Contains(query, source) && strings.Contains(query, " GROUP BY ") && !strings.Contains(query, "qt_rank") {
 			n++
 		}
 	}
@@ -326,17 +326,22 @@ func TestV3RepresentativeValidationAndCleanup(t *testing.T) {
 			t.Fatalf("got %v", err)
 		}
 	})
-	for name, rows := range map[string]string{
-		"duplicate": `('1','a',1,NULL,'x'),('1','a',2,NULL,'y'),('2','b',1,NULL,'z')`,
-		"missing":   `('1','a',1,NULL,'x'),(NULL,'a',2,NULL,'y'),('2','b',1,NULL,'z')`,
+	for name, fixture := range map[string]struct {
+		rows    string
+		invalid bool
+	}{
+		"duplicate":            {`('1','a',1,NULL,'x'),('1','a',2,NULL,'y'),('3','a',3,NULL,'chosen'),('2','b',1,NULL,'z')`, true},
+		"missing":              {`('1','a',2,NULL,'chosen'),(NULL,'a',1,NULL,'y'),('2','b',1,NULL,'z')`, true},
+		"cross-group identity": {`('1','a',1,NULL,'x'),('1','b',2,NULL,'y')`, false},
+		"binary identities":    {`('A','a',1,NULL,'x'),('a','a',2,NULL,'y')`, false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			log.reset(nil)
-			if _, err := db.Exec("DELETE FROM source; INSERT INTO source VALUES " + rows); err != nil {
+			if _, err := db.Exec("DELETE FROM source; INSERT INTO source VALUES " + fixture.rows); err != nil {
 				t.Fatal(err)
 			}
 			var diag *qt.PlanDiagnostic
-			if err := run(t, context.Background(), q); !errors.As(err, &diag) || diag.Code != "duplicate_identity" {
+			if err := run(t, context.Background(), q); fixture.invalid && (!errors.As(err, &diag) || diag.Code != "duplicate_identity") || !fixture.invalid && err != nil {
 				t.Fatalf("got %v", err)
 			}
 			if n := log.count("qt_rank"); n != 1 {
@@ -390,7 +395,7 @@ func TestV3StagedValuesAreNotRevalidated(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Staging decoded and validated every value; nothing after it repeats that.
-	for _, name := range []string{"qt_v2_datetime", "qt_v2_field_error"} {
+	for _, name := range []string{"qt_v2_datetime", "qt_v2_datetime_value", "qt_v2_datetime_error", "qt_v2_field_error"} {
 		if n := calls(name); n != 0 {
 			t.Fatalf("%s ran %d times after staging", name, n)
 		}
@@ -453,6 +458,90 @@ func TestV3StagedValuesAreNotRevalidated(t *testing.T) {
 	}
 	if out.Metrics[0].GroupCount != 4 || out.Metrics[1].Buckets[0].Value != float64(16) {
 		t.Fatal(out.Metrics)
+	}
+}
+
+func TestV3StagedIntegerGroupsMatchGeneral(t *testing.T) {
+	for _, mutation := range []string{"", "n=-3", "n=0.1", "n=NULL", "n=9223372036854775807", "k='" + strings.Repeat("x", 100001) + "'"} {
+		name := mutation
+		if name == "" {
+			name = "stored integers"
+		}
+		if len(name) > 50 {
+			name = "long group key"
+		}
+		t.Run(name, func(t *testing.T) {
+			log := &statementLog{}
+			db, d := hookedV3(t, log, representativeRows)
+			// Preserve INTEGER storage for this fixture instead of REAL affinity.
+			if _, err := db.Exec(`ALTER TABLE source RENAME TO old;
+CREATE TABLE source(id TEXT,k TEXT,n,at TEXT,label TEXT);
+INSERT INTO source SELECT id,k,CAST(n AS INTEGER),at,label FROM old;
+DROP TABLE old`); err != nil {
+				t.Fatal(err)
+			}
+			if mutation != "" {
+				if _, err := db.Exec("UPDATE source SET " + mutation + " WHERE id='1'"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			q := representativeRequest(qt.OrderBy{Field: "n", Dir: "desc", Nulls: "last"})
+			q.Grouping.Summaries = append(q.Grouping.Summaries,
+				qt.SummaryColumn{ID: "total", Op: "sum", Field: "n"},
+				qt.SummaryColumn{ID: "ratio", Op: "formula", Expression: "SUM([n])/NULLIF(COUNT(),0)"})
+			q.Result.Select = append(q.Result.Select, "total", "ratio")
+			log.reset(nil)
+			got, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mutation == "" && log.count("qt_integer_input") == 0 {
+				t.Fatal("integer summaries were not reduced from the staged source")
+			}
+			log.reset(declineDirect)
+			want, wantErr := d.Execute(context.Background(), db, q, qt.PlanOptions{})
+			if wantErr != nil || !reflect.DeepEqual(got, want) {
+				t.Fatalf("optimized %#v; general %#v / %v", got, want, wantErr)
+			}
+		})
+	}
+}
+
+func TestV3StoredDatetimeSourceMatchesGeneral(t *testing.T) {
+	for _, format := range []string{"rfc3339", "utc-millis", "unix-seconds", "unix-millis"} {
+		t.Run(format, func(t *testing.T) {
+			log := &statementLog{}
+			db, d := hookedV3(t, log, representativeRows)
+			if _, err := db.Exec(`ALTER TABLE source RENAME TO old;
+CREATE TABLE source(id TEXT,k TEXT,n REAL,at,label TEXT);
+INSERT INTO source SELECT * FROM old; DROP TABLE old`); err != nil {
+				t.Fatal(err)
+			}
+			field := d.Schema.Fields["at"]
+			field.SQLiteDatetimeFormat = format
+			d.Schema.Fields["at"] = field
+			q := representativeRequest(qt.OrderBy{Field: "n", Dir: "desc", Nulls: "last"})
+			q.ExpectedRevisions = map[string]string{"unused": "1"}
+			options := qt.PlanOptions{Resolver: qt.DefinitionResolverFunc(func(_ context.Context, id string) (qt.ComputedColumn, error) {
+				return qt.ComputedColumn{ID: id, Label: "Unused", Revision: "1", Expression: qt.ComputedExpression{Language: "qt-expr", Version: 1, Source: "[n]*2"}}, nil
+			})}
+			for _, value := range []any{nil, "", "invalid", "2026-11-01T05:15:00.000Z", "2026-11-01T05:15:00.123456789+02:30", int64(-1), float64(-0.125), int64(1793500000000), []byte("invalid")} {
+				if _, err := db.Exec("UPDATE source SET at=?", value); err != nil {
+					t.Fatal(err)
+				}
+				log.reset(nil)
+				before := sqliteCalls["qt_v2_datetime_value"].Load()
+				got, err := d.Execute(context.Background(), db, q, options)
+				if sqliteCalls["qt_v2_datetime_value"].Load() == before {
+					t.Fatal("stored-source datetime decoder was not exercised")
+				}
+				log.reset(declineDirect)
+				want, wantErr := d.Execute(context.Background(), db, q, options)
+				if !reflect.DeepEqual(got, want) || (err == nil) != (wantErr == nil) || err != nil && err.Error() != wantErr.Error() {
+					t.Fatalf("%s / %v: optimized %#v / %v; general %#v / %v", format, value, got, err, want, wantErr)
+				}
+			}
+		})
 	}
 }
 

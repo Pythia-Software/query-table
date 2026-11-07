@@ -10,6 +10,7 @@ import (
 type sqliteIntegerPlan struct {
 	SQL, NonnegativeSQL, Input string
 	Args                       []any
+	storedOnly                 bool
 }
 
 // V3 also proves the complete narrow source's byte size and identity storage.
@@ -19,13 +20,14 @@ type sqliteIntegerSourceProof struct {
 	maxPopulation, maxGroups int
 }
 
-// Speculative reductions for plain scalar metrics over integer storage. Opaque
-// host bindings retain one materialized raw projection. Checked integer SUM
-// proves nonnegative populations directly; signed inputs also check their exact
-// absolute total. Other domains retain the ordinary exact decimal reducer.
+// Speculative reductions for scalar metrics and aggregate leaves over integer
+// storage. Existing opaque multi-input batches retain one materialized raw
+// projection. Checked integer SUM proves nonnegative populations directly;
+// signed inputs also check their exact absolute total. Other domains retain
+// the ordinary exact decimal reducer.
 // No schema declaration or sampled row is treated as proof about the population.
 func sqliteIntegerReduction(ctx context.Context, q metricRequest, specs []AggSpec, s Schema, o PlanOptions, combined SQLPlan, sourceProof ...sqliteIntegerSourceProof) *sqliteIntegerPlan {
-	if len(specs) < 2 || combined.Scope != "allMatching" {
+	if len(specs) == 0 || combined.Scope != "allMatching" {
 		return nil
 	}
 	fields := map[string]bool{}
@@ -38,35 +40,58 @@ func sqliteIntegerReduction(ctx context.Context, q metricRequest, specs []AggSpe
 			expressions = append(expressions, measure)
 		}
 	}
-	for _, expression := range expressions {
-		n, err := parseExpression(expression)
-		if err != nil || !aggOpKnown(strings.ToLower(n.op)) || len(n.args) > 1 {
-			return nil
-		}
+	// The compiler still evaluates the final formula and its lazy error
+	// sidecars. Only replace aggregate leaves whose complete input domain can
+	// be proved. An unsupported leaf declines the entire speculative plan.
+	var collect func(*exprNode) bool
+	collect = func(n *exprNode) bool {
 		op := strings.ToLower(n.op)
+		if !aggOpKnown(op) && op != "median" {
+			if op == "field" {
+				return false
+			}
+			for _, child := range n.args {
+				if !collect(child) {
+					return false
+				}
+			}
+			return true
+		}
+		if len(n.args) > 1 {
+			return false
+		}
 		if op != "count" && op != "sum" && op != "avg" && op != "min" && op != "max" && op != "count_distinct" {
-			return nil
+			return false
 		}
 		if len(n.args) == 0 {
 			if op != "count" {
-				return nil
+				return false
 			}
 		} else {
 			if n.args[0].op != "field" {
-				return nil
+				return false
 			}
 			name := n.args[0].text
 			f, ok := s.Fields[name]
-			if !ok || f.Kind != FieldNumber || !f.ExpressionNumeric || f.ValueErrorExpr != "" {
-				return nil
+			if !ok || f.Kind != FieldNumber || !f.ExpressionNumeric || f.ValueErrorExpr != "" && !f.typedValue {
+				return false
 			}
 			fields[name] = true
 		}
 		nodes[expressionKey(n)] = n
+		return true
+	}
+	storedOnly := len(specs) == 1
+	for _, expression := range expressions {
+		n, err := parseExpression(expression)
+		if err != nil || !collect(n) {
+			return nil
+		}
+		storedOnly = storedOnly || !aggOpKnown(strings.ToLower(n.op))
 	}
 	for _, name := range specs[0].GroupBy {
 		f, ok := s.Fields[name]
-		if !ok || (f.Kind != FieldText && f.Kind != FieldEnum && f.Kind != FieldBool) || f.ValueErrorExpr != "" {
+		if !ok || (f.Kind != FieldText && f.Kind != FieldEnum && f.Kind != FieldBool && !(f.Kind == FieldDatetime && f.typedValue)) || f.ValueErrorExpr != "" && !f.typedValue {
 			return nil
 		}
 		fields[name] = true
@@ -91,10 +116,15 @@ func sqliteIntegerReduction(ctx context.Context, q metricRequest, specs []AggSpe
 	sort.Strings(names)
 	aliases := map[string]string{}
 	projections := []string{}
+	sidecars := []string{}
 	for i, name := range names {
 		alias := fmt.Sprintf("i%d", i)
 		aliases[name] = alias
 		projections = append(projections, s.Fields[name].Expr+" AS "+alias)
+		if expression := s.Fields[name].ValueErrorExpr; expression != "" {
+			projections = append(projections, expression+" AS "+alias+"_error")
+			sidecars = append(sidecars, "MIN("+alias+"_error) IS NULL")
+		}
 	}
 	if len(projections) == 0 {
 		projections = []string{"1 AS qt_present"}
@@ -119,12 +149,20 @@ func sqliteIntegerReduction(ctx context.Context, q metricRequest, specs []AggSpe
 	}
 	groupBy := []string{}
 	columns := []string{}
-	guards := []string{}
+	guards := append([]string{}, sidecars...)
 	for i, name := range specs[0].GroupBy {
 		raw := aliases[name]
 		typ := expressionType(s.Fields[name].Kind)
 		columns = append(columns, fmt.Sprintf("%s AS group%d,NULL AS group%d_error", raw, i, i))
 		groupBy = append(groupBy, raw+" COLLATE BINARY")
+		if s.Fields[name].typedValue {
+			// The staged source already checked storage/encoding and normalized
+			// datetimes. Text formula operands still have the stricter size bound.
+			if typ == "text" {
+				guards = append(guards, fmt.Sprintf("COALESCE(length(CAST(%s AS BLOB)),0)<=%d", raw, maxFormulaTextBytes))
+			}
+			continue
+		}
 		guard := "qt_v2_field_error(" + raw + ",'" + typ + "')"
 		// BINARY text groups contain one exact string (or NULL). Validate that
 		// value once per group. Numeric equality can merge INTEGER and REAL
@@ -148,7 +186,7 @@ func sqliteIntegerReduction(ctx context.Context, q metricRequest, specs []AggSpe
 		// hidden by that limit, or change ordinary diagnostic precedence.
 		columns = append(columns, "SUM(COUNT(*)) OVER () AS qt_source_count", "SUM(COALESCE(SUM("+strings.Join(parts, "+")+"),0)) OVER () AS qt_source_bytes")
 	}
-	plan := &sqliteIntegerPlan{Input: input, Args: args}
+	plan := &sqliteIntegerPlan{Input: input, Args: args, storedOnly: storedOnly}
 	modes := []string{"signed", "nonnegative"}
 	baseColumns, baseGuards := columns, guards
 	for _, mode := range modes {

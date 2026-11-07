@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Changed
+
+- Faster SQLite execution for eligible integer summaries and aggregate-leaf
+  formulas, exact count reuse, calendar staging and representative rows, plus
+  less page-planning work and bounded stored-value autocomplete processing.
+  Storage, numeric, identity and resource checks retain the general executor
+  when an optimization cannot prove equivalent results; nothing is cached
+  across requests or snapshots. Hosts should register the complete current
+  `SQLiteV2Functions()` list, including the new direct datetime value/error
+  decoders. See the [Pharos benchmark report](docs/sqlite-pharos-performance.md)
+  for measurements, limitations and reproduction commands.
+
 ## 1.0.0 — 2026-11-05
 
 ### Added

@@ -38,7 +38,22 @@ func compilePopulation(ctx context.Context, where []WhereTerm, s Schema, o PlanO
 	return b, nil
 }
 func (d QueryDatasetV3) countPopulation(ctx context.Context, tx *sql.Tx, where []WhereTerm, o PlanOptions) (int64, error) {
-	b, err := compilePopulation(ctx, where, d.Schema, o, d.Dialect == "sqlite")
+	schema := d.Schema
+	if d.Dialect == "sqlite" {
+		baseOnly := true
+		for _, term := range where {
+			for _, predicate := range term.Predicates() {
+				baseOnly = baseOnly && !strings.HasPrefix(predicate.Field, "@computed/")
+			}
+		}
+		if baseOnly {
+			// SourcePlan validated the catalogue already. COUNT needs its
+			// predicates, not the page's SELECT or global sorting bindings.
+			schema.DefaultSort, schema.TiebreakSort = nil, nil
+			schema = narrowSchema(schema, nil, nil, where)
+		}
+	}
+	b, err := compilePopulation(ctx, where, schema, o, d.Dialect == "sqlite")
 	if err != nil {
 		return 0, err
 	}
@@ -117,9 +132,16 @@ func (d QueryDatasetV3) executeUngrouped(ctx context.Context, tx *sql.Tx, q Quer
 			selected = append(selected, d.Schema.IDField)
 		}
 		resultQuery.Select = selected
-		rowsPlan, e := compileComputedRowsDialect(ctx, resultQuery, d.Schema, o, sqlite)
-		if e == nil {
-			rowsPlan, e = compileComputedRowsDialect(ctx, resultQuery, narrowSchema(d.Schema, rowsPlan.Dependencies, resultQuery.OrderBy, resultQuery.Where), o, sqlite)
+		// SourcePlan already discovered the complete transitive dependency set,
+		// including filters and hidden/default sorts. Use it to narrow before
+		// compiling the page rather than compiling that page twice.
+		rowSchema := d.Schema
+		if sqlite {
+			rowSchema = narrowSchema(rowSchema, plan.Dependencies, resultQuery.OrderBy, resultQuery.Where)
+		}
+		rowsPlan, e := compileComputedRowsDialect(ctx, resultQuery, rowSchema, o, sqlite)
+		if !sqlite && e == nil {
+			rowsPlan, e = compileComputedRowsDialect(ctx, resultQuery, narrowSchema(d.Schema, rowsPlan.Dependencies, resultQuery.OrderBy, resultQuery.Where), o, false)
 		}
 		if e != nil {
 			return out, e

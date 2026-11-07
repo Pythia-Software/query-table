@@ -153,6 +153,49 @@ func TestV2PopulationCountAndErrors(t *testing.T) {
 	}
 }
 
+func TestV2PopulationCountReuse(t *testing.T) {
+	log := &statementLog{}
+	db, d := crossFieldDataset(t, log)
+	d.SourceSQL = "SELECT * FROM source WHERE qt_test_metric_probe(tenant)=?1"
+	for _, tenant := range []string{"allowed", "denied", "empty"} {
+		d.SourceArgs = []any{tenant}
+		for _, minimum := range []int{0, 10, 100} {
+			q := metricsV3(nil, nil, 2, 1, qt.AggSpec{ID: "count", Op: "count", MinCount: qt.MetricMinCount{Min: minimum}})
+			metricProbeCalls.Store(0)
+			got, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if calls := metricProbeCalls.Load(); calls != 31 {
+				t.Fatalf("count repeated the authorized predicate: %d evaluations, want 31", calls)
+			}
+			want, err := qt.TestOnlyStageUngrouped(d).Execute(context.Background(), db, q, qt.PlanOptions{})
+			if err != nil || !reflect.DeepEqual(got.Metrics, want.Metrics) || got.Total != want.Total {
+				t.Fatalf("%s, min=%d: candidate %#v; staged %#v / %v", tenant, minimum, got.Metrics, want.Metrics, err)
+			}
+		}
+	}
+	// A metric-specific predicate and shown-row window describe different
+	// populations. Their count must still be evaluated independently.
+	d.SourceArgs = []any{"allowed"}
+	for _, m := range []qt.AggSpec{
+		{ID: "filtered", Op: "count", Where: []qt.WhereTerm{{Field: "n0", Op: ">", Value: "10"}}},
+		{ID: "shown", Op: "count", Scope: "shownRows"},
+		{ID: "grouped", Op: "count", GroupBy: []string{"k"}},
+		{ID: "measured", Op: "count", MinCount: qt.MetricMinCount{Min: 100, Sum: "n0"}},
+	} {
+		q := metricsV3(nil, nil, 2, 1, m)
+		got, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := qt.TestOnlyStageUngrouped(d).Execute(context.Background(), db, q, qt.PlanOptions{})
+		if err != nil || !reflect.DeepEqual(got.Metrics, want.Metrics) {
+			t.Fatalf("%s: candidate %#v; staged %#v / %v", m.ID, got.Metrics, want.Metrics, err)
+		}
+	}
+}
+
 // From TestV2SourceProofsConcurrentExecutions.
 func TestV2ConcurrentExecutions(t *testing.T) {
 	log := &statementLog{}

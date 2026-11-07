@@ -8,9 +8,11 @@ original V3 request; there is no precomputed input, request rewrite or new API.
 
 Plain COUNT, numeric COUNT(field), SUM, AVG, MIN, MAX and COUNT_DISTINCT with
 text/enum keys can share the guarded integer reducer used by ungrouped
-metric batches. The complete request
-first passes `SourcePlan`, including aggregate policies, revisions, token and
-snapshot checks and compiler budgets. EXPLAIN must resolve the narrow source
+metric batches. Aggregate-leaf formulas composed from these reductions can now
+share it too; final formula arithmetic and lazy error handling stay compiled.
+Indexed IN/NOT IN membership probes are accepted by source inspection. The
+complete request first passes `SourcePlan`, including aggregate policies,
+revisions, token and snapshot checks and compiler budgets. EXPLAIN must resolve the narrow source
 to the existing closed stored-column opcode allowlist. Functions, including
 functions inside views, expressions, virtual tables and unknown opcodes retain
 the general executor.
@@ -19,8 +21,9 @@ The reduction proves INTEGER/NULL storage and exact absolute totals within
 9,007,199,254,740,991. Nonnegative checked SUMs combine storage and bounds proofs;
 signed inputs retain the absolute-total check. Declined domains and statement
 failures fall back to exact general execution. Fractions, unsafe/cancelling
-integers, numeric-looking TEXT, invalid storage, computed inputs, formulas,
-representatives and samples keep its numeric results and diagnostics.
+integers, numeric-looking TEXT, invalid storage, computed inputs, unsupported
+formula leaves, representatives and samples keep its numeric results and
+diagnostics.
 
 The direct statement also counts source rows, measures the same narrow UTF-8
 value payload, and validates source text identities. Text/enum keys validate
@@ -149,3 +152,8 @@ published artifacts together; do not patch installed packages or module caches.
 
 See [preview transport migration](computed-columns.md#modern-row-transports)
 for the independent frontend change.
+
+See [real Pharos catalog measurements](sqlite-pharos-performance.md) for the
+2026-11-07 follow-up, including indexed source exclusions, singleton/formula
+metrics, count reuse and calendar grouping. The portable and HTTP measurements
+above describe the earlier release and have not been rerun as part of that work.

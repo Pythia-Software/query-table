@@ -524,6 +524,22 @@ func (d QueryDatasetV3) SourcePlan(ctx context.Context, q QueryRequestV3, o Plan
 	sourceSchema := d.Schema
 	sourceSchema.DefaultSort = nil
 	sourceSchema.TiebreakSort = nil
+	if sqlite {
+		baseOnly := true
+		for _, name := range source.Select {
+			baseOnly = baseOnly && !strings.HasPrefix(name, "@computed/")
+		}
+		for _, term := range source.Where {
+			for _, predicate := range term.Predicates() {
+				baseOnly = baseOnly && !strings.HasPrefix(predicate.Field, "@computed/")
+			}
+		}
+		if baseOnly {
+			// The request's order/summary validation above already checked the
+			// full schema. Base-only source bindings need no graph discovery.
+			sourceSchema = narrowSchema(sourceSchema, source.Select, nil, source.Where)
+		}
+	}
 	plan, err := compileQuerySource(ctx, source, sourceSchema, o, sqlite)
 	if err != nil {
 		return out, err

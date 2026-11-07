@@ -410,6 +410,29 @@ func TestV2CrossFieldStoredAndOpaqueSources(t *testing.T) {
 	}
 	q.Result.Where = []qt.WhereTerm{{Field: "n0", Op: ">", Value: "3"}}
 	check(false)
+	// Pharos excludes mirrored work through an indexed NOT IN relation. A
+	// membership probe is a stored lookup; functions hidden in that relation
+	// still decline direct execution. Compare actual exclusion and NULL rules.
+	if _, err := db.Exec("CREATE TABLE excluded(id TEXT PRIMARY KEY); INSERT INTO excluded VALUES('00000001'),('hidden')"); err != nil {
+		t.Fatal(err)
+	}
+	for _, membership := range []string{"IN", "NOT IN"} {
+		d.SourceSQL = "SELECT * FROM source WHERE tenant=?1 AND id " + membership + " (SELECT id FROM excluded)"
+		check(false)
+		got, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
+		log.reset(func(statement string) error {
+			if strings.Contains(statement, "qt_integer_input") {
+				return errors.New("force general reduction")
+			}
+			return nil
+		})
+		want, wantErr := d.Execute(context.Background(), db, q, qt.PlanOptions{})
+		if err != nil || wantErr != nil || !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s: candidate %#v / %v; general %#v / %v", membership, got, err, want, wantErr)
+		}
+	}
+	d.SourceSQL = "SELECT * FROM source WHERE tenant=?1 AND id NOT IN (SELECT qt_test_metric_probe(id) FROM excluded)"
+	check(true)
 }
 
 func TestV2CrossFieldProofStorageAndKeyTypes(t *testing.T) {
@@ -478,4 +501,92 @@ func TestV2CrossFieldSourceInspectionFallback(t *testing.T) {
 		t.Fatal("inspection cancellation", err)
 	}
 	assertNoReductions(t, tx)
+}
+
+// Singleton cards and formulas must agree with the original typed reducer,
+// including lazy branches, independent errors and integer-domain fallbacks.
+func TestV2IntegerFormulaReductions(t *testing.T) {
+	for _, mutation := range []string{"", "n0=-3", "n0=0.1", "n0='12'", "n0=9223372036854775807", "n0=NULL", "k=CAST(X'ff' AS TEXT)"} {
+		name := mutation
+		if name == "" {
+			name = "stored integers"
+		}
+		t.Run(name, func(t *testing.T) {
+			log := &statementLog{}
+			db, d := crossFieldDataset(t, log)
+			if mutation != "" {
+				if _, err := db.Exec("UPDATE source SET " + mutation + " WHERE tenant='allowed'"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, grouped := range []bool{false, true} {
+				for _, expressions := range [][]string{
+					{"SUM([n0])"},
+					{"SUM([n0])+1", "SUM([n0])+2"},
+					{"SUM([n0])/NULLIF(COUNT(),0)", "IF(COUNT()>0,AVG([n1]),1/0)", "SUM([n0])/0"},
+					{"IF(TRUE,COUNT(),SUM([n0]))", "SUM([n1])"},
+				} {
+					q := crossFieldQuery(grouped)
+					q.Metrics = nil
+					for i, expression := range expressions {
+						m := qt.AggSpec{ID: fmt.Sprint("m", i), Expression: expression}
+						if grouped {
+							m.GroupBy = []string{"k"}
+							m.MinCount = qt.MetricMinCount{Min: 10, Sum: "n1"}
+						}
+						q.Metrics = append(q.Metrics, m)
+					}
+					log.reset(nil)
+					got, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
+					if mutation == "" && log.count("qt_integer_input") == 0 {
+						t.Fatal("stored integer reduction was not used")
+					}
+					log.reset(func(statement string) error {
+						if strings.Contains(statement, "qt_integer_input") {
+							return errors.New("test: force general reduction")
+						}
+						return nil
+					})
+					want, wantErr := d.Execute(context.Background(), db, q, qt.PlanOptions{})
+					if !reflect.DeepEqual(got, want) || (err == nil) != (wantErr == nil) || err != nil && err.Error() != wantErr.Error() {
+						t.Fatalf("%v: candidate %#v / %v; general %#v / %v", expressions, got, err, want, wantErr)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestV2IntegerFormulasRetainOpaqueEvaluation(t *testing.T) {
+	log := &statementLog{}
+	db, d := crossFieldDataset(t, log)
+	d.SourceSQL = "SELECT *,qt_test_metric_probe(n0) AS probed FROM source WHERE tenant=?1"
+	f := d.Schema.Fields["n0"]
+	f.Expr = "r.probed"
+	d.Schema.Fields["n0"] = f
+	for _, value := range []string{"3", "-3", "0.1", "'12'"} {
+		if _, err := db.Exec("UPDATE source SET n0=" + value); err != nil {
+			t.Fatal(err)
+		}
+		for _, expressions := range [][]string{{"SUM([n0])"}, {"SUM([n0])+1", "SUM([n0])+2"}} {
+			q := crossFieldQuery(true)
+			q.Metrics = nil
+			for i, expression := range expressions {
+				q.Metrics = append(q.Metrics, qt.AggSpec{ID: fmt.Sprint("m", i), Expression: expression, GroupBy: []string{"k"}})
+			}
+			log.reset(nil)
+			metricProbeCalls.Store(0)
+			if _, err := d.Execute(context.Background(), db, q, qt.PlanOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			if calls := metricProbeCalls.Load(); calls != 30 {
+				t.Fatalf("opaque projection evaluated %d times, want 30", calls)
+			}
+			for _, statement := range log.seen {
+				if strings.HasPrefix(statement, "CREATE TEMP TABLE") && strings.Contains(statement, "qt_integer_input") {
+					t.Fatal("speculated on an opaque formula input")
+				}
+			}
+		}
+	}
 }
