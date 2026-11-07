@@ -1,6 +1,6 @@
 {
   "name": "@pythia-software/query-table-duckdb",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Schema-bound DuckDB execution for Query Table, in Node.js or the browser.",
   "license": "MIT",
   "author": "Pythia Software",
@@ -41,6 +41,6 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@pythia-software/query-table-core": "1.0.0"
+    "@pythia-software/query-table-core": "1.0.1"
   }
 }
