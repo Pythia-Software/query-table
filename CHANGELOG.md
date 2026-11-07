@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Added
+
+- `QueryDatasetV3.PopulationCounter` lets a host answer the exact population
+  count of an ungrouped execution, for example from its own cache keyed by
+  data generation, instead of recounting the filtered source on every request.
+  The executor describes each count with its statement, arguments, filter,
+  relative-time clock, computed revisions and a stable `Key`; the host owns
+  snapshot and authorization validity. See
+  [Host population counts](docs/backend-sqlite.md#host-population-counts).
+
 ## 1.0.1 — 2026-11-07
 
 ### Changed

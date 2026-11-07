@@ -248,6 +248,71 @@ staged projection is ignored there and the typed predicate applies. A provider
 error fails the whole execution. `QueryDatasetV3` rejects relations for
 PostgreSQL.
 
+## Host population counts
+
+Every ungrouped execution counts its whole filtered population exactly before
+it reads the page and metrics: the count is the result's `total` and
+`sourceTotal`, and metrics over the whole population reuse it. On a large
+source that count can dominate a small page. The executor never reuses a count
+across requests, because only the host knows when its data changed. A host
+that does can set `PopulationCounter` on a `QueryDatasetV3` (either dialect)
+and answer counts itself:
+
+```go
+type countCache struct {
+    mu     sync.Mutex
+    counts map[string]int64 // bounded in a real host
+}
+
+func (c *countCache) CountPopulation(ctx context.Context, tx *sql.Tx, p querytable.PopulationCount, count func(context.Context) (int64, error)) (int64, error) {
+    var generation int64 // advanced by every write to the source's tables
+    if err := tx.QueryRowContext(ctx, "SELECT generation FROM data_generation").Scan(&generation); err != nil {
+        return 0, err
+    }
+    key := fmt.Sprintf("%d/%s", generation, p.Key)
+    c.mu.Lock()
+    n, ok := c.counts[key]
+    c.mu.Unlock()
+    if ok {
+        return n, nil
+    }
+    n, err := count(ctx) // runs p.SQL in tx
+    if err == nil {
+        c.mu.Lock()
+        c.counts[key] = n
+        c.mu.Unlock()
+    }
+    return n, err
+}
+
+dataset := querytable.QueryDatasetV3{Schema: schema, Dialect: "sqlite", SourceSQL: source, PopulationCounter: cache}
+```
+
+The executor consults the counter once per ungrouped execution, with that
+execution's context and transaction. `PopulationCount` describes the count:
+
+- `SQL` and `Args` are the `COUNT(*)` statement the executor would run, and
+  `count` runs it in the transaction.
+- `Where` is the request's canonical filter, for hosts that can answer some
+  filters from a maintained rollup instead (an unfiltered count, say).
+- `Now` is the request's evaluation clock when a filter value is relative
+  (`-30d`), and zero otherwise; `Revisions` are the computed-definition
+  revisions the statement reaches.
+- `Key` digests the dialect, scope, dataset, expression profile,
+  `PlanOptions.Identity`, statement, arguments, revisions and, for relative
+  filters, the clock. Requests whose page, order or display columns differ
+  share a key when they filter alike.
+
+The answer must be the exact number of rows `SQL` returns in that
+transaction; the executor trusts it (rejecting only a negative count) and does
+not recount. `Key` does not identify the data snapshot, so a host that reuses
+counts must pair it with a data generation read inside the transaction, and
+with any authorization state that the source SELECT and its arguments do not
+encode. A relative filter's count is reusable only by requests that send the
+same `now`. A counter error fails the execution. Grouped executions, distinct
+values and staged scratch budgets count their own populations and do not
+consult the counter.
+
 ## Data and semantic conventions
 
 Use STRICT tables or equivalent ingestion validation. Bind numeric fields to
