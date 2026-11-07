@@ -10,7 +10,7 @@ import (
 // the full request. EXPLAIN must prove that retrying a declined domain cannot
 // repeat an expensive/volatile expression. Every value and budget is still
 // proved within this transaction; no declaration, sample or host cache is used.
-func (d QueryDatasetV3) sqliteDirectGroups(ctx context.Context, tx *sql.Tx, q QueryRequestV3, o PlanOptions, source SourceDependencyPlan, maxPop, maxGroups int, maxBytes int64, tables *[]string) (*SQLPlan, int64, error) {
+func (d QueryDatasetV3) sqliteDirectGroups(ctx context.Context, tx *sql.Tx, q QueryRequestV3, o PlanOptions, source SourceDependencyPlan, maxPop, maxGroups int, maxBytes int64, tables *[]string, declined *bool) (*SQLPlan, int64, error) {
 	// Calendar keys are computed over the staged population.
 	if d.Dialect != "sqlite" || q.Grouping == nil || q.Grouping.Representative != nil || len(q.Grouping.KeyIntervals) > 0 {
 		return nil, 0, nil
@@ -25,8 +25,9 @@ func (d QueryDatasetV3) sqliteDirectGroups(ctx context.Context, tx *sql.Tx, q Qu
 	specs := []AggSpec{count}
 	outputs := []summaryOutput{}
 	for _, summary := range q.Grouping.Summaries {
-		// Formulas and representatives retain the general typed executor.
-		if summary.Op == "formula" || summary.Op == "row" {
+		// Representatives retain the general typed executor. Formula leaves
+		// may use the same proved reduction; final arithmetic stays compiled.
+		if summary.Op == "row" {
 			return nil, 0, nil
 		}
 		spec := summarySpec(summary, q.Grouping.Keys)
@@ -49,6 +50,8 @@ func (d QueryDatasetV3) sqliteDirectGroups(ctx context.Context, tx *sql.Tx, q Qu
 	}
 	table := queryTableName()
 	*tables = append(*tables, table) // Register before potentially interrupted DDL.
+	// This flag is consulted only when the direct plan is declined.
+	*declined = true
 	for _, statement := range []string{integer.NonnegativeSQL, integer.SQL} {
 		statement = strings.Replace(statement, " AS MATERIALIZED (", " AS NOT MATERIALIZED (", 1)
 		valid, attemptErr := sqliteTryIntegerReduction(ctx, tx, table, statement, integer.Args)

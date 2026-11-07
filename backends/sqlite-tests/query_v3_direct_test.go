@@ -60,6 +60,10 @@ func TestV3DirectGroupsMatchGeneralExecution(t *testing.T) {
 			d := qt.QueryDatasetV3{Schema: v2.Schema, SourceSQL: v2.SourceSQL, SourceArgs: v2.SourceArgs, Dialect: "sqlite"}
 			for _, having := range []bool{false, true} {
 				q := directRequest()
+				q.Grouping.Summaries = append(q.Grouping.Summaries,
+					qt.SummaryColumn{ID: "ratio", Op: "formula", Expression: "SUM([n0])/NULLIF(COUNT(),0)"},
+					qt.SummaryColumn{ID: "lazy", Op: "formula", Expression: "IF(COUNT()>0,SUM([n0])+1,1/0)"})
+				q.Result.Select = append(q.Result.Select, "ratio", "lazy")
 				if having {
 					q.Result.Where = []qt.WhereTerm{{Field: "rows", Op: ">", Value: "4"}}
 				}
@@ -162,8 +166,17 @@ func TestV3DirectGroupsRetainOpaqueSourceEvaluation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if log.count("CREATE TEMP TABLE") == 0 || log.count("AS WITH qt_integer_input") != 0 {
-		t.Fatal("opaque expression used direct reduction")
+	staged := false
+	for _, statement := range log.seen {
+		if strings.HasPrefix(statement, "CREATE TEMP TABLE") {
+			if !staged && strings.Contains(statement, "qt_integer_input") {
+				t.Fatal("opaque expression used direct reduction before staging")
+			}
+			staged = true
+		}
+	}
+	if !staged {
+		t.Fatal("opaque source was not staged")
 	}
 	calls := metricProbeCalls.Load()
 	log.reset(declineDirect)

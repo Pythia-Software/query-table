@@ -96,6 +96,25 @@ func SQLiteV2Functions() []SQLiteScalarFunction {
 		}}
 	}
 	return append(sqliteDistributionFunctions(), []SQLiteScalarFunction{
+		fn("qt_v2_datetime_value", 2, func(a []driver.Value) (driver.Value, error) {
+			format, ok := a[1].(string)
+			if !ok {
+				return nil, fmt.Errorf("invalid datetime format")
+			}
+			value, _ := sqliteV2Datetime(a[0], format)
+			return value, nil
+		}),
+		fn("qt_v2_datetime_error", 2, func(a []driver.Value) (driver.Value, error) {
+			format, ok := a[1].(string)
+			if !ok {
+				return nil, fmt.Errorf("invalid datetime format")
+			}
+			_, code := sqliteV2Datetime(a[0], format)
+			if code == "" {
+				return nil, nil
+			}
+			return code, nil
+		}),
 		fn("qt_v2_datetime", 2, func(a []driver.Value) (driver.Value, error) {
 			format, ok := a[1].(string)
 			if !ok {

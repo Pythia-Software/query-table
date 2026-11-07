@@ -71,6 +71,16 @@ func (d QueryDatasetV3) executeDistinct(ctx context.Context, tx *sql.Tx, q Query
 			value, from = "qt_distinct.qt_element", b.rel+" CROSS JOIN LATERAL unnest("+bound.Expr+") AS qt_distinct(qt_element)"
 		}
 	}
+	if sqlite && !computed && (bound.Kind == FieldText || bound.Kind == FieldEnum) {
+		result, err := d.sqliteDistinctText(ctx, tx, q, o, b, value, from)
+		if err != nil {
+			return out, err
+		}
+		if result != nil {
+			out.Execution, out.Distinct = queryExecution(q, plan), result
+			return out, ctx.Err()
+		}
+	}
 	condition := "qt_value IS NOT NULL"
 	if request.Search != "" {
 		search := b.param(request.Search, "text")

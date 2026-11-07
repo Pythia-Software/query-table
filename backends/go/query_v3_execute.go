@@ -125,13 +125,19 @@ func (d QueryDatasetV3) ExecuteIn(ctx context.Context, tx *sql.Tx, q QueryReques
 	if q.Grouping == nil && !d.stageUngrouped {
 		return d.executeUngrouped(ctx, tx, q, o, plan, maxGroups, &tables)
 	}
-	direct, total, err := d.sqliteDirectGroups(ctx, tx, q, o, plan, maxPop, maxGroups, maxBytes, &tables)
+	direct, total, err := d.sqliteDirectGroups(ctx, tx, q, o, plan, maxPop, maxGroups, maxBytes, &tables, &o.sqliteIntegerDeclined)
 	if err != nil {
 		return out, err
 	}
 	staged := d.Schema
 	stageOptions := o
 	if direct == nil {
+		if d.Dialect == "sqlite" && q.Grouping != nil {
+			plan.SQLPlan, err = d.sqliteSourceProjection(ctx, tx, q.Source.Where, plan.SQLPlan, o, maxPop)
+			if err != nil {
+				return out, err
+			}
+		}
 		// Inspect the bounded narrow projection in the same authorized snapshot
 		// before copying it. An oversized source must never fill our temp table.
 		sizeSQL := d.stagingSizeSQL(plan.Columns)
@@ -148,12 +154,12 @@ func (d QueryDatasetV3) ExecuteIn(ctx context.Context, tx *sql.Tx, q QueryReques
 		source := queryTableName()
 		tables = append(tables, source)
 		calendarKeys := q.Grouping != nil && len(q.Grouping.KeyIntervals) > 0
-		create := "CREATE TEMP TABLE " + queryIdent(source) + " AS " + plan.SQL
 		if calendarKeys {
-			// Calendar keys are written back per staged row.
-			create = "CREATE TEMP TABLE " + queryIdent(source) + " AS SELECT *,ROW_NUMBER() OVER () AS qt_calendar_row FROM (" + plan.SQL + ") AS qt_calendar_source"
+			err = d.stageCalendarSource(ctx, tx, source, plan.SQLPlan)
+		} else {
+			_, err = tx.ExecContext(ctx, "CREATE TEMP TABLE "+queryIdent(source)+" AS "+plan.SQL, plan.Args...)
 		}
-		if _, err = tx.ExecContext(ctx, create, plan.Args...); err != nil {
+		if err != nil {
 			return out, err
 		}
 		// Recheck the materialized values too, including host expressions that may
@@ -406,8 +412,10 @@ func calendarGroupField(i int) string { return fmt.Sprintf("__qt_calendar_key%d_
 // staged source rows, with the metric calendar, and adds a datetime field for
 // it to the staged schema. The original field stays available to summaries.
 func (d QueryDatasetV3) keyCalendarGroups(ctx context.Context, tx *sql.Tx, table string, g *GroupingDefinition, columns []OutputColumn, staged Schema) error {
-	if _, err := tx.ExecContext(ctx, "CREATE UNIQUE INDEX "+queryIdent(table+"_calendar")+" ON "+queryIdent(table)+" (qt_calendar_row)"); err != nil {
-		return err
+	if d.Dialect != "sqlite" {
+		if _, err := tx.ExecContext(ctx, "CREATE UNIQUE INDEX "+queryIdent(table+"_calendar")+" ON "+queryIdent(table)+" (qt_calendar_row)"); err != nil {
+			return err
+		}
 	}
 	for i, key := range g.Keys {
 		interval, ok := g.KeyIntervals[key]
@@ -449,6 +457,8 @@ func (d QueryDatasetV3) keyCalendarGroups(ctx context.Context, tx *sql.Tx, table
 // the staged fields grouped by; names are the result key columns.
 func (d QueryDatasetV3) stageGroups(ctx context.Context, tx *sql.Tx, table string, g *GroupingDefinition, names []string, s Schema, o PlanOptions, maxGroups int, prepared *SQLPlan) (result Schema, err error) {
 	result = Schema{Name: s.Name + ":groups", IDField: GroupIdentityField, Fields: map[string]FieldSpec{}}
+	reductions := []string{}
+	defer func() { err = errors.Join(err, d.dropQueryTables(ctx, tx, reductions)) }()
 	// SQLite reduces scalar summaries in the COUNT pass: one scan of the staged
 	// population and one GROUP BY write every value and error sidecar into the
 	// group table. SourcePlan compiled each summary on its own. Any sampled
@@ -482,6 +492,16 @@ func (d QueryDatasetV3) stageGroups(ctx context.Context, tx *sql.Tx, table strin
 	}
 	if err != nil {
 		return result, err
+	}
+	if prepared == nil && d.Dialect == "sqlite" && !o.sqliteIntegerDeclined {
+		specs := []AggSpec{countSpec}
+		for _, output := range fused {
+			specs = append(specs, AggSpec{ID: output.ID, Expression: output.Expression, GroupBy: g.Keys})
+		}
+		countPlan, err = d.sqliteStagedGroups(ctx, tx, specs, s, o, countPlan, &reductions)
+		if err != nil {
+			return result, err
+		}
 	}
 	reduced := map[string]OutputColumn{}
 	for _, column := range countPlan.Columns {
@@ -681,6 +701,29 @@ func representativePlan(ctx context.Context, g *GroupingDefinition, s Schema, o 
 	id, err := b.field(s.IDField)
 	if err != nil {
 		return SQLPlan{}, err
+	}
+	if sqlite {
+		// Validate narrow key/identity tuples separately from representative
+		// payloads. COUNT(DISTINCT) ignores NULL, so equality with COUNT(*)
+		// proves both nonnull and unique IDs within each typed group. This
+		// avoids carrying every ROW payload through three identity windows.
+		source := b.rel
+		identityColumns, identityJoin := []string{}, []string{}
+		for i, key := range partitions {
+			alias := fmt.Sprintf("qt_identity_key%d", i)
+			identityColumns = append(identityColumns, key+" AS "+alias)
+			identityJoin = append(identityJoin, key+" IS NOT DISTINCT FROM qt_identity."+alias)
+		}
+		identityColumns = append(identityColumns, "CASE WHEN COUNT(DISTINCT "+id.Value+")=COUNT(*) THEN 1 ELSE 2 END AS qt_identity_count")
+		b.stage("SELECT " + strings.Join(identityColumns, ",") + " FROM " + source + " GROUP BY " + strings.Join(partitions, ","))
+		identities := b.rel
+		b.rel = source
+		b.stage("SELECT *,ROW_NUMBER() OVER (PARTITION BY " + strings.Join(partitions, ",") + " ORDER BY " + order + ") AS qt_rank FROM " + source)
+		// ROW_NUMBER's own sorter supplies its evaluation boundary; avoid a
+		// second materialized copy of all ranked rows before keeping rank 1.
+		b.stages[len(b.stages)-1].Materialized = false
+		sql := "SELECT " + strings.Join(projections, ",") + ",qt_identity.qt_identity_count,0 AS qt_missing_identity," + id.Value + " AS qt_source_id FROM " + b.rel + " JOIN " + identities + " AS qt_identity ON " + strings.Join(identityJoin, " AND ") + " WHERE qt_rank=1"
+		return b.finish(sql, "allMatching", nil), nil
 	}
 	b.stage("SELECT *,ROW_NUMBER() OVER (PARTITION BY " + strings.Join(partitions, ",") + " ORDER BY " + order + ") AS qt_rank,COUNT(*) OVER (PARTITION BY " + strings.Join(append(append([]string{}, partitions...), id.Value), ",") + ") AS qt_same_identity,SUM(CASE WHEN " + id.Value + " IS NULL THEN 1 ELSE 0 END) OVER (PARTITION BY " + strings.Join(partitions, ",") + ") AS qt_missing_identity FROM " + b.rel)
 	b.stage("SELECT *,MAX(qt_same_identity) OVER (PARTITION BY " + strings.Join(partitions, ",") + ") AS qt_identity_count FROM " + b.rel)

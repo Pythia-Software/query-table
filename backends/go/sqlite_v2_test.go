@@ -125,6 +125,34 @@ func TestSQLiteV2AggregateLifecycleAndBounds(t *testing.T) {
 		}
 	}
 }
+
+func TestSQLiteDatetimeSplitDecodersMatchEnvelope(t *testing.T) {
+	functions := map[string]SQLiteScalarFunction{}
+	for _, f := range SQLiteV2Functions() {
+		functions[f.Name] = f
+	}
+	for _, format := range []string{"rfc3339", "utc-millis", "unix-seconds", "unix-millis"} {
+		for _, input := range []driver.Value{nil, "", "invalid", "2026-11-01T05:15:00.000Z", "2026-11-01T05:15:00.123456789+02:30", int64(-1), float64(-0.125), int64(1793500000000), float64(1e100), []byte("2026-11-01T05:15:00Z")} {
+			args := []driver.Value{input, format}
+			payload, err := functions["qt_v2_datetime"].Call(args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var original struct {
+				Value any
+				Error string
+			}
+			if err = json.Unmarshal([]byte(payload.(string)), &original); err != nil {
+				t.Fatal(err)
+			}
+			value, err := functions["qt_v2_datetime_value"].Call(args)
+			code, codeErr := functions["qt_v2_datetime_error"].Call(args)
+			if err != nil || codeErr != nil || value != original.Value || sqliteErrorCode(code) != original.Error {
+				t.Fatalf("%s / %v: split %v / %v / %v / %v; envelope %#v", format, input, value, code, err, codeErr, original)
+			}
+		}
+	}
+}
 func TestSQLiteV2EnvelopeAndParameterPartition(t *testing.T) {
 	o := PlanOptions{SourceSQL: "SELECT * FROM fixture WHERE tenant=?1", SourceArgs: []any{"tenant"}}
 	d := QueryDatasetV3{Schema: sqliteV2TestSchema(), SourceSQL: o.SourceSQL, SourceArgs: o.SourceArgs, Dialect: "sqlite"}

@@ -372,7 +372,7 @@ func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggS
 	}
 	table := queryTableName()
 	*tables = append(*tables, table)
-	if _, err = tx.ExecContext(ctx, "CREATE TEMP TABLE "+queryIdent(table)+" AS SELECT *,ROW_NUMBER() OVER () AS qt_calendar_row FROM ("+p.SQL+") AS qt_calendar_source", p.Args...); err != nil {
+	if err = d.stageCalendarSource(ctx, tx, table, p); err != nil {
 		return MetricResult{}, err
 	}
 	// A calendar scratch relation lives for one metric, rather than accumulating
@@ -384,8 +384,10 @@ func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggS
 	if err = d.checkCalendarStaging(ctx, tx, queryIdent(table), sizeSQL, nil, maxPopulation, maxBytes); err != nil {
 		return MetricResult{}, err
 	}
-	if _, err = tx.ExecContext(ctx, "CREATE UNIQUE INDEX "+queryIdent(table+"_index")+" ON "+queryIdent(table)+" (qt_calendar_row)"); err != nil {
-		return MetricResult{}, err
+	if d.Dialect != "sqlite" {
+		if _, err = tx.ExecContext(ctx, "CREATE UNIQUE INDEX "+queryIdent(table+"_index")+" ON "+queryIdent(table)+" (qt_calendar_row)"); err != nil {
+			return MetricResult{}, err
+		}
 	}
 	if _, err = tx.ExecContext(ctx, "ALTER TABLE "+queryIdent(table)+" ADD COLUMN qt_calendar_key TEXT"); err != nil {
 		return MetricResult{}, err
@@ -738,6 +740,11 @@ func sortCalendarBuckets(buckets []MetricBucket, spec AggSpec) {
 // Each row's key (its interval start, or its cyclic slot) is written to the
 // column named key, cast to keyType, by the row's qt_calendar_row ordinal.
 func (d QueryDatasetV3) keyCalendarColumn(ctx context.Context, tx *sql.Tx, table, dateAlias, key, keyType, interval string, loc *time.Location) error {
+	if d.Dialect == "sqlite" {
+		if done, err := d.sqliteKeyCalendarColumn(ctx, tx, table, dateAlias, key, keyType, interval, loc); done || err != nil {
+			return err
+		}
+	}
 	const batchSize = 400 // Two parameters per key fit SQLite's legacy 999 limit.
 	var after int64
 	for {
@@ -793,4 +800,83 @@ func (d QueryDatasetV3) keyCalendarColumn(ctx context.Context, tx *sql.Tx, table
 			return nil
 		}
 	}
+}
+
+// Calendar staging produces canonical UTC timestamps with nine fractional
+// digits. Their BINARY order is instant order. For bounded observed ranges,
+// compute the exact timezone boundaries once, then assign keys in one UPDATE
+// using a balanced decision tree. No rows cross the driver or get rebound as
+// VALUES. Sparse/wide ranges retain the bounded per-row implementation above.
+// Both paths use calendarFloor/calendarNext, including DST and cyclic keys.
+func (d QueryDatasetV3) sqliteKeyCalendarColumn(ctx context.Context, tx *sql.Tx, table, dateAlias, key, keyType, interval string, loc *time.Location) (bool, error) {
+	const layout = "2006-01-02T15:04:05.000000000Z"
+	const maxBoundaries = 256 // At most 511 bindings, below legacy SQLite's 999.
+	column := queryIdent(dateAlias) + " COLLATE BINARY"
+	var low, high sql.NullString
+	if err := tx.QueryRowContext(ctx, "SELECT MIN("+column+"),MAX("+column+") FROM "+queryIdent(table)).Scan(&low, &high); err != nil {
+		return false, err
+	}
+	if !low.Valid && !high.Valid {
+		return true, nil
+	}
+	start, err := time.Parse(layout, low.String)
+	if err != nil || start.Year() < 1 || start.UTC().Format(layout) != low.String {
+		return false, nil
+	}
+	end, err := time.Parse(layout, high.String)
+	if err != nil || end.Year() > 9998 || end.UTC().Format(layout) != high.String {
+		return false, nil
+	}
+	floor, err := calendarFloor(start, interval, loc)
+	if err != nil || floor.After(start) {
+		return false, nil
+	}
+	boundaries := []time.Time{}
+	for {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		boundaries = append(boundaries, floor)
+		if len(boundaries) > maxBoundaries {
+			return false, nil
+		}
+		next, err := calendarNext(floor, interval, loc)
+		if err != nil || !next.After(floor) {
+			return false, nil
+		}
+		// A skipped civil date can make Next's wall-time resolution land
+		// inside the following period. It is not an interval boundary; keep
+		// the authoritative per-row floor for that exceptional timezone range.
+		verified, err := calendarFloor(next, interval, loc)
+		if err != nil || !verified.Equal(next) {
+			return false, nil
+		}
+		if next.After(end) {
+			break
+		}
+		// Next may retain a location at a skipped-date transition. Floor's
+		// representation must supply the key, exactly as the per-row path does.
+		floor = verified
+	}
+	args := []any{}
+	bind := func(value string) string {
+		args = append(args, value)
+		return d.param(len(args))
+	}
+	var decision func(int, int) string
+	decision = func(lo, hi int) string {
+		if hi-lo == 1 {
+			bucket := boundaries[lo].Format("2006-01-02T15:04:05.000Z")
+			if calendarCycle(interval) {
+				bucket = strconv.Itoa(calendarSlot(boundaries[lo], interval, loc))
+			}
+			return "CAST(" + bind(bucket) + " AS " + keyType + ")"
+		}
+		mid := lo + (hi-lo)/2
+		pivot := bind(boundaries[mid].UTC().Format(layout))
+		return "CASE WHEN " + column + "<" + pivot + " THEN " + decision(lo, mid) + " ELSE " + decision(mid, hi) + " END"
+	}
+	expression := decision(0, len(boundaries))
+	_, err = tx.ExecContext(ctx, "UPDATE "+queryIdent(table)+" SET "+queryIdent(key)+"="+expression+" WHERE "+queryIdent(dateAlias)+" IS NOT NULL", args...)
+	return true, err
 }

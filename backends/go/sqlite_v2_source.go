@@ -36,6 +36,7 @@ func sqliteStoredProjection(ctx context.Context, tx *sql.Tx, input string, args 
 		case "Init", "Halt", "Goto", "Noop", "Transaction", "TableLock",
 			"OpenRead", "Close", "Rewind", "Next", "Prev", "Last",
 			"Column", "Rowid", "IdxRowid", "DeferredSeek", "SeekRowid", "NotExists",
+			"Found", "NotFound",
 			"SeekGE", "SeekGT", "SeekLE", "SeekLT", "IdxGE", "IdxGT", "IdxLE", "IdxLT",
 			"Variable", "Null", "Integer", "Int64", "Real", "String8", "Blob",
 			"Copy", "SCopy", "Move", "RealAffinity", "Affinity",
@@ -44,6 +45,9 @@ func sqliteStoredProjection(ctx context.Context, tx *sql.Tx, input string, args 
 			"Once", "DecrJumpZero", "ResultRow":
 			// These instructions only read stored values, bind constants, compare
 			// predicates or drive physical table/index cursors.
+			// Found/NotFound are index membership probes, including the indexed
+			// IN/NOT IN exclusions in an authorized source. Building an ephemeral
+			// relation or invoking a function still declines this allowlist.
 		default:
 			return false, nil
 		}

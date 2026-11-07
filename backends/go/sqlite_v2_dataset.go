@@ -146,6 +146,14 @@ func (d sqliteV2Dataset) executeMetrics(ctx context.Context, tx *sql.Tx, metrics
 		}
 		created := reductions.mark()
 		m, err := isolateMetric(ctx, tx, p.ID, p.Scope, func() (MetricResult, error) {
+			// The v3 executor already counted this exact authorized population
+			// in this transaction. Retain the compiled COUNT consumer (including
+			// minCount and result diagnostics) without reading that source again.
+			if counted, ok, err := sqliteCountedMetric(p, spec, total); err != nil {
+				return MetricResult{}, err
+			} else if ok {
+				return d.readV2Metric(ctx, tx, counted, spec, total, metrics, maxGroups)
+			}
 			p, err := reductions.plan(ctx, tx, p)
 			if err != nil {
 				return MetricResult{}, err
@@ -164,6 +172,34 @@ func (d sqliteV2Dataset) executeMetrics(ctx context.Context, tx *sql.Tx, metrics
 		out = append(out, m)
 	}
 	return out, nil
+}
+
+func sqliteCountedMetric(p metricSQLPlan, spec AggSpec, total int64) (metricSQLPlan, bool, error) {
+	if p.Scope != "allMatching" || len(spec.Where) != 0 || len(spec.GroupBy) != 0 || spec.ExpressionY != "" || spec.Distribution != nil || spec.MinCount.Measure() != "" || p.reduction == nil {
+		return p, false, nil
+	}
+	n, err := parseExpression(metricExpression(spec))
+	if err != nil || strings.ToLower(n.op) != "count" || len(n.args) != 0 {
+		return p, false, nil
+	}
+	key := expressionKey(n)
+	columns := make([]string, 0, len(p.SQLiteReductionColumns))
+	for _, column := range p.SQLiteReductionColumns {
+		value := ""
+		switch p.reduction.keys[column.Name] {
+		case "count":
+			value = fmt.Sprint(total)
+		case "value\x00" + key:
+			value = fmt.Sprintf("CAST(%d AS REAL)", total)
+		case "error\x00" + key:
+			value = "NULL"
+		default:
+			return p, false, nil
+		}
+		columns = append(columns, value+" AS "+column.Name)
+	}
+	counted, err := sqliteReplaceStage(p, p.SQLiteReductionStage, "SELECT "+strings.Join(columns, ","))
+	return counted, true, err
 }
 
 // verifyV2Revisions checks the complete handshake, including unused fields.

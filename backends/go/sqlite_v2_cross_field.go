@@ -55,9 +55,6 @@ func (c *sqliteReductionCache) addCrossFields(ctx context.Context, batch metricB
 		for _, p := range members {
 			inputs[sqliteFusionKey(p)] = true
 		}
-		if len(inputs) < 2 {
-			continue // Preserve the smaller identical-input reuse plan.
-		}
 		primary := specs[members[0].ID]
 		extra := []summaryOutput{}
 		for _, member := range members[1:] {
@@ -80,6 +77,15 @@ func (c *sqliteReductionCache) addCrossFields(ctx context.Context, batch metricB
 			integerSpecs = append(integerSpecs, specs[member.ID])
 		}
 		f.integer = sqliteIntegerReduction(ctx, q, integerSpecs, s, o, combined)
+		if len(inputs) < 2 {
+			if f.integer == nil {
+				continue // Preserve the smaller identical-input reuse plan.
+			}
+			// A newly eligible singleton/identical-input batch may speculate
+			// only on stored projections. Opaque expressions keep their original
+			// evaluation count even when a value declines the integer domain.
+			f.integer.storedOnly = true
+		}
 		for name, identity := range combined.reduction.keys {
 			f.aliases[identity] = name
 		}
@@ -101,7 +107,10 @@ func (c *sqliteReductionCache) crossFieldPlan(ctx context.Context, tx *sql.Tx, p
 			if err != nil {
 				return p, err
 			}
-			candidates := []string{f.integer.SQL}
+			candidates := []string{}
+			if !f.integer.storedOnly {
+				candidates = append(candidates, f.integer.SQL)
+			}
 			if direct {
 				candidates = []string{f.integer.NonnegativeSQL, f.integer.SQL}
 			}

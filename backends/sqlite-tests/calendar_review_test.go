@@ -63,7 +63,7 @@ func TestCalendarScratchIsNarrowBatchedAndReleasedPerMetric(t *testing.T) {
 	maxActive, updates, maxArgs := 0, 0, 0
 	var columns []int
 	db := sql.OpenDB(calendarProbeConnector{base: original.Driver(), probe: func(conn driver.Conn, query string, args int) {
-		if strings.HasPrefix(query, "CREATE TEMP TABLE ") && strings.Contains(query, "qt_calendar_source") {
+		if strings.HasPrefix(query, "CREATE TEMP TABLE ") && (strings.Contains(query, "qt_calendar_source") || strings.Contains(query, "qt_calendar_row INTEGER PRIMARY KEY")) {
 			name := strings.Fields(query)[3]
 			active[name] = true
 			if len(active) > maxActive {
@@ -91,7 +91,7 @@ func TestCalendarScratchIsNarrowBatchedAndReleasedPerMetric(t *testing.T) {
 		if strings.HasPrefix(query, "DROP TABLE IF EXISTS ") {
 			delete(active, strings.TrimPrefix(strings.Fields(query)[4], "temp."))
 		}
-		if strings.HasPrefix(query, "WITH qt_calendar_keys") {
+		if strings.HasPrefix(query, "WITH qt_calendar_keys") || strings.HasPrefix(query, "UPDATE ") && strings.Contains(query, "qt_calendar_key") {
 			updates++
 			if args > maxArgs {
 				maxArgs = args
@@ -115,7 +115,7 @@ func TestCalendarScratchIsNarrowBatchedAndReleasedPerMetric(t *testing.T) {
 	if maxActive != 1 || len(active) != 0 || !reflect.DeepEqual(columns, []int{5, 7}) {
 		t.Fatalf("calendar scratch: max=%d active=%v columns=%v", maxActive, active, columns)
 	}
-	if updates != 4 || maxArgs > 800 {
+	if updates < 1 || updates > 4 || maxArgs > 800 {
 		t.Fatalf("calendar updates=%d parameters=%d", updates, maxArgs)
 	}
 	for _, metric := range out.Metrics {

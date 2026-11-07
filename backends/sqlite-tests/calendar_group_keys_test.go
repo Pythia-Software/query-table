@@ -6,15 +6,70 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	qt "github.com/Pythia-Software/query-table/backends/go"
 )
+
+// A distant, result-filtered group makes the observed range too wide for the
+// compact boundary plan. It supplies a reference through the per-row fallback
+// for the same visible rows, without changing the calendar algorithms in tests.
+func TestV3CalendarBoundariesMatchWideRangeFallback(t *testing.T) {
+	for _, zone := range []struct{ name, start string }{
+		{"America/Denver", "2026-03-08T05:00:00Z"},
+		{"America/Denver", "2026-11-01T05:00:00Z"},
+		{"Australia/Lord_Howe", "2026-10-03T12:00:00Z"},
+		{"Australia/Adelaide", "2044-12-31T22:00:00Z"},
+		{"Pacific/Apia", "2011-12-29T12:00:00Z"},
+	} {
+		for _, interval := range []string{"hour", "day", "week", "month", "year"} {
+			t.Run(zone.name+"/"+zone.start+"/"+interval, func(t *testing.T) {
+				log := &statementLog{}
+				db, d := hookedV3(t, log, "('null','real',1,NULL,'x')")
+				f := d.Schema.Fields["at"]
+				f.SQLiteDatetimeFormat = "rfc3339"
+				d.Schema.Fields["at"] = f
+				start, err := time.Parse(time.RFC3339, zone.start)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for i := range 48 {
+					// Both sides of exact boundaries and sub-millisecond values.
+					at := start.Add(time.Duration(i)*time.Hour + time.Duration(i%2)*999999999*time.Nanosecond)
+					if _, err := db.Exec("INSERT INTO source VALUES(?,?,?,?,?)", at.Format(time.RFC3339Nano), "real", i+1, at.Format(time.RFC3339Nano), "x"); err != nil {
+						t.Fatal(err)
+					}
+				}
+				q := groupedRequest()
+				q.Grouping = &qt.GroupingDefinition{Keys: []string{"at", "k"}, KeyIntervals: map[string]qt.GroupKeyInterval{"at": {Interval: interval, TimeZone: zone.name}}, Summaries: []qt.SummaryColumn{{ID: "num", Op: "count"}, {ID: "total", Op: "sum", Field: "n"}}}
+				q.Result = qt.WireQuery{Select: []string{"at", "k", "num", "total"}, Where: []qt.WhereTerm{{Field: "k", Op: "=", Value: "real"}}, OrderBy: []qt.OrderBy{{Field: "at", Dir: "asc"}}, Limit: 100}
+				log.reset(nil)
+				got, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if log.count("WITH qt_calendar_keys") != 0 {
+					t.Fatal("bounded range did not use compact calendar keys")
+				}
+				if _, err = db.Exec("INSERT INTO source VALUES('sentinel','hidden',0,'2400-01-01T00:00:00.000Z','x')"); err != nil {
+					t.Fatal(err)
+				}
+				log.reset(nil)
+				want, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
+				if err != nil || !reflect.DeepEqual(got.Rows, want.Rows) || got.Total != want.Total || log.count("WITH qt_calendar_keys") == 0 {
+					t.Fatalf("compact %#v; wide-range %#v / %v", got, want, err)
+				}
+			})
+		}
+	}
+}
 
 // A calendar key in a grouping stage gives one group per local interval,
 // keyed by its start, with the same totals as the equivalent dateGrouping
 // metric over the source.
 func TestV3CalendarGroupKeysMatchDateGrouping(t *testing.T) {
 	db, d := setupV3(t)
+	d.SourceSQL = "SELECT id,k,n,qt_test_metric_probe(at) AS at,label FROM grouped"
 	if !d.Capabilities().CalendarGroupKeys {
 		t.Fatal("calendar group keys are not advertised")
 	}
@@ -41,9 +96,13 @@ func TestV3CalendarGroupKeysMatchDateGrouping(t *testing.T) {
 		if err != nil || !strings.Contains(string(encoded), `"keys":[{"field":"at","interval":"`+c.interval+`"`) {
 			t.Fatalf("%v: encoded %s %v", c, encoded, err)
 		}
+		metricProbeCalls.Store(0)
 		grouped, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
 		if err != nil {
 			t.Fatal(c, err)
+		}
+		if calls := metricProbeCalls.Load(); calls != 12 { // Six rows: preflight + copy.
+			t.Fatalf("calendar repeated an opaque source: %d evaluations, want 12", calls)
 		}
 		metric := qt.QueryRequestV3{Version: 3, Profile: qt.SQLiteExpressionProfile, Result: qt.WireQuery{Select: []string{"id"}, Limit: 10},
 			Metrics: []qt.AggSpec{{ID: "m", Op: "sum", Field: "n", GroupBy: []string{"at"}, DateGrouping: &qt.MetricDateGrouping{Field: "at", Interval: c.interval, TimeZone: c.zone, Range: "query"}}}}
