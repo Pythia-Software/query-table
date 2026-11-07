@@ -1,6 +1,6 @@
 {
   "name": "@pythia-software/query-table-ui",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Schema-driven data table — opinionated, themeable React components.",
   "keywords": ["data-table", "query-builder", "react", "components", "typescript"],
   "license": "MIT",
@@ -35,8 +35,8 @@
   },
   "dependencies": {
     "@floating-ui/react": "^0.27.20",
-    "@pythia-software/query-table-core": "1.0.0",
-    "@pythia-software/query-table-react": "1.0.0",
+    "@pythia-software/query-table-core": "1.0.1",
+    "@pythia-software/query-table-react": "1.0.1",
     "@tanstack/react-virtual": "3.14.21"
   },
   "peerDependencies": {

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.1 — 2026-11-07
+
 ### Changed
 
 - Faster SQLite execution for eligible integer summaries and aggregate-leaf
