@@ -289,29 +289,49 @@ dataset := querytable.QueryDatasetV3{Schema: schema, Dialect: "sqlite", SourceSQ
 ```
 
 The executor consults the counter once per ungrouped execution, with that
-execution's context and transaction. `PopulationCount` describes the count:
+execution's context and transaction. Executions in other transactions may
+consult the same counter concurrently. `PopulationCount` describes the count,
+and the counter gets its own copy: editing it does not change the execution.
 
 - `SQL` and `Args` are the `COUNT(*)` statement the executor would run, and
   `count` runs it in the transaction.
 - `Where` is the request's canonical filter, for hosts that can answer some
   filters from a maintained rollup instead (an unfiltered count, say).
-- `Now` is the request's evaluation clock when a filter value is relative
-  (`-30d`), and zero otherwise; `Revisions` are the computed-definition
-  revisions the statement reaches.
+- `Now` is the evaluation clock that relative values in `Where` (`-30d`)
+  resolve against.
 - `Key` digests the dialect, scope, dataset, expression profile,
-  `PlanOptions.Identity`, statement, arguments, revisions and, for relative
-  filters, the clock. Requests whose page, order or display columns differ
-  share a key when they filter alike.
+  `PlanOptions.Identity`, statement, arguments, and the revisions of the
+  computed definitions the statement reaches. Relative values are bound as
+  resolved instants, so a relative filter's key changes with `now`, and its
+  count is reusable only by requests that send the same `now`. Requests whose
+  page, order, display columns or metrics differ share a key when they filter
+  alike.
 
 The answer must be the exact number of rows `SQL` returns in that
-transaction; the executor trusts it (rejecting only a negative count) and does
-not recount. `Key` does not identify the data snapshot, so a host that reuses
-counts must pair it with a data generation read inside the transaction, and
-with any authorization state that the source SELECT and its arguments do not
-encode. A relative filter's count is reusable only by requests that send the
-same `now`. A counter error fails the execution. Grouped executions, distinct
-values and staged scratch budgets count their own populations and do not
-consult the counter.
+transaction. The executor trusts it, rejecting only a negative count. It does
+not recount, and it reports the answer as `total`, `sourceTotal` and the
+value of whole-population `count()` metrics. A counter error fails the
+execution. Grouped executions, distinct values and staged scratch budgets
+count their own populations and do not consult the counter.
+
+Equal keys mean equal statements, not equal counts. A host that reuses counts
+across executions owns their validity:
+
+- Read the data generation inside the counting transaction, under snapshot
+  isolation (SQLite transactions, PostgreSQL `REPEATABLE READ` as `Execute`
+  uses). Otherwise the generation and the count can describe different data.
+- Advance the generation on every write to every table the statement reads,
+  including the tables behind predicate relations.
+- Do not reuse counts for a source that reads rows staged per request into a
+  temporary table. Its statement text stays the same while its rows change.
+- Add any state that changes the statement's result without changing its
+  text to your key. Examples are authorization that the source SELECT and its
+  arguments don't encode (a session variable or row-level security, say), and
+  the process time zone when bindings use SQLite's `'localtime'`.
+- A counter that answers from `Where` instead of running `SQL` reimplements
+  Query Table's predicates and must match them exactly: null handling,
+  collation, negation and `any`/`all` groups. Decline any filter you don't
+  model, and fall back to `count`.
 
 ## Data and semantic conventions
 

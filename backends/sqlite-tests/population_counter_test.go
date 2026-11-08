@@ -3,6 +3,7 @@ package sqlitetests
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -69,8 +70,13 @@ func TestV3PopulationCounterParity(t *testing.T) {
 			if first.Key == "" || first.Key != second.Key || first.SQL != second.SQL || !reflect.DeepEqual(first.Args, second.Args) {
 				t.Fatalf("repeated execution changed its count: %+v\n%+v", first, second)
 			}
-			if first.Dialect != "sqlite" || first.Scope != "one" || first.Dataset != "direct" || len(first.Where) != len(q.Result.Where) {
-				t.Fatalf("count description: %+v", first)
+			described, _ := json.Marshal(first.Where)
+			requested, _ := json.Marshal(q.Result.Where)
+			if len(q.Result.Where) == 0 && len(first.Where) == 0 {
+				described, requested = nil, nil
+			}
+			if string(described) != string(requested) || first.Now.UnixMilli() != q.Now {
+				t.Fatalf("count description %s at %v, request %s at %d", described, first.Now, requested, q.Now)
 			}
 		})
 	}
@@ -108,6 +114,16 @@ func TestV3PopulationCounterAnswers(t *testing.T) {
 	if _, err := executeV3In(db, counted, q, o); err == nil || !strings.Contains(err.Error(), "generation unavailable") {
 		t.Fatal("counter error", err)
 	}
+	// The executor's own count fails the execution when the counter
+	// returns its error.
+	counted.PopulationCounter = qt.PopulationCounterFunc(func(ctx context.Context, _ *sql.Tx, _ qt.PopulationCount, count func(context.Context) (int64, error)) (int64, error) {
+		cancelled, cancel := context.WithCancel(ctx)
+		cancel()
+		return count(cancelled)
+	})
+	if _, err := executeV3In(db, counted, q, o); !errors.Is(err, context.Canceled) {
+		t.Fatal("count error", err)
+	}
 }
 
 func TestV3PopulationCountKeys(t *testing.T) {
@@ -131,9 +147,6 @@ func TestV3PopulationCountKeys(t *testing.T) {
 	later := noon.Add(time.Minute)
 
 	base := describe(d, where(qt.WhereTerm{Field: "e", Op: "=", Value: "low"}), o)
-	if len(base.Revisions) != 0 || !base.Now.IsZero() {
-		t.Fatalf("base filter reached revisions %v or the clock %v", base.Revisions, base.Now)
-	}
 	// Page shape, order and the clock do not change an absolute count.
 	reshaped := where(qt.WhereTerm{Field: "e", Op: "=", Value: "low"})
 	reshaped.Result.Select, reshaped.Result.OrderBy, reshaped.Result.Limit, reshaped.Result.Offset = []string{"id", "note"}, []qt.OrderBy{{Field: "n", Dir: "desc"}}, 10, 4
@@ -168,7 +181,8 @@ func TestV3PopulationCountKeys(t *testing.T) {
 	identified.Identity = "actor-2"
 	distinct("identity", describe(d, where(qt.WhereTerm{Field: "e", Op: "=", Value: "low"}), identified))
 
-	// A relative filter keys on the request's clock.
+	// A relative filter keys on the request's clock, which every count
+	// reports.
 	recent := where(qt.WhereTerm{Field: "at", Op: ">=", Value: "-14d"})
 	relative := describe(d, at(recent, noon), o)
 	if !relative.Now.Equal(noon) {
@@ -182,11 +196,7 @@ func TestV3PopulationCountKeys(t *testing.T) {
 
 	// A computed filter keys on the definition revisions it reaches.
 	computed := where(qt.WhereTerm{Field: "@computed/double", Op: ">", Value: "2"})
-	revised := describe(d, computed, o)
-	if !reflect.DeepEqual(revised.Revisions, map[string]string{"double": "1"}) {
-		t.Fatalf("computed revisions %v", revised.Revisions)
-	}
-	distinct("computed", revised)
+	distinct("computed", describe(d, computed, o))
 	resolver := o.Resolver
 	bumped := o
 	bumped.Resolver = qt.DefinitionResolverFunc(func(ctx context.Context, id string) (qt.ComputedColumn, error) {
@@ -195,9 +205,52 @@ func TestV3PopulationCountKeys(t *testing.T) {
 		return c, err
 	})
 	computed.ExpectedRevisions = map[string]string{"double": "2", "inv": "2", "big": "2"}
-	if got := describe(d, computed, bumped); got.Revisions["double"] != "2" {
-		t.Fatalf("bumped revisions %v", got.Revisions)
-	} else {
-		distinct("computed revision", got)
+	distinct("computed revision", describe(d, computed, bumped))
+
+	// A predicate relation is part of the statement, so its SQL and
+	// arguments separate otherwise equal filters.
+	related := func(tenant string) qt.QueryDatasetV3 {
+		r := d
+		r.PredicateRelations = qt.SQLitePredicateRelationsFunc(func(_ context.Context, _ *sql.Tx, p qt.SQLitePredicate) (qt.SQLitePredicateRelation, bool, error) {
+			if p.Field != "e" {
+				return qt.SQLitePredicateRelation{}, false, nil
+			}
+			return qt.SQLitePredicateRelation{SQL: "SELECT id FROM direct WHERE tenant=? AND e=?", Args: []any{tenant, p.Value}}, true, nil
+		})
+		return r
+	}
+	low := where(qt.WhereTerm{Field: "e", Op: "=", Value: "low"})
+	relation := describe(related("one"), low, o)
+	if !strings.Contains(relation.SQL, "tenant=?") {
+		t.Fatalf("relation not compiled into the count: %s", relation.SQL)
+	}
+	distinct("relation", relation)
+	distinct("relation args", describe(related("two"), low, o))
+}
+
+// The counter's description is its own: a host that edits it cannot change
+// the filter the executor pages and reduces with.
+func TestV3PopulationCountIsACopy(t *testing.T) {
+	db, d, o := ungroupedV3(t, 60)
+	q := ungroupedRequest(qt.WireQuery{Select: []string{"id", "e"}, Where: []qt.WhereTerm{
+		{Field: "e", Op: "=", Value: "low"},
+		{Any: []qt.WhereClause{{All: []qt.WhereClause{{Field: "k", Op: "=", Value: "alpha"}}}, {Field: "k", Op: "=", Value: "beta"}}, SetFilter: &qt.SetFilterMetadata{ID: "k", Mode: "any", Values: []string{"alpha", "beta"}}},
+	}, Limit: 50})
+	plain := executeV3(t, db, d, q, o)
+	request, _ := json.Marshal(q)
+	d.PopulationCounter = qt.PopulationCounterFunc(func(ctx context.Context, _ *sql.Tx, p qt.PopulationCount, count func(context.Context) (int64, error)) (int64, error) {
+		p.Where[0].Value = "mid"
+		p.Where[1].Any[0].All[0].Value = "gamma"
+		p.Where[1].Any[1].Value = "gamma"
+		p.Where[1].SetFilter.Values[0] = "gamma"
+		p.Args[0] = "two"
+		return count(ctx)
+	})
+	got := executeV3(t, db, d, q, o)
+	if after, _ := json.Marshal(q); string(after) != string(request) {
+		t.Fatalf("counter changed the request:\n%s\n%s", request, after)
+	}
+	if got.Total != plain.Total || !reflect.DeepEqual(got.Rows, plain.Rows) {
+		t.Fatalf("counter changed the execution: %d %v\n%d %v", got.Total, got.Rows, plain.Total, plain.Rows)
 	}
 }
