@@ -350,6 +350,52 @@ and handle selection, save feedback, and unsaved-edit protection in your control
 Share and query history remain available. The demo's `/saved-queries` route shows
 an integrated prototype of this slot.
 
+Pass `runActionsBeforeActivity` to insert host-owned React content into the
+row-count/update bar, after any auto-update status and immediately before
+**Request activity**, **Auto-Update**, and **Run Now**:
+
+```tsx
+<QueryBuilder
+  api={table}
+  fields={schema.fields}
+  total={table.total}
+  runActionsBeforeActivity={
+    <DataReadinessIndicator dataset={dataset} query={table.query} />
+  }
+/>
+```
+
+The slot stays in the normal React tree, mounted in both expanded and collapsed
+layouts, through loading, errors, polling, and parent rerenders. Each builder
+has its own content and lifecycle. Omit it (or pass `null`/`false`) for no extra
+element or spacing. The theme wraps actions on constrained widths; narrow/touch
+layouts use a two-column grid in DOM/tab order, with polling status spanning
+both columns. Prefer compact buttons as direct children (a fragment can supply
+several); host dialogs should use a portal or a native `<dialog>` so their
+contents do not occupy an action cell. `requestActivityDetails` remains a
+separate slot **inside** the activity panel.
+
+With the bundled `theme.css`, `qt-btn` is a supported styling class for native
+host `<button type="button">` elements. It supplies normal, hover, disabled and
+visible `:focus-visible` states and the builder's responsive touch targets
+(44px at the default `--qt-touch-target-scale: 1`). `qt-btn--active` and
+`qt-btn--primary` provide the matching state/primary treatments. Keep status
+colors on the icon rather than the whole button, for example:
+
+```tsx
+<button type="button" className="qt-btn" aria-label="Data readiness"
+  aria-haspopup="dialog" onClick={openReadinessDialog}>
+  <span className="host-readiness-ready"><Icon name="check" /></span>
+</button>
+```
+
+Use your own status-colored icon or wrap `Icon` in a host-styled span. The host
+owns the accessible name, state, event handlers and dialog, including focus
+restoration to the invoking button on close. Query Table adds no button wrapper,
+disabled state or tab index to the slot. With a custom theme, apply your host
+button styles directly; `classNames.button` only styles Query Table's controls.
+The demo's `/run-actions` route shows independent builders and a host dialog.
+
 The query builder's **Share** button copies a URL containing the complete
 current query, including a saved default query. Configure `useQueryTable` with
 `syncUrl: true` so recipients load shared query URLs. Query tokens are encoded,

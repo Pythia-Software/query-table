@@ -92,6 +92,9 @@ export interface QueryBuilderProps<Row> {
   shareUrl?: string;
   /** Additional diagnostics shown inside request activity. */
   requestActivityDetails?: ReactNode;
+  /** Host content after auto-update status and before Request activity.
+   * Remains mounted when the editor is collapsed; the host owns its behavior. */
+  runActionsBeforeActivity?: ReactNode;
   /** The controller; QueryBuilder drives it through the intent helpers. */
   api: QueryTableApi<Row>;
   /** All schema fields (for the field picker / sort picker). */
@@ -348,6 +351,7 @@ export function QueryBuilder<Row>({
   metricTheme,
   metricLocale,
   requestActivityDetails,
+  runActionsBeforeActivity,
   clauses,
   whereRow,
   summary,
@@ -879,6 +883,7 @@ export function QueryBuilder<Row>({
               )} (${autoRefreshStatus.pollCount} polls run)`}
             </span>
           ) : null}
+          {runActionsBeforeActivity}
           <button
             type="button"
             className={cx(

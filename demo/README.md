@@ -36,6 +36,16 @@ use a separate browser-storage namespace. `/` retains the current interface for
 comparison. The demo uses the optional `QueryBuilder.savedQueryControls` slot;
 this is an interaction prototype, not a replacement of the default controls.
 
+## Host run actions
+
+Open `/run-actions` for `QueryBuilder.runActionsBeforeActivity`: two independent
+readiness buttons and host-owned dialogs, plus a builder with the slot omitted.
+Try collapse, auto-update, loading/error simulation and host rerenders. With
+the dev server running, `npm run test:run-actions` checks Chromium and WebKit at
+desktop, phone and touch-landscape sizes, including action/tab order, touch
+targets, dialog focus restoration, empty slots and persistent host state.
+Screenshots are written to `.context/run-actions/`.
+
 ## Cell displays and item details
 
 Open http://localhost:5179/cells to explore native, serialized, encoded, escaped,
