@@ -248,6 +248,96 @@ staged projection is ignored there and the typed predicate applies. A provider
 error fails the whole execution. `QueryDatasetV3` rejects relations for
 PostgreSQL.
 
+## Host population counts
+
+Every ungrouped execution counts its whole filtered population exactly before
+it reads the page and metrics: the count is the result's `total` and
+`sourceTotal`, and metrics over the whole population reuse it. On a large
+source that count can dominate a small page. The executor never reuses a count
+across requests, because only the host knows when its data changed. A host
+that does can set `PopulationCounter` on a `QueryDatasetV3` (either dialect)
+and answer counts itself:
+
+```go
+type countCache struct {
+    mu     sync.Mutex
+    counts map[string]int64 // bounded in a real host
+}
+
+func (c *countCache) CountPopulation(ctx context.Context, tx *sql.Tx, p querytable.PopulationCount, count func(context.Context) (int64, error)) (int64, error) {
+    var generation int64 // advanced by every write to the source's tables
+    if err := tx.QueryRowContext(ctx, "SELECT generation FROM data_generation").Scan(&generation); err != nil {
+        return 0, err
+    }
+    key := fmt.Sprintf("%d/%s", generation, p.Key)
+    c.mu.Lock()
+    n, ok := c.counts[key]
+    c.mu.Unlock()
+    if ok {
+        return n, nil
+    }
+    n, err := count(ctx) // runs p.SQL in tx
+    if err == nil {
+        c.mu.Lock()
+        c.counts[key] = n
+        c.mu.Unlock()
+    }
+    return n, err
+}
+
+dataset := querytable.QueryDatasetV3{Schema: schema, Dialect: "sqlite", SourceSQL: source, PopulationCounter: cache}
+```
+
+The executor consults the counter once per ungrouped execution, with that
+execution's context and transaction. Executions in other transactions may
+consult the same counter concurrently. `PopulationCount` describes the count,
+and the counter gets its own copy: editing it, including byte-slice and
+pointer arguments, does not change the execution.
+
+- `SQL` and `Args` are the `COUNT(*)` statement the executor would run, and
+  `count` runs it in the transaction.
+- `Where` is the request's canonical filter, for hosts that can answer some
+  filters from a maintained rollup instead (an unfiltered count, say).
+- `Now` is the evaluation clock that relative values in `Where` (`-30d`)
+  resolve against.
+- `Key` digests the dialect, scope, dataset, expression profile,
+  `PlanOptions.Identity`, statement, the values its arguments bind, and the
+  revisions of the computed definitions the statement reaches. Arguments key
+  by their default `database/sql` conversion, so a `*string` keys by its
+  string and a `driver.Valuer` by its `Value`. If an argument has no default
+  conversion (a type only its driver understands), the key is unique to the
+  execution and the count is never reused. Relative values are bound as
+  resolved instants, so a relative filter's key changes with `now`, and its
+  count is reusable only by requests that send the same `now`. Requests whose
+  page, order, display columns or metrics differ share a key when they filter
+  alike.
+
+The answer must be the exact number of rows `SQL` returns in that
+transaction. The executor trusts it, rejecting only a negative count. It does
+not recount, and it reports the answer as `total`, `sourceTotal` and the
+value of whole-population `count()` metrics. A counter error fails the
+execution. Grouped executions, distinct values and staged scratch budgets
+count their own populations and do not consult the counter.
+
+Equal keys mean equal statements, not equal counts. A host that reuses counts
+across executions owns their validity:
+
+- Read the data generation inside the counting transaction, under snapshot
+  isolation (SQLite transactions, PostgreSQL `REPEATABLE READ` as `Execute`
+  uses). Otherwise the generation and the count can describe different data.
+- Advance the generation on every write to every table the statement reads,
+  including the tables behind predicate relations.
+- Do not reuse counts for a source that reads rows staged per request into a
+  temporary table. Its statement text stays the same while its rows change.
+- Add any state that changes the statement's result without changing its
+  text to your key. Examples are authorization that the source SELECT and its
+  arguments don't encode (a session variable or row-level security, say), and
+  the process time zone when bindings use SQLite's `'localtime'`.
+- A counter that answers from `Where` instead of running `SQL` reimplements
+  Query Table's predicates and must match them exactly: null handling,
+  collation, negation and `any`/`all` groups. Decline any filter you don't
+  model, and fall back to `count`.
+
 ## Data and semantic conventions
 
 Use STRICT tables or equivalent ingestion validation. Bind numeric fields to

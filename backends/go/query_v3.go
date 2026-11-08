@@ -168,6 +168,10 @@ type QueryDatasetV3 struct {
 	// grouped results never use them. Nil compiles every predicate normally.
 	// See SQLitePredicateRelations.
 	PredicateRelations SQLitePredicateRelations
+	// PopulationCounter optionally answers ungrouped population counts, for
+	// example from a host cache keyed by data generation. Nil runs every count.
+	// See PopulationCounter.
+	PopulationCounter PopulationCounter
 	// stageUngrouped sends ungrouped requests through the staged executor;
 	// see TestOnlyStageUngrouped.
 	stageUngrouped bool

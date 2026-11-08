@@ -57,10 +57,7 @@ func (d QueryDatasetV3) countPopulation(ctx context.Context, tx *sql.Tx, where [
 	if err != nil {
 		return 0, err
 	}
-	p := b.finish("SELECT COUNT(*) FROM "+b.rel, "allMatching", nil)
-	var total int64
-	err = tx.QueryRowContext(ctx, p.SQL, p.Args...).Scan(&total)
-	return total, err
+	return d.runPopulationCount(ctx, tx, where, b.finish("SELECT COUNT(*) FROM "+b.rel, "allMatching", nil), o)
 }
 
 // narrowSchema keeps the bindings a compiled plan reaches, the requested,

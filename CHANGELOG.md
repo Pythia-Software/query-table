@@ -2,9 +2,15 @@
 
 ## Unreleased
 
-## 1.0.2 — 2026-11-08
+- `QueryDatasetV3.PopulationCounter` lets a host answer the exact population
+  count of an ungrouped execution, for example from its own cache keyed by
+  data generation, instead of recounting the filtered source on every request.
+  The executor describes each count with a copy of its filter, the evaluation
+  clock, its statement and arguments, and a stable `Key`. The host owns snapshot,
+  authorization and connection-state validity. See
+  [Host population counts](docs/backend-sqlite.md#host-population-counts).
 
-### Added
+## 1.0.2 — 2026-11-08
 
 - `QueryBuilder.runActionsBeforeActivity` accepts host-owned React controls after
   polling status and before Request activity, Auto-Update and Run Now. Content
