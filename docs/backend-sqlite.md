@@ -291,7 +291,8 @@ dataset := querytable.QueryDatasetV3{Schema: schema, Dialect: "sqlite", SourceSQ
 The executor consults the counter once per ungrouped execution, with that
 execution's context and transaction. Executions in other transactions may
 consult the same counter concurrently. `PopulationCount` describes the count,
-and the counter gets its own copy: editing it does not change the execution.
+and the counter gets its own copy: editing it, including byte-slice and
+pointer arguments, does not change the execution.
 
 - `SQL` and `Args` are the `COUNT(*)` statement the executor would run, and
   `count` runs it in the transaction.
@@ -300,8 +301,12 @@ and the counter gets its own copy: editing it does not change the execution.
 - `Now` is the evaluation clock that relative values in `Where` (`-30d`)
   resolve against.
 - `Key` digests the dialect, scope, dataset, expression profile,
-  `PlanOptions.Identity`, statement, arguments, and the revisions of the
-  computed definitions the statement reaches. Relative values are bound as
+  `PlanOptions.Identity`, statement, the values its arguments bind, and the
+  revisions of the computed definitions the statement reaches. Arguments key
+  by their default `database/sql` conversion, so a `*string` keys by its
+  string and a `driver.Valuer` by its `Value`. If an argument has no default
+  conversion (a type only its driver understands), the key is unique to the
+  execution and the count is never reused. Relative values are bound as
   resolved instants, so a relative filter's key changes with `now`, and its
   count is reusable only by requests that send the same `now`. Requests whose
   page, order, display columns or metrics differ share a key when they filter

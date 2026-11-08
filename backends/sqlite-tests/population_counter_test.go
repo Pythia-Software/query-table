@@ -254,3 +254,50 @@ func TestV3PopulationCountIsACopy(t *testing.T) {
 		t.Fatalf("counter changed the execution: %d %v\n%d %v", got.Total, got.Rows, plain.Total, plain.Rows)
 	}
 }
+
+// Mutable source arguments are copied into the description too: editing the
+// described bytes changes neither the count nor the dataset's arguments.
+func TestV3PopulationCountCopiesArguments(t *testing.T) {
+	db, d, o := ungroupedV3(t, 60)
+	d.SourceSQL, d.SourceArgs = "SELECT * FROM direct WHERE tenant=CAST(?1 AS TEXT)", []any{[]byte("one")}
+	q := ungroupedRequest(qt.WireQuery{Select: []string{"id"}, Limit: 50})
+	plain := executeV3(t, db, d, q, o)
+	d.PopulationCounter = qt.PopulationCounterFunc(func(ctx context.Context, _ *sql.Tx, p qt.PopulationCount, count func(context.Context) (int64, error)) (int64, error) {
+		copy(p.Args[0].([]byte), "two")
+		return count(ctx)
+	})
+	got := executeV3(t, db, d, q, o)
+	if string(d.SourceArgs[0].([]byte)) != "one" || got.Total != plain.Total || !reflect.DeepEqual(got.Rows, plain.Rows) {
+		t.Fatalf("source args %q, total %d (plain %d)", d.SourceArgs[0], got.Total, plain.Total)
+	}
+}
+
+// Arguments key by the values they bind: one pointer whose value changes
+// keys apart, and a new pointer to an equal value keys alike.
+func TestV3PopulationCountKeysBoundValues(t *testing.T) {
+	db, d, o := ungroupedV3(t, 60)
+	host := &countingHost{}
+	d.PopulationCounter = host
+	q := ungroupedRequest(qt.WireQuery{Select: []string{"id"}, Limit: 3})
+	tenant := "one"
+	describe := func(arg any) (qt.PopulationCount, int64) {
+		t.Helper()
+		host.offered = nil
+		d.SourceArgs = []any{arg}
+		total := executeV3(t, db, d, q, o).Total
+		return host.offered[0], total
+	}
+	one, oneTotal := describe(&tenant)
+	tenant = "two"
+	two, twoTotal := describe(&tenant)
+	if oneTotal == twoTotal || one.Key == two.Key {
+		t.Fatalf("pointer value changed the count %d→%d but kept key %v", oneTotal, twoTotal, one.Key == two.Key)
+	}
+	again := "one"
+	if p, _ := describe(&again); p.Key != one.Key {
+		t.Fatal("an equal value behind a new pointer changed the key")
+	}
+	if p, _ := describe("one"); p.Key != one.Key {
+		t.Fatal("a value and a pointer to it bind alike but keyed apart")
+	}
+}
