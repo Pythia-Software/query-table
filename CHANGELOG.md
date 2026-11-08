@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.0.3 — 2026-11-08
+
+### Added
+
 - `QueryDatasetV3.PopulationCounter` lets a host answer the exact population
   count of an ungrouped execution, for example from its own cache keyed by
   data generation, instead of recounting the filtered source on every request.
