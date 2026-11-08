@@ -1,0 +1,5 @@
+.run-actions-demo { max-width: 1200px; margin: 0 auto; padding: 16px; }
+.run-actions-fixture-controls { display: flex; flex-wrap: wrap; gap: 12px; margin: 12px 0; }
+.run-actions-ready { color: #168047; display: inline-flex; }
+.run-actions-dialog { color: var(--qt-text); background: var(--qt-bg); border: 1px solid var(--qt-border); border-radius: 8px; max-width: min(400px, calc(100vw - 48px)); padding: 20px; }
+.run-actions-dialog::backdrop { background: #0006; }

@@ -314,7 +314,7 @@
 .qt-qb-run-metric { color: var(--qt-muted); font-size: 12px; }
 .qt-qb-run-metric--strong { font-weight: 700; color: var(--qt-text); }
 .qt-qb-auto-status { color: var(--qt-muted); font-size: 11px; }
-.qt-qb-run-actions { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+.qt-qb-run-actions { display: inline-flex; align-items: center; flex-wrap: wrap; max-width: 100%; gap: 8px; margin-left: auto; }
 .qt-qb-run-error { color: var(--qt-fail-fg); font-size: 11px; }
 .qt-btn.qt-qb-collapse-btn,
 .qt-btn.qt-qt-section-toggle {
