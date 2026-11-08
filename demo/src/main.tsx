@@ -21,6 +21,7 @@ const DateMetricsPrototype = lazy(() =>
 );
 const FitControlsDemo = lazy(() => import("./FitControlsDemo").then(module => ({ default: module.FitControlsDemo })));
 const ChartLayoutDemo = lazy(() => import("./ChartLayoutDemo").then(module => ({ default: module.ChartLayoutDemo })));
+const RunActionsDemo = lazy(() => import("./RunActionsDemo").then(module => ({ default: module.RunActionsDemo })));
 const GroupingDemo = lazy(() => import("./grouping/GroupingDemo").then(module => ({ default: module.GroupingDemo })));
 
 const PlaygroundFeedback = import.meta.env.DEV
@@ -47,6 +48,8 @@ createRoot(document.getElementById("root")!).render(
       </Suspense>
     ) : window.location.pathname.startsWith("/filter-values") ? (
       <Suspense fallback={<p>Loading filter playground…</p>}><FilterValueDemo /></Suspense>
+    ) : window.location.pathname.startsWith("/run-actions") ? (
+      <Suspense fallback={<p>Loading run actions…</p>}><RunActionsDemo /></Suspense>
     ) : window.location.pathname.startsWith("/fit-controls") ? (
       <Suspense fallback={<p>Loading fitted tables…</p>}><FitControlsDemo /></Suspense>
     ) : window.location.pathname.startsWith("/chart-layout") ? (

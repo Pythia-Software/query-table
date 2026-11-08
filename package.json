@@ -1,6 +1,6 @@
 {
   "name": "query-table-monorepo",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "description": "Schema-driven data table — core, react, and ui packages.",
   "license": "MIT",
@@ -44,6 +44,7 @@
     "demo": "npm run dev --workspace @pythia-software/query-table-demo",
     "test:dnd": "node demo/dnd-test.mjs",
     "test:mobile": "node demo/mobile-test.mjs",
+    "test:run-actions": "node demo/run-actions-test.mjs",
     "test:touch-targets": "node demo/touch-target-test.mjs",
     "test:menus": "node demo/menu-test.mjs",
     "test:filter-values": "node demo/filter-value-test.mjs",

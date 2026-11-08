@@ -2,8 +2,6 @@
 
 ## Unreleased
 
-### Added
-
 - `QueryDatasetV3.PopulationCounter` lets a host answer the exact population
   count of an ungrouped execution, for example from its own cache keyed by
   data generation, instead of recounting the filtered source on every request.
@@ -11,6 +9,17 @@
   clock, its statement and arguments, and a stable `Key`. The host owns snapshot,
   authorization and connection-state validity. See
   [Host population counts](docs/backend-sqlite.md#host-population-counts).
+
+## 1.0.2 — 2026-11-08
+
+- `QueryBuilder.runActionsBeforeActivity` accepts host-owned React controls after
+  polling status and before Request activity, Auto-Update and Run Now. Content
+  remains mounted when the editor collapses and through request/polling updates;
+  omitted slots add no element or spacing. Run actions wrap at constrained widths
+  and retain their DOM/tab order in the narrow two-column grid. The UI guide
+  documents `qt-btn` as supported styling for native host buttons, including
+  keyboard focus and responsive touch targets. The `/run-actions` demo and
+  `npm run test:run-actions` cover independent builders and host-owned dialogs.
 
 ## 1.0.1 — 2026-11-07
 
