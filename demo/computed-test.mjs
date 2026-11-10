@@ -2,6 +2,7 @@
 // QT_BROWSER_CHANNEL=chrome uses installed Chrome instead of Playwright Chromium.
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
+import { decodeQueryStrict } from "../packages/core/dist/index.js";
 const browser = await chromium.launch({
   headless: true,
   ...(process.env.QT_BROWSER_CHANNEL
@@ -79,7 +80,7 @@ try {
     .allTextContents();
   assert.ok(values.includes("pivot"));
   const token = new URL(page.url()).searchParams.get("q");
-  const saved = JSON.parse(Buffer.from(token, "base64url").toString());
+  const saved = decodeQueryStrict(token);
   assert.ok(JSON.stringify(saved).includes("@computed/"));
   assert.ok(!JSON.stringify(saved).includes("REGEX"));
   await open();
@@ -157,13 +158,8 @@ try {
       ),
     ].some((c) => c.textContent === "piv"),
   );
-  const repairedQuery = JSON.parse(
-    Buffer.from(
-      new URL(page.url()).searchParams.get("q"),
-      "base64url",
-    ).toString(),
-  );
-  assert.deepEqual(repairedQuery.s, [["@computed/missing-original"]]);
+  const repairedQuery = decodeQueryStrict(new URL(page.url()).searchParams.get("q"));
+  assert.deepEqual(repairedQuery.select.map((column) => column.field), ["@computed/missing-original"]);
   assert.deepEqual(errors, []);
   console.log(
     "Computed editor: sampling, frequencies, draft cancellation, regex inspector, shared updates, ID persistence, worker timeout/recovery, mobile layout, missing-definition repair passed.",

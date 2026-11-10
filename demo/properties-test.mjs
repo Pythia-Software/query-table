@@ -2,12 +2,14 @@
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import { chromium } from "playwright";
+import { decodeQueryStrict } from "../packages/core/dist/index.js";
 const browser = await chromium.launch({ headless: true });
 const base = process.env.QT_DEMO_URL ?? "http://localhost:5179";
 const errors = [];
 const itemCard = (page) => page.locator(".qt-object-demo-item > .qt-object-inspector");
 const fields = (scope) => scope.locator(":scope > .qt-object-properties dt").allTextContents();
-const queryState = (page) => JSON.parse(Buffer.from(new URL(page.url()).searchParams.get("q"), "base64url").toString());
+const linkState = (url) => decodeQueryStrict(new URL(url).searchParams.get("q"));
+const queryState = (page) => linkState(page.url());
 try {
   await mkdir(".context", { recursive: true });
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, permissions: ["clipboard-read", "clipboard-write"] });
@@ -54,7 +56,7 @@ try {
   const popoverFields = await fields(hover.locator(".qt-object-inspector"));
   await hover.getByRole("button", { name: "Share", exact: true }).click();
   const popoverShare = await page.evaluate(() => navigator.clipboard.readText());
-  const popoverSnapshot = JSON.parse(Buffer.from(new URL(popoverShare).searchParams.get("q"), "base64url").toString()).d;
+  const popoverSnapshot = linkState(popoverShare).itemDetails;
   assert.deepEqual(popoverSnapshot.active, { id: "call-1", mode: "modal" });
   assert.deepEqual(popoverSnapshot.views.modal, popoverSnapshot.views.hover);
 
@@ -130,8 +132,8 @@ try {
   let modal = page.getByRole("dialog", { name: "Item details", exact: true });
   await modal.locator("dt").first().waitFor();
   assert.match(await modal.innerText(), /npm run build/);
-  await page.waitForFunction(() => JSON.parse(atob(new URL(location.href).searchParams.get("q").replaceAll("-", "+").replaceAll("_", "/"))).d?.active?.id === "call-2");
-  assert.equal(queryState(page).d.active.mode, "modal");
+  await page.waitForURL(url => linkState(url).itemDetails?.active?.id === "call-2");
+  assert.equal(queryState(page).itemDetails.active.mode, "modal");
   await modal.getByRole("button", { name: "Share", exact: true }).click();
   const modalLink = await page.evaluate(() => navigator.clipboard.readText());
   const clean = await browser.newContext({ viewport: { width: 1200, height: 900 } });
@@ -146,7 +148,7 @@ try {
   const separator = modal.getByRole("separator", { name: "Resize property column", exact: true });
   await separator.focus();
   await separator.press("ArrowRight");
-  await page.waitForFunction(() => JSON.parse(atob(new URL(location.href).searchParams.get("q").replaceAll("-", "+").replaceAll("_", "/"))).d.views.modal.labelWidth === 30);
+  await page.waitForURL(url => linkState(url).itemDetails?.views?.modal?.labelWidth === 30);
   const split = await separator.boundingBox();
   await page.mouse.move(split.x + split.width / 2, split.y + split.height / 2);
   await page.mouse.down();
@@ -155,10 +157,10 @@ try {
     await page.waitForTimeout(25);
   }
   await page.mouse.up();
-  await page.waitForFunction(() => JSON.parse(atob(new URL(location.href).searchParams.get("q").replaceAll("-", "+").replaceAll("_", "/"))).d.views.modal.labelWidth > 30);
-  const modalWidth = queryState(page).d.views.modal.labelWidth;
+  await page.waitForURL(url => linkState(url).itemDetails?.views?.modal?.labelWidth > 30);
+  const modalWidth = queryState(page).itemDetails.views.modal.labelWidth;
   assert.ok(modalWidth > 30);
-  assert.equal(queryState(page).d.views.hover.labelWidth, undefined);
+  assert.equal(queryState(page).itemDetails.views.hover.labelWidth, undefined);
   await modal.locator(".qt-property").filter({ has: page.locator("dt", { hasText: /^Command$/ }) }).locator("dd").dblclick();
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), "npm run build");
   await modal.getByRole("status").filter({ hasText: "Copied" }).waitFor();
@@ -196,7 +198,7 @@ try {
   assert.deepEqual(await fields(expanded.locator(".qt-object-inspector")), before);
   await expanded.getByRole("button", { name: "Share", exact: true }).click();
   const expandedLink = await page.evaluate(() => navigator.clipboard.readText());
-  assert.equal(JSON.parse(Buffer.from(new URL(expandedLink).searchParams.get("q"), "base64url").toString()).d.active.mode, "expand");
+  assert.equal(linkState(expandedLink).itemDetails.active.mode, "expand");
   await page.reload();
   expanded = page.getByRole("region", { name: "Expanded item call-1", exact: true });
   await expanded.locator("dt").first().waitFor();
@@ -210,7 +212,7 @@ try {
   // Creator-enabled options live in the column selector's Apply/Cancel draft.
   const detailHeader = page.locator('th[data-qt-field="__qt_item_details__"]');
   await detailHeader.dragTo(page.locator('th[data-qt-field="tool_name"]'), { targetPosition: { x: 3, y: 16 } });
-  assert.equal(queryState(page).s[0][0], "__qt_item_details__");
+  assert.equal(queryState(page).select[0].field, "__qt_item_details__");
   assert.equal(await page.locator('thead th').first().getAttribute('data-qt-field'), "__qt_item_details__");
   await page.getByRole("button", { name: "Expand query builder", exact: true }).click();
   await page.getByRole("button", { name: "Customize columns", exact: true }).click();
@@ -225,11 +227,11 @@ try {
   await columns.getByRole("checkbox", { name: "Include Modal", exact: true }).uncheck();
   await columns.getByRole("button", { name: "Move Detail down", exact: true }).click();
   await columns.getByRole("button", { name: "Apply columns", exact: true }).click();
-  assert.equal(queryState(page).s[1][0], "__qt_item_details__");
+  assert.equal(queryState(page).select[1].field, "__qt_item_details__");
   assert.equal(await page.getByRole("button", { name: "Open item call-1 in modal", exact: true }).count(), 0);
   await page.reload();
   await itemCard(page).locator("dt").first().waitFor();
-  assert.equal(queryState(page).s[1][0], "__qt_item_details__");
+  assert.equal(queryState(page).select[1].field, "__qt_item_details__");
   assert.equal(await page.getByRole("button", { name: "Open item call-1 in modal", exact: true }).count(), 0);
   await page.getByRole("button", { name: "Preview item call-1", exact: true }).click();
   await hover.locator("dt").first().waitFor();
