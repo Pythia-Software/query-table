@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Added
+
+- `MetricTheme.colorBy` names group keys (one, or a priority list) whose value
+  colours marks grouped by several keys. A bar, pie slice, box or list row
+  grouped by `repository_name` and `family` with `colorBy: "family"` takes
+  `color("family", value)`, so that dimension's overrides, domain and layer
+  apply and one kind keeps its colour across repositories. Without it, or when
+  a grouping has no listed key, whole tuples keep their hashed colours. Legends
+  show the colour drawn for each key; hover cards and Other are unchanged. See
+  [Caller palettes and styling](docs/metrics.md#caller-palettes-and-styling).
+
 ## 1.0.4 — 2026-11-10
 
 ### Changed

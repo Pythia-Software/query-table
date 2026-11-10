@@ -23,6 +23,15 @@ export interface MetricTheme {
     >
   >;
   tokens?: Partial<Record<MetricToken, string>>;
+  /**
+   * Group keys whose value colours a mark drawn for a whole multi-key group
+   * (bar, pie, box, list), in priority order. A group takes
+   * `color(field, value)` of the first listed field among its keys, so that
+   * field's overrides, domain and layer apply and, for example, one kind of
+   * event keeps its colour on every repository's bar. Groupings without a
+   * listed field colour each whole key, as when this is omitted.
+   */
+  colorBy?: string | ReadonlyArray<string>;
 }
 export interface MetricClassNames {
   root?: string;
@@ -104,19 +113,41 @@ export function createMetricColorResolver(theme: MetricTheme = {}) {
         colors.length
     ]!;
   };
+  const colorBy = (
+    typeof theme.colorBy === "string"
+      ? [theme.colorBy]
+      : Array.isArray(theme.colorBy)
+        ? theme.colorBy.slice(0, 64)
+        : []
+  ).filter((field): field is string => typeof field === "string" && field.length > 0);
+  const colorByIndex = (fields: readonly string[]) => {
+    for (const field of colorBy) {
+      const index = fields.indexOf(field);
+      if (index >= 0) return index;
+    }
+    return -1;
+  };
   return {
     token,
     color,
     /**
      * Colours whole group keys drawn together. Single values resolve as
-     * `color`. A tuple's colour depends only on the theme and its values,
-     * except that tuples sharing a chart take the next free colour rather
-     * than repeat one while the palette has room.
+     * `color`. With a theme `colorBy` field among `fields`, a tuple takes
+     * that field's `color`. Otherwise a tuple's colour depends only on the
+     * theme and its values, except that tuples sharing a chart take the next
+     * free colour rather than repeat one while the palette has room.
      */
     tupleColors(
       fields: readonly string[],
       tuples: ReadonlyArray<readonly MetricValue[]>,
     ): (values: readonly MetricValue[]) => string {
+      const by = fields.length > 1 ? colorByIndex(fields) : -1;
+      if (by >= 0)
+        return (values) => {
+          if (values.length <= 1) return color(fields[0] ?? "", values[0] ?? null);
+          if (values.every((v) => v === null)) return token("null");
+          return color(fields[by]!, values[by] ?? null);
+        };
       const identity = fields
         .map((field) => theme.dimensions?.[field]?.identity ?? field)
         .join("\0");

@@ -23,6 +23,10 @@ type MetricTheme = {
   tokens?: Partial<Record<
     "accent" | "text" | "muted" | "grid" | "surface" |
     "other" | "null" | "error", string>>;
+  // Group keys whose value colours a whole multi-key mark (bars, pies, boxes,
+  // lists), in priority order. A group takes color(field, value) of the first
+  // listed key it contains; groupings without one colour each whole key.
+  colorBy?: string | ReadonlyArray<string>;
   // Future numeric heatmaps use separate sequential/diverging scales,
   // not the categorical layer slots.
 };

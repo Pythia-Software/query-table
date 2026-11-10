@@ -346,6 +346,27 @@ const metricTheme: MetricTheme = {
 
 Use the same instance-scoped theme on QueryBuilder and MetricsPanel. Typed dimension/value identities keep Linux the same color across charts and distinguish numeric `1` from string `"1"`. A stable domain gives explicit palette order; unknown values hash deterministically. `overrides: [{ value, color }]` pins individual assignments, and `identity` lets equivalent field names share an identity. No global registry or data-arrival order affects colors. Finite palettes may reuse colors; use domains/overrides when uniqueness matters. Marks grouped by several keys (pie, donut, bar, box, histogram, list) are colored by their whole key, using the first field's layer: two keys drawn in one chart take different colors while the palette has room, and otherwise a key's color depends only on the theme and its values. Scatter charts color by their first key, which names the series. Line charts color by their second key.
 
+To color multi-key marks by one of their keys instead, name it in `colorBy`. A
+group then takes `color(field, value)` of that key, so its `overrides`, `domain`
+and layer apply, and one kind keeps its color on every bar:
+
+```ts
+const metricTheme: MetricTheme = {
+  layers: [{ id: "kinds", colors: ["#3979c3", "#288577", "#9864b4"] }],
+  dimensions: {
+    family: { layer: "kinds", overrides: [{ value: "Missing tool", color: "var(--event-friction)" }] },
+  },
+  colorBy: "family", // or a priority list: ["family", "platform"]
+};
+```
+
+`colorBy` applies to every chart on the theme whose `groupBy` contains a listed
+field; with a list, the first listed field present wins. Other groupings, single
+keys, scatter and line charts are unaffected. Legends list each whole key with
+the color drawn for it, so several entries can share a color; hover cards and
+the Other bucket are unchanged. It is presentation only and is not part of the
+query, links or saved state.
+
 CSS tokens cover accent, text, muted, grid, surface, other, null, and error. `MetricClassNames` exposes root/card/title/plot/axis/grid/legend/mark slots. `MetricCard` can render standalone with a clause and result/buckets; `MetricsEditor` can be opened directly with `{ api, fields, onClose, initialMetricId?, theme?, locale? }`. Palette information belongs to the caller and is not serialized into shared query data.
 
 
