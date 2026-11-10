@@ -95,7 +95,8 @@ func SQLiteV2Functions() []SQLiteScalarFunction {
 			return call(a)
 		}}
 	}
-	return append(sqliteDistributionFunctions(), []SQLiteScalarFunction{
+	functions := append(sqliteDistributionFunctions(), sqliteTextFunctions()...)
+	return append(functions, []SQLiteScalarFunction{
 		fn("qt_v2_datetime_value", 2, func(a []driver.Value) (driver.Value, error) {
 			format, ok := a[1].(string)
 			if !ok {

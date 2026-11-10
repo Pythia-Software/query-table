@@ -448,10 +448,22 @@ bounded profile through trusted schema metadata:
 ```
 
 `LoadSQLiteSchema` and SQLite codegen preserve this opt-in and aggregate policy.
-Formula types are checked strictly. Arrays remain available for ordinary row
-projection and filters, but are not formula operands or metric group keys.
+Formula types are checked strictly. Array fields remain available for ordinary
+row projection and filters, but are not formula operands or metric group keys.
 Supported scalar operators are arithmetic, comparisons, boolean logic, IF,
-COALESCE, NULLIF, IS_NULL, and ABS. Text ordering comparisons are rejected;
+COALESCE, NULLIF, IS_NULL, and ABS, plus the text functions LENGTH, WORD_COUNT, LOWER,
+UPPER, TRIM, LTRIM, RTRIM, CONTAINS, STARTS_WITH, ENDS_WITH (with ignoreCase),
+`ARRAY_LENGTH(SPLIT(...))` and the regex functions REGEX_TEST, REGEX_EXTRACT
+and REGEX_REPLACE, with the browser's semantics (except the case-mapping
+differences), and the regex subset, described in
+[Text and array functions](backend-metrics.md#text-and-array-functions). They
+need the complete current `SQLiteV2Functions()` list; the release after 1.0.4
+adds `qt_v2_lower`, `qt_v2_upper`, `qt_v2_length`, `qt_v2_word_count`, `qt_v2_split_count`,
+`qt_v2_regex_test`, `qt_v2_regex_extract`, `qt_v2_regex_replace` and
+`qt_v2_regex_replace_error`. (`qt_v2_lower` uses Go's Unicode case mapping;
+the older `qt_lower` used by text filters is unchanged.)
+Formula regex is separate from the Go/RE2 regex filters above: it is translated
+from JavaScript syntax and refuses patterns whose meaning differs. Text ordering comparisons are rejected;
 text equality, distinctness, extrema, and group ordering use BINARY collation.
 Aggregate leaves are COUNT, COUNT_DISTINCT, SUM, AVG, MIN, MAX, and MEDIAN.
 Nested reductions and row fields outside reductions are rejected. Aggregate

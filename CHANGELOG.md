@@ -185,6 +185,60 @@
   Proportion (Wilson) or Rate (Poisson) with a 90/95/99% level, and toggle
   whiskers and bands. Kinds that validation rejects for the metric are
   disabled with the reason, and the section is hidden while none applies.
+### Added
+
+- The Go SQLite and PostgreSQL expression profiles run the text functions
+  `LENGTH`, `TRIM`, `LTRIM`, `RTRIM`, two-argument `CONTAINS`, `STARTS_WITH`
+  and `ENDS_WITH`, and `ARRAY_LENGTH(SPLIT(text, separator))`, inside
+  aggregates, computed definitions, distribution inputs and grouped formula
+  summaries, so a metric such as `SUM(LENGTH([text]))` or a per-conversation
+  word count no longer fails with `arity`. Results match the browser runtime:
+  `LENGTH` counts code points, the trims remove JavaScript's white space set,
+  `SPLIT` counts like `String.prototype.split` (an empty separator splits
+  UTF-16 code units; more than 10,000 parts is the per-row error
+  `array_range`), and missing text stays NULL rather than empty. A text array
+  is accepted only inside `ARRAY_LENGTH`; other text functions are refused
+  (`unsupported_function`). A formula text operand above 100,000 UTF-8 bytes
+  remains `text_range` on the server (the browser bounds 100,000 UTF-16 code
+  units), and makes that row's whole group an error.
+- New formula function `WORD_COUNT(text)` in the browser, DuckDB, Go SQLite
+  and Go PostgreSQL: the number of runs of characters between white space (the
+  set `TRIM` removes), with no element bound. Unlike
+  `ARRAY_LENGTH(SPLIT(TRIM(text), " "))` it treats line breaks and repeated
+  spaces as one separator and does not fail with `array_range` on long text.
+- Both profiles also run `LOWER`, `UPPER` and the `ignoreCase` argument of
+  `CONTAINS`, `STARTS_WITH` and `ENDS_WITH` (both sides lower-cased). These
+  favor the common case over exact parity: SQLite uses Go's simple Unicode
+  case mapping and PostgreSQL uses `lower()`/`upper()` under the database's
+  default collation (a `C` default maps only ASCII), so a few characters differ
+  from JavaScript, such as `UPPER("ß")`, final sigma and `İ`. ASCII, Latin-1,
+  basic Greek and Cyrillic letters agree; see
+  [Case mapping](docs/backend-metrics.md#case-mapping).
+- The SQLite profile runs `REGEX_TEST`, `REGEX_EXTRACT` and `REGEX_REPLACE`
+  with literal JavaScript patterns, translated to RE2 only when the meaning is
+  identical; other patterns are refused with `unsupported_regex`. PostgreSQL
+  refuses formula regex. `RegexAggregateExpressions` stays false.
+- **SQLite hosts must register the complete current `SQLiteV2Functions()`
+  list**, which adds `qt_v2_lower`, `qt_v2_upper`, `qt_v2_length`,
+  `qt_v2_word_count`, `qt_v2_split_count`, `qt_v2_regex_test`, `qt_v2_regex_extract`,
+  `qt_v2_regex_replace` and `qt_v2_regex_replace_error`.
+- Shared fixtures `schema/fixtures/text-functions.json` (local engine, DuckDB,
+  Go SQLite, Go PostgreSQL) and `schema/fixtures/formula-regex.json` (browser
+  regex results against the server translation). See
+  [Text and array functions](docs/backend-metrics.md#text-and-array-functions).
+
+### Fixed
+
+- DuckDB `TRIM`, `LTRIM` and `RTRIM` remove the JavaScript white space set
+  (DuckDB's own trim kept tabs and line breaks), and `SPLIT` with an empty
+  separator follows `String.prototype.split` (`SPLIT("", "")` is empty; text
+  with a supplementary character is an error rather than a different count,
+  except in `ARRAY_LENGTH`, which counts UTF-16 code units). `SPLIT` results
+  above 10,000 elements are an error, as in the browser.
+- DuckDB `CONTAINS`, `STARTS_WITH` and `ENDS_WITH` return NULL for a NULL
+  `ignoreCase` argument, as in the browser, instead of comparing exactly.
+- Go server diagnostics name an unknown function `unsupported_function`
+  instead of `arity`.
 
 ## 1.0.4 — 2026-11-10
 

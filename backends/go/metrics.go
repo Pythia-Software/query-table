@@ -372,15 +372,19 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 		if n.op == "literal" {
 			return b.row(n)
 		}
+		if formulaRegexFunction(n.op) {
+			return ValueSQL{}, diagnostic(ErrorCodeAggregateContext, "regex is supported only inside aggregate row expressions")
+		}
+		op, operands := splitCountNode(n)
 		a := []ValueSQL{}
-		for _, arg := range n.args {
+		for _, arg := range operands {
 			v, err := lower(arg)
 			if err != nil {
 				return v, err
 			}
 			a = append(a, v)
 		}
-		return b.operation(n.op, a)
+		return b.operation(op, a)
 	}
 	v, e := lower(n)
 	if e != nil {

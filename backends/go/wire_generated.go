@@ -491,7 +491,8 @@ const (
 	ErrorCodeSort ErrorCode = "sort"
 	// Text ordering needs a collation this profile does not provide.
 	ErrorCodeCollationRequired ErrorCode = "collation_required"
-	// Regex filtering or sorting is outside this server profile.
+	// Regex filtering, sorting or a formula regex pattern is outside this server
+	// profile.
 	ErrorCodeUnsupportedRegex ErrorCode = "unsupported_regex"
 	// A text value cannot be represented (for example NUL or an unpaired
 	// surrogate).
