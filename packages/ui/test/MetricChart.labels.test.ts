@@ -161,6 +161,33 @@ describe("multi-key group colours", () => {
         ["pharos / Missing tool", "var(--event-missing)"],
       ]);
     });
+
+    it("lets a chart's saved colorBy win over the theme's", () => {
+      const resolver = createMetricColorResolver(theme);
+      const byRepository = resolver.tupleColors(fields, events.map((b) => b.keys), "repository_name");
+      expect(events.map((b) => byRepository(b.keys))).toEqual(events.map((b) => resolver.color("repository_name", b.keys[0] ?? null)));
+      // Without a theme default, the chart's key alone decides.
+      const { colorBy: _, ...uncoloured } = theme;
+      const doc = chart({ id: "m", op: "count", groupBy: fields, display: { kind: "bar-vertical", colorBy: "family" } }, events, uncoloured);
+      expect(colours(doc).slice(0, 5)).toEqual([
+        "var(--event-docs)", "red", "var(--event-missing)", "var(--event-missing)", "var(--event-missing)",
+      ]);
+    });
+
+    it("ignores a saved colorBy the chart no longer groups by", () => {
+      const keys = events.map((b) => b.keys);
+      // Falls back to the theme's key...
+      const themed = createMetricColorResolver(theme);
+      expect(keys.map(themed.tupleColors(fields, keys, "status"))).toEqual(keys.map(themed.tupleColors(fields, keys)));
+      // ...or, without one, to whole-tuple colours, rendered without error.
+      const { colorBy: _, ...uncoloured } = theme;
+      const plain = createMetricColorResolver(uncoloured);
+      expect(keys.map(plain.tupleColors(fields, keys, "status"))).toEqual(keys.map(plain.tupleColors(fields, keys)));
+      const stale = chart({ id: "m", op: "count", groupBy: fields, display: { kind: "bar-vertical", colorBy: "status" } }, events, uncoloured);
+      const fresh = chart({ id: "m", op: "count", groupBy: fields, display: { kind: "bar-vertical" } }, events, uncoloured);
+      expect(colours(stale)).toEqual(colours(fresh));
+      expect(stale.querySelector(".qt-metric-error, [role='alert']")).toBeNull();
+    });
   });
 
   it("keeps themed tuples apart while the palette has room", () => {

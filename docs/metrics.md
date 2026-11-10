@@ -360,12 +360,25 @@ const metricTheme: MetricTheme = {
 };
 ```
 
-`colorBy` applies to every chart on the theme whose `groupBy` contains a listed
-field; with a list, the first listed field present wins. Other groupings, single
-keys, scatter and line charts are unaffected. Legends list each whole key with
-the color drawn for it, so several entries can share a color; hover cards and
-the Other bucket are unchanged. It is presentation only and is not part of the
-query, links or saved state.
+The theme's `colorBy` is the host default: it applies to every chart whose
+`groupBy` contains a listed field; with a list, the first listed field present
+wins. A chart can choose its own key with `display.colorBy`, which takes
+precedence and is saved with the chart in query links and saved views. The
+metric editor offers it as **Colour by** for bar, pie, ring, box, histogram and
+list charts grouped by two or more keys, with **Whole group (theme default)**
+clearing it:
+
+```ts
+{ id: "events", op: "count", groupBy: ["repository_name", "family"],
+  display: { kind: "bar-horizontal", colorBy: "family" } }
+```
+
+A saved `display.colorBy` that names a key the chart no longer groups by is
+kept but ignored: the chart falls back to the theme's key, or to whole-group
+colors, without an error. Other groupings, single keys, scatter and line charts
+are unaffected. Legends list each whole key with the color drawn for it, so
+several entries can share a color; hover cards and the Other bucket are
+unchanged. Neither setting is sent to the server.
 
 CSS tokens cover accent, text, muted, grid, surface, other, null, and error. `MetricClassNames` exposes root/card/title/plot/axis/grid/legend/mark slots. `MetricCard` can render standalone with a clause and result/buckets; `MetricsEditor` can be opened directly with `{ api, fields, onClose, initialMetricId?, theme?, locale? }`. Palette information belongs to the caller and is not serialized into shared query data.
 

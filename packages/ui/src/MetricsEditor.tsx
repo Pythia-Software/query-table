@@ -2352,6 +2352,34 @@ export function MetricsEditor<Row>({
                       </select>
                     </label>
                   )}
+                  {selected.groupBy.length > 1 &&
+                    !["value", "table", "line", "scatter"].includes(chosen.kind) && (
+                    <label>
+                      Colour by
+                      <select
+                        aria-label="Colour groups by"
+                        value={
+                          chosen.colorBy !== undefined &&
+                          selected.groupBy.includes(chosen.colorBy)
+                            ? chosen.colorBy
+                            : ""
+                        }
+                        onChange={(e) => {
+                          const display = { ...chosen };
+                          if (e.target.value) display.colorBy = e.target.value;
+                          else delete display.colorBy;
+                          patch(selected.id, { display });
+                        }}
+                      >
+                        <option value="">Whole group (theme default)</option>
+                        {selected.groupBy.map((group) => (
+                          <option key={group} value={group}>
+                            {fieldLabel(group)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
                   {chosen.kind !== "value" && (
                     <label>
                       Maximum displayed groups

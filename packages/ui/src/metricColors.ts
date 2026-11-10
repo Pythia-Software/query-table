@@ -29,7 +29,8 @@ export interface MetricTheme {
    * `color(field, value)` of the first listed field among its keys, so that
    * field's overrides, domain and layer apply and, for example, one kind of
    * event keeps its colour on every repository's bar. Groupings without a
-   * listed field colour each whole key, as when this is omitted.
+   * listed field colour each whole key, as when this is omitted. A clause's
+   * own `display.colorBy` takes precedence over this host default.
    */
   colorBy?: string | ReadonlyArray<string>;
 }
@@ -120,8 +121,8 @@ export function createMetricColorResolver(theme: MetricTheme = {}) {
         ? theme.colorBy.slice(0, 64)
         : []
   ).filter((field): field is string => typeof field === "string" && field.length > 0);
-  const colorByIndex = (fields: readonly string[]) => {
-    for (const field of colorBy) {
+  const colorByIndex = (fields: readonly string[], preferred?: string) => {
+    for (const field of preferred === undefined ? colorBy : [preferred, ...colorBy]) {
       const index = fields.indexOf(field);
       if (index >= 0) return index;
     }
@@ -132,16 +133,19 @@ export function createMetricColorResolver(theme: MetricTheme = {}) {
     color,
     /**
      * Colours whole group keys drawn together. Single values resolve as
-     * `color`. With a theme `colorBy` field among `fields`, a tuple takes
-     * that field's `color`. Otherwise a tuple's colour depends only on the
-     * theme and its values, except that tuples sharing a chart take the next
-     * free colour rather than repeat one while the palette has room.
+     * `color`. With a colouring field among `fields` (the clause's
+     * `colorField` first, then the theme's `colorBy`), a tuple takes that
+     * field's `color`; a `colorField` outside `fields` is ignored. Otherwise
+     * a tuple's colour depends only on the theme and its values, except that
+     * tuples sharing a chart take the next free colour rather than repeat one
+     * while the palette has room.
      */
     tupleColors(
       fields: readonly string[],
       tuples: ReadonlyArray<readonly MetricValue[]>,
+      colorField?: string,
     ): (values: readonly MetricValue[]) => string {
-      const by = fields.length > 1 ? colorByIndex(fields) : -1;
+      const by = fields.length > 1 ? colorByIndex(fields, colorField) : -1;
       if (by >= 0)
         return (values) => {
           if (values.length <= 1) return color(fields[0] ?? "", values[0] ?? null);

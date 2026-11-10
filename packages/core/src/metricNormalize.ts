@@ -67,6 +67,7 @@ export const METRIC_OPTION_SPECS = {
     xLabel: "string",
     yLabel: "string",
     legendPosition: ["left", "right", "top", "bottom", "none"],
+    colorBy: "string",
     maxGroups: "positiveInteger",
     showOther: "boolean",
     boxMean: "boolean",

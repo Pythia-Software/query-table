@@ -12,6 +12,11 @@
   a grouping has no listed key, whole tuples keep their hashed colours. Legends
   show the colour drawn for each key; hover cards and Other are unchanged. See
   [Caller palettes and styling](docs/metrics.md#caller-palettes-and-styling).
+- A metric's `display.colorBy` saves the colouring key with the chart. It takes
+  precedence over the theme's `colorBy`, travels in query links (TypeScript and
+  Go codecs) and saved views, and is set with the metric editor's **Colour by**
+  control, shown for charts grouped by two or more keys. A saved key the chart
+  no longer groups by is ignored (the theme's key or whole-group colours apply).
 
 ## 1.0.4 — 2026-11-10
 

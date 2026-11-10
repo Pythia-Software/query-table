@@ -107,7 +107,7 @@ export function MetricChart({
     ).text;
   // One mark per group takes the whole key's colour. A scatter's first key
   // names its series; the remaining keys identify points within it.
-  const tupleShade = colors.tupleColors(clause.groupBy, buckets.map((b) => b.keys));
+  const tupleShade = colors.tupleColors(clause.groupBy, buckets.map((b) => b.keys), display.colorBy);
   const shade = (b: MetricBucket) =>
     !b.keys.length
       ? colors.token("accent")

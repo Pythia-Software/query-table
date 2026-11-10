@@ -26,6 +26,7 @@ type MetricTheme = {
   // Group keys whose value colours a whole multi-key mark (bars, pies, boxes,
   // lists), in priority order. A group takes color(field, value) of the first
   // listed key it contains; groupings without one colour each whole key.
+  // A clause's saved display.colorBy (one key) takes precedence.
   colorBy?: string | ReadonlyArray<string>;
   // Future numeric heatmaps use separate sequential/diverging scales,
   // not the categorical layer slots.
