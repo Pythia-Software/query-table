@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   EMPTY_QUERY,
@@ -9,6 +10,7 @@ import {
   normalQuantile,
   toQueryRequestV3,
   validateMetric,
+  type AggregationBucket,
   type AggregationClause,
   type FieldSchema,
   type QueryCapabilitiesV3,
@@ -114,4 +116,44 @@ describe("local engine", () => {
     expect(() => toQueryRequestV3(query, schema, capabilities)).toThrow(/metric intervals/);
     expect(toQueryRequestV3(query, schema, { ...capabilities, metricIntervals: true }).metrics[0]!.interval).toEqual({ kind: "proportion" });
   });
+});
+
+// ---- schema/fixtures/metric-intervals.json: the cross-engine contract -------
+
+interface FixtureCase {
+  name: string;
+  localOnly?: boolean;
+  metric: AggregationClause;
+  expected: { error?: true; groupCount?: number; hiddenGroups?: number; buckets?: Record<string, unknown>[]; other?: Record<string, unknown> };
+}
+const fixture = JSON.parse(
+  readFileSync(new URL("../../../schema/fixtures/metric-intervals.json", import.meta.url), "utf8"),
+) as { now: string; tolerance: number; schema: FieldSchema<Row>; rows: Row[]; cases: FixtureCase[] };
+
+/** Fixture fields only; numbers within the fixture's relative tolerance. */
+export function intervalBucket(bucket: AggregationBucket, tolerance: number) {
+  const near = (value: unknown) =>
+    typeof value === "number" ? expect.closeTo(value, -Math.log10(Math.max(Math.abs(value), 1) * tolerance)) : value;
+  return {
+    keys: bucket.keys,
+    count: Number(bucket.count),
+    ...(bucket.error ? { error: true } : { value: near(bucket.value) }),
+    ...(bucket.lower !== undefined ? { lower: near(bucket.lower) } : {}),
+    ...(bucket.upper !== undefined ? { upper: near(bucket.upper) } : {}),
+  };
+}
+const asExpected = (bucket: Record<string, unknown>) => ("error" in bucket ? { ...bucket, error: true } : bucket);
+
+describe("shared metric interval fixture (local engine)", () => {
+  for (const c of fixture.cases)
+    it(c.name, () => {
+      const [entry] = evaluateMetrics(fixture.rows, { ...EMPTY_QUERY, aggregations: [c.metric] }, fixture.schema, { now: Date.parse(fixture.now) }).metrics;
+      if (c.expected.error) return expect(entry!.error, "metric error").toBeTruthy();
+      expect(entry!.error).toBeUndefined();
+      expect(entry!.groupCount).toBe(c.expected.groupCount);
+      expect(entry!.hiddenGroups).toBe(c.expected.hiddenGroups);
+      expect(c.expected.buckets!.map(asExpected)).toEqual(entry!.buckets.map((b) => intervalBucket(b, fixture.tolerance)));
+      if (c.expected.other) expect(asExpected(c.expected.other)).toEqual(intervalBucket(entry!.other!, fixture.tolerance));
+      else expect(entry!.other).toBeUndefined();
+    });
 });

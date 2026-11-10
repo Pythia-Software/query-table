@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Added
+
+- Confidence intervals for ratio metrics. `interval: { kind: "proportion" }`
+  (Wilson score) or `{ kind: "rate" }` (exact Garwood Poisson), with an
+  optional `level` (default 0.95), returns `lower` and `upper` on every bucket
+  of a metric that is a ratio of two SUM, COUNT or COUNT_DISTINCT aggregates,
+  such as `SUM([events])/NULLIF(COUNT_DISTINCT([message_id])/1000,0)`. Bounds
+  come from each group's exact numerator and denominator and are scaled like
+  the value; other shapes are a clause diagnostic (`metric_interval`). Windows
+  pool the parts first, shares take a proportion interval of their total, and
+  the local engine pools an additive ratio's Other remainder. The local engine
+  computes intervals; DuckDB and the Go SQLite and PostgreSQL executors compute
+  the same bounds and advertise `queryCapabilities.metricIntervals`, and
+  `toQueryRequestV3` refuses an interval a server does not advertise. Shared
+  cases, including the Pharos evidence (6 of 128, 8 of 52 and 6 of 15 turns),
+  are in `schema/fixtures/metric-intervals.json`. See
+  [Intervals for rates and shares](docs/metrics.md#intervals-for-rates-and-shares).
+
 ## 1.0.4 — 2026-11-10
 
 ### Changed

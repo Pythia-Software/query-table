@@ -132,6 +132,12 @@ result, err := dataset.Execute(ctx, db, request,
     querytable.PlanOptions{Identity: trustedActorDatasetSchemaIdentity})
 ```
 
+`Capabilities()` advertises every metric control the executor runs, among them
+`metricFilters`, `metricMinCount`, `metricMinCountMeasures` and
+`metricIntervals` (confidence intervals on ratio metrics; see
+[Intervals for rates and shares](metrics.md#intervals-for-rates-and-shares)).
+Serve it unchanged: clients refuse a control a server does not advertise.
+
 `Execute` owns one short transaction. To share a snapshot with other host work,
 begin a transaction and call `ExecuteIn(ctx, tx, request, options)`; the caller
 owns the transaction and must finish it promptly. `NewQueryV3Handler(db,

@@ -137,7 +137,7 @@ func (d sqliteV2Dataset) executeMetrics(ctx context.Context, tx *sql.Tx, metrics
 			out = append(out, m)
 			continue
 		}
-		key := p.Fingerprint + "\x00" + p.Scope
+		key := p.Fingerprint + "\x00" + p.Scope + "\x00" + metricIntervalKey(spec)
 		if previous, ok := memo[key]; ok {
 			previous = cloneSQLiteMetric(previous)
 			previous.ID = p.ID
@@ -258,6 +258,13 @@ func (d sqliteV2Dataset) readV2Metric(ctx context.Context, tx *sql.Tx, p metricS
 		}
 	}
 	out := MetricResult{ID: p.ID, Scope: p.Scope, ProcessedRows: processed, Coverage: "exact", Buckets: []MetricBucket{}}
+	var ratio metricRatio
+	if spec.Interval != nil {
+		var err error
+		if ratio, err = validateMetricInterval(spec); err != nil {
+			return out, err
+		}
+	}
 	rows, e := tx.QueryContext(ctx, p.SQL, p.Args...)
 	if e != nil {
 		return out, e
@@ -359,6 +366,9 @@ func (d sqliteV2Dataset) readV2Metric(ctx context.Context, tx *sql.Tx, p metricS
 			b.Y = &yv
 			b.YError = sqliteErrorCode(v["y_error"])
 		}
+		if spec.Interval != nil && v["interval_numerator_error"] == nil && v["interval_denominator_error"] == nil {
+			applyMetricInterval(&b, spec.Interval, ratio.scale, v["interval_numerator"], v["interval_denominator"])
+		}
 		out.Buckets = append(out.Buckets, b)
 	}
 	return out, rows.Err()
@@ -426,6 +436,10 @@ func cloneSQLiteMetric(m MetricResult) MetricResult {
 		if b.InputErrorCount != nil {
 			n := *b.InputErrorCount
 			b.InputErrorCount = &n
+		}
+		if b.Lower != nil {
+			lower, upper := *b.Lower, *b.Upper
+			b.Lower, b.Upper = &lower, &upper
 		}
 		switch d := b.Distribution.(type) {
 		case *MetricHistogramDistribution:

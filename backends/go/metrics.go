@@ -119,6 +119,13 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 	if spec.Display != nil && spec.Display.Kind == "scatter" && spec.ExpressionY == "" {
 		return SQLPlan{}, diagnostic(ErrorCodePairedExpressionRequired, "scatter requires both X and Y aggregate expressions")
 	}
+	var ratio metricRatio
+	if spec.Interval != nil {
+		var err error
+		if ratio, err = validateMetricInterval(spec); err != nil {
+			return SQLPlan{}, err
+		}
+	}
 	b, e := newPlanDialect(ctx, s, o, sqlite)
 	if e != nil {
 		return SQLPlan{}, e
@@ -380,6 +387,23 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 		return SQLPlan{}, e
 	}
 	v = b.metricNumber(v)
+	var intervalParts [2]ValueSQL
+	if spec.Interval != nil {
+		// The interval's exact parts, from this metric's own reductions. Parts
+		// outside the kind's domain make the value an error here, so that it
+		// ranks, limits and counts like any other error.
+		if ratio, e = metricRatioParts(n); e != nil {
+			return SQLPlan{}, e
+		}
+		num, den := leaves[ratio.numerator], leaves[ratio.denominator]
+		intervalParts = [2]ValueSQL{num, den}
+		domain := num.Value + "<0 OR " + den.Value + "<0"
+		if spec.Interval.Kind == "proportion" {
+			domain += " OR " + num.Value + ">" + den.Value
+		}
+		bad := "(" + v.Value + " IS NOT NULL AND " + num.Error + " IS NULL AND " + den.Error + " IS NULL AND " + den.Value + "<>0 AND (" + domain + "))"
+		v = b.emitNative("CASE WHEN "+bad+" THEN NULL ELSE "+v.Value+" END", "COALESCE("+v.Error+",CASE WHEN "+bad+" THEN "+b.errorLiteral("interval_domain")+" END)", v.Type)
+	}
 	extraValues := make([]ValueSQL, len(extraNodes))
 	for i, node := range extraNodes {
 		if extraValues[i], e = lower(node); e != nil {
@@ -426,6 +450,11 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 	if minNode != nil {
 		leaf := leaves[minNode]
 		fields = append(fields, leaf.Value+" AS min_measure", leaf.Error+" AS min_measure_error")
+	}
+	if spec.Interval != nil {
+		num, den := intervalParts[0], intervalParts[1]
+		fields = append(fields, num.Value+" AS interval_numerator", num.Error+" AS interval_numerator_error",
+			den.Value+" AS interval_denominator", den.Error+" AS interval_denominator_error")
 	}
 	b.stage("SELECT " + strings.Join(fields, ",") + " FROM " + b.rel)
 	order, e := metricOrder(spec, len(groups), y != nil, false)

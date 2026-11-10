@@ -1,0 +1,452 @@
+{
+  "description": "Metric interval conformance (MetricSpec.interval). Every engine (local TypeScript, DuckDB, Go SQLite and Go PostgreSQL) executes each case and must return these buckets: keys, count, value, lower and upper within a relative tolerance of 1e-9, and error as a boolean. A bucket without lower and upper must have neither. Cases marked localOnly need client planning or the local engine's Other remainder. Reference bounds are independent: the Wilson closed form with scipy's normal quantile, and scipy's gamma quantiles for the exact Poisson (Garwood) interval. The short, medium and long bands are the Pharos prompt-length evidence: 6 of 128, 8 of 52 and 6 of 15 turns.",
+  "now": "2026-03-08T00:00:00.000Z",
+  "tolerance": 1e-09,
+  "schema": {
+    "name": "turns",
+    "idField": "id",
+    "fields": [
+      {
+        "name": "id",
+        "label": "ID",
+        "type": "text",
+        "source": {
+          "kind": "backend"
+        },
+        "aggregate": {
+          "groupable": false
+        }
+      },
+      {
+        "name": "band",
+        "label": "Band",
+        "type": "text",
+        "source": {
+          "kind": "backend"
+        }
+      },
+      {
+        "name": "turn",
+        "label": "Turn",
+        "type": "text",
+        "source": {
+          "kind": "backend"
+        }
+      },
+      {
+        "name": "events",
+        "label": "Events",
+        "type": "number",
+        "source": {
+          "kind": "backend"
+        }
+      },
+      {
+        "name": "messages",
+        "label": "Messages",
+        "type": "number",
+        "source": {
+          "kind": "backend"
+        }
+      },
+      {
+        "name": "at",
+        "label": "At",
+        "type": "datetime",
+        "source": {
+          "kind": "backend"
+        },
+        "aggregate": {
+          "groupable": true
+        }
+      }
+    ]
+  },
+  "rows": [
+    {"id": "r000", "band": "short", "turn": "short-0", "events": 3, "messages": 24, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r001", "band": "short", "turn": "short-1", "events": 1, "messages": 24, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r002", "band": "short", "turn": "short-2", "events": 1, "messages": 24, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r003", "band": "short", "turn": "short-3", "events": 1, "messages": 24, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r004", "band": "short", "turn": "short-4", "events": 1, "messages": 24, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r005", "band": "short", "turn": "short-5", "events": 1, "messages": 24, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r006", "band": "short", "turn": "short-6", "events": 0, "messages": 24, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r007", "band": "short", "turn": "short-7", "events": 0, "messages": 24, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r008", "band": "short", "turn": "short-8", "events": 0, "messages": 24, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r009", "band": "short", "turn": "short-9", "events": 0, "messages": 24, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r010", "band": "short", "turn": "short-10", "events": 0, "messages": 24, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r011", "band": "short", "turn": "short-11", "events": 0, "messages": 24, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r012", "band": "short", "turn": "short-12", "events": 0, "messages": 24, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r013", "band": "short", "turn": "short-13", "events": 0, "messages": 24, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r014", "band": "short", "turn": "short-14", "events": 0, "messages": 24, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r015", "band": "short", "turn": "short-15", "events": 0, "messages": 24, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r016", "band": "short", "turn": "short-16", "events": 0, "messages": 24, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r017", "band": "short", "turn": "short-17", "events": 0, "messages": 24, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r018", "band": "short", "turn": "short-18", "events": 0, "messages": 24, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r019", "band": "short", "turn": "short-19", "events": 0, "messages": 24, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r020", "band": "short", "turn": "short-20", "events": 0, "messages": 24, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r021", "band": "short", "turn": "short-21", "events": 0, "messages": 24, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r022", "band": "short", "turn": "short-22", "events": 0, "messages": 24, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r023", "band": "short", "turn": "short-23", "events": 0, "messages": 24, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r024", "band": "short", "turn": "short-24", "events": 0, "messages": 24, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r025", "band": "short", "turn": "short-25", "events": 0, "messages": 24, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r026", "band": "short", "turn": "short-26", "events": 0, "messages": 24, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r027", "band": "short", "turn": "short-27", "events": 0, "messages": 24, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r028", "band": "short", "turn": "short-28", "events": 0, "messages": 24, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r029", "band": "short", "turn": "short-29", "events": 0, "messages": 24, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r030", "band": "short", "turn": "short-30", "events": 0, "messages": 24, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r031", "band": "short", "turn": "short-31", "events": 0, "messages": 24, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r032", "band": "short", "turn": "short-32", "events": 0, "messages": 24, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r033", "band": "short", "turn": "short-33", "events": 0, "messages": 24, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r034", "band": "short", "turn": "short-34", "events": 0, "messages": 24, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r035", "band": "short", "turn": "short-35", "events": 0, "messages": 24, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r036", "band": "short", "turn": "short-36", "events": 0, "messages": 24, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r037", "band": "short", "turn": "short-37", "events": 0, "messages": 24, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r038", "band": "short", "turn": "short-38", "events": 0, "messages": 24, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r039", "band": "short", "turn": "short-39", "events": 0, "messages": 24, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r040", "band": "short", "turn": "short-40", "events": 0, "messages": 24, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r041", "band": "short", "turn": "short-41", "events": 0, "messages": 24, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r042", "band": "short", "turn": "short-42", "events": 0, "messages": 24, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r043", "band": "short", "turn": "short-43", "events": 0, "messages": 24, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r044", "band": "short", "turn": "short-44", "events": 0, "messages": 24, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r045", "band": "short", "turn": "short-45", "events": 0, "messages": 24, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r046", "band": "short", "turn": "short-46", "events": 0, "messages": 24, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r047", "band": "short", "turn": "short-47", "events": 0, "messages": 24, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r048", "band": "short", "turn": "short-48", "events": 0, "messages": 24, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r049", "band": "short", "turn": "short-49", "events": 0, "messages": 24, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r050", "band": "short", "turn": "short-50", "events": 0, "messages": 24, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r051", "band": "short", "turn": "short-51", "events": 0, "messages": 24, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r052", "band": "short", "turn": "short-52", "events": 0, "messages": 24, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r053", "band": "short", "turn": "short-53", "events": 0, "messages": 24, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r054", "band": "short", "turn": "short-54", "events": 0, "messages": 24, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r055", "band": "short", "turn": "short-55", "events": 0, "messages": 24, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r056", "band": "short", "turn": "short-56", "events": 0, "messages": 24, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r057", "band": "short", "turn": "short-57", "events": 0, "messages": 24, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r058", "band": "short", "turn": "short-58", "events": 0, "messages": 23, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r059", "band": "short", "turn": "short-59", "events": 0, "messages": 23, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r060", "band": "short", "turn": "short-60", "events": 0, "messages": 23, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r061", "band": "short", "turn": "short-61", "events": 0, "messages": 23, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r062", "band": "short", "turn": "short-62", "events": 0, "messages": 23, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r063", "band": "short", "turn": "short-63", "events": 0, "messages": 23, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r064", "band": "short", "turn": "short-64", "events": 0, "messages": 23, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r065", "band": "short", "turn": "short-65", "events": 0, "messages": 23, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r066", "band": "short", "turn": "short-66", "events": 0, "messages": 23, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r067", "band": "short", "turn": "short-67", "events": 0, "messages": 23, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r068", "band": "short", "turn": "short-68", "events": 0, "messages": 23, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r069", "band": "short", "turn": "short-69", "events": 0, "messages": 23, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r070", "band": "short", "turn": "short-70", "events": 0, "messages": 23, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r071", "band": "short", "turn": "short-71", "events": 0, "messages": 23, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r072", "band": "short", "turn": "short-72", "events": 0, "messages": 23, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r073", "band": "short", "turn": "short-73", "events": 0, "messages": 23, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r074", "band": "short", "turn": "short-74", "events": 0, "messages": 23, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r075", "band": "short", "turn": "short-75", "events": 0, "messages": 23, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r076", "band": "short", "turn": "short-76", "events": 0, "messages": 23, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r077", "band": "short", "turn": "short-77", "events": 0, "messages": 23, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r078", "band": "short", "turn": "short-78", "events": 0, "messages": 23, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r079", "band": "short", "turn": "short-79", "events": 0, "messages": 23, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r080", "band": "short", "turn": "short-80", "events": 0, "messages": 23, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r081", "band": "short", "turn": "short-81", "events": 0, "messages": 23, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r082", "band": "short", "turn": "short-82", "events": 0, "messages": 23, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r083", "band": "short", "turn": "short-83", "events": 0, "messages": 23, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r084", "band": "short", "turn": "short-84", "events": 0, "messages": 23, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r085", "band": "short", "turn": "short-85", "events": 0, "messages": 23, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r086", "band": "short", "turn": "short-86", "events": 0, "messages": 23, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r087", "band": "short", "turn": "short-87", "events": 0, "messages": 23, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r088", "band": "short", "turn": "short-88", "events": 0, "messages": 23, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r089", "band": "short", "turn": "short-89", "events": 0, "messages": 23, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r090", "band": "short", "turn": "short-90", "events": 0, "messages": 23, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r091", "band": "short", "turn": "short-91", "events": 0, "messages": 23, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r092", "band": "short", "turn": "short-92", "events": 0, "messages": 23, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r093", "band": "short", "turn": "short-93", "events": 0, "messages": 23, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r094", "band": "short", "turn": "short-94", "events": 0, "messages": 23, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r095", "band": "short", "turn": "short-95", "events": 0, "messages": 23, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r096", "band": "short", "turn": "short-96", "events": 0, "messages": 23, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r097", "band": "short", "turn": "short-97", "events": 0, "messages": 23, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r098", "band": "short", "turn": "short-98", "events": 0, "messages": 23, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r099", "band": "short", "turn": "short-99", "events": 0, "messages": 23, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r100", "band": "short", "turn": "short-100", "events": 0, "messages": 23, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r101", "band": "short", "turn": "short-101", "events": 0, "messages": 23, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r102", "band": "short", "turn": "short-102", "events": 0, "messages": 23, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r103", "band": "short", "turn": "short-103", "events": 0, "messages": 23, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r104", "band": "short", "turn": "short-104", "events": 0, "messages": 23, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r105", "band": "short", "turn": "short-105", "events": 0, "messages": 23, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r106", "band": "short", "turn": "short-106", "events": 0, "messages": 23, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r107", "band": "short", "turn": "short-107", "events": 0, "messages": 23, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r108", "band": "short", "turn": "short-108", "events": 0, "messages": 23, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r109", "band": "short", "turn": "short-109", "events": 0, "messages": 23, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r110", "band": "short", "turn": "short-110", "events": 0, "messages": 23, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r111", "band": "short", "turn": "short-111", "events": 0, "messages": 23, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r112", "band": "short", "turn": "short-112", "events": 0, "messages": 23, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r113", "band": "short", "turn": "short-113", "events": 0, "messages": 23, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r114", "band": "short", "turn": "short-114", "events": 0, "messages": 23, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r115", "band": "short", "turn": "short-115", "events": 0, "messages": 23, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r116", "band": "short", "turn": "short-116", "events": 0, "messages": 23, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r117", "band": "short", "turn": "short-117", "events": 0, "messages": 23, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r118", "band": "short", "turn": "short-118", "events": 0, "messages": 23, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r119", "band": "short", "turn": "short-119", "events": 0, "messages": 23, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r120", "band": "short", "turn": "short-120", "events": 0, "messages": 23, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r121", "band": "short", "turn": "short-121", "events": 0, "messages": 23, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r122", "band": "short", "turn": "short-122", "events": 0, "messages": 23, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r123", "band": "short", "turn": "short-123", "events": 0, "messages": 23, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r124", "band": "short", "turn": "short-124", "events": 0, "messages": 23, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r125", "band": "short", "turn": "short-125", "events": 0, "messages": 23, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r126", "band": "short", "turn": "short-126", "events": 0, "messages": 23, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r127", "band": "short", "turn": "short-127", "events": 0, "messages": 23, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r128", "band": "medium", "turn": "medium-0", "events": 1, "messages": 25, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r129", "band": "medium", "turn": "medium-1", "events": 1, "messages": 25, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r130", "band": "medium", "turn": "medium-2", "events": 1, "messages": 25, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r131", "band": "medium", "turn": "medium-3", "events": 1, "messages": 25, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r132", "band": "medium", "turn": "medium-4", "events": 1, "messages": 25, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r133", "band": "medium", "turn": "medium-5", "events": 1, "messages": 25, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r134", "band": "medium", "turn": "medium-6", "events": 1, "messages": 25, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r135", "band": "medium", "turn": "medium-7", "events": 1, "messages": 25, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r136", "band": "medium", "turn": "medium-8", "events": 0, "messages": 25, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r137", "band": "medium", "turn": "medium-9", "events": 0, "messages": 25, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r138", "band": "medium", "turn": "medium-10", "events": 0, "messages": 25, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r139", "band": "medium", "turn": "medium-11", "events": 0, "messages": 25, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r140", "band": "medium", "turn": "medium-12", "events": 0, "messages": 25, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r141", "band": "medium", "turn": "medium-13", "events": 0, "messages": 25, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r142", "band": "medium", "turn": "medium-14", "events": 0, "messages": 25, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r143", "band": "medium", "turn": "medium-15", "events": 0, "messages": 25, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r144", "band": "medium", "turn": "medium-16", "events": 0, "messages": 25, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r145", "band": "medium", "turn": "medium-17", "events": 0, "messages": 25, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r146", "band": "medium", "turn": "medium-18", "events": 0, "messages": 25, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r147", "band": "medium", "turn": "medium-19", "events": 0, "messages": 25, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r148", "band": "medium", "turn": "medium-20", "events": 0, "messages": 25, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r149", "band": "medium", "turn": "medium-21", "events": 0, "messages": 25, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r150", "band": "medium", "turn": "medium-22", "events": 0, "messages": 25, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r151", "band": "medium", "turn": "medium-23", "events": 0, "messages": 25, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r152", "band": "medium", "turn": "medium-24", "events": 0, "messages": 25, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r153", "band": "medium", "turn": "medium-25", "events": 0, "messages": 25, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r154", "band": "medium", "turn": "medium-26", "events": 0, "messages": 24, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r155", "band": "medium", "turn": "medium-27", "events": 0, "messages": 24, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r156", "band": "medium", "turn": "medium-28", "events": 0, "messages": 24, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r157", "band": "medium", "turn": "medium-29", "events": 0, "messages": 24, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r158", "band": "medium", "turn": "medium-30", "events": 0, "messages": 24, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r159", "band": "medium", "turn": "medium-31", "events": 0, "messages": 24, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r160", "band": "medium", "turn": "medium-32", "events": 0, "messages": 24, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r161", "band": "medium", "turn": "medium-33", "events": 0, "messages": 24, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r162", "band": "medium", "turn": "medium-34", "events": 0, "messages": 24, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r163", "band": "medium", "turn": "medium-35", "events": 0, "messages": 24, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r164", "band": "medium", "turn": "medium-36", "events": 0, "messages": 24, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r165", "band": "medium", "turn": "medium-37", "events": 0, "messages": 24, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r166", "band": "medium", "turn": "medium-38", "events": 0, "messages": 24, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r167", "band": "medium", "turn": "medium-39", "events": 0, "messages": 24, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r168", "band": "medium", "turn": "medium-40", "events": 0, "messages": 24, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r169", "band": "medium", "turn": "medium-41", "events": 0, "messages": 24, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r170", "band": "medium", "turn": "medium-42", "events": 0, "messages": 24, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r171", "band": "medium", "turn": "medium-43", "events": 0, "messages": 24, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r172", "band": "medium", "turn": "medium-44", "events": 0, "messages": 24, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r173", "band": "medium", "turn": "medium-45", "events": 0, "messages": 24, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r174", "band": "medium", "turn": "medium-46", "events": 0, "messages": 24, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r175", "band": "medium", "turn": "medium-47", "events": 0, "messages": 24, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r176", "band": "medium", "turn": "medium-48", "events": 0, "messages": 24, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r177", "band": "medium", "turn": "medium-49", "events": 0, "messages": 24, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r178", "band": "medium", "turn": "medium-50", "events": 0, "messages": 24, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r179", "band": "medium", "turn": "medium-51", "events": 0, "messages": 24, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r180", "band": "long", "turn": "long-0", "events": 1, "messages": 8, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r181", "band": "long", "turn": "long-1", "events": 1, "messages": 8, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r182", "band": "long", "turn": "long-2", "events": 1, "messages": 8, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r183", "band": "long", "turn": "long-3", "events": 1, "messages": 8, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r184", "band": "long", "turn": "long-4", "events": 1, "messages": 8, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r185", "band": "long", "turn": "long-5", "events": 1, "messages": 8, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r186", "band": "long", "turn": "long-6", "events": 0, "messages": 8, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r187", "band": "long", "turn": "long-7", "events": 0, "messages": 8, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r188", "band": "long", "turn": "long-8", "events": 0, "messages": 7, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r189", "band": "long", "turn": "long-9", "events": 0, "messages": 7, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r190", "band": "long", "turn": "long-10", "events": 0, "messages": 7, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r191", "band": "long", "turn": "long-11", "events": 0, "messages": 7, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r192", "band": "long", "turn": "long-12", "events": 0, "messages": 7, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r193", "band": "long", "turn": "long-13", "events": 0, "messages": 7, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r194", "band": "long", "turn": "long-14", "events": 0, "messages": 7, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r195", "band": "none", "turn": "none-0", "events": 0, "messages": 5, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r196", "band": "none", "turn": "none-1", "events": 0, "messages": 5, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r197", "band": "none", "turn": "none-2", "events": 0, "messages": 5, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r198", "band": "none", "turn": "none-3", "events": 0, "messages": 5, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r199", "band": "none", "turn": "none-4", "events": 0, "messages": 5, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r200", "band": "none", "turn": "none-5", "events": 0, "messages": 5, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r201", "band": "none", "turn": "none-6", "events": 0, "messages": 5, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r202", "band": "none", "turn": "none-7", "events": 0, "messages": 5, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r203", "band": "none", "turn": "none-8", "events": 0, "messages": 5, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r204", "band": "none", "turn": "none-9", "events": 0, "messages": 5, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r205", "band": "all", "turn": "all-0", "events": 1, "messages": 2, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r206", "band": "all", "turn": "all-1", "events": 1, "messages": 2, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r207", "band": "all", "turn": "all-2", "events": 1, "messages": 2, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r208", "band": "all", "turn": "all-3", "events": 1, "messages": 2, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r209", "band": "silent", "turn": "silent-0", "events": 0, "messages": 0, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r210", "band": "silent", "turn": "silent-1", "events": 0, "messages": 0, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r211", "band": "silent", "turn": "silent-2", "events": 0, "messages": 0, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r212", "band": "big", "turn": "big-0", "events": 150000, "messages": 500000000, "at": "2026-03-04T12:00:00.000Z"},
+    {"id": "r213", "band": "big", "turn": "big-1", "events": 120000, "messages": 500000000, "at": "2026-03-01T12:00:00.000Z"},
+    {"id": "r214", "band": "orphan", "turn": null, "events": 0, "messages": 1, "at": "2026-03-02T12:00:00.000Z"},
+    {"id": "r215", "band": "orphan", "turn": null, "events": 0, "messages": 1, "at": "2026-03-04T12:00:00.000Z"}
+  ],
+  "cases": [
+    {
+      "name": "proportion of turns with an event, by band (Pharos evidence)",
+      "metric": {"op": "count", "id": "m", "expression": "COUNT_DISTINCT(IF([events]>0,[turn],NULL))/NULLIF(COUNT_DISTINCT([turn]),0)", "groupBy": ["band"], "sort": [{"key": "group0", "dir": "asc"}], "interval": {"kind": "proportion"}},
+      "expected": {
+        "buckets": [
+          {"keys": ["all"], "count": 4, "value": 1.0, "lower": 0.5101091635454027, "upper": 1.0},
+          {"keys": ["big"], "count": 2, "value": 1.0, "lower": 0.34238022750665303, "upper": 1.0},
+          {"keys": ["long"], "count": 15, "value": 0.4, "lower": 0.1982449614134158, "upper": 0.6425316987937539},
+          {"keys": ["medium"], "count": 52, "value": 0.15384615384615385, "lower": 0.08007685016780323, "upper": 0.27524085176410146},
+          {"keys": ["none"], "count": 10, "value": 0.0, "lower": 0.0, "upper": 0.2775327998628892},
+          {"keys": ["orphan"], "count": 2, "value": null},
+          {"keys": ["short"], "count": 128, "value": 0.046875, "lower": 0.02165784417192377, "upper": 0.09849752245094323},
+          {"keys": ["silent"], "count": 3, "value": 0.0, "lower": 0.0, "upper": 0.5614970317550455}
+        ],
+        "groupCount": 8
+      }
+    },
+    {
+      "name": "percent proportion at 90% without NULLIF: a zero denominator is an error",
+      "metric": {"op": "count", "id": "m", "expression": "100*COUNT_DISTINCT(IF([events]>0,[turn],NULL))/COUNT_DISTINCT([turn])", "groupBy": ["band"], "sort": [{"key": "group0", "dir": "asc"}], "interval": {"kind": "proportion", "level": 0.9}},
+      "expected": {
+        "buckets": [
+          {"keys": ["all"], "count": 4, "value": 100.0, "lower": 59.652137479729525, "upper": 100.0},
+          {"keys": ["big"], "count": 2, "value": 100.0, "lower": 42.50306090063465, "upper": 100.0},
+          {"keys": ["long"], "count": 15, "value": 40.0, "lower": 22.316791026598217, "upper": 60.73936306560458},
+          {"keys": ["medium"], "count": 52, "value": 15.384615384615385, "lower": 8.892181134155479, "upper": 25.300959584374503},
+          {"keys": ["none"], "count": 10, "value": 0.0, "lower": 0.0, "upper": 21.294197008340692},
+          {"keys": ["short"], "count": 128, "value": 4.6875, "lower": 2.4430227943622396, "upper": 8.80787220632309},
+          {"keys": ["silent"], "count": 3, "value": 0.0, "lower": 0.0, "upper": 47.41955741575127},
+          {"keys": ["orphan"], "count": 2, "error": true}
+        ],
+        "groupCount": 8
+      }
+    },
+    {
+      "name": "events per 1,000 messages (exact Poisson, large counts included)",
+      "metric": {"op": "count", "id": "m", "expression": "SUM([events])/NULLIF(SUM([messages])/1000,0)", "groupBy": ["band"], "sort": [{"key": "group0", "dir": "asc"}], "interval": {"kind": "rate"}},
+      "expected": {
+        "buckets": [
+          {"keys": ["all"], "count": 4, "value": 500.0, "lower": 136.23317170329062, "upper": 1280.1985844254618},
+          {"keys": ["big"], "count": 2, "value": 0.27, "lower": 0.26898252032296, "upper": 0.2710203758683911},
+          {"keys": ["long"], "count": 15, "value": 53.097345132743364, "lower": 19.485789853901338, "upper": 115.5705665709618},
+          {"keys": ["medium"], "count": 52, "value": 6.279434850863423, "lower": 2.7110142674635025, "upper": 12.372989968754563},
+          {"keys": ["none"], "count": 10, "value": 0.0, "lower": 0.0, "upper": 73.77758908227871},
+          {"keys": ["orphan"], "count": 2, "value": 0.0, "lower": 0.0, "upper": 1844.439727056968},
+          {"keys": ["short"], "count": 128, "value": 2.6648900732844774, "lower": 1.1505103853259502, "upper": 5.2508958095247555},
+          {"keys": ["silent"], "count": 3, "value": null}
+        ],
+        "groupCount": 8
+      }
+    },
+    {
+      "name": "events per turn: a distinct-count exposure",
+      "metric": {"op": "count", "id": "m", "expression": "SUM([events])/NULLIF(COUNT_DISTINCT([turn]),0)", "groupBy": ["band"], "sort": [{"key": "group0", "dir": "asc"}], "interval": {"kind": "rate", "level": 0.99}},
+      "expected": {
+        "buckets": [
+          {"keys": ["all"], "count": 4, "value": 1.0, "lower": 0.16805163587685132, "upper": 3.1485224464963966},
+          {"keys": ["big"], "count": 2, "value": 135000.0, "lower": 134331.71909039316, "upper": 135670.66044702614},
+          {"keys": ["long"], "count": 15, "value": 0.4, "lower": 0.10246078793631112, "upper": 1.0439783207531763},
+          {"keys": ["medium"], "count": 52, "value": 0.15384615384615385, "lower": 0.049444283106189375, "upper": 0.3572735716981417},
+          {"keys": ["none"], "count": 10, "value": 0.0, "lower": 0.0, "upper": 0.5298317366548037},
+          {"keys": ["orphan"], "count": 2, "value": null},
+          {"keys": ["short"], "count": 128, "value": 0.0625, "lower": 0.020086740011889433, "upper": 0.14514238850237007},
+          {"keys": ["silent"], "count": 3, "value": 0.0, "lower": 0.0, "upper": 1.7661057888493454}
+        ],
+        "groupCount": 8
+      }
+    },
+    {
+      "name": "a proportion whose numerator exceeds its denominator is an error",
+      "metric": {"op": "count", "id": "m", "expression": "SUM([events])/COUNT()", "groupBy": ["band"], "sort": [{"key": "group0", "dir": "asc"}], "interval": {"kind": "proportion"}},
+      "expected": {
+        "buckets": [
+          {"keys": ["all"], "count": 4, "value": 1.0, "lower": 0.5101091635454027, "upper": 1.0},
+          {"keys": ["long"], "count": 15, "value": 0.4, "lower": 0.1982449614134158, "upper": 0.6425316987937539},
+          {"keys": ["medium"], "count": 52, "value": 0.15384615384615385, "lower": 0.08007685016780323, "upper": 0.27524085176410146},
+          {"keys": ["none"], "count": 10, "value": 0.0, "lower": 0.0, "upper": 0.2775327998628892},
+          {"keys": ["orphan"], "count": 2, "value": 0.0, "lower": 0.0, "upper": 0.6576197724933469},
+          {"keys": ["short"], "count": 128, "value": 0.0625, "lower": 0.03200692569506118, "upper": 0.11848791104425867},
+          {"keys": ["silent"], "count": 3, "value": 0.0, "lower": 0.0, "upper": 0.5614970317550455},
+          {"keys": ["big"], "count": 2, "error": true}
+        ],
+        "groupCount": 8
+      }
+    },
+    {
+      "name": "ungrouped total",
+      "metric": {"op": "count", "id": "m", "expression": "COUNT_DISTINCT(IF([events]>0,[turn],NULL))/NULLIF(COUNT_DISTINCT([turn]),0)", "groupBy": [], "interval": {"kind": "proportion"}},
+      "expected": {
+        "buckets": [
+          {"keys": [], "count": 216, "value": 0.12149532710280374, "lower": 0.08427550436986392, "upper": 0.17206440045356725}
+        ],
+        "groupCount": 1
+      }
+    },
+    {
+      "name": "minCount hides small groups before their intervals",
+      "metric": {"op": "count", "id": "m", "expression": "COUNT_DISTINCT(IF([events]>0,[turn],NULL))/NULLIF(COUNT_DISTINCT([turn]),0)", "groupBy": ["band"], "sort": [{"key": "group0", "dir": "asc"}], "interval": {"kind": "proportion"}, "minCount": {"min": 20, "distinct": "turn"}},
+      "expected": {
+        "buckets": [
+          {"keys": ["medium"], "count": 52, "value": 0.15384615384615385, "lower": 0.08007685016780323, "upper": 0.27524085176410146},
+          {"keys": ["short"], "count": 128, "value": 0.046875, "lower": 0.02165784417192377, "upper": 0.09849752245094323}
+        ],
+        "groupCount": 2,
+        "hiddenGroups": 6
+      }
+    },
+    {
+      "name": "calendar days: empty intervals have no interval",
+      "metric": {"op": "count", "id": "m", "expression": "SUM([events])/NULLIF(SUM([messages])/1000,0)", "groupBy": ["at"], "interval": {"kind": "rate"}, "dateGrouping": {"field": "at", "interval": "day", "includeEmpty": true, "range": "custom", "start": "2026-02-28", "end": "2026-03-04"}},
+      "expected": {
+        "buckets": [
+          {"keys": ["2026-02-28T00:00:00.000Z"], "count": 0, "value": null},
+          {"keys": ["2026-03-01T00:00:00.000Z"], "count": 72, "value": 0.24001928666268005, "lower": 0.23866322653141614, "upper": 0.24138114104389985},
+          {"keys": ["2026-03-02T00:00:00.000Z"], "count": 72, "value": 5.398110661268556, "lower": 2.3305210369423093, "upper": 10.636429973139888},
+          {"keys": ["2026-03-03T00:00:00.000Z"], "count": 0, "value": null},
+          {"keys": ["2026-03-04T00:00:00.000Z"], "count": 72, "value": 0.30001511135524017, "lower": 0.2984987889809817, "upper": 0.3015372273827477}
+        ],
+        "groupCount": 5
+      }
+    },
+    {
+      "name": "Other pools an additive ratio's parts (local engine)",
+      "localOnly": true,
+      "metric": {"op": "count", "id": "m", "expression": "SUM([events])/NULLIF(SUM([messages])/1000,0)", "groupBy": ["band"], "sort": [{"key": "group0", "dir": "asc"}], "groupLimit": 3, "interval": {"kind": "rate"}},
+      "expected": {
+        "buckets": [
+          {"keys": ["all"], "count": 4, "value": 500.0, "lower": 136.23317170329062, "upper": 1280.1985844254618},
+          {"keys": ["big"], "count": 2, "value": 0.27, "lower": 0.26898252032296, "upper": 0.2710203758683911},
+          {"keys": ["long"], "count": 15, "value": 53.097345132743364, "lower": 19.485789853901338, "upper": 115.5705665709618}
+        ],
+        "groupCount": 8,
+        "other": {"keys": [], "count": 195, "value": 3.696857670979667, "lower": 2.113073579861721, "upper": 6.003465248974342}
+      }
+    },
+    {
+      "name": "a share is a proportion of its total (planned on the client)",
+      "localOnly": true,
+      "metric": {"op": "count", "id": "m", "groupBy": ["band"], "share": "total", "sort": [{"key": "group0", "dir": "asc"}], "interval": {"kind": "proportion"}},
+      "expected": {
+        "buckets": [
+          {"keys": ["all"], "count": 4, "value": 0.018518518518518517, "lower": 0.007224468618003885, "upper": 0.046639160581946934},
+          {"keys": ["big"], "count": 2, "value": 0.009259259259259259, "lower": 0.002542906334952362, "upper": 0.0331257926573052},
+          {"keys": ["long"], "count": 15, "value": 0.06944444444444445, "lower": 0.0425325659555028, "upper": 0.11140317938676092},
+          {"keys": ["medium"], "count": 52, "value": 0.24074074074074073, "lower": 0.18857477336780482, "upper": 0.3019671808167841},
+          {"keys": ["none"], "count": 10, "value": 0.046296296296296294, "lower": 0.025338742275287273, "upper": 0.0831096775477433},
+          {"keys": ["orphan"], "count": 2, "value": 0.009259259259259259, "lower": 0.002542906334952362, "upper": 0.0331257926573052},
+          {"keys": ["short"], "count": 128, "value": 0.5925925925925926, "lower": 0.5260034995337115, "upper": 0.655945802543221},
+          {"keys": ["silent"], "count": 3, "value": 0.013888888888888888, "lower": 0.00473451726297602, "upper": 0.04003164683312817}
+        ],
+        "groupCount": 8
+      }
+    },
+    {
+      "name": "an interval needs a ratio",
+      "metric": {"op": "count", "id": "m", "expression": "AVG([events])", "groupBy": ["band"], "interval": {"kind": "rate"}},
+      "expected": {
+        "error": true
+      }
+    },
+    {
+      "name": "an interval kind is proportion or rate",
+      "metric": {"op": "count", "id": "m", "expression": "COUNT_DISTINCT(IF([events]>0,[turn],NULL))/NULLIF(COUNT_DISTINCT([turn]),0)", "groupBy": ["band"], "interval": {"kind": "wald"}},
+      "expected": {
+        "error": true
+      }
+    }
+  ]
+}
