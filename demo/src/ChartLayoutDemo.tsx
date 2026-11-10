@@ -51,7 +51,7 @@ const shareBuckets: MetricBucket[] = [
 const intervalLine: RenderingClause = { ...shares, id: "interval-line", groupBy: ["day", "tool"], label: "Daily share with an interval", display: { kind: "line", format: percent } };
 const intervalSeries: MetricBucket[] = [
   ...days.map((day, i) => ({ keys: [day, "Read"], value: [0.1, 0.2, 0.15][i]!, count: 40, lower: [0.04, 0.1, 0.07][i]!, upper: [0.22, 0.34, 0.28][i]! })),
-  ...days.map((day, i) => ({ keys: [day, "Bash"], value: [0.5, 0.6, 0.55][i]!, count: 12, ...(i === 1 ? {} : { lower: [0.25, 0, 0.3][i]!, upper: [0.75, 0, 0.78][i]! }) })),
+  ...days.map((day, i) => ({ keys: [day, "Bash"], value: [0.5, 0.6, 0.55][i]!, count: 12, lower: [0.25, 0.36, 0.3][i]!, upper: [0.75, 0.8, 0.78][i]! })),
 ];
 
 /** Synthetic chart layouts for the browser checks in demo/chart-layout-test.mjs. */

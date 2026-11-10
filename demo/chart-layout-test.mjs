@@ -71,11 +71,14 @@ for (const [engineName, engine] of [["Chromium", chromium], ["WebKit", webkit]])
           chart: svg.closest("[data-chart]").dataset.chart,
           whiskers: [...svg.querySelectorAll(".qt-metric-interval")].map(inside),
           bands: [...svg.querySelectorAll(".qt-metric-interval-band")].map(inside),
+          // Every series here has bounds at every point: each band is a shaded area.
+          filled: [...svg.querySelectorAll(".qt-metric-interval-band")].every(g => g.querySelector("path")?.getAttribute("d")),
         };
       }));
       assert.deepEqual(intervals.map(c => [c.chart, c.whiskers.length, c.bands.length]),
         [["interval-bars", 3, 0], ["interval-bars-compact", 3, 0], ["interval-line", 0, 2]], `${where}: whiskers on bounded bars, one band per series`);
       for (const c of intervals) assert.ok([...c.whiskers, ...c.bands].every(Boolean), `${where}: ${c.chart} intervals stay inside the plot`);
+      assert.ok(intervals.every(c => c.filled), `${where}: every line series has a shaded band`);
       const bounded = page.locator("[data-chart=interval-bars] .qt-metric-mark").nth(2);
       await bounded.scrollIntoViewIfNeeded();
       await bounded.hover();
