@@ -43,6 +43,15 @@ INSERT INTO big SELECT 'low'||i,-1000000-i,'all','low' FROM k UNION ALL SELECT '
 	return db, qt.QueryDatasetV3{Dialect: "sqlite", Schema: schema, SourceSQL: "SELECT * FROM big", MaxPopulation: size + 30}
 }
 
+// percentileCurve is a 101-point cumulative curve: 0, 0.01, …, 1.
+func percentileCurve() []float64 {
+	curve := make([]float64, 101)
+	for i := range curve {
+		curve[i] = float64(i) / 100
+	}
+	return curve
+}
+
 // percentileSampleSize is the permutation size of the single-group test:
 // 250,000 samples, or 2,000 under the race detector, which slows the pure-Go
 // SQLite driver tenfold.
@@ -148,6 +157,8 @@ func TestPercentilesRankEachGroup(t *testing.T) {
 	q := metricsV3(nil, nil, 0, 0,
 		qt.AggSpec{ID: "median", Expression: "MEDIAN([n])", GroupBy: []string{"parity"}},
 		qt.AggSpec{ID: "tukey", Op: "count", GroupBy: []string{"parity"}, Distribution: &qt.MetricDistribution{Kind: "box", Input: "[n]", Whiskers: "tukey"}},
+		qt.AggSpec{ID: "whiskers", Op: "count", GroupBy: []string{"parity"}, Distribution: &qt.MetricDistribution{Kind: "box", Input: "[n]", Whiskers: "percentile", WhiskerProbabilities: []float64{0.05, 0.99}}},
+		qt.AggSpec{ID: "curve", Op: "count", GroupBy: []string{"parity"}, Distribution: &qt.MetricDistribution{Kind: "quantiles", Input: "[n]", Probabilities: percentileCurve()}},
 	)
 	compareStaged(t, tx, d, q, qt.PlanOptions{})
 	compareDirect(t, tx, d, q)
@@ -213,5 +224,7 @@ func percentileAgreementMetrics(id, input string, grouping []string) []qt.AggSpe
 		{ID: "tukey_" + id, Op: "count", GroupBy: grouping, Distribution: &qt.MetricDistribution{Kind: "box", Input: input, Whiskers: "tukey"}},
 		{ID: "p90_" + id, Expression: "PERCENTILE(" + input + ", 0.9)", GroupBy: grouping},
 		{ID: "spread_" + id, Expression: "PERCENTILE(" + input + ", 0.95) - PERCENTILE(" + input + ", 0.05) + MEDIAN(" + input + ")", GroupBy: grouping},
+		{ID: "whiskers_" + id, Op: "count", GroupBy: grouping, Distribution: &qt.MetricDistribution{Kind: "box", Input: input, Whiskers: "percentile", WhiskerProbabilities: []float64{0.05, 0.99}}},
+		{ID: "curve_" + id, Op: "count", GroupBy: grouping, Distribution: &qt.MetricDistribution{Kind: "quantiles", Input: input, Probabilities: percentileCurve()}},
 	}
 }

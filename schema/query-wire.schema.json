@@ -100,13 +100,15 @@
       }
     },
     "MetricDistribution": {
-      "description": "A box or histogram over `input` per group instead of a scalar value.",
+      "description": "A box, histogram or quantile curve over `input` per group instead of a scalar value.",
       "type": "object", "additionalProperties": false, "required": ["kind", "input"],
       "properties": {
-        "kind": { "type": "string", "enum": ["box", "histogram"] },
+        "kind": { "type": "string", "enum": ["box", "histogram", "quantiles"] },
         "input": { "type": "string" },
-        "whiskers": { "type": "string", "enum": ["minmax", "tukey"] },
-        "bins": { "type": "integer", "minimum": 1 }
+        "whiskers": { "type": "string", "enum": ["minmax", "tukey", "percentile"] },
+        "whiskerProbabilities": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2, "description": "Box whiskers at these exact-linear percentiles [lo, hi] with whiskers \"percentile\": 0 <= lo < 0.25 and 0.75 < hi <= 1. Default [0.1, 0.9]." },
+        "bins": { "type": "integer", "minimum": 1 },
+        "probabilities": { "type": "array", "items": { "type": "number" }, "minItems": 1, "maxItems": 101, "description": "Quantiles: 1–101 strictly increasing probabilities in [0, 1]." }
       }
     },
     "MetricMinCountDistinct": {
@@ -222,6 +224,8 @@
         "metricMinCount": { "type": "boolean", "x-go-omit": "none", "description": "Executes a numeric minCount and reports hiddenGroups." },
         "metricMinCountMeasures": { "type": "boolean", "x-go-omit": "none", "description": "Also executes an object minCount." },
         "metricPercentiles": { "type": "boolean", "x-go-omit": "none", "description": "Executes PERCENTILE(expr, p) in metric and summary formulas." },
+        "boxPercentileWhiskers": { "type": "boolean", "x-go-omit": "none", "description": "Executes box whiskers \"percentile\" with whiskerProbabilities." },
+        "quantileDistributions": { "type": "boolean", "x-go-omit": "none", "description": "Executes the \"quantiles\" distribution." },
         "version": { "const": 3 },
         "groupedRows": { "type": "boolean" },
         "calendarGrouping": { "type": "boolean" },
@@ -268,7 +272,8 @@
         "low": { "type": "number", "description": "Lower whisker." }, "high": { "type": "number", "description": "Upper whisker." },
         "outliers": { "type": "array", "items": { "type": "number" } },
         "outlierCount": { "type": "integer", "x-go-repr": "int64" },
-        "whiskers": { "type": "string", "enum": ["minmax", "tukey"] },
+        "whiskers": { "type": "string", "enum": ["minmax", "tukey", "percentile"] },
+        "whiskerProbabilities": { "type": "array", "items": { "type": "number" }, "description": "The [lo, hi] probabilities of percentile whiskers; present only when whiskers is \"percentile\"." },
         "method": { "type": "string", "enum": ["exact-linear"] }
       }
     },
@@ -289,11 +294,27 @@
         "n": { "type": "integer", "x-go-repr": "int64" }
       }
     },
+    "MetricQuantilesSummary": {
+      "type": "object", "required": ["n", "probabilities", "values"],
+      "properties": {
+        "n": { "type": "integer", "x-go-repr": "int64" },
+        "probabilities": { "type": "array", "items": { "type": "number" } },
+        "values": { "type": "array", "items": { "type": "number" }, "description": "The exact-linear percentile at each probability." }
+      }
+    },
+    "MetricQuantilesDistribution": {
+      "type": "object", "required": ["kind", "summary"],
+      "properties": {
+        "kind": { "const": "quantiles" },
+        "summary": { "oneOf": [{ "$ref": "#/$defs/MetricQuantilesSummary" }, { "type": "null" }], "x-go-repr": "*MetricQuantilesSummary", "description": "null when the group has no numeric samples." }
+      }
+    },
     "MetricDistributionResult": {
       "x-go-type": "MetricDistributionResult",
       "oneOf": [
         { "$ref": "#/$defs/MetricBoxDistribution", "x-swift-case": "box" },
-        { "$ref": "#/$defs/MetricHistogramDistribution", "x-swift-case": "histogram" }
+        { "$ref": "#/$defs/MetricHistogramDistribution", "x-swift-case": "histogram" },
+        { "$ref": "#/$defs/MetricQuantilesDistribution", "x-swift-case": "quantiles" }
       ]
     },
     "MetricBucket": {

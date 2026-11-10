@@ -1,6 +1,7 @@
 package querytable
 
 import (
+	"cmp"
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
@@ -196,12 +197,27 @@ func (a *sqliteSampleQuantilesAggregate) Value() (driver.Value, error) {
 // rankedOverflow.
 type sqliteBoxSamplesAggregate struct {
 	sqliteSamples
-	whiskers string
+	whiskers    string
+	percentiles [2]float64
 }
 
+// Step reads the sample, and for qt_v2_box_percentile(sample, lo, hi) the
+// whisker probabilities.
 func (a *sqliteBoxSamplesAggregate) Step(v []driver.Value) error {
-	if len(v) != 1 {
-		return fmt.Errorf("qt_v2_box_%s expects one argument", a.whiskers)
+	arity := 1
+	if a.whiskers == "percentile" {
+		arity = 3
+	}
+	if len(v) != arity {
+		return fmt.Errorf("qt_v2_box_%s expects %d arguments", a.whiskers, arity)
+	}
+	if arity == 3 {
+		lo, loOK := sqliteFloat(v[1])
+		hi, hiOK := sqliteFloat(v[2])
+		if !loOK || !hiOK || !(lo >= 0 && lo < 0.25 && hi > 0.75 && hi <= 1) {
+			return fmt.Errorf("qt_v2_box_percentile expects whisker probabilities")
+		}
+		a.percentiles = [2]float64{lo, hi}
 	}
 	a.add(v[0])
 	return nil
@@ -216,11 +232,50 @@ func (a *sqliteBoxSamplesAggregate) Value() (driver.Value, error) {
 		return sqliteDistributionJSON(nil, a.err, nil)
 	}
 	sort.Float64s(a.samples)
-	value, code, box := distributionBox(a.samples, a.whiskers)
+	value, code, box := distributionBox(a.samples, a.whiskers, a.percentiles)
 	if box == nil {
 		return sqliteDistributionJSON(nil, code, nil)
 	}
 	return sqliteDistributionJSON(value, code, box)
+}
+
+// sqliteQuantilesSamplesAggregate is qt_v2_quantiles_samples(sample,
+// probabilities): the quantile payload of a group that fits in memory, or
+// rankedOverflow.
+type sqliteQuantilesSamplesAggregate struct {
+	sqliteSamples
+	probabilities string
+}
+
+func (a *sqliteQuantilesSamplesAggregate) Step(v []driver.Value) error {
+	text, ok := v[1].(string)
+	if len(v) != 2 || !ok || a.probabilities != "" && a.probabilities != text {
+		return fmt.Errorf("qt_v2_quantiles_samples expects a sample and one probability list")
+	}
+	a.probabilities = text
+	a.add(v[0])
+	return nil
+}
+
+func (a *sqliteQuantilesSamplesAggregate) Value() (driver.Value, error) {
+	if a.overflow {
+		return rankedOverflow, nil
+	}
+	if a.err != "" {
+		return sqliteDistributionJSON(nil, a.err, nil)
+	}
+	probabilities, err := sqliteProbabilities(a.probabilities)
+	if err != nil {
+		return nil, err
+	}
+	sort.Float64s(a.samples)
+	value, code, d := quantilesPayload(int64(len(a.samples)), probabilities, func(rank int64) (float64, bool) {
+		return a.samples[rank-1], true
+	})
+	if d == nil {
+		return sqliteDistributionJSON(nil, code, nil)
+	}
+	return sqliteDistributionJSON(value, code, d)
 }
 
 // sqliteExactMeanAggregate is qt_v2_exact_mean(sample): distributionMean of
@@ -261,6 +316,8 @@ func sqliteRankedAggregates() []SQLiteAggregateDescriptor {
 		{Name: "qt_v2_sample_quantiles", Arity: 2, New: func() SQLiteAggregateFunction { return &sqliteSampleQuantilesAggregate{} }},
 		{Name: "qt_v2_box_minmax", Arity: 1, New: func() SQLiteAggregateFunction { return &sqliteBoxSamplesAggregate{whiskers: "minmax"} }},
 		{Name: "qt_v2_box_tukey", Arity: 1, New: func() SQLiteAggregateFunction { return &sqliteBoxSamplesAggregate{whiskers: "tukey"} }},
+		{Name: "qt_v2_box_percentile", Arity: 3, New: func() SQLiteAggregateFunction { return &sqliteBoxSamplesAggregate{whiskers: "percentile"} }},
+		{Name: "qt_v2_quantiles_samples", Arity: 2, New: func() SQLiteAggregateFunction { return &sqliteQuantilesSamplesAggregate{} }},
 		{Name: "qt_v2_exact_mean", Arity: 1, New: func() SQLiteAggregateFunction { return &sqliteExactMeanAggregate{} }},
 	}
 }
@@ -338,7 +395,7 @@ func rankedResult(value float64, code string) driver.Value {
 
 // sqliteRankedFunctions are scalar helpers called once per group.
 func sqliteRankedFunctions() []SQLiteScalarFunction {
-	return []SQLiteScalarFunction{
+	return append(sqliteQuantileFunctions(), []SQLiteScalarFunction{
 		// qt_v2_sample_pick(results, i): term i of qt_v2_sample_quantiles, as
 		// REAL, TEXT error code or NULL; rankedOverflow stays rankedOverflow.
 		{Name: "qt_v2_sample_pick", Arity: 2, Call: func(a []driver.Value) (driver.Value, error) {
@@ -413,13 +470,15 @@ func sqliteRankedFunctions() []SQLiteScalarFunction {
 		}},
 		// qt_v2_box_summary(mode, n, min, max, mean, q1a, q1b, q2a, q2b, q3a,
 		// q3b, low, high, outlier_count, outliers) returns the box payload of
-		// one group, as the former qt_v2_box aggregate did.
+		// one group, as the former qt_v2_box aggregate did. Percentile boxes
+		// pass their [lo, hi] whisker probabilities, as JSON, in place of the
+		// outliers they never list.
 		{Name: "qt_v2_box_summary", Arity: 15, Call: func(a []driver.Value) (driver.Value, error) {
 			if len(a) != 15 {
 				return nil, fmt.Errorf("qt_v2_box_summary expects fifteen arguments")
 			}
 			mode, ok := a[0].(string)
-			if !ok || mode != "minmax" && mode != "tukey" {
+			if !ok || mode != "minmax" && mode != "tukey" && mode != "percentile" {
 				return nil, fmt.Errorf("invalid whisker mode")
 			}
 			n, v, err := rankedArguments("qt_v2_box_summary", a[1:11])
@@ -447,6 +506,23 @@ func sqliteRankedFunctions() []SQLiteScalarFunction {
 						}
 					}
 				}
+				if mode == "percentile" {
+					// qt_v2_quantile results: a REAL whisker or a TEXT error code.
+					for i, target := range []*float64{&parts.low, &parts.high} {
+						if code, ok := a[11+i].(string); ok {
+							parts.whiskerError = cmp.Or(parts.whiskerError, code)
+						} else if x, ok := sqliteFloat(a[11+i]); ok {
+							*target = x
+						} else {
+							return nil, fmt.Errorf("invalid percentile whisker")
+						}
+					}
+					parts.outlierCount, _ = a[13].(int64)
+					text, _ := a[14].(string)
+					if err := json.Unmarshal([]byte(text), &parts.probabilities); err != nil || len(parts.probabilities) != 2 {
+						return nil, fmt.Errorf("invalid whisker probabilities")
+					}
+				}
 			}
 			value, code, box := boxSummary(parts, mode)
 			if box == nil {
@@ -454,7 +530,141 @@ func sqliteRankedFunctions() []SQLiteScalarFunction {
 			}
 			return sqliteDistributionJSON(value, code, box)
 		}},
+	}...)
+}
+
+// quantileRanks lists the distinct one-based ranks the exact-linear
+// percentiles of n samples read, for every probability and the median.
+func quantileRankList(n int64, probabilities []float64) []int64 {
+	seen := map[int64]bool{}
+	ranks := []int64{}
+	for _, p := range append(append([]float64{}, probabilities...), 0.5) {
+		lower := exactLinearIndex(n, p)
+		for _, rank := range []int64{lower + 1, min(lower+1, n-1) + 1} {
+			if !seen[rank] {
+				seen[rank] = true
+				ranks = append(ranks, rank)
+			}
+		}
 	}
+	sort.Slice(ranks, func(i, j int) bool { return ranks[i] < ranks[j] })
+	return ranks
+}
+
+// quantilesPayload is one group's quantile distribution and median value
+// from its samples by one-based rank, or an error code.
+func quantilesPayload(n int64, probabilities []float64, at func(rank int64) (float64, bool)) (*float64, string, *MetricQuantilesDistribution) {
+	if n == 0 {
+		return nil, "", &MetricQuantilesDistribution{Kind: "quantiles"}
+	}
+	percentile := func(p float64) (float64, string) {
+		lower := exactLinearIndex(n, p)
+		a, okA := at(lower + 1)
+		b, okB := at(min(lower+1, n-1) + 1)
+		if !okA || !okB {
+			return 0, "missing_rank"
+		}
+		return exactLinear(n, p, a, b)
+	}
+	values := make([]float64, len(probabilities))
+	for i, p := range probabilities {
+		var code string
+		if values[i], code = percentile(p); code != "" {
+			return nil, code, nil
+		}
+	}
+	median, code := percentile(0.5)
+	if code != "" {
+		return nil, code, nil
+	}
+	return &median, "", &MetricQuantilesDistribution{Kind: "quantiles", Summary: &MetricQuantilesSummary{N: n, Probabilities: append([]float64{}, probabilities...), Values: values}}
+}
+
+func sqliteProbabilities(value driver.Value) ([]float64, error) {
+	text, ok := value.(string)
+	var probabilities []float64
+	if !ok || len(text) > 10000 || json.Unmarshal([]byte(text), &probabilities) != nil || !validQuantileProbabilities(probabilities) {
+		return nil, fmt.Errorf("invalid quantile probabilities")
+	}
+	return probabilities, nil
+}
+
+// sqliteQuantileFunctions read a quantile distribution's ranks per group.
+func sqliteQuantileFunctions() []SQLiteScalarFunction {
+	return []SQLiteScalarFunction{
+		// qt_v2_quantile_ranks(n, probabilities): a JSON array of the ranks.
+		{Name: "qt_v2_quantile_ranks", Arity: 2, Call: func(a []driver.Value) (driver.Value, error) {
+			n, ok := a[0].(int64)
+			probabilities, err := sqliteProbabilities(a[1])
+			if !ok || n < 0 || err != nil {
+				return nil, cmp.Or(err, fmt.Errorf("qt_v2_quantile_ranks expects a sample count"))
+			}
+			ranks := []int64{}
+			if n > 0 {
+				ranks = quantileRankList(n, probabilities)
+			}
+			text, err := json.Marshal(ranks)
+			return string(text), err
+		}},
+		// qt_v2_quantiles_summary(n, probabilities, samples): the payload of
+		// one group from qt_v2_rank_samples' [rank, sample] pairs.
+		{Name: "qt_v2_quantiles_summary", Arity: 3, Call: func(a []driver.Value) (driver.Value, error) {
+			n, ok := a[0].(int64)
+			probabilities, err := sqliteProbabilities(a[1])
+			if !ok || n < 0 || err != nil {
+				return nil, cmp.Or(err, fmt.Errorf("qt_v2_quantiles_summary expects a sample count"))
+			}
+			samples := map[int64]float64{}
+			if text, ok := a[2].(string); ok {
+				var pairs [][2]float64
+				if json.Unmarshal([]byte(text), &pairs) != nil {
+					return nil, fmt.Errorf("invalid ranked samples")
+				}
+				for _, pair := range pairs {
+					samples[int64(pair[0])] = pair[1]
+				}
+			}
+			value, code, distribution := quantilesPayload(n, probabilities, func(rank int64) (float64, bool) {
+				v, ok := samples[rank]
+				return v, ok
+			})
+			if code == "missing_rank" {
+				return nil, fmt.Errorf("a quantile rank has no sample")
+			}
+			if distribution == nil {
+				return sqliteDistributionJSON(nil, code, nil)
+			}
+			return sqliteDistributionJSON(value, code, distribution)
+		}},
+	}
+}
+
+// maxRankSamples bounds qt_v2_rank_samples: two ranks for each of at most
+// 101 probabilities and the median.
+const maxRankSamples = 2 * (maxQuantileProbabilities + 1)
+
+// sqliteRankSamplesAggregate collects [rank, sample] pairs as a JSON array.
+type sqliteRankSamplesAggregate struct{ pairs [][2]float64 }
+
+func (a *sqliteRankSamplesAggregate) Step(v []driver.Value) error {
+	if len(v) != 2 {
+		return fmt.Errorf("qt_v2_rank_samples expects two arguments")
+	}
+	rank, ok := v[0].(int64)
+	value, valueOK := sqliteFloat(v[1])
+	if !ok || !valueOK || len(a.pairs) >= maxRankSamples {
+		return fmt.Errorf("qt_v2_rank_samples expects at most %d ranked numbers", maxRankSamples)
+	}
+	a.pairs = append(a.pairs, [2]float64{float64(rank), value})
+	return nil
+}
+
+func (a *sqliteRankSamplesAggregate) Value() (driver.Value, error) {
+	if a.pairs == nil {
+		a.pairs = [][2]float64{}
+	}
+	text, err := json.Marshal(a.pairs)
+	return string(text), err
 }
 
 // tukeyFences are the 1.5×IQR fences, rounding each operation like the browser.
@@ -513,8 +723,12 @@ type boxParts struct {
 	quartiles      [3][2]float64
 	low, high      float64
 	tukeyEmpty     bool
-	outlierCount   int64
-	outliers       []float64
+	// whiskerError fails percentile whiskers whose interpolation failed;
+	// probabilities are their [lo, hi].
+	whiskerError  string
+	probabilities []float64
+	outlierCount  int64
+	outliers      []float64
 }
 
 // boxSummary validates and assembles a box: the median value and box, or an
@@ -541,7 +755,8 @@ func boxSummary(p boxParts, mode string) (*float64, string, *MetricBoxDistributi
 		mode = "minmax"
 	}
 	s := &MetricBoxSummary{N: p.n, Min: p.min, Q1: q[0], Median: q[1], Q3: q[2], Max: p.max, Mean: mean, Low: p.min, High: p.max, Outliers: []float64{}, Whiskers: mode, Method: DistributionPrecision}
-	if mode == "tukey" {
+	switch mode {
+	case "tukey":
 		if p.tukeyEmpty {
 			return nil, "numeric_range", nil
 		}
@@ -549,6 +764,13 @@ func boxSummary(p boxParts, mode string) (*float64, string, *MetricBoxDistributi
 		if p.outliers != nil {
 			s.Outliers = p.outliers
 		}
+	case "percentile":
+		// Interpolated whiskers; samples beyond them are counted, not listed.
+		if p.whiskerError != "" {
+			return nil, p.whiskerError, nil
+		}
+		s.Low, s.High, s.OutlierCount = p.low, p.high, p.outlierCount
+		s.WhiskerProbabilities = p.probabilities
 	}
 	return &s.Median, "", &MetricBoxDistribution{Kind: "box", Summary: s}
 }

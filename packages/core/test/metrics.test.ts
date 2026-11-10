@@ -13,6 +13,7 @@ import {
   histogramEdges,
   histogramCounts,
   percentile,
+  quantilesSummary,
   type AggregationClause,
   type FieldSchema,
   type QueryState,
@@ -1291,6 +1292,64 @@ describe("PERCENTILE aggregate expressions", () => {
         ),
       }),
     ).not.toThrow();
+  });
+});
+
+describe("percentile whiskers and quantile distributions", () => {
+  const schema: FieldSchema = {
+    name: "q",
+    idField: "id",
+    fields: [
+      { name: "id", label: "ID", type: "number", source: { kind: "backend" } },
+      { name: "n", label: "Number", type: "number", source: { kind: "backend" } },
+      { name: "g", label: "Group", type: "text", source: { kind: "backend" } },
+    ],
+  };
+  const data = [3, 1, 4, 1, 5, 9, 2, 6, null].map((n, id) => ({ id, n, g: "a" }));
+  type Distribution = NonNullable<AggregationClause["distribution"]>;
+  const run = (distribution: Distribution) =>
+    evaluateMetrics(data, query(metric("COUNT()", { groupBy: ["g"], distribution })), schema).metrics[0]!;
+  it("draws whiskers at interpolated percentiles and counts the samples beyond them", () => {
+    const sorted = [1, 1, 2, 3, 4, 5, 6, 9];
+    const summary = boxSummary(sorted, "percentile", [0.1, 0.9])!;
+    expect(summary).toMatchObject({
+      whiskers: "percentile",
+      whiskerProbabilities: [0.1, 0.9],
+      low: percentile(sorted, 0.1),
+      high: percentile(sorted, 0.9),
+      outliers: [],
+      // Only 9 lies beyond: the low whisker equals the repeated minimum.
+      outlierCount: 1,
+    });
+    expect(boxSummary(sorted, "percentile")!.low).toBe(percentile(sorted, 0.1));
+    expect(() => boxSummary(sorted, "percentile", [0.3, 0.9])).toThrow(/Percentile whiskers/);
+    const entry = run({ kind: "box", input: "[n]", whiskers: "percentile", whiskerProbabilities: [0, 1] });
+    expect(entry.error).toBeUndefined();
+    expect(entry.buckets[0]!.distribution).toMatchObject({ kind: "box", summary: { low: 1, high: 9, outlierCount: 0 } });
+  });
+  it("interpolates each quantile; the value is the median", () => {
+    const entry = run({ kind: "quantiles", input: "[n]", probabilities: [0, 0.5, 0.95, 1] });
+    expect(entry.error).toBeUndefined();
+    const sorted = [1, 1, 2, 3, 4, 5, 6, 9];
+    expect(entry.buckets[0]).toMatchObject({
+      value: 3.5,
+      nullCount: 1,
+      distribution: { kind: "quantiles", summary: { n: 8, probabilities: [0, 0.5, 0.95, 1], values: [0, 0.5, 0.95, 1].map((p) => percentile(sorted, p)) } },
+    });
+    expect(quantilesSummary([], [0.5])).toBeNull();
+  });
+  it("validates whisker percentiles and probabilities", () => {
+    const message = (distribution: Distribution) =>
+      validateMetric(metric("COUNT()", { groupBy: ["g"], distribution }), schema)[0]?.message;
+    expect(message({ kind: "box", input: "[n]", whiskers: "percentile", whiskerProbabilities: [0.25, 0.9] })).toMatch(/Percentile whiskers/);
+    // Options of another kind or whisker mode are inactive and ignored.
+    expect(message({ kind: "box", input: "[n]", whiskers: "tukey", whiskerProbabilities: [0.5, 0.5] })).toBeUndefined();
+    expect(message({ kind: "histogram", input: "[n]", whiskers: "tukey" })).toBeUndefined();
+    expect(message({ kind: "quantiles", input: "[n]" })).toMatch(/strictly increasing/);
+    expect(message({ kind: "quantiles", input: "[n]", probabilities: [0.5, 0.2] })).toMatch(/strictly increasing/);
+    expect(message({ kind: "quantiles", input: "[n]", probabilities: Array.from({ length: 102 }, (_, i) => i / 101) })).toMatch(/strictly increasing/);
+    expect(message({ kind: "box", input: "[n]", probabilities: [0.5, 0.2] })).toBeUndefined();
+    expect(message({ kind: "quantiles", input: "[n]", probabilities: Array.from({ length: 101 }, (_, i) => i / 100) })).toBeUndefined();
   });
 });
 

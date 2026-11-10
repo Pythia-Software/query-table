@@ -1550,6 +1550,109 @@
       "packed": "{\"g\":[{\"id\":\"tokens\",\"op\":\"sum\",\"groupBy\":[\"model_family\"],\"field\":\"tokens\",\"label\":\"Tokens\",\"groupLimit\":10,\"minCount\":2,\"display\":{\"kind\":\"bar-horizontal\",\"valueLabel\":\"Tokens\",\"format\":{\"kind\":\"number\",\"decimals\":0},\"list\":{\"showBars\":true}},\"layout\":{\"widthRem\":30,\"heightRem\":12,\"minWidthRem\":1,\"minHeightRem\":1},\"sort\":[{\"key\":\"value\",\"dir\":\"desc\"}],\"where\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"anthropic\"}]},{\"id\":\"daily\",\"op\":\"count\",\"groupBy\":[],\"window\":{\"reduce\":\"mean\",\"periods\":7},\"dateGrouping\":{\"field\":\"time\",\"interval\":\"day\",\"timeZone\":\"UTC\",\"includeEmpty\":true,\"range\":\"query\",\"partialIntervals\":\"exclude\"},\"display\":{\"kind\":\"line\",\"xScale\":{\"mode\":\"linear\"},\"yScale\":{\"mode\":\"log\",\"min\":1}}},{\"id\":\"share\",\"op\":\"sum\",\"groupBy\":[\"provider\",\"model\"],\"field\":\"cost\",\"share\":\"group0\",\"display\":{\"kind\":\"table\",\"pivot\":{\"swap\":true}}},{\"id\":\"weekday\",\"op\":\"count\",\"groupBy\":[\"time\",\"provider\"],\"dateGrouping\":{\"field\":\"time\",\"interval\":\"dayOfWeek\",\"timeZone\":\"Asia/Kolkata\",\"includeEmpty\":true,\"range\":\"query\",\"occurrence\":{\"interval\":\"day\",\"includeEmpty\":true}},\"display\":{\"kind\":\"box\"},\"distribution\":{\"kind\":\"box\",\"input\":\"\",\"whiskers\":\"tukey\"}},{\"id\":\"hourly\",\"op\":\"count\",\"groupBy\":[\"time\"],\"dateGrouping\":{\"field\":\"time\",\"interval\":\"hourOfDay\",\"timeZone\":\"America/New_York\",\"includeEmpty\":true,\"range\":\"observed\"},\"display\":{\"kind\":\"line\"}},{\"id\":\"conversations\",\"op\":\"sum\",\"groupBy\":[\"model_family\"],\"field\":\"cost\",\"minCount\":{\"min\":5,\"distinct\":\"conversation_id\"}},{\"id\":\"calls\",\"op\":\"count\",\"groupBy\":[\"tool_name\"],\"minCount\":{\"min\":10,\"sum\":\"call_count\"}},{\"id\":\"spread\",\"op\":\"count\",\"groupBy\":[],\"expression\":\"COUNT()\",\"scope\":\"shownRows\",\"distribution\":{\"kind\":\"histogram\",\"input\":\"latency\",\"bins\":20}},{\"id\":\"future\",\"op\":\"count\",\"groupBy\":[],\"field\":\"latency\",\"diagnostics\":[\"Unsupported aggregate operation.\"],\"unsupportedOp\":\"median\"}]}"
     },
     {
+      "name": "percentile whiskers and quantile distributions",
+      "state": {
+        "select": [],
+        "where": [],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0,
+        "aggregations": [
+          {
+            "id": "whiskers",
+            "op": "count",
+            "groupBy": [
+              "provider"
+            ],
+            "distribution": {
+              "kind": "box",
+              "input": "latency",
+              "whiskers": "percentile",
+              "whiskerProbabilities": [
+                0.05,
+                0.95
+              ]
+            },
+            "display": {
+              "kind": "box"
+            }
+          },
+          {
+            "id": "curve",
+            "op": "count",
+            "groupBy": [
+              "provider"
+            ],
+            "distribution": {
+              "kind": "quantiles",
+              "input": "latency",
+              "probabilities": [
+                0,
+                0.25,
+                0.5,
+                0.9,
+                1
+              ]
+            },
+            "display": {
+              "kind": "quantiles"
+            }
+          }
+        ]
+      },
+      "token": "2d.nY-xDsIwDET_xXOEClIHOvIF7FWHJo2K1SgJTlKoqvw7boWoQIiB8c5n3_MMPVT1DNhBBbcLhkFTAAHOs1Yu2ciiJ5f8aeIgeHIjdpqgEdBh8KZle4YB7XJAujvkdRAJZYro7MdUAFqfIivTRm3VxM6rtgKvSWkb0ejNP5OTrUSDETVn6mJXlKLYHcsmZ_EkV4nGZeU_7Gtq187wA37LfHuB778zMuBhoVxJxZ5Rm_wA",
+      "normalized": {
+        "select": [],
+        "where": [],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0,
+        "aggregations": [
+          {
+            "id": "whiskers",
+            "op": "count",
+            "groupBy": [
+              "provider"
+            ],
+            "display": {
+              "kind": "box"
+            },
+            "distribution": {
+              "kind": "box",
+              "input": "latency",
+              "whiskers": "percentile",
+              "whiskerProbabilities": [
+                0.05,
+                0.95
+              ]
+            }
+          },
+          {
+            "id": "curve",
+            "op": "count",
+            "groupBy": [
+              "provider"
+            ],
+            "display": {
+              "kind": "quantiles"
+            },
+            "distribution": {
+              "kind": "quantiles",
+              "input": "latency",
+              "probabilities": [
+                0,
+                0.25,
+                0.5,
+                0.9,
+                1
+              ]
+            }
+          }
+        ]
+      },
+      "packed": "{\"g\":[{\"id\":\"whiskers\",\"op\":\"count\",\"groupBy\":[\"provider\"],\"display\":{\"kind\":\"box\"},\"distribution\":{\"kind\":\"box\",\"input\":\"latency\",\"whiskers\":\"percentile\",\"whiskerProbabilities\":[0.05,0.95]}},{\"id\":\"curve\",\"op\":\"count\",\"groupBy\":[\"provider\"],\"display\":{\"kind\":\"quantiles\"},\"distribution\":{\"kind\":\"quantiles\",\"input\":\"latency\",\"probabilities\":[0,0.25,0.5,0.9,1]}}]}"
+    },
+    {
       "name": "every metric option",
       "state": {
         "select": [],

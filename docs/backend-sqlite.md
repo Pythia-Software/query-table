@@ -687,8 +687,15 @@ from browser accumulation. Whiskers default to minmax; Tukey uses 1.5×IQR
 fences and actual observed endpoints (for a ranked group, native counts of the
 samples below and above the fences give the ranks of the endpoints and of the
 retained outliers). Responses retain all outliers up to 20; larger populations retain the
-first 10 and last 10 sorted outliers while reporting the full count. A group
-above `MaxSamplesPerGroup` (see MEDIAN) yields a `resource_limit` metric error
+first 10 and last 10 sorted outliers while reporting the full count. Percentile
+whiskers (`qt_v2_box_percentile` in memory) read two more ranked pairs for a
+ranked group and count the samples beyond them natively. Quantile curves
+(`kind: "quantiles"`) sort a group in memory with `qt_v2_quantiles_samples`;
+a group beyond the in-memory budget asks Go for the distinct ranks its
+probabilities and the median need (`qt_v2_quantile_ranks`), reads those
+samples by rank (`qt_v2_rank_samples`, at most 204 per group) and
+interpolates them once (`qt_v2_quantiles_summary`). A group above
+`MaxSamplesPerGroup` (see MEDIAN) yields a `resource_limit` metric error
 rather than sampling.
 The scalar `value` used for box sorting is the median.
 

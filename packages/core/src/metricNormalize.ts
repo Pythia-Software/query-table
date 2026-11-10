@@ -3,7 +3,7 @@ import type { AggregationClause } from "./query";
 /** How normalizeMetricOptions validates one option: an allowed value list or a
  *  type. "minCount" is a positive integer, or an object read with the
  *  `minCount` table that has `min` and exactly one of `distinct` and `sum`. */
-export type MetricOptionSpec = readonly string[] | "string" | "boolean" | "integer" | "positiveInteger" | "number" | "minCount";
+export type MetricOptionSpec = readonly string[] | "string" | "boolean" | "integer" | "positiveInteger" | "number" | "numberList" | "minCount";
 
 /** The option tables normalizeMetricOptions copies from, in output order. Other
  *  implementations of query links (the Go module) are checked against this
@@ -62,6 +62,7 @@ export const METRIC_OPTION_SPECS = {
       "scatter",
       "box",
       "histogram",
+      "quantiles",
     ],
     valueLabel: "string",
     xLabel: "string",
@@ -108,10 +109,12 @@ export const METRIC_OPTION_SPECS = {
     columnDir: ["asc", "desc"],
   },
   distribution: {
-    kind: ["box", "histogram"],
+    kind: ["box", "histogram", "quantiles"],
     input: "string",
-    whiskers: ["minmax", "tukey"],
+    whiskers: ["minmax", "tukey", "percentile"],
+    whiskerProbabilities: "numberList",
     bins: "integer",
+    probabilities: "numberList",
   },
   layout: {
     widthRem: "integer",
@@ -161,6 +164,11 @@ export function normalizeMetricOptions(
           ? typeof v === "string" && v.length <= 10000
           : spec === "number"
             ? typeof v === "number" && Number.isFinite(v)
+            : spec === "numberList"
+              ? Array.isArray(v) &&
+                v.length >= 1 &&
+                v.length <= 101 &&
+                v.every((x) => typeof x === "number" && Number.isFinite(x))
             : spec === "boolean"
               ? typeof v === "boolean"
               : spec === "integer" || spec === "positiveInteger"

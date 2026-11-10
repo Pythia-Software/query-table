@@ -75,6 +75,14 @@ describe("QueryError", () => {
     const summary = { ...EMPTY_QUERY, grouping: { keys: ["kind"], summaries: [{ id: "p", op: "formula" as const, expression: "PERCENTILE([n], 0.5)" }], representative: null, source: EMPTY_QUERY } };
     expect(() => toQueryRequestV3(summary, schema, capabilities))
       .toThrow(expect.objectContaining({ capability: "metricPercentiles" }));
+    const box = { ...EMPTY_QUERY, aggregations: [{ id: "b", op: "count" as const, groupBy: ["kind"], distribution: { kind: "box" as const, input: "[n]", whiskers: "percentile" as const } }] };
+    expect(() => toQueryRequestV3(box, schema, capabilities))
+      .toThrow(expect.objectContaining({ capability: "boxPercentileWhiskers", metricId: "b" }));
+    expect(toQueryRequestV3(box, schema, { ...capabilities, boxPercentileWhiskers: true }).metrics[0]!.distribution).toMatchObject({ whiskers: "percentile" });
+    const curve = { ...EMPTY_QUERY, aggregations: [{ id: "q", op: "count" as const, groupBy: ["kind"], distribution: { kind: "quantiles" as const, input: "[n]", probabilities: [0.5, 0.9] } }] };
+    expect(() => toQueryRequestV3(curve, schema, capabilities))
+      .toThrow(expect.objectContaining({ capability: "quantileDistributions", metricId: "q" }));
+    expect(toQueryRequestV3(curve, schema, { ...capabilities, quantileDistributions: true }).metrics[0]!.distribution).toMatchObject({ probabilities: [0.5, 0.9] });
     // Names inside text literals and field references are not calls.
     const text = { ...EMPTY_QUERY, aggregations: [{ id: "c", op: "count" as const, groupBy: [], expression: "COUNT(IF([kind] = \"PERCENTILE(\", 1, NULL))" }] };
     expect(toQueryRequestV3(text, schema, capabilities).metrics).toHaveLength(1);

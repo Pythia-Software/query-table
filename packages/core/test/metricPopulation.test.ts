@@ -27,6 +27,7 @@ interface ExpectedBucket {
   count: number;
   value?: unknown;
   box?: Record<string, number>;
+  summary?: Record<string, unknown> | null;
   histogram?: { edges: number[]; counts: number[]; n: number };
 }
 interface Case {
@@ -45,6 +46,12 @@ const fixture = JSON.parse(
 ) as { now: string; schema: FieldSchema<Row>; rows: Row[]; cases: Case[] };
 const now = Date.parse(fixture.now);
 
+/** Only the distribution summary fields the fixture states. */
+function projectSummary(distribution: unknown, want: unknown) {
+  const summary = (distribution as { summary?: Record<string, unknown> | null } | undefined)?.summary;
+  if (!summary || !want || typeof want !== "object") return null;
+  return Object.fromEntries(Object.keys(want).map((key) => [key, summary[key]]));
+}
 /** The cross-engine contract: only the fields the shared fixture states. */
 function projectMetric(entry: AggregationResultEntry, expected: Case["expected"]) {
   if ("error" in expected) return { error: !!entry.error };
@@ -61,6 +68,7 @@ function projectMetric(entry: AggregationResultEntry, expected: Case["expected"]
         count: bucket.count,
         ...(want && "value" in want ? { value: bucket.value } : {}),
         ...(want?.box && box ? { box: { n: box.n, min: box.min, q1: box.q1, median: box.median, q3: box.q3, max: box.max } } : {}),
+        ...(want && "summary" in want ? { summary: projectSummary(bucket.distribution, want.summary) } : {}),
         ...(want?.histogram && histogram ? { histogram: { edges: histogram.edges, counts: histogram.counts, n: histogram.n } } : {}),
       };
     }),

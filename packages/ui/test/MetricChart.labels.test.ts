@@ -2,7 +2,8 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { boxSummary } from "@pythia-software/query-table-core";
+import { boxSummary, quantilesSummary } from "@pythia-software/query-table-core";
+import { distributionProblem } from "../src/metricPresentation";
 import { MetricChart } from "../src/MetricChart";
 import { metricLabelWidth, truncateMetricLabel } from "../src/metricChartHelpers";
 import { createMetricColorResolver, type MetricTheme } from "../src/metricColors";
@@ -104,5 +105,34 @@ describe("multi-key group colours", () => {
     const resolve = createMetricColorResolver(theme).tupleColors(["provider", "model"], pairs.slice(0, 2).map((b) => b.keys));
     expect(new Set(pairs.slice(0, 2).map((b) => resolve(b.keys))).size).toBe(2);
     expect(resolve([null, null])).toContain("--qt-metric-null");
+  });
+});
+
+describe("percentile distributions", () => {
+  it("draws one cumulative curve per group with its values on hover", () => {
+    const curve = (values: number[]) => ({ kind: "quantiles" as const, summary: quantilesSummary(values, [0, 0.5, 0.9, 1])! });
+    const buckets: MetricBucket[] = [
+      { keys: ["a"], value: 2, count: 3, distribution: curve([1, 2, 3]) },
+      { keys: ["b"], value: 20, count: 3, distribution: curve([10, 20, 40]) },
+      { keys: ["c"], value: null, count: 1, distribution: { kind: "quantiles", summary: null } },
+    ];
+    const doc = chart({ id: "m", op: "count", groupBy: ["g"], display: { kind: "quantiles" }, distribution: { kind: "quantiles", input: "[n]", probabilities: [0, 0.5, 0.9, 1] } }, buckets);
+    expect(doc.querySelector(".qt-metric-message")).toBeNull();
+    expect(doc.querySelectorAll("polyline")).toHaveLength(2);
+    expect(doc.querySelectorAll("circle")).toHaveLength(8);
+    expect(doc.body.innerHTML).toContain("P90");
+    expect(distributionProblem(buckets[0]!.distribution)).toBeUndefined();
+    expect(distributionProblem({ kind: "quantiles", summary: { n: 2, probabilities: [0.5, 0.2], values: [1, 2] } })).toBeDefined();
+  });
+  // The label comes from the result, not a (possibly newer) request.
+  it("labels percentile whiskers in the box tooltip", () => {
+    const summary = boxSummary([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "percentile", [0.05, 0.95])!;
+    const doc = chart(
+      { id: "m", op: "count", groupBy: ["g"], display: { kind: "box" }, distribution: { kind: "box", input: "[n]", whiskers: "percentile", whiskerProbabilities: [0.1, 0.9] } },
+      [{ keys: ["a"], value: summary.median, count: 10, distribution: { kind: "box", summary } }],
+    );
+    expect(distributionProblem({ kind: "box", summary })).toBeUndefined();
+    expect(doc.body.innerHTML).toContain("P5–P95 whiskers");
+    expect(doc.body.innerHTML).toContain("samples beyond the whiskers (minimum and maximum marked)");
   });
 });

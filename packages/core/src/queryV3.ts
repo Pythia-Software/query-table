@@ -131,6 +131,11 @@ export function toQueryRequestV3<Row>(query: QueryState, baseSchema: FieldSchema
     for (const issue of validateMetric({ ...clause, ...(dateGrouping ? { dateGrouping } : {}) } as AggregationClause, resultSchema))
       refusals.push({ code: "invalid_metric", message: issue.message, metricId: projected.id });
     refusals.push(...gatedFunctionRefusals([projected.expression, projected.expressionY], resultSchema, capabilities, projected.id));
+    const distribution = (projected as MetricSpecV3).distribution;
+    if (distribution?.kind === "quantiles" && !capabilities.quantileDistributions)
+      refusals.push({ ...unsupported("quantileDistributions", "This server does not support quantile distributions."), metricId: projected.id });
+    if (distribution?.kind === "box" && distribution.whiskers === "percentile" && !capabilities.boxPercentileWhiskers)
+      refusals.push({ ...unsupported("boxPercentileWhiskers", "This server does not support percentile box whiskers."), metricId: projected.id });
     if (dateGrouping && !capabilities.calendarGrouping)
       refusals.push({ ...unsupported("calendarGrouping", "This server does not support calendar grouping."), metricId: projected.id });
     else if (isMetricCycle(dateGrouping?.interval) && !capabilities.calendarCycles)

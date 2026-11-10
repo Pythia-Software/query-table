@@ -72,12 +72,16 @@ export interface WireMetricSort {
   nulls?: "first" | "last";
 }
 
-/** A box or histogram over `input` per group instead of a scalar value. */
+/** A box, histogram or quantile curve over `input` per group instead of a scalar value. */
 export interface MetricDistribution {
-  kind: "box" | "histogram";
+  kind: "box" | "histogram" | "quantiles";
   input: string;
-  whiskers?: "minmax" | "tukey";
+  whiskers?: "minmax" | "tukey" | "percentile";
+  /** Box whiskers at these exact-linear percentiles [lo, hi] with whiskers "percentile": 0 <= lo < 0.25 and 0.75 < hi <= 1. Default [0.1, 0.9]. */
+  whiskerProbabilities?: number[];
   bins?: number;
+  /** Quantiles: 1–101 strictly increasing probabilities in [0, 1]. */
+  probabilities?: number[];
 }
 
 export interface MetricMinCountDistinct {
@@ -173,6 +177,10 @@ export interface QueryCapabilitiesV3 {
   metricMinCountMeasures?: boolean;
   /** Executes PERCENTILE(expr, p) in metric and summary formulas. */
   metricPercentiles?: boolean;
+  /** Executes box whiskers "percentile" with whiskerProbabilities. */
+  boxPercentileWhiskers?: boolean;
+  /** Executes the "quantiles" distribution. */
+  quantileDistributions?: boolean;
   version: 3;
   groupedRows: boolean;
   calendarGrouping: boolean;
@@ -226,7 +234,9 @@ export interface MetricBoxSummary {
   high: number;
   outliers: number[];
   outlierCount: number;
-  whiskers: "minmax" | "tukey";
+  whiskers: "minmax" | "tukey" | "percentile";
+  /** The [lo, hi] probabilities of percentile whiskers; present only when whiskers is "percentile". */
+  whiskerProbabilities?: number[];
   method: "exact-linear";
 }
 
@@ -244,7 +254,20 @@ export interface MetricHistogramDistribution {
   n: number;
 }
 
-export type MetricDistributionResult = MetricBoxDistribution | MetricHistogramDistribution;
+export interface MetricQuantilesSummary {
+  n: number;
+  probabilities: number[];
+  /** The exact-linear percentile at each probability. */
+  values: number[];
+}
+
+export interface MetricQuantilesDistribution {
+  kind: "quantiles";
+  /** null when the group has no numeric samples. */
+  summary: MetricQuantilesSummary | null;
+}
+
+export type MetricDistributionResult = MetricBoxDistribution | MetricHistogramDistribution | MetricQuantilesDistribution;
 
 /** One group of a metric result. `keys` has one entry per groupBy field ([] for a grand total); a null key is the NULL bucket. */
 export interface MetricBucketV3 {
