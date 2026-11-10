@@ -230,6 +230,24 @@ func logGamma(x float64) float64 {
 	return 0.5*math.Log(2*math.Pi) + (x+0.5)*math.Log(t) - t + math.Log(sum)
 }
 
+// logDensityScale is ln(a1^a1 e^-a1 / Γ(a1 + 1)), the scale of the
+// Gamma(a1 + 1) density at its mode. Stirling's series avoids cancelling two
+// terms of size a1 ln a1.
+func logDensityScale(a1 float64) float64 {
+	if a1 < 10 {
+		return a1*(math.Log(a1)-1) - logGamma(a1+1)
+	}
+	r := 1 / a1
+	r2 := r * r
+	return -0.5*math.Log(2*math.Pi*a1) - r*(1.0/12-r2*(1.0/360-r2*(1.0/1260-r2/1680)))
+}
+
+// logDensityShape is -(x - a1) + a1 ln(x / a1), accurate when x is close to a
+// large a1.
+func logDensityShape(x, a1 float64) float64 {
+	return -(x - a1) + a1*math.Log1p((x-a1)/a1)
+}
+
 // 18-point Gauss-Legendre nodes and weights on [0, 1].
 var gaussNodes, gaussWeights = gaussLegendre(18)
 
@@ -263,7 +281,7 @@ func gaussLegendre(n int) ([]float64, []float64) {
 // and continued fraction need O(√a) terms.
 func gammaPQuadrature(a, x float64) float64 {
 	a1 := a - 1
-	lna1, root := math.Log(a1), math.Sqrt(a1)
+	root := math.Sqrt(a1)
 	var xu float64
 	if x > a1 {
 		xu = math.Max(a1+11.5*root, x+6*root)
@@ -273,9 +291,9 @@ func gammaPQuadrature(a, x float64) float64 {
 	sum := 0.0
 	for j := range gaussNodes {
 		t := x + (xu-x)*gaussNodes[j]
-		sum += gaussWeights[j] * math.Exp(-(t-a1)+a1*(math.Log(t)-lna1))
+		sum += gaussWeights[j] * math.Exp(logDensityShape(t, a1))
 	}
-	tail := sum * (xu - x) * math.Exp(a1*(lna1-1)-logGamma(a))
+	tail := sum * (xu - x) * math.Exp(logDensityScale(a1))
 	if tail > 0 {
 		return 1 - tail
 	}
@@ -335,10 +353,9 @@ func gammaQuantile(p, a float64) float64 {
 		panic(fmt.Sprintf("invalid gamma quantile p=%v a=%v", p, a))
 	}
 	a1, gln := a-1, logGamma(a)
-	var x, lna1, afac float64
+	var x, scale float64
 	if a > 1 {
-		lna1 = math.Log(a1)
-		afac = math.Exp(a1*(lna1-1) - gln)
+		scale = math.Exp(logDensityScale(a1))
 		pp := p
 		if p >= 0.5 {
 			pp = 1 - p
@@ -365,7 +382,7 @@ func gammaQuantile(p, a float64) float64 {
 		err := gammaP(a, x) - p
 		var density float64
 		if a > 1 {
-			density = afac * math.Exp(-(x-a1)+a1*(math.Log(x)-lna1))
+			density = scale * math.Exp(logDensityShape(x, a1))
 		} else {
 			density = math.Exp(-x + a1*math.Log(x) - gln)
 		}

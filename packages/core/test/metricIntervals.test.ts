@@ -59,6 +59,9 @@ describe("metric interval numerics", () => {
     // Garwood bounds for 0..2 events: chi-square quantiles / 2.
     expect(gammaQuantile(0.975, 1)).toBeCloseTo(3.6888794541139363, 12);
     expect(gammaQuantile(0.025, 2)).toBeCloseTo(0.24220927854396496, 12);
+    // A trillion events: Stirling's series keeps the bounds exact.
+    expect(gammaQuantile(0.025, 1e12) / 999998040036.9626).toBeCloseTo(1, 12);
+    expect(gammaQuantile(0.975, 1e12 + 1) / 1000001959965.9316).toBeCloseTo(1, 12);
   });
   it("computes Wilson bounds for the Pharos evidence", () => {
     const bounds = groups.map(([, hits, turns]) => metricIntervalBounds({ kind: "proportion" }, hits, turns));

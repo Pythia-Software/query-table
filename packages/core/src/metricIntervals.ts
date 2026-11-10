@@ -244,6 +244,21 @@ export function logGamma(x: number): number {
   const t = x + 7.5;
   return 0.5 * Math.log(2 * Math.PI) + (x + 0.5) * Math.log(t) - t + Math.log(sum);
 }
+/** ln(a1^a1 e^-a1 / Γ(a1 + 1)), the scale of the Gamma(a1 + 1) density at its
+ * mode. Stirling's series avoids cancelling two terms of size a1 ln a1. */
+function logDensityScale(a1: number): number {
+  if (a1 < 10) return a1 * (Math.log(a1) - 1) - logGamma(a1 + 1);
+  const r = 1 / a1,
+    r2 = r * r;
+  return (
+    -0.5 * Math.log(2 * Math.PI * a1) -
+    r * (1 / 12 - r2 * (1 / 360 - r2 * (1 / 1260 - r2 / 1680)))
+  );
+}
+/** -(x - a1) + a1 ln(x / a1), accurate when x is close to a large a1. */
+function logDensityShape(x: number, a1: number): number {
+  return -(x - a1) + a1 * Math.log1p((x - a1) / a1);
+}
 // 18-point Gauss-Legendre nodes and weights on [0, 1].
 const GAUSS = (() => {
   const n = 18,
@@ -276,7 +291,6 @@ const GAUSS = (() => {
  * fraction need O(√a) terms. */
 function gammaPQuadrature(a: number, x: number): number {
   const a1 = a - 1,
-    lna1 = Math.log(a1),
     root = Math.sqrt(a1);
   const xu =
     x > a1
@@ -285,9 +299,9 @@ function gammaPQuadrature(a: number, x: number): number {
   let sum = 0;
   for (let j = 0; j < GAUSS.nodes.length; j++) {
     const t = x + (xu - x) * GAUSS.nodes[j]!;
-    sum += GAUSS.weights[j]! * Math.exp(-(t - a1) + a1 * (Math.log(t) - lna1));
+    sum += GAUSS.weights[j]! * Math.exp(logDensityShape(t, a1));
   }
-  const tail = sum * (xu - x) * Math.exp(a1 * (lna1 - 1) - logGamma(a));
+  const tail = sum * (xu - x) * Math.exp(logDensityScale(a1));
   return tail > 0 ? 1 - tail : -tail;
 }
 /** The regularized lower incomplete gamma function P(a, x). */
@@ -332,10 +346,10 @@ export function gammaQuantile(p: number, a: number): number {
   if (!(a > 0) || !(p > 0 && p < 1)) throw Error("Invalid gamma quantile.");
   const a1 = a - 1,
     gln = logGamma(a);
-  let x: number, lna1 = 0, afac = 0;
+  let x: number,
+    scale = 0;
   if (a > 1) {
-    lna1 = Math.log(a1);
-    afac = Math.exp(a1 * (lna1 - 1) - gln);
+    scale = Math.exp(logDensityScale(a1));
     const pp = p < 0.5 ? p : 1 - p,
       t = Math.sqrt(-2 * Math.log(pp));
     let guess = (2.30753 + t * 0.27061) / (1 + t * (0.99229 + t * 0.04481)) - t;
@@ -354,7 +368,7 @@ export function gammaQuantile(p: number, a: number): number {
     const error = gammaP(a, x) - p;
     const density =
       a > 1
-        ? afac * Math.exp(-(x - a1) + a1 * (Math.log(x) - lna1))
+        ? scale * Math.exp(logDensityShape(x, a1))
         : Math.exp(-x + a1 * Math.log(x) - gln);
     const u = error / density;
     const step = u / (1 - 0.5 * Math.min(1, u * (a1 / x - 1)));

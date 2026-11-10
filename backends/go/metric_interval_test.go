@@ -44,6 +44,8 @@ func TestMetricIntervalNumerics(t *testing.T) {
 	near(gammaQuantile(0.975, 1), 3.6888794541139363, 1e-12)
 	near(gammaQuantile(0.025, 2), 0.24220927854396496, 1e-12)
 	near(gammaQuantile(0.5, 1e6), 999999.6666667, 1e-10)
+	near(gammaQuantile(0.025, 1e12), 999998040036.9626, 1e-12)
+	near(gammaQuantile(0.975, 1e12+1), 1000001959965.9316, 1e-12)
 	lower, upper, ok, domain := metricIntervalBounds(&MetricInterval{Kind: "proportion"}, 6, 15, 1)
 	if !ok || domain {
 		t.Fatal("no interval")
