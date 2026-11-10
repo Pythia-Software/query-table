@@ -125,7 +125,7 @@ export function MetricChart({
   // Hover and accessible text name a bucket's interval even when the display
   // hides whiskers and bands.
   const intervalText = (b: MetricBucket) =>
-    kind === "scatter" ? undefined : metricIntervalText(clause, b, (v) => fmt(v, display.format), locale);
+    kind === "scatter" ? undefined : metricIntervalText(clause, b, (v) => fmt(v, display.format), { locale });
   const detail = (b: MetricBucket) => {
     const interval = intervalText(b);
     return `${metricGroupLabel(b, clause, locale, true)}\n${b.error ?? fmt(b.value, kind === "scatter" ? display.xFormat : display.format)}${kind === "scatter" ? ` / ${b.yError ?? fmt(b.y, display.yFormat)}` : ""}${interval ? `\n${interval}` : ""}\n${b.count.toLocaleString(locale)} rows`;
@@ -651,11 +651,18 @@ export function MetricChart({
         horizontal
           ? <line key={key} x1={v1} x2={v2} y1={c1} y2={c2} />
           : <line key={key} x1={c1} x2={c2} y1={v1} y2={v2} />;
+      const segments = [
+        segment("span", pos(s.low), at, pos(s.high), at),
+        s.lowCap && segment("low", pos(s.low), at - half, pos(s.low), at + half),
+        s.highCap && segment("high", pos(s.high), at - half, pos(s.high), at + half),
+      ];
+      // A halo in the surface colour keeps the whisker legible over dark bars.
       return (
         <g className="qt-metric-interval" stroke={colors.token("text")} strokeWidth={1.5} strokeLinecap="round" pointerEvents="none">
-          {segment("span", pos(s.low), at, pos(s.high), at)}
-          {s.lowCap && segment("low", pos(s.low), at - half, pos(s.low), at + half)}
-          {s.highCap && segment("high", pos(s.high), at - half, pos(s.high), at + half)}
+          <g className="qt-metric-interval-halo" stroke={colors.token("surface")} strokeWidth={3.5} strokeOpacity={0.85}>
+            {segments}
+          </g>
+          {segments}
         </g>
       );
     };

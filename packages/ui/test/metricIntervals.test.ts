@@ -2,16 +2,24 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import type { FieldDef } from "@pythia-software/query-table-core";
+import {
+  METRIC_INTERVAL_DOMAIN,
+  METRIC_INTERVAL_LEVELS,
+  type FieldDef,
+} from "@pythia-software/query-table-core";
 import { MetricChart } from "../src/MetricChart";
 import { MetricCard } from "../src/MetricsPanel";
 import {
   metricBandPath,
-  metricBucketInterval,
   metricIntervalSpan,
-  metricIntervalText,
   metricValueAxisValues,
 } from "../src/metricChartHelpers";
+// The package entry exports the interval reading for host-rendered views.
+import {
+  formatMetricIntervalLevel,
+  metricBucketInterval,
+  metricIntervalText,
+} from "../src/index";
 import { formatMetricOutput } from "../src/metricFormat";
 import type { MetricBucket, RenderingClause } from "../src/metricTypes";
 
@@ -41,7 +49,8 @@ const plot = (doc: Document) => {
 };
 const lines = (doc: Document, selector = ".qt-metric-interval") =>
   [...doc.querySelectorAll(selector)].map((g) =>
-    [...g.querySelectorAll("line")].map((l) =>
+    // Direct children only: the halo beneath repeats the same segments.
+    [...g.querySelectorAll(":scope > line")].map((l) =>
       ["x1", "y1", "x2", "y2"].map((a) => Number(l.getAttribute(a))),
     ),
   );
@@ -82,10 +91,32 @@ describe("interval helpers", () => {
 
   it("names the level and formats bounds like the value", () => {
     const fmt = (v: number) => formatMetricOutput(v, percent, "en-US").text;
-    expect(metricIntervalText(rate, buckets[0]!, fmt, "en-US")).toBe("95% interval 2.2%–9.8%");
-    expect(metricIntervalText({ ...rate, interval: { kind: "rate", level: 0.9 } }, buckets[0]!, fmt, "en-US")).toBe("90% interval 2.2%–9.8%");
-    expect(metricIntervalText({ ...rate, interval: { kind: "rate", level: 0.995 } }, buckets[0]!, fmt, "en-US")).toBe("99.5% interval 2.2%–9.8%");
-    expect(metricIntervalText(rate, buckets[3]!, fmt, "en-US")).toBeUndefined();
+    const en = { locale: "en-US" };
+    expect(metricIntervalText(rate, buckets[0]!, fmt, en)).toBe("95% interval 2.2%–9.8%");
+    expect(metricIntervalText({ ...rate, interval: { kind: "rate", level: 0.9 } }, buckets[0]!, fmt, en)).toBe("90% interval 2.2%–9.8%");
+    expect(metricIntervalText({ ...rate, interval: { kind: "rate", level: 0.995 } }, buckets[0]!, fmt, en)).toBe("99.5% interval 2.2%–9.8%");
+    expect(metricIntervalText(rate, buckets[3]!, fmt, en)).toBeUndefined();
+    // Hosts that localize replace the word.
+    expect(metricIntervalText(rate, buckets[0]!, fmt, { locale: "en-US", label: "CI" })).toBe("95% CI 2.2%–9.8%");
+    expect(metricIntervalText(rate, { keys: ["x"], value: 1.5, count: 2, intervalError: METRIC_INTERVAL_DOMAIN }, fmt, { label: "CI" }))
+      .toBe("No CI: needs whole counts, at most the total");
+  });
+
+  it("formats every accepted level without rounding it to 100%", () => {
+    expect(formatMetricIntervalLevel(0.95, "en-US")).toBe("95%");
+    expect(formatMetricIntervalLevel(0.9999, "en-US")).toBe("99.99%");
+    expect(formatMetricIntervalLevel(0.99999, "en-US")).toBe("99.999%");
+    expect(formatMetricIntervalLevel(METRIC_INTERVAL_LEVELS.min, "en-US")).toBe("50%");
+  });
+
+  it("names why a bucket has no interval", () => {
+    const fmt = String;
+    const outside: MetricBucket = { keys: ["x"], value: 1.5, count: 2, intervalError: METRIC_INTERVAL_DOMAIN };
+    expect(metricIntervalText(rate, outside, fmt)).toBe("No interval: needs whole counts, at most the total");
+    expect(metricIntervalText({ interval: { kind: "rate" } }, outside, fmt)).toBe("No interval: needs a whole, nonnegative count");
+    expect(metricIntervalText(rate, { ...outside, intervalError: "other_code" }, fmt)).toBe("No interval: other_code");
+    // A bucket error already explains itself.
+    expect(metricIntervalText(rate, { ...outside, error: "boom" }, fmt)).toBeUndefined();
   });
 
   it("breaks a band at points without bounds and returns lone points", () => {
@@ -123,8 +154,19 @@ describe("interval whiskers on bars", () => {
       expect(marks[0]!.getAttribute("aria-label")).toBe("31-100\n4.7%\n95% interval 2.2%–9.8%\n128 rows");
       expect(marks[3]!.getAttribute("aria-label")).toBe("none\n10.0%\n3 rows");
       expect(doc.querySelector(".qt-sr-only")!.textContent).toContain("Whiskers show each value's 95% interval.");
+      // A surface-coloured halo beneath repeats each whisker's segments.
+      const halo = doc.querySelector(".qt-metric-interval > .qt-metric-interval-halo")!;
+      expect(halo.querySelectorAll("line")).toHaveLength(3);
+      expect(Number(halo.getAttribute("stroke-width"))).toBeGreaterThan(1.5);
     });
   }
+
+  it("says why a bucket has no interval in its hover text", () => {
+    const doc = chart(rate, [{ keys: ["odd"], value: 1.5, count: 2, intervalError: "interval_domain" }]);
+    expect(doc.querySelectorAll(".qt-metric-interval")).toHaveLength(0);
+    expect(doc.querySelector(".qt-metric-mark")!.getAttribute("aria-label"))
+      .toBe("odd\n150.0%\nNo interval: needs whole counts, at most the total\n2 rows");
+  });
 
   it("hides whiskers but keeps hover text when the display turns them off", () => {
     const doc = chart({ ...rate, display: { ...rate.display!, showIntervals: false } });
@@ -207,6 +249,41 @@ describe("interval hover text in tables and lists", () => {
     expect(table.querySelector(".qt-metric-flat-value[title]")!.getAttribute("title")).toBe("95% interval 2.2%–9.8%");
     const value = card({ ...rate, groupBy: [], display: { kind: "value", format: percent } }, [{ ...buckets[0]!, keys: [] }]);
     expect(value.querySelector(".qt-metric-big-value")!.getAttribute("title")).toBe("95% interval 2.2%–9.8%");
+  });
+
+  it("reads the interval to assistive technology in lists and tables", () => {
+    const list = card({ ...rate, display: { kind: "list", format: percent } });
+    expect(list.querySelector(".qt-metric-bar-value")!.textContent).toBe("4.7%, 95% interval 2.2%–9.8%");
+    expect(list.querySelector(".qt-metric-bar-value .qt-sr-only")!.textContent).toBe(", 95% interval 2.2%–9.8%");
+    const pivot = card({ ...rate, groupBy: ["bucket", "b"], display: { kind: "table", format: percent } },
+      [{ ...buckets[0]!, keys: ["x", "y"] }]);
+    expect(pivot.querySelector(".qt-metric-pivot-cell")!.textContent).toBe("4.7%, 95% interval 2.2%–9.8%");
+  });
+
+  it("shows a single value's interval beside its rows unless intervals are hidden", () => {
+    const clause = { ...rate, groupBy: [], display: { kind: "value" as const, format: percent } };
+    const shown = card(clause, [{ ...buckets[0]!, keys: [] }]);
+    expect(shown.querySelector(".qt-metric-big-sub")!.textContent).toBe("95% interval 2.2%–9.8% · 128 rows");
+    expect(shown.querySelector(".qt-metric-big-value .qt-sr-only")).toBeNull();
+    const hidden = card({ ...clause, display: { ...clause.display, showIntervals: false } }, [{ ...buckets[0]!, keys: [] }]);
+    expect(hidden.querySelector(".qt-metric-big-sub")!.textContent).toBe("128 rows");
+    expect(hidden.querySelector(".qt-metric-big-value .qt-sr-only")!.textContent).toBe(", 95% interval 2.2%–9.8%");
+  });
+
+  it("lists a ratio's returned Other remainder with its interval", () => {
+    const other: MetricBucket = { keys: [], value: 0.2, count: 40, lower: 0.1, upper: 0.35 };
+    const render = (clause: RenderingClause, b = buckets.slice(0, 3)) =>
+      parse(renderToStaticMarkup(createElement(MetricCard, {
+        clause, fields, locale: "en-US", result: { buckets: b, other, groupCount: 5 },
+      })));
+    const list = { ...rate, groupLimit: 3, display: { kind: "list" as const, format: percent, showOther: true } };
+    const rows = [...render(list).querySelectorAll(".qt-metric-bar-row")];
+    expect(rows).toHaveLength(4);
+    expect(rows[3]!.querySelector(".qt-metric-bar-label")!.textContent).toBe("Other (combined remainder)");
+    expect(rows[3]!.querySelector(".qt-metric-bar-value")!.getAttribute("title")).toBe("95% interval 10.0%–35.0%");
+    // Not without showOther, nor when the display drops more groups itself.
+    expect(render({ ...list, display: { ...list.display, showOther: false } }).querySelectorAll(".qt-metric-bar-row")).toHaveLength(3);
+    expect(render({ ...list, display: { ...list.display, maxGroups: 2 } }).querySelectorAll(".qt-metric-bar-row")).toHaveLength(2);
   });
 
   it("formats bounds with the card's decimals when the metric has no format", () => {

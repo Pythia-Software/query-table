@@ -177,6 +177,8 @@
 .qt-metric .qt-metric-big-sub {
   font-size: 11px;
   color: var(--qt-metric-muted, var(--qt-muted));
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .qt-metric .qt-metric-pivot,
 .qt-metric .qt-metric-flat {

@@ -7,7 +7,10 @@ import type {
 } from "./metricTypes";
 import { metricTimestamp, formatMetricOutput } from "./metricFormat";
 import { metricTupleKey } from "./metricColors";
-import { DEFAULT_METRIC_INTERVAL_LEVEL } from "@pythia-software/query-table-core";
+import {
+  DEFAULT_METRIC_INTERVAL_LEVEL,
+  METRIC_INTERVAL_DOMAIN,
+} from "@pythia-software/query-table-core";
 /** A cyclic slot's label: "09:00" for an hour of the day and the locale's
  * weekday ("Mon", or "Monday" in detail) for an ISO day of the week. */
 export function metricCycleLabel(
@@ -239,6 +242,15 @@ export function metricDisplayBuckets(clause: RenderingClause, buckets: MetricBuc
   const head = buckets.slice(0, limit), tail = buckets.slice(limit);
   const all = other ? [...buckets, other] : buckets;
   const list = clause.display?.kind === "list" || ((clause.display?.kind ?? "auto") === "auto" && clause.groupBy.length === 1);
+  // A ratio's remainder cannot be pooled from displayed values, but engines
+  // pool its parts into `other` (with an interval when one is set). Show that
+  // row as returned when the display drops no further groups.
+  if (list && clause.display?.showOther && other && !tail.length && !partial
+    && !additiveMetric(clause) && !other.error && finiteMetricNumber(other.value)) {
+    const row: MetricBucket = { ...other, keys: ["Other (combined remainder)"] };
+    otherBuckets.add(row);
+    return [...head, row];
+  }
   if (!list || !clause.display?.showOther || !additiveMetric(clause) || partial
     || (groupCount !== undefined && groupCount > buckets.length && !other)
     || all.some(b => b.error || !finiteMetricNumber(b.value) || b.value < 0)) return head;
@@ -321,9 +333,9 @@ export function metricScale(
 }
 
 /** A bucket's confidence interval (`clause.interval`), when it has finite,
- * ordered bounds and no error. */
+ * ordered bounds and no error. The supported reading of `lower`/`upper`. */
 export function metricBucketInterval(
-  b: MetricBucket,
+  b: Pick<MetricBucket, "lower" | "upper" | "error">,
 ): { lower: number; upper: number } | undefined {
   const { lower, upper } = b;
   return !b.error && finiteMetricNumber(lower) && finiteMetricNumber(upper) && lower <= upper
@@ -380,26 +392,52 @@ export function metricIntervalSpan(
   };
 }
 
+export interface MetricIntervalTextOptions {
+  locale?: string | undefined;
+  /** The word for the interval, for hosts that localize (default "interval"). */
+  label?: string | undefined;
+}
+
 /** Hover and accessible text for a bucket's interval, e.g.
  * "95% interval 2.2%–9.8%": the clause's level as a percent and the bounds in
- * the metric's own value format. Undefined when the bucket has no bounds. */
+ * `format`, which should be the metric's own value format. A bucket whose
+ * parts are outside the interval kind's domain (`intervalError`) reads
+ * "No interval: …". Undefined when the bucket has neither. */
 export function metricIntervalText(
-  clause: RenderingClause,
+  clause: Pick<RenderingClause, "interval">,
   b: MetricBucket,
   format: (value: number) => string,
-  locale?: string,
+  options: MetricIntervalTextOptions = {},
 ): string | undefined {
+  const label = options.label ?? "interval";
   const interval = metricBucketInterval(b);
-  if (!interval) return undefined;
-  return `${metricIntervalLevelText(clause, locale)} interval ${format(interval.lower)}–${format(interval.upper)}`;
+  if (interval)
+    return `${metricIntervalLevelText(clause, options.locale)} ${label} ${format(interval.lower)}–${format(interval.upper)}`;
+  if (!b.intervalError || b.error) return undefined;
+  const reason =
+    b.intervalError !== METRIC_INTERVAL_DOMAIN
+      ? b.intervalError
+      : clause.interval?.kind === "rate"
+        ? "needs a whole, nonnegative count"
+        : "needs whole counts, at most the total";
+  return `No ${label}: ${reason}`;
+}
+
+/** An interval level as a percent: "95%", "99.99%". Up to four decimals, so
+ * no accepted level rounds to 100%. */
+export function formatMetricIntervalLevel(level: number, locale?: string): string {
+  return new Intl.NumberFormat(locale, {
+    style: "percent",
+    maximumFractionDigits: 4,
+  }).format(level);
 }
 
 /** A clause's interval level as a percent, "95%" by default. */
-export function metricIntervalLevelText(clause: RenderingClause, locale?: string): string {
-  return new Intl.NumberFormat(locale, {
-    style: "percent",
-    maximumFractionDigits: 2,
-  }).format(clause.interval?.level ?? DEFAULT_METRIC_INTERVAL_LEVEL);
+export function metricIntervalLevelText(
+  clause: Pick<RenderingClause, "interval">,
+  locale?: string,
+): string {
+  return formatMetricIntervalLevel(clause.interval?.level ?? DEFAULT_METRIC_INTERVAL_LEVEL, locale);
 }
 
 /** A line series' interval band as one SVG path: an area over each run of

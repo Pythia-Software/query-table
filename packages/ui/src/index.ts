@@ -47,6 +47,12 @@ export type { MetricCardProps } from "./MetricsPanel";
 export { createMetricColorResolver } from "./metricColors";
 export type { MetricTheme, MetricClassNames } from "./metricColors";
 export { formatMetricOutput, validateMetricFormat, metricTimestamp } from "./metricFormat";
+export {
+  metricBucketInterval,
+  metricIntervalText,
+  formatMetricIntervalLevel,
+} from "./metricChartHelpers";
+export type { MetricIntervalTextOptions } from "./metricChartHelpers";
 
 export { RequestActivity } from "./RequestActivity";
 export type { RequestActivityProps } from "./RequestActivity";

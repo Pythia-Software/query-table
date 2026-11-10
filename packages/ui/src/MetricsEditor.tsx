@@ -13,6 +13,8 @@ import {
 } from "react";
 import {
   DEFAULT_METRIC_INTERVAL_LEVEL,
+  METRIC_INTERVAL_LEVELS,
+  validateMetricInterval,
   MAX_AGGREGATIONS,
   MAX_METRIC_WINDOW_PERIODS,
   METRIC_FUNCTIONS,
@@ -56,6 +58,7 @@ import { useMetricWorkbench } from "./useMetricWorkbench";
 import { useMetricResize } from "./useMetricResize";
 import { Icon, type IconName } from "./Icon";
 import { MetricWhereEditor } from "./MetricWhereEditor";
+import { formatMetricIntervalLevel } from "./metricChartHelpers";
 import { FORMULA_FUNCTIONS } from "@pythia-software/query-table-core";
 
 const FormulaEditor = lazy(() => import("./FormulaEditor"));
@@ -244,6 +247,30 @@ export function MetricsEditor<Row>({
     return problems;
   }, [drafts, computationDiagnostics]);
   const diagnosticKey = JSON.stringify([...computationDiagnostics]);
+  // Why each interval kind cannot apply to the selected metric (undefined when
+  // it can), from the same validation that reports a chosen interval's issue.
+  // Undefined while the metric itself does not compile: then nothing is known.
+  const intervalReasons = useMemo(() => {
+    if (!selected) return undefined;
+    const check = (c: AggregationClause) => {
+      if (compileRef.current) compileRef.current(c);
+      else validateMetricInterval(c, compileMetric(metricExpression(c), fields));
+    };
+    const { interval: _interval, ...base } = selected;
+    try {
+      check(base);
+    } catch {
+      return undefined;
+    }
+    const reasons: Partial<Record<MetricInterval["kind"], string>> = {};
+    for (const kind of ["proportion", "rate"] as const)
+      try {
+        check({ ...base, interval: { kind } });
+      } catch (e) {
+        reasons[kind] = e instanceof Error ? e.message : String(e);
+      }
+    return reasons;
+  }, [selected, fields, api.aggregations.compile]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1996,12 +2023,16 @@ export function MetricsEditor<Row>({
                       }
                     />
                   )}
-                {(!["box", "histogram", "scatter"].includes(chosen.kind) ||
-                  selected.interval) && (
+                {/* Shown when an interval is set, or some kind could apply. */}
+                {(selected.interval ||
+                  (!["box", "histogram", "scatter"].includes(chosen.kind) &&
+                    (!intervalReasons || !intervalReasons.proportion || !intervalReasons.rate))) && (
                   <MetricIntervalSettings
                     interval={selected.interval}
+                    reasons={intervalReasons ?? {}}
                     display={chosen}
-                    settings={settingsState("Interval")}
+                    locale={locale}
+                    settings={settingsState("Confidence interval")}
                     onChange={(interval) =>
                       patch(selected.id, {
                         interval,
@@ -3302,25 +3333,35 @@ function MetricSeriesSettings({
     </Settings>
   );
 }
-const INTERVAL_LEVELS = [0.9, 0.95, 0.99];
-const levelText = (level: number) =>
-  `${Number((level * 100).toPrecision(6))}%`;
+/** Offered levels, within the range engines accept. */
+const INTERVAL_LEVELS = [0.9, 0.95, 0.99].filter(
+  (l) => l >= METRIC_INTERVAL_LEVELS.min && l <= METRIC_INTERVAL_LEVELS.max,
+);
+const INTERVAL_KINDS: Array<[MetricInterval["kind"], string]> = [
+  ["proportion", "Proportion (Wilson)"],
+  ["rate", "Rate (Poisson)"],
+];
 /** A display without the interval toggle, which defaults to drawn. */
 function withoutIntervalDisplay(display: MetricDisplay): MetricDisplay {
   const { showIntervals: _showIntervals, ...rest } = display;
   return rest;
 }
 /** A confidence interval on each value: Wilson for a proportion, exact
- * Poisson for a rate. validateMetric reports metrics that cannot have one. */
+ * Poisson for a rate. A kind that cannot apply to the metric is disabled,
+ * with validation's reason as its title; a chosen one stays selectable. */
 function MetricIntervalSettings({
   interval,
+  reasons,
   display,
+  locale,
   settings,
   onChange,
   onDisplayChange,
 }: {
   interval: MetricInterval | undefined;
+  reasons: Partial<Record<MetricInterval["kind"], string>>;
   display: MetricDisplay;
+  locale: string | undefined;
   settings: { open: boolean; onOpenChange: (open: boolean) => void };
   onChange: (interval: MetricInterval | undefined) => void;
   onDisplayChange: (show: boolean) => void;
@@ -3333,20 +3374,21 @@ function MetricIntervalSettings({
     ? INTERVAL_LEVELS
     : [...INTERVAL_LEVELS, level].sort((a, b) => a - b);
   const drawn = ["bar-vertical", "bar-horizontal", "line"].includes(display.kind);
+  const problem = interval && reasons[interval.kind];
   return (
     <Settings
-      title="Interval"
+      title="Confidence interval"
       {...settings}
       summary={
         interval
-          ? `${levelText(level)} ${interval.kind === "rate" ? "rate (Poisson)" : "proportion (Wilson)"}`
+          ? `${formatMetricIntervalLevel(level, locale)} ${interval.kind === "rate" ? "rate (Poisson)" : "proportion (Wilson)"}`
           : "None"
       }
     >
       <label>
-        Interval
+        Confidence interval
         <select
-          aria-label="Interval"
+          aria-label="Confidence interval"
           value={interval?.kind ?? "none"}
           onChange={(e) =>
             onChange(
@@ -3357,22 +3399,30 @@ function MetricIntervalSettings({
           }
         >
           <option value="none">None</option>
-          <option value="proportion">Proportion (Wilson)</option>
-          <option value="rate">Rate (Poisson)</option>
+          {INTERVAL_KINDS.map(([kind, label]) => (
+            <option
+              key={kind}
+              value={kind}
+              disabled={!!reasons[kind] && interval?.kind !== kind}
+              title={reasons[kind]}
+            >
+              {label}
+            </option>
+          ))}
         </select>
       </label>
       {interval && (
         <>
           <label>
-            Confidence
+            Confidence level
             <select
-              aria-label="Interval level"
+              aria-label="Confidence level"
               value={String(level)}
               onChange={(e) => onChange(withLevel(interval.kind, Number(e.target.value)))}
             >
               {levels.map((l) => (
                 <option key={l} value={String(l)}>
-                  {levelText(l)}
+                  {formatMetricIntervalLevel(l, locale)}
                 </option>
               ))}
             </select>
@@ -3391,14 +3441,12 @@ function MetricIntervalSettings({
         </>
       )}
       <p className="qt-metric-help">
-        {interval?.kind === "rate"
-          ? "An exact Poisson interval for a count per exposure, such as SUM([events]) / COUNT([id])."
-          : interval
-            ? "A Wilson interval for a share of units, such as COUNT_DISTINCT(IF(...)) / COUNT_DISTINCT(...)."
-            : "Bounds each value with a confidence interval."}{" "}
-        The metric must be one SUM, COUNT or COUNT_DISTINCT divided by
-        another, or a share.
-        {interval ? " Hover a value for its interval." : ""}
+        {problem ??
+          (interval?.kind === "rate"
+            ? "An exact Poisson interval for a count per exposure. Hover a value for its interval."
+            : interval
+              ? "A Wilson interval for a share of units. Hover a value for its interval."
+              : "Bounds each value: a Wilson interval for a proportion, an exact Poisson interval for a rate. Unavailable kinds give their reason on hover.")}
       </p>
     </Settings>
   );

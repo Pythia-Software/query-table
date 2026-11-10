@@ -1220,36 +1220,36 @@ it("turns on an interval with a level, hides its whiskers, and drops it with a d
   const toggle = () => host.querySelector<HTMLInputElement>('[aria-label="Show interval whiskers and bands"]');
   try {
     await act(async () => root.render(createElement(MetricsEditor, { api, fields, onClose: vi.fn() })));
-    expect(host.querySelector('[aria-label="Interval level"]')).toBeNull();
+    expect(host.querySelector('[aria-label="Confidence level"]')).toBeNull();
     expect(toggle()).toBeNull();
-    choose("Interval", "proportion");
+    choose("Confidence interval", "proportion");
     expect(host.textContent).toContain("95% proportion (Wilson)");
     expect(toggle()!.checked).toBe(true);
-    choose("Interval level", "0.99");
+    choose("Confidence level", "0.99");
     act(() => toggle()!.click());
     expect(saved()).toMatchObject({
       interval: { kind: "proportion", level: 0.99 },
       display: { kind: "bar-vertical", showIntervals: false },
     });
     // The default level stays implicit; switching kind keeps the level.
-    choose("Interval", "rate");
+    choose("Confidence interval", "rate");
     expect(host.textContent).toContain("99% rate (Poisson)");
-    choose("Interval level", "0.95");
+    choose("Confidence level", "0.95");
     expect(saved().interval).toEqual({ kind: "rate" });
     // Turning the interval off drops its display setting too.
-    choose("Interval", "none");
+    choose("Confidence interval", "none");
     let next = saved();
     expect(next.interval).toBeUndefined();
     expect(next.display).toEqual({ kind: "bar-vertical" });
     // Tables keep the interval for hover text but have no whiskers to toggle.
-    choose("Interval", "proportion");
+    choose("Confidence interval", "proportion");
     act(() => toggle()!.click());
     choose("Metric display", "table");
     expect(toggle()).toBeNull();
-    expect(host.querySelector('[aria-label="Interval level"]')).not.toBeNull();
+    expect(host.querySelector('[aria-label="Confidence level"]')).not.toBeNull();
     // A distribution has no interval: it leaves with its display setting.
     choose("Metric display", "box");
-    expect(host.querySelector('[aria-label="Interval"]')).toBeNull();
+    expect(host.querySelector('[aria-label="Confidence interval"]')).toBeNull();
     next = saved();
     expect(next.interval).toBeUndefined();
     expect(next.display).toEqual({ kind: "box" });
@@ -1274,6 +1274,34 @@ it("reports an interval on a metric that is not a ratio", async () => {
     await act(async () => root.render(createElement(MetricsEditor, { api, fields, onClose: vi.fn() })));
     expect(host.textContent).toContain("Review 1 issue");
     expect(host.querySelector(`[title^="An interval needs a ratio of two aggregates"]`)).not.toBeNull();
-    expect(host.querySelector<HTMLSelectElement>('[aria-label="Interval"]')!.value).toBe("rate");
+    expect(host.querySelector<HTMLSelectElement>('[aria-label="Confidence interval"]')!.value).toBe("rate");
+    expect(host.textContent).toContain("An interval needs a ratio of two aggregates");
+  } finally { act(() => root.unmount()); host.remove(); }
+});
+
+it("offers only the interval kinds validation accepts for the metric", async () => {
+  const host = document.createElement("div"); document.body.append(host);
+  let root = createRoot(host);
+  const fields: FieldDef<unknown>[] = [
+    { name: "bucket", label: "Bucket", type: "text", source: { kind: "backend" }, aggregate: { groupable: true } },
+    { name: "hits", label: "Hits", type: "number", source: { kind: "backend" } },
+  ];
+  const kinds = async (clause: AggregationClause) => {
+    const api = { aggregations: { clauses: [clause] }, setQuery: vi.fn(), rows: [], total: 0, query: { where: [] } } as unknown as QueryTableApi<unknown>;
+    act(() => root.unmount());
+    root = createRoot(host);
+    await act(async () => root.render(createElement(MetricsEditor, { api, fields, onClose: vi.fn() })));
+    const select = host.querySelector<HTMLSelectElement>('[aria-label="Confidence interval"]');
+    return select && Object.fromEntries([...select.options].map((o) => [o.value, o.disabled ? o.title : "ok"]));
+  };
+  try {
+    // A ratio can have either kind.
+    expect(await kinds({ id: "r", op: "count", expression: "SUM([hits])/NULLIF(COUNT(),0)", groupBy: ["bucket"] }))
+      .toEqual({ none: "ok", proportion: "ok", rate: "ok" });
+    // A share is a proportion of its total.
+    expect(await kinds({ id: "s", op: "count", groupBy: ["bucket"], share: "total" }))
+      .toEqual({ none: "ok", proportion: "ok", rate: "A share is a proportion of its total: use a proportion interval." });
+    // A plain count can have neither, so the section is hidden.
+    expect(await kinds({ id: "c", op: "count", groupBy: ["bucket"] })).toBeNull();
   } finally { act(() => root.unmount()); host.remove(); }
 });
