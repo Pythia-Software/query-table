@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.0.4 — 2026-11-10
+
+### Changed
+
 - SQLite metrics and grouped formula summaries can combine text/enum `COUNT`
   and `COUNT_DISTINCT` with guarded native integer reductions. This avoids the
   per-field typed staging chain for eligible stored sources, including
