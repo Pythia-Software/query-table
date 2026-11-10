@@ -8,6 +8,7 @@ import {
 } from "react";
 import {
   createMetricColorResolver,
+  metricKeyColored,
   metricTupleKey,
   typedMetricKey,
   type MetricClassNames,
@@ -107,7 +108,13 @@ export function MetricChart({
     ).text;
   // One mark per group takes the whole key's colour. A scatter's first key
   // names its series; the remaining keys identify points within it.
-  const tupleShade = colors.tupleColors(clause.groupBy, buckets.map((b) => b.keys), display.colorBy);
+  // A key's colour may be shared by several groups, so only marks with their
+  // own text label (bars, boxes) colour by key; pie slices and histogram
+  // series, told apart by colour alone, keep whole-key colours.
+  const tupleShade = colors.tupleColors(clause.groupBy, buckets.map((b) => b.keys), {
+    colorBy: display.colorBy,
+    keyColors: metricKeyColored(kind),
+  });
   const shade = (b: MetricBucket) =>
     !b.keys.length
       ? colors.token("accent")

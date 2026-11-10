@@ -823,15 +823,19 @@ it("clears a stored label limit to unlimited and preserves a numeric draft until
   } finally { act(() => root.unmount()); host.remove(); }
 });
 
-for (const [name, groupBy, shown] of [["one key", ["repository"], false], ["two keys", ["repository", "family"], true]] as const) {
-  it(`offers a colouring key for a chart grouped by ${name}: ${shown}`, async () => {
+for (const [name, kind, groupBy, shown] of [
+  ["bars by one key", "bar-vertical", ["repository"], false],
+  ["bars by two keys", "bar-vertical", ["repository", "family"], true],
+  ["a pie by two keys", "pie", ["repository", "family"], false],
+] as const) {
+  it(`offers a colouring key for ${name}: ${shown}`, async () => {
     const host = document.createElement("div"); document.body.append(host);
     const root = createRoot(host), setQuery = vi.fn();
     const fields: FieldDef<unknown>[] = [
       { name: "repository", type: "text", label: "Repository", source: { kind: "backend" } },
       { name: "family", type: "text", label: "Kind", source: { kind: "backend" } },
     ];
-    const clause: AggregationClause = { id: "m", op: "count", groupBy: [...groupBy], display: { kind: "bar-vertical" } };
+    const clause: AggregationClause = { id: "m", op: "count", groupBy: [...groupBy], display: { kind } };
     const api = { aggregations: { clauses: [clause] }, setQuery, rows: [], total: 0, query: { where: [] } } as unknown as QueryTableApi<unknown>;
     try {
       await act(async () => root.render(createElement(MetricsEditor, { api, fields, onClose: vi.fn() })));

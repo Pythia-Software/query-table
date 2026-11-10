@@ -971,3 +971,12 @@ it("says what one point of a windowed or share metric is", () => {
   expect(render({ ...clause, share: "total" })).toContain("Share of the total.");
   expect(render(clause)).not.toContain("trailing");
 });
+
+it("colours list swatches and bars by a saved colorBy key", () => {
+  const listClause: RenderingClause = { id: "m", op: "count", groupBy: ["repository", "family"], display: { kind: "list", colorBy: "family", list: { useGroupColors: true } } };
+  const pairs: MetricBucket[] = [{ keys: ["a", "Missing tool"], value: 3, count: 3 }, { keys: ["b", "Missing tool"], value: 2, count: 2 }, { keys: ["b", "Flaky"], value: 1, count: 1 }];
+  const host = document.createElement("div");
+  host.innerHTML = renderToStaticMarkup(createElement(MetricCard, { clause: listClause, buckets: pairs, fields, renderers: defaultRenderers, theme: { dimensions: { family: { layer: "x", overrides: [{ value: "Missing tool", color: "orange" }, { value: "Flaky", color: "teal" }] } } } }));
+  const swatches = [...host.querySelectorAll<HTMLElement>(".qt-metric-bar-label .qt-metric-swatch")].map((s) => s.style.background);
+  expect(swatches).toEqual(["orange", "orange", "teal"]);
+});

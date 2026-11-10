@@ -49,7 +49,7 @@ import { MenuButton, MenuItem, MenuSeparator } from "./Menu";
 import { ReorderList } from "./ReorderList";
 import { MetricCard, cardDecimals } from "./MetricsPanel";
 import { formatMetricOutput, validateMetricFormat } from "./metricFormat";
-import type { MetricTheme } from "./metricColors";
+import { metricKeyColored, type MetricTheme } from "./metricColors";
 import { useMetricWorkbench } from "./useMetricWorkbench";
 import { useMetricResize } from "./useMetricResize";
 import { Icon, type IconName } from "./Icon";
@@ -2352,8 +2352,7 @@ export function MetricsEditor<Row>({
                       </select>
                     </label>
                   )}
-                  {selected.groupBy.length > 1 &&
-                    !["value", "table", "line", "scatter"].includes(chosen.kind) && (
+                  {selected.groupBy.length > 1 && metricKeyColored(chosen.kind) && (
                     <label>
                       Colour by
                       <select

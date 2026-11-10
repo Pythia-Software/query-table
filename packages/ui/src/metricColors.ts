@@ -24,12 +24,13 @@ export interface MetricTheme {
   >;
   tokens?: Partial<Record<MetricToken, string>>;
   /**
-   * Group keys whose value colours a mark drawn for a whole multi-key group
-   * (bar, pie, box, list), in priority order. A group takes
-   * `color(field, value)` of the first listed field among its keys, so that
-   * field's overrides, domain and layer apply and, for example, one kind of
-   * event keeps its colour on every repository's bar. Groupings without a
-   * listed field colour each whole key, as when this is omitted. A clause's
+   * Group keys whose value colours a labelled mark drawn for a whole
+   * multi-key group (bar, box, list), in priority order, matched by field
+   * name or dimension `identity`. A group takes the first listed key's
+   * override, domain slot or NULL colour, so, for example, one kind of event
+   * keeps its colour on every repository's bar; other values take the next
+   * colour no other value of that key uses in the chart. Groupings without a
+   * listed field, and pie and ring slices, colour each whole key. A clause's
    * own `display.colorBy` takes precedence over this host default.
    */
   colorBy?: string | ReadonlyArray<string>;
@@ -92,27 +93,53 @@ export function createMetricColorResolver(theme: MetricTheme = {}) {
       )?.colors ?? palette
     );
   };
-  const color = (field: string, value: MetricValue): string => {
-    const dim = theme.dimensions?.[field],
-      identity = dim?.identity ?? field;
-    const override = dim?.overrides
+  const override = (field: string, value: MetricValue) =>
+    theme.dimensions?.[field]?.overrides
       ?.slice(0, 4096)
       .find(
         (o) =>
           typedMetricKey(o.value) === typedMetricKey(value) &&
           validColor(o.color),
-      );
-    if (override) return override.color;
+      )?.color;
+  const domainIndex = (field: string, value: MetricValue) =>
+    theme.dimensions?.[field]?.domain
+      ?.slice(0, 4096)
+      .findIndex((v) => typedMetricKey(v) === typedMetricKey(value)) ?? -1;
+  const identityOf = (field: string) => theme.dimensions?.[field]?.identity ?? field;
+  const color = (field: string, value: MetricValue): string => {
+    const pinned = override(field, value);
+    if (pinned) return pinned;
     if (value === null) return token("null");
-    const colors = layerColors(field, identity);
-    const index =
-      dim?.domain
-        ?.slice(0, 4096)
-        .findIndex((v) => typedMetricKey(v) === typedMetricKey(value)) ?? -1;
+    const identity = identityOf(field),
+      colors = layerColors(field, identity),
+      index = domainIndex(field, value);
     return colors[
       (index >= 0 ? index : hash(`${identity}\0${typedMetricKey(value)}`)) %
         colors.length
     ]!;
+  };
+  /**
+   * Stable colours for distinct values drawn together. Pinned values (an
+   * override, a domain entry or NULL) resolve as `color`; values hashed into
+   * the palette take the next colour no other value in `values` uses while the
+   * palette has room, sorted by typed key so the result ignores arrival order.
+   */
+  const spread = <T,>(
+    entries: ReadonlyArray<readonly [key: string, value: T]>,
+    colors: readonly string[],
+    preferred: (value: T) => number,
+    reserved: Iterable<number> = [],
+  ) => {
+    const assigned = new Map<string, number>();
+    let used = new Set<number>(reserved);
+    for (const [key, value] of [...new Map(entries)].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+      if (used.size >= colors.length) used = new Set();
+      let index = preferred(value);
+      while (used.has(index)) index = (index + 1) % colors.length;
+      used.add(index);
+      assigned.set(key, index);
+    }
+    return assigned;
   };
   const colorBy = (
     typeof theme.colorBy === "string"
@@ -121,10 +148,13 @@ export function createMetricColorResolver(theme: MetricTheme = {}) {
         ? theme.colorBy.slice(0, 64)
         : []
   ).filter((field): field is string => typeof field === "string" && field.length > 0);
+  /** The first candidate key among `fields`, by name or shared dimension identity. */
   const colorByIndex = (fields: readonly string[], preferred?: string) => {
-    for (const field of preferred === undefined ? colorBy : [preferred, ...colorBy]) {
-      const index = fields.indexOf(field);
-      if (index >= 0) return index;
+    for (const name of preferred === undefined ? colorBy : [preferred, ...colorBy]) {
+      const exact = fields.indexOf(name);
+      if (exact >= 0) return exact;
+      const shared = fields.findIndex((field) => identityOf(field) === name);
+      if (shared >= 0) return shared;
     }
     return -1;
   };
@@ -133,53 +163,68 @@ export function createMetricColorResolver(theme: MetricTheme = {}) {
     color,
     /**
      * Colours whole group keys drawn together. Single values resolve as
-     * `color`. With a colouring field among `fields` (the clause's
-     * `colorField` first, then the theme's `colorBy`), a tuple takes that
-     * field's `color`; a `colorField` outside `fields` is ignored. Otherwise
-     * a tuple's colour depends only on the theme and its values, except that
-     * tuples sharing a chart take the next free colour rather than repeat one
-     * while the palette has room.
+     * `color`. With `keyColors` (the default) and a colouring key among
+     * `fields` (the clause's `colorBy` first, then the theme's; a name not
+     * among `fields` is ignored), a tuple takes that key's colour: its
+     * override, domain slot or NULL colour, and otherwise the next colour no
+     * other value of that key in this chart uses. Without one, a tuple's
+     * colour depends only on the theme and its values, except that tuples
+     * sharing a chart take the next free colour rather than repeat one while
+     * the palette has room.
      */
     tupleColors(
       fields: readonly string[],
       tuples: ReadonlyArray<readonly MetricValue[]>,
-      colorField?: string,
+      options: { colorBy?: string | undefined; keyColors?: boolean | undefined } = {},
     ): (values: readonly MetricValue[]) => string {
-      const by = fields.length > 1 ? colorByIndex(fields, colorField) : -1;
-      if (by >= 0)
+      const single = (values: readonly MetricValue[]) => color(fields[0] ?? "", values[0] ?? null);
+      const by = fields.length > 1 && options.keyColors !== false ? colorByIndex(fields, options.colorBy) : -1;
+      if (by >= 0) {
+        const field = fields[by]!,
+          identity = identityOf(field),
+          colors = layerColors(field, identity);
+        const present = tuples.filter((values) => values.length > 1).map((values) => values[by] ?? null);
+        const hashed = present.filter((v) => v !== null && !override(field, v) && domainIndex(field, v) < 0);
+        const assigned = spread(
+          hashed.map((v) => [typedMetricKey(v), v] as const),
+          colors,
+          (v) => hash(`${identity}\0${typedMetricKey(v)}`) % colors.length,
+          present.filter((v) => v !== null && !override(field, v) && domainIndex(field, v) >= 0)
+            .map((v) => domainIndex(field, v) % colors.length),
+        );
         return (values) => {
-          if (values.length <= 1) return color(fields[0] ?? "", values[0] ?? null);
-          if (values.every((v) => v === null)) return token("null");
-          return color(fields[by]!, values[by] ?? null);
+          if (values.length <= 1) return single(values);
+          const value = values[by] ?? null,
+            index = assigned.get(typedMetricKey(value));
+          return index === undefined ? color(field, value) : colors[index]!;
         };
-      const identity = fields
-        .map((field) => theme.dimensions?.[field]?.identity ?? field)
-        .join("\0");
+      }
+      const identity = fields.map(identityOf).join("\0");
       const colors = layerColors(fields[0] ?? "", identity);
       const preferred = (values: readonly MetricValue[]) =>
         hash(`${identity}\0${metricTupleKey(values)}`) % colors.length;
-      const assigned = new Map<string, number>();
-      let used = new Set<number>();
-      const keyed = new Map(
+      const assigned = spread(
         tuples
           .filter((values) => values.length > 1 && values.some((v) => v !== null))
           .map((values) => [metricTupleKey(values), values] as const),
+        colors,
+        preferred,
       );
-      for (const key of [...keyed.keys()].sort()) {
-        if (used.size === colors.length) used = new Set();
-        let index = preferred(keyed.get(key)!);
-        while (used.has(index)) index = (index + 1) % colors.length;
-        used.add(index);
-        assigned.set(key, index);
-      }
       return (values) => {
-        if (values.length <= 1) return color(fields[0] ?? "", values[0] ?? null);
+        if (values.length <= 1) return single(values);
         if (values.every((v) => v === null)) return token("null");
         return colors[assigned.get(metricTupleKey(values)) ?? preferred(values)]!;
       };
     },
   };
 }
+/**
+ * Chart kinds whose marks each carry their own text label, so several groups
+ * may share a key's colour: lists, bars and boxes. Pie and ring slices and
+ * histogram series are told apart by colour alone and keep whole-key colours.
+ */
+export const metricKeyColored = (kind: string): boolean =>
+  ["list", "bar-horizontal", "bar-vertical", "box"].includes(kind);
 export function metricThemeStyle(theme?: MetricTheme): CSSProperties {
   const resolver = createMetricColorResolver(theme);
   const style: Record<string, string> = {};

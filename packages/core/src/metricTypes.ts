@@ -103,9 +103,10 @@ export interface MetricDisplay {
   yFormat?: MetricValueFormat;
   legendPosition?: "left" | "right" | "top" | "bottom" | "none";
   /**
-   * The group key whose value colours marks grouped by several keys (bars,
-   * pie slices, boxes, list swatches), taking precedence over the theme's
-   * `colorBy`. A key the clause no longer groups by is ignored.
+   * The group key whose value colours labelled marks grouped by several keys
+   * (bars, boxes, list swatches), taking precedence over the theme's
+   * `colorBy`. Pie and ring slices keep whole-group colours. A key the clause
+   * no longer groups by is ignored.
    */
   colorBy?: string;
   /** Maximum displayed groups; does not change the computed result or ordering. */

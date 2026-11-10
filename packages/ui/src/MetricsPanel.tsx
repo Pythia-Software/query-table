@@ -502,7 +502,7 @@ function BarList({
 }) {
   const colors = createMetricColorResolver(theme),
     options = clause.display?.list,
-    shade = colors.tupleColors(clause.groupBy, buckets.filter((b) => !isMetricOtherBucket(b)).map((b) => b.keys), clause.display?.colorBy);
+    shade = colors.tupleColors(clause.groupBy, buckets.filter((b) => !isMetricOtherBucket(b)).map((b) => b.keys), { colorBy: clause.display?.colorBy });
   const below = options?.barPosition === "below", showValues = options?.showValues !== false;
   const requestedLines = options?.maxLabelLines;
   const maxLabelLines = below && typeof requestedLines === "number"

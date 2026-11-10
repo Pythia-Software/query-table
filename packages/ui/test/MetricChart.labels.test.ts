@@ -164,7 +164,7 @@ describe("multi-key group colours", () => {
 
     it("lets a chart's saved colorBy win over the theme's", () => {
       const resolver = createMetricColorResolver(theme);
-      const byRepository = resolver.tupleColors(fields, events.map((b) => b.keys), "repository_name");
+      const byRepository = resolver.tupleColors(fields, events.map((b) => b.keys), { colorBy: "repository_name" });
       expect(events.map((b) => byRepository(b.keys))).toEqual(events.map((b) => resolver.color("repository_name", b.keys[0] ?? null)));
       // Without a theme default, the chart's key alone decides.
       const { colorBy: _, ...uncoloured } = theme;
@@ -178,16 +178,59 @@ describe("multi-key group colours", () => {
       const keys = events.map((b) => b.keys);
       // Falls back to the theme's key...
       const themed = createMetricColorResolver(theme);
-      expect(keys.map(themed.tupleColors(fields, keys, "status"))).toEqual(keys.map(themed.tupleColors(fields, keys)));
+      expect(keys.map(themed.tupleColors(fields, keys, { colorBy: "status" }))).toEqual(keys.map(themed.tupleColors(fields, keys)));
       // ...or, without one, to whole-tuple colours, rendered without error.
       const { colorBy: _, ...uncoloured } = theme;
       const plain = createMetricColorResolver(uncoloured);
-      expect(keys.map(plain.tupleColors(fields, keys, "status"))).toEqual(keys.map(plain.tupleColors(fields, keys)));
+      expect(keys.map(plain.tupleColors(fields, keys, { colorBy: "status" }))).toEqual(keys.map(plain.tupleColors(fields, keys)));
       const stale = chart({ id: "m", op: "count", groupBy: fields, display: { kind: "bar-vertical", colorBy: "status" } }, events, uncoloured);
       const fresh = chart({ id: "m", op: "count", groupBy: fields, display: { kind: "bar-vertical" } }, events, uncoloured);
       expect(colours(stale)).toEqual(colours(fresh));
       expect(stale.querySelector(".qt-metric-error, [role='alert']")).toBeNull();
     });
+
+    it("gives unpinned values of the key distinct colours within a chart", () => {
+      const palette: MetricTheme = { layers: [{ id: "six", colors: ["c0", "c1", "c2", "c3", "c4", "c5"] }], dimensions: { family: { layer: "six", domain: ["Pinned"] } }, colorBy: "family" };
+      const families = ["Missing tool", "Flaky failure", "Out-of-date docs", "Permission denied", "Pinned"];
+      const tuples = families.flatMap((family) => [["a", family], ["b", family]]);
+      const resolve = createMetricColorResolver(palette).tupleColors(fields, tuples);
+      const byFamily = families.map((family) => resolve(["a", family]));
+      expect(new Set(byFamily).size).toBe(families.length);
+      // Every repository shares its family's colour; domain slots stay reserved.
+      expect(families.map((family) => resolve(["b", family]))).toEqual(byFamily);
+      expect(resolve(["a", "Pinned"])).toBe("c0");
+      // Arrival order does not matter.
+      const reversed = createMetricColorResolver(palette).tupleColors(fields, [...tuples].reverse());
+      expect(families.map((family) => reversed(["a", family]))).toEqual(byFamily);
+    });
+
+    it("honours the key's NULL override even when every key is NULL", () => {
+      const nulls: MetricTheme = { ...theme, dimensions: { family: { layer: "kinds", overrides: [{ value: null, color: "pink" }] } } };
+      const resolve = createMetricColorResolver(nulls).tupleColors(fields, [["a", null], [null, null]]);
+      expect(resolve(["a", null])).toBe("pink");
+      expect(resolve([null, null])).toBe("pink");
+    });
+
+    it("matches a key through its dimension identity", () => {
+      const shared: MetricTheme = { ...theme, dimensions: { ...theme.dimensions, event_family: { layer: "kinds", identity: "family", overrides: [{ value: "Missing tool", color: "orange" }] } } };
+      const resolve = createMetricColorResolver(shared).tupleColors(["repository_name", "event_family"], [["a", "Missing tool"], ["b", "Missing tool"]]);
+      expect(resolve(["a", "Missing tool"])).toBe("orange");
+      expect(resolve(["b", "Missing tool"])).toBe("orange");
+    });
+
+    // Histograms accept a single grouping key, so only pies and rings draw
+    // several keys with colour as their only identifier.
+    for (const kind of ["pie", "donut"] as const) {
+      it(`keeps whole-key colours in ${kind} charts, told apart by colour alone`, () => {
+        const buckets = events.slice(2, 5);
+        const { colorBy: _, ...uncoloured } = theme;
+        const keyed = colours(chart({ id: "m", op: "count", groupBy: fields, display: { kind, colorBy: "family" } }, buckets, theme));
+        const whole = colours(chart({ id: "m", op: "count", groupBy: fields, display: { kind } }, buckets, uncoloured));
+        expect(keyed).toEqual(whole);
+        expect(keyed.length).toBeGreaterThan(0);
+        expect(keyed).not.toContain("var(--event-missing)");
+      });
+    }
   });
 
   it("keeps themed tuples apart while the palette has room", () => {
