@@ -634,8 +634,10 @@ even populations. A group above `MaxSamplesPerGroup` (default
 `SQLiteMaxMedianSamples`, 100,000; at most 1,000,000) yields a `resource_limit`
 metric error, never an approximation.
 
-Wrong storage types, invalid/noncanonical datetime bindings, text over 100,000
-UTF-8 bytes, unsafe integers, range errors, and division by zero remain explicit.
+Wrong storage types, invalid/noncanonical datetime bindings, formula text over
+100,000 UTF-8 bytes (except a field read directly by a counting function; see
+[Text and array functions](backend-metrics.md#text-and-array-functions)),
+unsafe integers, range errors, and division by zero remain explicit.
 Selected invalid base fields fail row decoding. Datetime filters retain the
 storage conventions above; formulas normalize datetime values to UTC. Arrays cannot
 enter formulas. Box plots and histograms are described below.

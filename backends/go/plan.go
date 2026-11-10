@@ -477,9 +477,10 @@ func (b *planBuilder) field(name string) (ValueSQL, error) {
 }
 
 // sourceValue is a plain source field for SELECT, ORDER BY and representative
-// ROW values. The 100,000-byte text bound applies to formula inputs only, so
-// projected and sorted text keeps its full value. Storage and encoding checks
-// still apply; formula operands continue to use the bounded field.
+// ROW values, and the direct text operand of the counting functions
+// (unboundedTextOperands). The 100,000-byte text bound applies to other
+// formula inputs only, so this text keeps its full value. Storage and
+// encoding checks still apply; other formula operands use the bounded field.
 func (b *planBuilder) sourceValue(name string) (ValueSQL, error) {
 	raw, ok := b.raw[name]
 	if !ok || raw.Type != "text" || strings.HasPrefix(name, "@computed/") {
@@ -564,15 +565,39 @@ func (b *planBuilder) row(n *exprNode) (result ValueSQL, err error) {
 		return b.regex(n)
 	}
 	op, operands := splitCountNode(n)
+	unbounded := unboundedTextOperands(op, len(operands))
 	args := []ValueSQL{}
 	for _, a := range operands {
-		v, e := b.row(a)
+		var v ValueSQL
+		var e error
+		if unbounded && a.op == "field" {
+			v, e = b.sourceValue(a.text)
+		} else {
+			v, e = b.row(a)
+		}
 		if e != nil {
 			return v, e
 		}
 		args = append(args, v)
 	}
 	return b.operation(op, args)
+}
+
+// unboundedTextOperands reports a function that reads its text once and
+// returns a number or a boolean without copying it: LENGTH, WORD_COUNT and
+// the case-sensitive (two-argument) CONTAINS, STARTS_WITH and ENDS_WITH. A
+// source text field passed to one directly is read without the formula text
+// bound (maxFormulaTextBytes), as in the browser runtime; storage and
+// encoding checks still apply. Any other argument expression, such as
+// TRIM([text]), keeps the bound on its own inputs.
+func unboundedTextOperands(op string, arity int) bool {
+	switch op {
+	case "LENGTH", "WORD_COUNT":
+		return true
+	case "CONTAINS", "STARTS_WITH", "ENDS_WITH":
+		return arity == 2
+	}
+	return false
 }
 
 // splitCountOp is the compiler-internal operation for ARRAY_LENGTH(SPLIT(text,

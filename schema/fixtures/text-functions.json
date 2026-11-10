@@ -1193,5 +1193,285 @@
         "messages": 1
       }
     ]
+  },
+  "largeText": {
+    "description": "Messages above the 100,000-character formula text bound. A text field read directly by LENGTH, WORD_COUNT or two-argument CONTAINS/STARTS_WITH/ENDS_WITH is not bounded, so these count in every engine; other uses keep the bound and fail per group. A row text {\"repeat\": s, \"times\": n} is s repeated n times. expectedDuckDB replaces expected for DuckDB, which has no formula text bound.",
+    "rows": [
+      {
+        "id": "big",
+        "conversation_id": "c1",
+        "role": "tool",
+        "text": {
+          "repeat": "word\n",
+          "times": 30000
+        }
+      },
+      {
+        "id": "reply",
+        "conversation_id": "c1",
+        "role": "user",
+        "text": "short reply"
+      },
+      {
+        "id": "cjk",
+        "conversation_id": "c2",
+        "role": "user",
+        "text": {
+          "repeat": "\u65e5\u672c\u8a9e ",
+          "times": 30000
+        }
+      },
+      {
+        "id": "ok",
+        "conversation_id": "c2",
+        "role": "assistant",
+        "text": "ok"
+      }
+    ],
+    "cases": [
+      {
+        "name": "LENGTH counts a message above the text bound",
+        "metric": {
+          "id": "m",
+          "op": "count",
+          "expression": "SUM(LENGTH([text]))",
+          "groupBy": [
+            "conversation_id"
+          ],
+          "sort": [
+            {
+              "key": "group0",
+              "dir": "asc",
+              "nulls": "last"
+            }
+          ]
+        },
+        "expected": {
+          "groupCount": 2,
+          "buckets": [
+            { "keys": ["c1"], "count": 2, "value": 150011 },
+            { "keys": ["c2"], "count": 2, "value": 120002 }
+          ]
+        }
+      },
+      {
+        "name": "WORD_COUNT counts a message above the text bound",
+        "metric": {
+          "id": "m",
+          "op": "count",
+          "expression": "SUM(WORD_COUNT([text]))",
+          "groupBy": [
+            "conversation_id"
+          ],
+          "sort": [
+            {
+              "key": "group0",
+              "dir": "asc",
+              "nulls": "last"
+            }
+          ]
+        },
+        "expected": {
+          "groupCount": 2,
+          "buckets": [
+            { "keys": ["c1"], "count": 2, "value": 30002 },
+            { "keys": ["c2"], "count": 2, "value": 30001 }
+          ]
+        }
+      },
+      {
+        "name": "scatter of characters against words with large messages",
+        "metric": {
+          "id": "m",
+          "op": "count",
+          "expression": "SUM(LENGTH([text]))",
+          "groupBy": [
+            "conversation_id"
+          ],
+          "sort": [
+            {
+              "key": "group0",
+              "dir": "asc",
+              "nulls": "last"
+            }
+          ],
+          "expressionY": "SUM(WORD_COUNT([text]))",
+          "display": {
+            "kind": "scatter"
+          }
+        },
+        "expected": {
+          "groupCount": 2,
+          "buckets": [
+            { "keys": ["c1"], "count": 2, "value": 150011, "y": 30002 },
+            { "keys": ["c2"], "count": 2, "value": 120002, "y": 30001 }
+          ]
+        }
+      },
+      {
+        "name": "case-sensitive CONTAINS, STARTS_WITH and ENDS_WITH read large text",
+        "metric": {
+          "id": "m",
+          "op": "count",
+          "expression": "SUM(IF(CONTAINS([text], \"word\\nword\"), 1, 0) + IF(STARTS_WITH([text], \"\u65e5\"), 10, 0) + IF(ENDS_WITH([text], \"reply\"), 100, 0))",
+          "groupBy": [
+            "id"
+          ],
+          "sort": [
+            {
+              "key": "group0",
+              "dir": "asc",
+              "nulls": "last"
+            }
+          ]
+        },
+        "expected": {
+          "groupCount": 4,
+          "buckets": [
+            { "keys": ["big"], "count": 1, "value": 1 },
+            { "keys": ["cjk"], "count": 1, "value": 10 },
+            { "keys": ["ok"], "count": 1, "value": 0 },
+            { "keys": ["reply"], "count": 1, "value": 100 }
+          ]
+        }
+      },
+      {
+        "name": "a text-producing argument keeps the bound",
+        "metric": {
+          "id": "m",
+          "op": "count",
+          "expression": "SUM(LENGTH(TRIM([text])))",
+          "groupBy": [
+            "conversation_id"
+          ],
+          "sort": [
+            {
+              "key": "group0",
+              "dir": "asc",
+              "nulls": "last"
+            }
+          ]
+        },
+        "expected": {
+          "groupCount": 2,
+          "buckets": [
+            {
+              "keys": [
+                "c1"
+              ],
+              "count": 2,
+              "value": null,
+              "error": true
+            },
+            {
+              "keys": [
+                "c2"
+              ],
+              "count": 2,
+              "value": null,
+              "error": true
+            }
+          ]
+        },
+        "expectedDuckDB": {
+          "groupCount": 2,
+          "buckets": [
+            { "keys": ["c1"], "count": 2, "value": 150010 },
+            { "keys": ["c2"], "count": 2, "value": 120001 }
+          ]
+        }
+      },
+      {
+        "name": "ignoreCase matching keeps the bound",
+        "metric": {
+          "id": "m",
+          "op": "count",
+          "expression": "SUM(IF(CONTAINS([text], \"WORD\", TRUE), 1, 0))",
+          "groupBy": [
+            "conversation_id"
+          ],
+          "sort": [
+            {
+              "key": "group0",
+              "dir": "asc",
+              "nulls": "last"
+            }
+          ]
+        },
+        "expected": {
+          "groupCount": 2,
+          "buckets": [
+            {
+              "keys": [
+                "c1"
+              ],
+              "count": 2,
+              "value": null,
+              "error": true
+            },
+            {
+              "keys": [
+                "c2"
+              ],
+              "count": 2,
+              "value": null,
+              "error": true
+            }
+          ]
+        },
+        "expectedDuckDB": {
+          "groupCount": 2,
+          "buckets": [
+            { "keys": ["c1"], "count": 2, "value": 1 },
+            { "keys": ["c2"], "count": 2, "value": 0 }
+          ]
+        }
+      }
+    ],
+    "groupedSummaries": {
+      "where": [],
+      "grouping": {
+        "keys": [
+          "conversation_id"
+        ],
+        "summaries": [
+          {
+            "id": "characters",
+            "op": "formula",
+            "expression": "SUM(LENGTH([text]))"
+          },
+          {
+            "id": "word_count",
+            "op": "formula",
+            "expression": "SUM(WORD_COUNT([text]))"
+          },
+          {
+            "id": "messages",
+            "op": "count"
+          }
+        ]
+      },
+      "orderBy": [
+        {
+          "field": "conversation_id",
+          "dir": "asc",
+          "nulls": "last"
+        }
+      ],
+      "expected": [
+        {
+          "conversation_id": "c1",
+          "characters": 150011,
+          "word_count": 30002,
+          "messages": 2
+        },
+        {
+          "conversation_id": "c2",
+          "characters": 120002,
+          "word_count": 30001,
+          "messages": 2
+        }
+      ]
+    }
   }
 }
