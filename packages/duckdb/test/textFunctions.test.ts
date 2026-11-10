@@ -28,6 +28,7 @@ const fixture = JSON.parse(
   rows: Row[];
   cases: Case[];
   groupedSummaries: { where: QueryState["where"]; grouping: { keys: string[]; summaries: { id: string; op: string; expression?: string }[] }; orderBy: QueryState["orderBy"]; expected: Row[] };
+  largeText: { rows: Row[]; cases: (Case & { expectedDuckDB?: Case["expected"] })[]; groupedSummaries: { where: QueryState["where"]; grouping: { keys: string[]; summaries: { id: string; op: string; expression?: string }[] }; orderBy: QueryState["orderBy"]; expected: Row[] } };
 };
 const now = Date.parse(fixture.now);
 const BOM = String.fromCharCode(0xfeff);
@@ -99,6 +100,41 @@ describe("shared text function fixture (DuckDB)", () => {
       grouping: { ...g.grouping, representative: null, source: { ...EMPTY_QUERY, where: g.where } },
     } as QueryState);
     const result = await backend.execute(toQueryRequestV3(query, fixture.schema, backend.capabilities, undefined, { now }));
+    expect(result.rows.map((row) => Object.fromEntries(Object.keys(g.expected[0]!).map((key) => [key, row[key]])))).toEqual(g.expected);
+  });
+});
+
+describe("shared text function fixture: text above the formula bound (DuckDB)", () => {
+  let large: DuckDBBackend;
+  beforeAll(async () => {
+    await native.run("CREATE TABLE large_messages (id VARCHAR, conversation_id VARCHAR, role VARCHAR, text VARCHAR)");
+    for (const row of fixture.largeText.rows) {
+      const text = row.text as { repeat: string; times: number } | string;
+      await native.run("INSERT INTO large_messages VALUES ($1,$2,$3,$4)", [
+        row.id, row.conversation_id, row.role, typeof text === "object" ? text.repeat.repeat(text.times) : text,
+      ] as never[]);
+    }
+    large = new DuckDBBackend({ relation: "large_messages", schema: fixture.schema, connection: { query: async (sql, args) => run(sql, args) } });
+  });
+  for (const c of fixture.largeText.cases)
+    it(c.name, async () => {
+      const query = normalizeQueryState({ ...EMPTY_QUERY, limit: 100, aggregations: [c.metric] });
+      const entry = (await large.execute(toQueryRequestV3(query, fixture.schema, large.capabilities, undefined, { now, rows: false }))).metrics[0]!;
+      expect(entry.error).toBeUndefined();
+      // DuckDB has no formula text bound, so text-producing uses count too.
+      const expected = c.expectedDuckDB ?? c.expected;
+      expect(project(entry, expected)).toEqual(expected);
+    });
+  it("grouped formula summaries", async () => {
+    const g = fixture.largeText.groupedSummaries;
+    const query = normalizeQueryState({
+      ...EMPTY_QUERY,
+      select: [...g.grouping.keys, ...g.grouping.summaries.map((s) => s.id)].map((field) => ({ field })),
+      orderBy: g.orderBy,
+      limit: 100,
+      grouping: { ...g.grouping, representative: null, source: { ...EMPTY_QUERY, where: g.where } },
+    } as QueryState);
+    const result = await large.execute(toQueryRequestV3(query, fixture.schema, large.capabilities, undefined, { now }));
     expect(result.rows.map((row) => Object.fromEntries(Object.keys(g.expected[0]!).map((key) => [key, row[key]])))).toEqual(g.expected);
   });
 });

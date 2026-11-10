@@ -200,7 +200,8 @@
   is accepted only inside `ARRAY_LENGTH`; other text functions are refused
   (`unsupported_function`). A formula text operand above 100,000 UTF-8 bytes
   remains `text_range` on the server (the browser bounds 100,000 UTF-16 code
-  units), and makes that row's whole group an error.
+  units), and makes that row's whole group an error, except as described
+  under Changed.
 - New formula function `WORD_COUNT(text)` in the browser, DuckDB, Go SQLite
   and Go PostgreSQL: the number of runs of characters between white space (the
   set `TRIM` removes), with no element bound. Unlike
@@ -225,6 +226,21 @@
 - Shared fixtures `schema/fixtures/text-functions.json` (local engine, DuckDB,
   Go SQLite, Go PostgreSQL) and `schema/fixtures/formula-regex.json` (browser
   regex results against the server translation). See
+  [Text and array functions](docs/backend-metrics.md#text-and-array-functions).
+
+### Changed
+
+- Counting functions read text in full. A source text field passed directly to
+  `LENGTH`, `WORD_COUNT` or two-argument `CONTAINS`, `STARTS_WITH` or
+  `ENDS_WITH` is no longer subject to the 100,000-character formula text input
+  bound, in the browser runtime, DuckDB (which had no bound), Go SQLite and Go
+  PostgreSQL. `SUM(LENGTH([text]))` and `SUM(WORD_COUNT([text]))` therefore
+  count very long messages instead of failing their whole group. These
+  functions return a number or a boolean without copying the text. The bound
+  still applies to every other use of a text field, including a text-producing
+  argument (`LENGTH(TRIM([text]))` fails with `text_range` as before),
+  `ignoreCase` matching and `ARRAY_LENGTH(SPLIT(...))`. Storage-type, UTF-8 and
+  host staging limits are unchanged. See
   [Text and array functions](docs/backend-metrics.md#text-and-array-functions).
 
 ### Fixed

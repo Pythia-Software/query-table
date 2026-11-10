@@ -33,6 +33,83 @@ type textFunctionFixture struct {
 		OrderBy  []qt.OrderBy          `json:"orderBy"`
 		Expected []map[string]any      `json:"expected"`
 	} `json:"groupedSummaries"`
+	LargeText struct {
+		Rows             []map[string]any   `json:"rows"`
+		Cases            []textFunctionCase `json:"cases"`
+		GroupedSummaries struct {
+			Grouping qt.GroupingDefinition `json:"grouping"`
+			OrderBy  []qt.OrderBy          `json:"orderBy"`
+			Expected []map[string]any      `json:"expected"`
+		} `json:"groupedSummaries"`
+	} `json:"largeText"`
+}
+
+// Messages above the formula text bound: counting functions read a direct
+// text field in full; text-producing arguments and ignoreCase keep the bound.
+func TestPostgresTextFunctionLargeText(t *testing.T) {
+	db, d, f, now := setupTextFunctions(t)
+	if _, err := db.Exec("DELETE FROM messages"); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range f.LargeText.Rows {
+		text := r["text"]
+		if spec, ok := text.(map[string]any); ok {
+			text = strings.Repeat(spec["repeat"].(string), int(spec["times"].(float64)))
+		}
+		if _, err := db.Exec("INSERT INTO messages VALUES($1,$2,$3,$4)", r["id"], r["conversation_id"], r["role"], text); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, c := range f.LargeText.Cases {
+		t.Run(c.Name, func(t *testing.T) {
+			q := qt.QueryRequestV3{Version: 3, Profile: qt.ServerExpressionProfile, Now: now.UnixMilli(), Metrics: []qt.AggSpec{c.Metric},
+				Source: qt.WireQuery{Limit: 100}, Result: qt.WireQuery{Limit: 100}}
+			out, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out.Metrics[0].Error != "" {
+				t.Fatalf("%s: %s", out.Metrics[0].ErrorCode, out.Metrics[0].Error)
+			}
+			if got := projectTextMetric(t, out.Metrics[0], c.Expected); !reflect.DeepEqual(got, c.Expected) {
+				t.Fatalf("got  %v\nwant %v", got, c.Expected)
+			}
+			for _, b := range out.Metrics[0].Buckets {
+				if b.Error != "" && b.Error != "text_range" {
+					t.Fatalf("bucket error %q, want text_range", b.Error)
+				}
+			}
+		})
+	}
+	t.Run("grouped summaries", func(t *testing.T) {
+		g := f.LargeText.GroupedSummaries
+		selected := append([]string{}, g.Grouping.Keys...)
+		for _, s := range g.Grouping.Summaries {
+			selected = append(selected, s.ID)
+		}
+		q := qt.QueryRequestV3{Version: 3, Profile: qt.ServerExpressionProfile, Now: now.UnixMilli(), Rows: true, Grouping: &g.Grouping,
+			Source: qt.WireQuery{Limit: 100}, Result: qt.WireQuery{Select: selected, OrderBy: g.OrderBy, Limit: 100}}
+		out, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, _ := json.Marshal(out.Rows)
+		var rows []map[string]any
+		if err = json.Unmarshal(data, &rows); err != nil {
+			t.Fatal(err)
+		}
+		got := []map[string]any{}
+		for _, row := range rows {
+			p := map[string]any{}
+			for key := range g.Expected[0] {
+				p[key] = row[key]
+			}
+			got = append(got, p)
+		}
+		if !reflect.DeepEqual(got, g.Expected) {
+			t.Fatalf("got  %v\nwant %v", got, g.Expected)
+		}
+	})
 }
 
 func setupTextFunctions(t *testing.T) (*sql.DB, qt.QueryDatasetV3, textFunctionFixture, time.Time) {

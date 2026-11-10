@@ -879,12 +879,19 @@ export function formulaRuntime(
   };
   let inspection: RegexInspection | undefined;
   let budget = 5000;
-  function run(n: FormulaNode): FormulaValue {
+  // unbounded: a text field read directly by a counting function, which
+  // returns a number or boolean without copying the text, skips the
+  // 100,000-character text bound. Every other check still applies.
+  function run(n: FormulaNode, unbounded = false): FormulaValue {
     if (--budget < 0) fail("Formula operation limit exceeded.");
     if (n.kind === "literal") return n.value;
     if (n.kind === "field") {
       if (!Object.prototype.hasOwnProperty.call(inputs, n.name)) return null;
-      const v = bound(inputs[n.name] ?? null);
+      const input = inputs[n.name] ?? null;
+      const v =
+        unbounded && n.valueType === "text" && typeof input === "string"
+          ? input
+          : bound(input);
       if (v === null) return null;
       if (n.valueType === "number") return num(v);
       if (n.valueType === "bool" && typeof v !== "boolean")
@@ -944,7 +951,14 @@ export function formulaRuntime(
             ? null
             : false;
     }
-    const vs = args.map(run);
+    // LENGTH, WORD_COUNT and case-sensitive CONTAINS/STARTS_WITH/ENDS_WITH
+    // read a direct text field without the text bound (see run).
+    const counting =
+      name === "LENGTH" ||
+      name === "WORD_COUNT" ||
+      (args.length === 2 &&
+        (name === "CONTAINS" || name === "STARTS_WITH" || name === "ENDS_WITH"));
+    const vs = args.map((arg) => run(arg, counting));
     const a = vs[0] ?? null,
       b = vs[1] ?? null,
       c = vs[2] ?? null;

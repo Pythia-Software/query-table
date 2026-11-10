@@ -27,9 +27,23 @@ const fixture = JSON.parse(
   schema: FieldSchema<Row>;
   rows: Row[];
   cases: Case[];
-  groupedSummaries: { where: QueryState["where"]; grouping: { keys: string[]; summaries: { id: string; op: string; expression?: string }[] }; orderBy: QueryState["orderBy"]; expected: Row[] };
+  groupedSummaries: Grouped;
+  largeText: { rows: Row[]; cases: Case[]; groupedSummaries: Grouped };
 };
 const now = Date.parse(fixture.now);
+interface Grouped { where: QueryState["where"]; grouping: { keys: string[]; summaries: { id: string; op: string; expression?: string }[] }; orderBy: QueryState["orderBy"]; expected: Row[] }
+/** The selected columns of the fixture's grouped rows, evaluated locally. */
+function groupedRows(g: Grouped, rows: Row[]) {
+  const query = {
+    ...EMPTY_QUERY,
+    select: [...g.grouping.keys, ...g.grouping.summaries.map((s) => s.id)].map((field) => ({ field })),
+    orderBy: g.orderBy,
+    limit: 100,
+    grouping: { ...g.grouping, representative: null, source: { ...EMPTY_QUERY, where: g.where } },
+  } as QueryState;
+  return (applyQuery(rows, query, fixture.schema, { now }).rows as Row[]).map((row) =>
+    Object.fromEntries(Object.keys(g.expected[0]!).map((key) => [key, row[key]])));
+}
 
 /** The cross-engine contract: only the fields the shared fixture states. */
 function projectTextMetric(entry: AggregationResultEntry, expected: Case["expected"]) {
@@ -58,16 +72,31 @@ describe("shared text function fixture (local engine)", () => {
       expect(projectTextMetric(result, c.expected)).toEqual(c.expected);
     });
   it("grouped formula summaries", () => {
-    const g = fixture.groupedSummaries;
-    const query = {
-      ...EMPTY_QUERY,
-      select: [...g.grouping.keys, ...g.grouping.summaries.map((s) => s.id)].map((field) => ({ field })),
-      orderBy: g.orderBy,
-      limit: 100,
-      grouping: { ...g.grouping, representative: null, source: { ...EMPTY_QUERY, where: g.where } },
-    } as QueryState;
-    const rows = applyQuery(fixture.rows, query, fixture.schema, { now }).rows as Row[];
-    expect(rows.map((row) => Object.fromEntries(Object.keys(g.expected[0]!).map((key) => [key, row[key]])))).toEqual(g.expected);
+    expect(groupedRows(fixture.groupedSummaries, fixture.rows)).toEqual(fixture.groupedSummaries.expected);
+  });
+});
+
+/** Expands the fixture's {repeat, times} text. */
+const expandRows = (rows: Row[]) =>
+  rows.map((row) => {
+    const text = row.text as { repeat: string; times: number } | string | null;
+    return text && typeof text === "object" ? { ...row, text: text.repeat.repeat(text.times) } : row;
+  });
+
+describe("shared text function fixture: text above the formula bound (local engine)", () => {
+  const rows = expandRows(fixture.largeText.rows);
+  it("has messages above 100,000 characters", () => {
+    expect(rows.some((row) => (row.text as string).length > 100000)).toBe(true);
+  });
+  for (const c of fixture.largeText.cases)
+    it(c.name, () => {
+      const query: QueryState = { ...EMPTY_QUERY, limit: 100, aggregations: [c.metric] };
+      const result = evaluateMetrics(rows, query, fixture.schema, { now }).metrics[0]!;
+      expect(result.error).toBeUndefined();
+      expect(projectTextMetric(result, c.expected)).toEqual(c.expected);
+    });
+  it("grouped formula summaries", () => {
+    expect(groupedRows(fixture.largeText.groupedSummaries, rows)).toEqual(fixture.largeText.groupedSummaries.expected);
   });
 });
 
