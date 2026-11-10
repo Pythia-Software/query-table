@@ -521,6 +521,7 @@ var (
 		{key: "xLabel", kind: optionString},
 		{key: "yLabel", kind: optionString},
 		enumOption("legendPosition", "left", "right", "top", "bottom", "none"),
+		{key: "colorBy", kind: optionString},
 		{key: "maxGroups", kind: optionPositiveInteger},
 		{key: "showOther", kind: optionBoolean},
 		{key: "boxMean", kind: optionBoolean},

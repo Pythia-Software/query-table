@@ -199,6 +199,18 @@ export const stateCases: StateCase[] = [
     },
   },
   {
+    // A saved colour key survives links even when the clause no longer
+    // groups by it; renderers then ignore it.
+    name: "metric colour keys",
+    state: {
+      ...EMPTY_QUERY,
+      aggregations: [
+        { id: "kinds", op: "count", groupBy: ["repository", "family"], display: { kind: "bar-vertical", colorBy: "family" } },
+        { id: "stale", op: "count", groupBy: ["repository"], display: { kind: "bar-horizontal", colorBy: "family" } },
+      ],
+    },
+  },
+  {
     name: "every metric option",
     state: {
       ...EMPTY_QUERY,
@@ -209,7 +221,7 @@ export const stateCases: StateCase[] = [
           window: { periods: 3, reduce: "total", partial: "include" },
           dateGrouping: { field: "time", interval: "week", timeZone: "Europe/Paris", includeEmpty: false, range: "custom", start: "2026-01-01", end: "2026-02-01", partialIntervals: "include" },
           display: {
-            kind: "scatter", valueLabel: "V", xLabel: "X", yLabel: "Y", legendPosition: "bottom", maxGroups: 8, showOther: true, boxMean: false,
+            kind: "scatter", valueLabel: "V", xLabel: "X", yLabel: "Y", legendPosition: "bottom", colorBy: "provider", maxGroups: 8, showOther: true, boxMean: false,
             xScale: { mode: "linear", min: -1.5, max: 10 }, yScale: { mode: "log", min: 0.001, max: 1e6 },
             format: { kind: "duration", decimals: 1, sourceUnit: "seconds", style: "clock", pattern: "hh:mm", timeZone: "UTC" },
             xFormat: { kind: "datetime", sourceUnit: "epochMilliseconds", style: "iso", timeZone: "America/New_York" },
@@ -402,7 +414,7 @@ export const tokenCases: TokenCase[] = [
       g: [
         { id: "a", op: "sum", field: "", groupBy: "x", scope: "everything", layout: { widthRem: 3, minWidthRem: 9 }, sort: [{ key: "value", dir: "up" }, { key: "group7", dir: ["desc"] }, 3], diagnostics: ["kept", 4, "kept"] },
         { id: "b", op: "avg", groupBy: ["g1", 7], window: "weekly", dateGrouping: { field: "t" }, display: { kind: 3, xScale: 1 }, distribution: [], where: [{ field: "x", op: "nope", value: "1" }] },
-        { id: "c", op: "max", unsupportedOp: "p99", groupBy: [], display: { maxGroups: 0, legendPosition: "left", format: { kind: "percent", pattern: "x".repeat(10001) } }, window: { periods: "all", partial: "omit" } },
+        { id: "c", op: "max", unsupportedOp: "p99", groupBy: [], display: { maxGroups: 0, legendPosition: "left", colorBy: 7, format: { kind: "percent", pattern: "x".repeat(10001) } }, window: { periods: "all", partial: "omit" } },
         { id: "d", op: "count", groupBy: ["t"], dateGrouping: { field: "t", interval: "dayOfWeek", includeEmpty: false, range: "query", occurrence: { interval: "week", includeEmpty: "yes" } } },
         { id: "e", op: "count", groupBy: ["t"], dateGrouping: { field: "t", interval: "hourOfDay", includeEmpty: true, range: "query", occurrence: "hourly" } },
       ],

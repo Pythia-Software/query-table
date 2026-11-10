@@ -823,6 +823,37 @@ it("clears a stored label limit to unlimited and preserves a numeric draft until
   } finally { act(() => root.unmount()); host.remove(); }
 });
 
+for (const [name, kind, groupBy, shown] of [
+  ["bars by one key", "bar-vertical", ["repository"], false],
+  ["bars by two keys", "bar-vertical", ["repository", "family"], true],
+  ["a pie by two keys", "pie", ["repository", "family"], false],
+] as const) {
+  it(`offers a colouring key for ${name}: ${shown}`, async () => {
+    const host = document.createElement("div"); document.body.append(host);
+    const root = createRoot(host), setQuery = vi.fn();
+    const fields: FieldDef<unknown>[] = [
+      { name: "repository", type: "text", label: "Repository", source: { kind: "backend" } },
+      { name: "family", type: "text", label: "Kind", source: { kind: "backend" } },
+    ];
+    const clause: AggregationClause = { id: "m", op: "count", groupBy: [...groupBy], display: { kind } };
+    const api = { aggregations: { clauses: [clause] }, setQuery, rows: [], total: 0, query: { where: [] } } as unknown as QueryTableApi<unknown>;
+    try {
+      await act(async () => root.render(createElement(MetricsEditor, { api, fields, onClose: vi.fn() })));
+      const select = host.querySelector<HTMLSelectElement>('[aria-label="Colour groups by"]');
+      expect(Boolean(select)).toBe(shown);
+      if (!select) return;
+      expect([...select.options].map((o) => o.textContent)).toEqual(["Whole group (theme default)", "Repository", "Kind"]);
+      expect(select.value).toBe("");
+      act(() => {
+        select.value = "family";
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      act(() => [...host.querySelectorAll("button")].find(b => b.textContent === "Apply metrics")!.click());
+      expect(setQuery.mock.calls[0]![0]({ where: [] }).aggregations[0].display).toEqual({ kind: "bar-vertical", colorBy: "family" });
+    } finally { act(() => root.unmount()); host.remove(); }
+  });
+}
+
 it("saves display group limits and remainder visibility separately from the query group limit", async () => {
   const host = document.createElement("div"); document.body.append(host);
   const root = createRoot(host), setQuery = vi.fn();

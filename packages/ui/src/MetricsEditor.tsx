@@ -49,7 +49,7 @@ import { MenuButton, MenuItem, MenuSeparator } from "./Menu";
 import { ReorderList } from "./ReorderList";
 import { MetricCard, cardDecimals } from "./MetricsPanel";
 import { formatMetricOutput, validateMetricFormat } from "./metricFormat";
-import type { MetricTheme } from "./metricColors";
+import { metricKeyColored, type MetricTheme } from "./metricColors";
 import { useMetricWorkbench } from "./useMetricWorkbench";
 import { useMetricResize } from "./useMetricResize";
 import { Icon, type IconName } from "./Icon";
@@ -2347,6 +2347,33 @@ export function MetricsEditor<Row>({
                                 none: "None",
                               }[position]
                             }
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  {selected.groupBy.length > 1 && metricKeyColored(chosen.kind) && (
+                    <label>
+                      Colour by
+                      <select
+                        aria-label="Colour groups by"
+                        value={
+                          chosen.colorBy !== undefined &&
+                          selected.groupBy.includes(chosen.colorBy)
+                            ? chosen.colorBy
+                            : ""
+                        }
+                        onChange={(e) => {
+                          const display = { ...chosen };
+                          if (e.target.value) display.colorBy = e.target.value;
+                          else delete display.colorBy;
+                          patch(selected.id, { display });
+                        }}
+                      >
+                        <option value="">Whole group (theme default)</option>
+                        {selected.groupBy.map((group) => (
+                          <option key={group} value={group}>
+                            {fieldLabel(group)}
                           </option>
                         ))}
                       </select>

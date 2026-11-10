@@ -23,6 +23,13 @@ type MetricTheme = {
   tokens?: Partial<Record<
     "accent" | "text" | "muted" | "grid" | "surface" |
     "other" | "null" | "error", string>>;
+  // Group keys whose value colours a labelled multi-key mark (bars, boxes,
+  // lists), in priority order, matched by name or dimension identity. A group
+  // takes the first listed key's override, domain slot or NULL colour, else
+  // the next colour unused by that key in the chart; groupings without one,
+  // and pie/ring slices, colour each whole key. A clause's saved
+  // display.colorBy (one key) takes precedence.
+  colorBy?: string | ReadonlyArray<string>;
   // Future numeric heatmaps use separate sequential/diverging scales,
   // not the categorical layer slots.
 };

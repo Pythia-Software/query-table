@@ -37,6 +37,24 @@
   JSON previews and links, nowrap host controls and `SelectConfig.minWidth`
   keep their minimums. A wrapping link whose label is one unbreakable token
   (a URL or path) still floors at the whole token.
+### Added
+
+- `MetricTheme.colorBy` names group keys (one, or a priority list, matched by
+  field name or dimension `identity`) whose value colours bars, boxes and list
+  rows grouped by several keys. A bar grouped by `repository_name` and
+  `family` with `colorBy: "family"` takes that dimension's override, domain
+  slot or NULL colour, so one kind keeps its colour across repositories; other
+  values take the next colour no other value of the key uses in that chart.
+  Without it, or when a grouping has no listed key, whole tuples keep their
+  hashed colours. Pie and ring slices, told apart by colour alone, always keep
+  whole-tuple colours. Legends show the colour drawn for each key; hover cards
+  and Other are unchanged. See
+  [Caller palettes and styling](docs/metrics.md#caller-palettes-and-styling).
+- A metric's `display.colorBy` saves the colouring key with the chart. It takes
+  precedence over the theme's `colorBy`, travels in query links (TypeScript and
+  Go codecs) and saved views, and is set with the metric editor's **Colour by**
+  control, shown for bar, box and list charts grouped by two or more keys. A saved key the chart
+  no longer groups by is ignored (the theme's key or whole-group colours apply).
 
 ## 1.0.4 — 2026-11-10
 

@@ -344,7 +344,46 @@ const metricTheme: MetricTheme = {
 };
 ```
 
-Use the same instance-scoped theme on QueryBuilder and MetricsPanel. Typed dimension/value identities keep Linux the same color across charts and distinguish numeric `1` from string `"1"`. A stable domain gives explicit palette order; unknown values hash deterministically. `overrides: [{ value, color }]` pins individual assignments, and `identity` lets equivalent field names share an identity. No global registry or data-arrival order affects colors. Finite palettes may reuse colors; use domains/overrides when uniqueness matters. Marks grouped by several keys (pie, donut, bar, box, histogram, list) are colored by their whole key, using the first field's layer: two keys drawn in one chart take different colors while the palette has room, and otherwise a key's color depends only on the theme and its values. Scatter charts color by their first key, which names the series. Line charts color by their second key.
+Use the same instance-scoped theme on QueryBuilder and MetricsPanel. Typed dimension/value identities keep Linux the same color across charts and distinguish numeric `1` from string `"1"`. A stable domain gives explicit palette order; unknown values hash deterministically. `overrides: [{ value, color }]` pins individual assignments, and `identity` lets equivalent field names share an identity. No global registry or data-arrival order affects colors. Finite palettes may reuse colors; use domains/overrides when uniqueness matters. Marks grouped by several keys (pie, donut, bar, box, list) are colored by their whole key, using the first field's layer: two keys drawn in one chart take different colors while the palette has room, and otherwise a key's color depends only on the theme and its values. Scatter charts color by their first key, which names the series. Line charts color by their second key.
+
+To color bars, boxes and list rows grouped by several keys by one of their keys
+instead, name it in `colorBy`. A group then takes that key's color: its
+`overrides`, `domain` slot or NULL color, so one kind keeps its color on every
+bar. Values with neither take the next color no other value of the key uses in
+the same chart while the palette has room (by typed value, not arrival order),
+so give the key a `domain` or `overrides` when its colors must also match across
+charts. A key matches by field name or by its dimension's `identity`:
+
+```ts
+const metricTheme: MetricTheme = {
+  layers: [{ id: "kinds", colors: ["#3979c3", "#288577", "#9864b4"] }],
+  dimensions: {
+    family: { layer: "kinds", overrides: [{ value: "Missing tool", color: "var(--event-friction)" }] },
+  },
+  colorBy: "family", // or a priority list: ["family", "platform"]
+};
+```
+
+The theme's `colorBy` is the host default: it applies to every chart whose
+`groupBy` contains a listed field; with a list, the first listed field present
+wins. A chart can choose its own key with `display.colorBy`, which takes
+precedence and is saved with the chart in query links and saved views. The
+metric editor offers it as **Colour by** for bar, box and list charts grouped by
+two or more keys, with **Whole group (theme default)** clearing it:
+
+```ts
+{ id: "events", op: "count", groupBy: ["repository_name", "family"],
+  display: { kind: "bar-horizontal", colorBy: "family" } }
+```
+
+A saved `display.colorBy` that names a key the chart no longer groups by is
+kept but ignored: the chart falls back to the theme's key, or to whole-group
+colors, without an error. Key colors apply only to marks that carry their own
+label. Pie and ring slices, which are told apart by color alone, keep
+whole-group colors under either setting (histograms take a single grouping key).
+Other groupings, single keys, scatter and line charts are unaffected. Legends list each whole key with the color drawn for it, so
+several entries can share a color; hover cards and the Other bucket are
+unchanged. Neither setting is sent to the server.
 
 CSS tokens cover accent, text, muted, grid, surface, other, null, and error. `MetricClassNames` exposes root/card/title/plot/axis/grid/legend/mark slots. `MetricCard` can render standalone with a clause and result/buckets; `MetricsEditor` can be opened directly with `{ api, fields, onClose, initialMetricId?, theme?, locale? }`. Palette information belongs to the caller and is not serialized into shared query data.
 

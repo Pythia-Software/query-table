@@ -99,6 +99,140 @@ describe("multi-key group colours", () => {
     expect(scatter).toEqual(pairs.map((b) => resolver.color("provider", b.keys[0]!)));
   });
 
+  describe("theme colorBy", () => {
+    const events: MetricBucket[] = [
+      { keys: ["textkit", "Out-of-date docs"], value: 5, count: 5 },
+      { keys: ["pharos", "Flaky failure"], value: 4, count: 4 },
+      { keys: ["textkit", "Missing tool"], value: 3, count: 3 },
+      { keys: ["pharos", "Missing tool"], value: 2, count: 2 },
+      { keys: ["query-table", "Missing tool"], value: 1, count: 1 },
+      { keys: ["query-table", "Unlisted kind"], value: 1, count: 1 },
+      { keys: ["query-table", null], value: 1, count: 1 },
+    ];
+    const theme: MetricTheme = {
+      layers: [{ id: "kinds", colors: ["red", "green", "blue"] }],
+      dimensions: {
+        family: {
+          layer: "kinds",
+          domain: ["Flaky failure", "Unlisted kind"],
+          overrides: [{ value: "Missing tool", color: "var(--event-missing)" }, { value: "Out-of-date docs", color: "var(--event-docs)" }],
+        },
+      },
+      colorBy: "family",
+    };
+    const fields = ["repository_name", "family"];
+
+    it("colours each tuple by that key's override, domain and null colour", () => {
+      const resolver = createMetricColorResolver(theme);
+      const resolve = resolver.tupleColors(fields, events.map((b) => b.keys));
+      expect(events.map((b) => resolve(b.keys))).toEqual([
+        "var(--event-docs)", "red", "var(--event-missing)", "var(--event-missing)", "var(--event-missing)", "green",
+        resolver.token("null"),
+      ]);
+      expect(events.map((b) => resolve(b.keys))).toEqual(events.map((b) => resolver.color("family", b.keys[1] ?? null)));
+      // The key may come first, and a priority list picks the first present field.
+      const swapped = createMetricColorResolver({ ...theme, colorBy: ["missing", "family", "repository_name"] })
+        .tupleColors(["family", "repository_name"], events.map((b) => [b.keys[1]!, b.keys[0]!]));
+      expect(swapped(["Missing tool", "pharos"])).toBe("var(--event-missing)");
+      expect(swapped(["Flaky failure", "textkit"])).toBe("red");
+    });
+
+    it("keeps whole-key colours for groupings without the field and single keys", () => {
+      const { colorBy: _, ...uncoloured } = theme;
+      const plain = createMetricColorResolver(uncoloured).tupleColors(fields, events.map((b) => b.keys));
+      const other = createMetricColorResolver({ ...theme, colorBy: "status" }).tupleColors(fields, events.map((b) => b.keys));
+      expect(events.map((b) => other(b.keys))).toEqual(events.map((b) => plain(b.keys)));
+      const single = createMetricColorResolver(theme).tupleColors(["family"], [["Missing tool"]]);
+      expect(single(["Missing tool"])).toBe("var(--event-missing)");
+    });
+
+    it("draws bars and their legend in the key's colour", () => {
+      const doc = chart({ id: "m", op: "count", groupBy: fields, display: { kind: "bar-vertical", legendPosition: "bottom" } }, events, theme);
+      expect(colours(doc).slice(0, 5)).toEqual([
+        "var(--event-docs)", "red", "var(--event-missing)", "var(--event-missing)", "var(--event-missing)",
+      ]);
+      const legend = [...doc.querySelectorAll(".qt-metric-legend-label")].map((l) => [
+        l.textContent, (l.previousElementSibling as HTMLElement | null)?.style.background,
+      ]);
+      expect(legend.slice(0, 4)).toEqual([
+        ["textkit / Out-of-date docs", "var(--event-docs)"],
+        ["pharos / Flaky failure", "red"],
+        ["textkit / Missing tool", "var(--event-missing)"],
+        ["pharos / Missing tool", "var(--event-missing)"],
+      ]);
+    });
+
+    it("lets a chart's saved colorBy win over the theme's", () => {
+      const resolver = createMetricColorResolver(theme);
+      const byRepository = resolver.tupleColors(fields, events.map((b) => b.keys), { colorBy: "repository_name" });
+      expect(events.map((b) => byRepository(b.keys))).toEqual(events.map((b) => resolver.color("repository_name", b.keys[0] ?? null)));
+      // Without a theme default, the chart's key alone decides.
+      const { colorBy: _, ...uncoloured } = theme;
+      const doc = chart({ id: "m", op: "count", groupBy: fields, display: { kind: "bar-vertical", colorBy: "family" } }, events, uncoloured);
+      expect(colours(doc).slice(0, 5)).toEqual([
+        "var(--event-docs)", "red", "var(--event-missing)", "var(--event-missing)", "var(--event-missing)",
+      ]);
+    });
+
+    it("ignores a saved colorBy the chart no longer groups by", () => {
+      const keys = events.map((b) => b.keys);
+      // Falls back to the theme's key...
+      const themed = createMetricColorResolver(theme);
+      expect(keys.map(themed.tupleColors(fields, keys, { colorBy: "status" }))).toEqual(keys.map(themed.tupleColors(fields, keys)));
+      // ...or, without one, to whole-tuple colours, rendered without error.
+      const { colorBy: _, ...uncoloured } = theme;
+      const plain = createMetricColorResolver(uncoloured);
+      expect(keys.map(plain.tupleColors(fields, keys, { colorBy: "status" }))).toEqual(keys.map(plain.tupleColors(fields, keys)));
+      const stale = chart({ id: "m", op: "count", groupBy: fields, display: { kind: "bar-vertical", colorBy: "status" } }, events, uncoloured);
+      const fresh = chart({ id: "m", op: "count", groupBy: fields, display: { kind: "bar-vertical" } }, events, uncoloured);
+      expect(colours(stale)).toEqual(colours(fresh));
+      expect(stale.querySelector(".qt-metric-error, [role='alert']")).toBeNull();
+    });
+
+    it("gives unpinned values of the key distinct colours within a chart", () => {
+      const palette: MetricTheme = { layers: [{ id: "six", colors: ["c0", "c1", "c2", "c3", "c4", "c5"] }], dimensions: { family: { layer: "six", domain: ["Pinned"] } }, colorBy: "family" };
+      const families = ["Missing tool", "Flaky failure", "Out-of-date docs", "Permission denied", "Pinned"];
+      const tuples = families.flatMap((family) => [["a", family], ["b", family]]);
+      const resolve = createMetricColorResolver(palette).tupleColors(fields, tuples);
+      const byFamily = families.map((family) => resolve(["a", family]));
+      expect(new Set(byFamily).size).toBe(families.length);
+      // Every repository shares its family's colour; domain slots stay reserved.
+      expect(families.map((family) => resolve(["b", family]))).toEqual(byFamily);
+      expect(resolve(["a", "Pinned"])).toBe("c0");
+      // Arrival order does not matter.
+      const reversed = createMetricColorResolver(palette).tupleColors(fields, [...tuples].reverse());
+      expect(families.map((family) => reversed(["a", family]))).toEqual(byFamily);
+    });
+
+    it("honours the key's NULL override even when every key is NULL", () => {
+      const nulls: MetricTheme = { ...theme, dimensions: { family: { layer: "kinds", overrides: [{ value: null, color: "pink" }] } } };
+      const resolve = createMetricColorResolver(nulls).tupleColors(fields, [["a", null], [null, null]]);
+      expect(resolve(["a", null])).toBe("pink");
+      expect(resolve([null, null])).toBe("pink");
+    });
+
+    it("matches a key through its dimension identity", () => {
+      const shared: MetricTheme = { ...theme, dimensions: { ...theme.dimensions, event_family: { layer: "kinds", identity: "family", overrides: [{ value: "Missing tool", color: "orange" }] } } };
+      const resolve = createMetricColorResolver(shared).tupleColors(["repository_name", "event_family"], [["a", "Missing tool"], ["b", "Missing tool"]]);
+      expect(resolve(["a", "Missing tool"])).toBe("orange");
+      expect(resolve(["b", "Missing tool"])).toBe("orange");
+    });
+
+    // Histograms accept a single grouping key, so only pies and rings draw
+    // several keys with colour as their only identifier.
+    for (const kind of ["pie", "donut"] as const) {
+      it(`keeps whole-key colours in ${kind} charts, told apart by colour alone`, () => {
+        const buckets = events.slice(2, 5);
+        const { colorBy: _, ...uncoloured } = theme;
+        const keyed = colours(chart({ id: "m", op: "count", groupBy: fields, display: { kind, colorBy: "family" } }, buckets, theme));
+        const whole = colours(chart({ id: "m", op: "count", groupBy: fields, display: { kind } }, buckets, uncoloured));
+        expect(keyed).toEqual(whole);
+        expect(keyed.length).toBeGreaterThan(0);
+        expect(keyed).not.toContain("var(--event-missing)");
+      });
+    }
+  });
+
   it("keeps themed tuples apart while the palette has room", () => {
     const theme: MetricTheme = { layers: [{ id: "two", colors: ["red", "blue"] }], dimensions: { provider: { layer: "two" } } };
     const resolve = createMetricColorResolver(theme).tupleColors(["provider", "model"], pairs.slice(0, 2).map((b) => b.keys));
