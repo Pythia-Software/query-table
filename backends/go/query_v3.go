@@ -308,8 +308,9 @@ func resultField(name, typ, expr string, groupable bool) FieldSpec {
 }
 
 // SourcePlan discovers keys, formulas, ROW projections, representative ordering,
-// source predicates and canonical transitive inputs. Result/HAVING aliases are
-// never mistaken for source fields. It performs no reads outside the resolver.
+// distinct targets, source predicates and canonical transitive inputs.
+// Result/HAVING aliases are never mistaken for source fields. It performs no
+// reads outside the resolver.
 func (d QueryDatasetV3) SourcePlan(ctx context.Context, q QueryRequestV3, o PlanOptions) (SourceDependencyPlan, error) {
 	var out SourceDependencyPlan
 	if err := ctx.Err(); err != nil {
@@ -447,6 +448,14 @@ func (d QueryDatasetV3) SourcePlan(ctx context.Context, q QueryRequestV3, o Plan
 		source.OrderBy = nil
 		source.Offset = 0
 		source.Limit = pop + 1
+	} else if q.Distinct != nil {
+		// Distinct values read the source.where population. The target and its
+		// computed inputs/revisions are dependencies even though no row selects it.
+		if _, _, e := d.distinctTarget(q.Distinct.Field); e != nil {
+			return out, e
+		}
+		source = WireQuery{Where: q.Source.Where, Limit: pop + 1}
+		fields[q.Distinct.Field] = true
 	} else {
 		source = q.Result
 		// The result stage reapplies ordinary-row predicates after the narrow

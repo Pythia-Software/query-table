@@ -738,14 +738,20 @@ never retries writes invisibly. SQLite interruption may abort a caller-owned
 transaction (including with modernc); after a cancelled or failed execution,
 the host should roll back rather than assume it can commit other operations.
 
-Temporary-storage policy belongs to the host. For large batches, consider
-leasing a connection with `PRAGMA temp_store=MEMORY`, opening the transaction
-on that connection, then restoring its previous setting after closing the
-transaction and before releasing the connection. Changing this setting drops
-existing temporary objects, so only use an appropriate dedicated lease with
-no unrelated temporary state. Memory-backed temporary storage trades disk I/O
-for memory use; retain population/group limits and deadlines. The reusable
-adapter does not change this connection setting.
+Temporary-storage policy belongs to the host; the reusable adapter never
+changes `temp_store` or other PRAGMAs. Choose the policy when a connection is
+opened (for example a DSN `_pragma=temp_store(memory)`, or a separate pool per
+storage mode) and keep it for the connection's lifetime. Do not set and
+restore `PRAGMA temp_store` around each request: changing it while the
+connection has a temp database resets every schema on that connection, so the
+next statement re-parses the whole catalog (milliseconds on a large schema),
+and it drops existing temporary objects. Likewise, end a successful request by
+committing its transaction rather than rolling it back: rolling back a
+transaction that created TEMP tables also forces a schema reload, while
+`ExecuteIn` has already dropped its own scratch tables (see [Supported SQLite
+scratch lifetime](sqlite-performance-handoff.md#supported-sqlite-scratch-lifetime)).
+Memory-backed temporary storage trades disk I/O for memory use; retain
+population/group limits and deadlines.
 
 Plain `:memory:` is a separate database per physical connection. Tests should
 use a file-backed database, or deliberately retain a shared in-memory connection.

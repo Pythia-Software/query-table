@@ -12,24 +12,13 @@ import (
 func (d QueryDatasetV3) executeDistinct(ctx context.Context, tx *sql.Tx, q QueryRequestV3, o PlanOptions) (QueryResultV3, error) {
 	out := QueryResultV3{Version: 3, Now: q.Now, Rows: []map[string]any{}, Metrics: []MetricResult{}, Schema: ProjectedSchema{Name: d.Schema.Name, IDField: d.Schema.IDField, Fields: []ProjectedField{}}}
 	request := *q.Distinct
-	field, ok := d.Schema.Fields[request.Field]
-	computed := strings.HasPrefix(request.Field, "@computed/")
-	if computed {
-		// Canonical computed values, as host-approved computed filters read them.
-		ok = d.ComputedFilterable[strings.TrimPrefix(request.Field, "@computed/")]
-	} else if !field.ServerFilter || strings.TrimSpace(field.Expr) == "" {
-		ok = false
+	field, computed, err := d.distinctTarget(request.Field)
+	if err != nil {
+		return out, err
 	}
-	if !ok {
-		return out, diagnostic(ErrorCodeInvalidQuery, "distinct needs a server-filterable field")
-	}
-	population := q
-	population.Distinct = nil
-	population.Result = WireQuery{Where: q.Source.Where, Limit: 1}
-	if computed {
-		population.Source.Select = append(append([]string{}, q.Source.Select...), request.Field)
-	}
-	plan, err := d.SourcePlan(ctx, population, o)
+	// The public source plan of the distinct request itself: source.where, the
+	// target and the target's computed inputs and revisions.
+	plan, err := d.SourcePlan(ctx, q, o)
 	if err != nil {
 		return out, err
 	}
@@ -132,6 +121,23 @@ func (d QueryDatasetV3) executeDistinct(ctx context.Context, tx *sql.Tx, q Query
 	out.Execution = queryExecution(q, plan)
 	out.Distinct = result
 	return out, ctx.Err()
+}
+
+// distinctTarget checks that the dataset lets requests suggest values for a
+// field: a server-filterable base binding, or a computed field the host
+// approved for filtering (whose canonical values computed filters read).
+func (d QueryDatasetV3) distinctTarget(name string) (FieldSpec, bool, error) {
+	field, ok := d.Schema.Fields[name]
+	computed := strings.HasPrefix(name, "@computed/")
+	if computed {
+		ok = d.ComputedFilterable[strings.TrimPrefix(name, "@computed/")]
+	} else if !field.ServerFilter || strings.TrimSpace(field.Expr) == "" {
+		ok = false
+	}
+	if !ok {
+		return FieldSpec{}, false, diagnostic(ErrorCodeInvalidQuery, "distinct needs a server-filterable field")
+	}
+	return field, computed, nil
 }
 
 // distinctField binds the suggested field in the population relation: a base

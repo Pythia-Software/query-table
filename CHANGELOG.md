@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Fixed
+
+- `QueryDatasetV3.SourcePlan` now includes a `distinct` request's target field
+  in its projection and `BaseFields`, with a computed target's transitive
+  inputs and resolved revisions, over the request's `source.where` population.
+  Hosts that stage only the planned base fields previously got no values for a
+  distinct-only request over an otherwise unselected field. An unfilterable
+  target is rejected while planning, as it already was during execution.
+
+### Documentation
+
+- The SQLite guide no longer suggests setting and restoring
+  `PRAGMA temp_store` per request. Choose the storage mode once per connection
+  and commit successful requests: changing `temp_store` or rolling back TEMP
+  DDL makes the connection re-parse its whole schema.
+
 ## 1.0.4 — 2026-11-10
 
 ### Changed

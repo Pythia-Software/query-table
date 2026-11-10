@@ -206,8 +206,11 @@ and do not commit other host operations after an execution/cleanup error.
 
 The adapter never changes `temp_store`, temp cache sizes or other PRAGMAs. The
 host still owns leases, pools, deadlines and restoring any settings it changes.
-Changing `temp_store` destroys existing temporary objects and can cause schema
-work, so it should not be a routine cleanup mechanism. File-backed storage and
+Changing `temp_store` while a connection has a temp database destroys its
+temporary objects and resets every schema on the connection, so the next
+statement re-parses the whole catalog. Set the storage mode once per connection
+(for example in the DSN, or with one pool per mode), never per request, and
+do not use it as a cleanup mechanism. File-backed storage and
 small temp caches remain supported; byte, population, group and sample guards
 are unchanged. TEMP page counts alone do not verify actual disk spill.
 
