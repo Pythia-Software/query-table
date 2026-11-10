@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### Changed
+
+- SQLite MEDIAN and box quartiles no longer hold each group's samples in Go
+  memory and no longer fail above 100,000 samples per group. Compiled plans
+  rank the validated samples in SQL and read only the samples at the needed
+  ranks; Tukey boxes count each tail natively and read their endpoints and at
+  most 20 outliers by rank. Results, error precedence and validation are
+  unchanged, except that the compiled box mean is SQLite's compensated `AVG`
+  (it may differ from the former sorted Neumaier sum by roundoff). SQLite
+  datasets have no default `MaxSamplesPerGroup`: the population and staging
+  budgets bound the work, and an explicit `MaxSamplesPerGroup` is still
+  enforced. PostgreSQL keeps its 100,000 default. Large single-group MEDIANs
+  cost more CPU than before because SQLite sorts the group; see
+  [Ranked percentiles](docs/backend-sqlite.md#ranked-percentiles).
+- The direct in-memory distribution scan of ungrouped SQLite requests runs only
+  while it would retain at most 1,000,000 samples; larger requests use the
+  ranked plans instead of failing.
+- `SQLiteV2Functions()` adds `qt_v2_quantile`, `qt_v2_midpoint`,
+  `qt_v2_box_fence` and `qt_v2_box_summary`, and `SQLiteV2Aggregates()` adds
+  `qt_v2_ranked_values`. Hosts that register the descriptor lists need no
+  change; hosts that register functions by name must add these. `qt_v2_median`
+  and `qt_v2_box` stay registered but are no longer called by compiled plans,
+  and `SQLiteMaxBoxSamples` is deprecated.
+
 ## 1.0.4 — 2026-11-10
 
 ### Changed

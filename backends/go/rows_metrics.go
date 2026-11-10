@@ -625,10 +625,6 @@ func (r *rowMetricReduction) distribution(m *rowMetricSpec, h *rowHistogram) Met
 		b.Error = r.err
 		return b
 	}
-	if len(r.samples) > SQLiteMaxBoxSamples {
-		b.Error = "resource_limit"
-		return b
-	}
 	if !r.sorted {
 		sort.Float64s(r.samples)
 		r.sorted = true

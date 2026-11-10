@@ -594,8 +594,9 @@ func fillCalendarBuckets(ctx context.Context, result *MetricResult, config Metri
 	return nil
 }
 func (d QueryDatasetV3) checkMetricSamples(ctx context.Context, tx *sql.Tx, spec AggSpec, q metricRequest, s Schema, o PlanOptions, maxGroups int) error {
-	if !metricSampled(spec, d.Dialect == "sqlite") {
-		return nil
+	limit, err := d.sampleLimit()
+	if err != nil || limit == 0 || !metricSampled(spec, d.Dialect == "sqlite") {
+		return err
 	}
 	probe := AggSpec{ID: "__qt_samples__", Op: "count", GroupBy: spec.GroupBy, Scope: spec.Scope, Where: spec.Where}
 	p, err := compileMetricDialect(ctx, q, probe, s, o, d.Dialect == "sqlite")
@@ -603,10 +604,6 @@ func (d QueryDatasetV3) checkMetricSamples(ctx context.Context, tx *sql.Tx, spec
 		return err
 	}
 	metric, err := (sqliteV2Dataset{}).readV2Metric(ctx, tx, metricSQLPlan{probe.ID, p}, probe, 0, q, maxGroups)
-	if err != nil {
-		return err
-	}
-	limit, err := d.sampleLimit()
 	if err != nil {
 		return err
 	}

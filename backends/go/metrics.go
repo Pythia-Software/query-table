@@ -216,6 +216,7 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 	reductionMemo := map[string]ValueSQL{}
 	reductions := []string{}
 	reductionKeys := map[string]string{}
+	ranked := []sqliteRankedLeaf{}
 	var collect func(*exprNode) error
 	collect = func(n *exprNode) error {
 		op := strings.ToLower(n.op)
@@ -296,7 +297,14 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 			index := len(leaves)
 			a := fmt.Sprintf("a%d", index)
 			z := a + "_error"
-			reductions = append(reductions, value+" AS "+a, errorExpr+" AS "+z)
+			if b.sqlite && op == "median" {
+				// Ranked after the reduction: count the samples and keep the
+				// input error here; sqliteRankedLeaves supplies a and z.
+				reductions = append(reductions, "COUNT("+raw+") AS "+a+"_n", "MIN("+errSQL+") AS "+a+"_input")
+				ranked = append(ranked, sqliteRankedLeaf{alias: a, sample: raw, ranks: medianRanks(), midpoint: true})
+			} else {
+				reductions = append(reductions, value+" AS "+a, errorExpr+" AS "+z)
+			}
 			reductionKeys[a], reductionKeys[z] = "value\x00"+key, "error\x00"+key
 			leaves[n] = ValueSQL{a, z, typ}
 			reductionMemo[key] = leaves[n]
@@ -354,9 +362,18 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 	}
 	reductionKeys["count"] = "count"
 	reductions = append(selectGroups, append(reductions, "COUNT(*) AS count")...)
+	population := b.rel
+	if len(ranked) > 0 {
+		// The reduction and every ranking read the validated population:
+		// store it once instead of repeating its guards per reader.
+		b.stages[len(b.stages)-1].Materialized = true
+	}
 	reductionFrom := " FROM " + b.rel + by
 	b.stage("SELECT " + strings.Join(reductions, ",") + reductionFrom)
 	reductionStage := len(b.stages) - 1
+	if len(ranked) > 0 {
+		b.sqliteRankedLeaves(population, groups, ranked)
+	}
 	var lower func(*exprNode) (ValueSQL, error)
 	lower = func(n *exprNode) (ValueSQL, error) {
 		if v, ok := leaves[n]; ok {
@@ -447,6 +464,11 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 		}
 	}
 	plan := b.finish(sql, scope, cols)
+	if len(ranked) > 0 {
+		// Ranked leaves read the population after the reduction stage, so
+		// that stage alone cannot be cached or fused.
+		return plan, nil
+	}
 	if b.lateSource {
 		reductionStage++ // finish prepends the shared authorized source.
 	}

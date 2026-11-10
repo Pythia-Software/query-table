@@ -149,7 +149,7 @@ func TestRowsDistributionErrorParity(t *testing.T) {
 
 func TestRowsDistributionBoxSampleBudget(t *testing.T) {
 	s := rowsSchema()
-	rows := make([]map[string]any, qt.SQLiteMaxBoxSamples+1)
+	rows := make([]map[string]any, qt.SQLiteMaxMedianSamples+1)
 	for i := range rows {
 		rows[i] = map[string]any{"id": fmt.Sprint(i), "n": int64(i % 1000), "enum": fmt.Sprint(i % 2)}
 	}
@@ -167,9 +167,17 @@ func TestRowsDistributionBoxSampleBudget(t *testing.T) {
 	)
 	compareStaged(t, tx, d, q, qt.PlanOptions{})
 	compareDirect(t, tx, d, q)
+	// SQLite ranks samples in SQL: no per-group budget applies by default.
 	got := executeV3Tx(t, tx, d, q, qt.PlanOptions{})
-	// v3 checks MaxSamplesPerGroup (default 100000) before reducing and fails
-	// the over-budget metric; v2 reported resource_limit on its bucket.
+	if got.Metrics[0].Error != "" || got.Metrics[0].Buckets[0].Distribution.(*qt.MetricBoxDistribution).Summary.N != int64(len(rows)) {
+		t.Fatal(mustJSON(t, got.Metrics))
+	}
+	// An explicit MaxSamplesPerGroup is checked before reducing and fails the
+	// over-budget metric; v2 reported resource_limit on its bucket.
+	d.MaxSamplesPerGroup = qt.SQLiteMaxMedianSamples
+	compareStaged(t, tx, d, q, qt.PlanOptions{})
+	compareDirect(t, tx, d, q)
+	got = executeV3Tx(t, tx, d, q, qt.PlanOptions{})
 	if got.Metrics[0].Error != "The box distribution exceeded the 100,000-sample budget" || got.Metrics[0].ErrorCode != qt.ErrorCodeResourceLimit || got.Metrics[1].ErrorCode != "" || got.Metrics[1].Error != "" || got.Metrics[1].Buckets[0].Error != "" {
 		t.Fatal(mustJSON(t, got.Metrics))
 	}
@@ -316,9 +324,9 @@ func TestDirectDistributionSharedScan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Besides the shared scan, v3 sends the population COUNT and one compiled
-	// sample-budget probe per distribution (v2 did neither); no other plans.
-	if log.count("WITH qt_direct_source") != 1 || log.count(populationMarker) != 1 || log.count("WITH qt0") != 1+len(q.Metrics) {
+	// Besides the shared scan, v3 sends only the population COUNT. SQLite has
+	// no default sample budget, so no compiled budget probe runs either.
+	if log.count("WITH qt_direct_source") != 1 || log.count(populationMarker) != 1 || log.count("WITH qt0") != 1 {
 		t.Fatal("expected one population count and one shared scan", strings.Join(log.seen, "\n---\n"))
 	}
 	for _, m := range got.Metrics {

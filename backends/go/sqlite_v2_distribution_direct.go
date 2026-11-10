@@ -18,9 +18,12 @@ import (
 // request's and each metric's filters stay in SQL. Values the reducers cannot
 // read exactly (errRowsUnsupported) or a failed statement leave every metric
 // to its compiled plan: ok is false. total is the matching population.
-func (d sqliteV2Dataset) directDistributions(ctx context.Context, tx *sql.Tx, q metricRequest, failures []error, o PlanOptions, maxGroups, maxPopulation int) (metrics map[int]MetricResult, total int64, ok bool, err error) {
+// The scan retains every sample of its metrics: when the counted population
+// could exceed sqliteDirectSamples of them, the compiled plans rank them in
+// SQL instead.
+func (d sqliteV2Dataset) directDistributions(ctx context.Context, tx *sql.Tx, q metricRequest, failures []error, o PlanOptions, maxGroups, maxPopulation int, counted int64) (metrics map[int]MetricResult, total int64, ok bool, err error) {
 	include := make([]bool, len(q.Metrics))
-	selected := false
+	selected, retained := false, int64(0)
 	fields := map[string]bool{}
 	for i, spec := range q.Metrics {
 		if failures[i] != nil || spec.Distribution == nil || rowMetricComputedField(spec) != "" {
@@ -31,12 +34,13 @@ func (d sqliteV2Dataset) directDistributions(ctx context.Context, tx *sql.Tx, q 
 			continue
 		}
 		include[i], selected = true, true
+		retained += counted
 		fields[m.field] = true
 		for _, name := range spec.GroupBy {
 			fields[name] = true
 		}
 	}
-	if !selected {
+	if !selected || retained > sqliteDirectSamples {
 		return nil, 0, false, nil
 	}
 	sourceName := "qt_direct_source"
@@ -144,6 +148,10 @@ func (d sqliteV2Dataset) directDistributions(ctx context.Context, tx *sql.Tx, q 
 	}
 	return metrics, total, true, nil
 }
+
+// sqliteDirectSamples bounds the samples the direct scan retains in memory
+// (eight bytes each) across its metrics.
+const sqliteDirectSamples = 1000000
 
 // sqliteDirectBinding admits fields whose SQL value is their stored value.
 func sqliteDirectBinding(name string, f FieldSpec) bool {

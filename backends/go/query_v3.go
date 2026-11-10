@@ -161,7 +161,11 @@ type QueryDatasetV3 struct {
 	MaxRows, MaxGroups, MaxPopulation int
 	// UTF-8 value/error payload of the narrow source, checked before its copy.
 	// Database storage overhead and query scratch space remain host-managed.
-	MaxStagingBytes    int64
+	MaxStagingBytes int64
+	// MaxSamplesPerGroup bounds the non-NULL inputs of one group of a MEDIAN or
+	// distribution metric (at most 1,000,000). PostgreSQL defaults to
+	// SQLiteMaxMedianSamples, since it sorts each group's samples in an array.
+	// SQLite ranks samples in SQL and has no per-group bound unless this is set.
 	MaxSamplesPerGroup int
 	// PredicateRelations optionally supplies host relations for base-field
 	// source and row filter predicates (SQLite only). Group filters over
@@ -659,9 +663,18 @@ func computedInputPolicy(plan SQLPlan, s Schema) []string {
 	sort.Strings(result)
 	return result
 }
+
+// sampleLimit is the exact sample budget per group, or zero for none.
+// PostgreSQL retains each group's sorted samples and defaults to
+// SQLiteMaxMedianSamples. SQLite ranks samples in SQL: only an explicit
+// MaxSamplesPerGroup bounds its groups; otherwise the population and staging
+// budgets do.
 func (d QueryDatasetV3) sampleLimit() (int, error) {
 	limit := d.MaxSamplesPerGroup
 	if limit == 0 {
+		if d.Dialect == "sqlite" {
+			return 0, nil
+		}
 		limit = SQLiteMaxMedianSamples
 	}
 	if limit < 1 || limit > 1000000 {

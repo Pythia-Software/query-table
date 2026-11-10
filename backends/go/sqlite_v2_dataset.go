@@ -120,7 +120,7 @@ func (d sqliteV2Dataset) executeMetrics(ctx context.Context, tx *sql.Tx, metrics
 			err = errors.Join(err, cleanupErr)
 		}
 	}()
-	direct, _, _, directErr := d.directDistributions(ctx, tx, metrics, failures, o, maxGroups, maxPopulation)
+	direct, _, _, directErr := d.directDistributions(ctx, tx, metrics, failures, o, maxGroups, maxPopulation, total)
 	if directErr != nil {
 		return nil, directErr
 	}
