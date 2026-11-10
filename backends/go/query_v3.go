@@ -120,6 +120,9 @@ func groupKeyLocation(typ, field string, interval GroupKeyInterval) (*time.Locat
 	if interval.Every < 0 || interval.Every > MaxCalendarEvery {
 		return nil, diagnostic(ErrorCodeGrouping, "a group key's every is a whole number of intervals, 1-1000")
 	}
+	if interval.Interval == "hour" && interval.Every > 1 && !calendarHourEvery(interval.Every) {
+		return nil, diagnostic(ErrorCodeGrouping, "a group key's "+calendarHourEveryMessage)
+	}
 	return calendarLocation(MetricDateGrouping{Field: field, Interval: interval.Interval, Every: interval.Every, TimeZone: interval.TimeZone, Range: "query"})
 }
 

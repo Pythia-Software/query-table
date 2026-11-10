@@ -427,9 +427,9 @@ When no interval is whole the result has no buckets.
 
 ### Buckets of several intervals
 
-`every` (an integer 1–1,000; omitted means 1) groups several calendar
-intervals into one bucket, such as 3-, 6- or 12-hour periods, fortnights or
-quarters:
+`every` (an integer 1–1,000; omitted means 1; for hours one of 1, 2, 3, 4, 6,
+8, 12 or 24) groups several calendar intervals into one bucket, such as 3-, 6-
+or 12-hour periods, fortnights or quarters:
 
 ```ts
 dateGrouping: { field: "at", interval: "hour", every: 6, timeZone: "America/New_York",
@@ -440,20 +440,23 @@ A bucket is keyed by its start instant, as one interval is. Anchors are fixed,
 independent of the query range, so the same rows always fall in the same
 buckets and results stay cache-stable:
 
-- **Hours.** When `every` divides 24 (2, 3, 4, 6, 8, 12), buckets start at local
-  wall-clock hours that are multiples of `every` within each local day in the
-  grouping zone: 00:00, 06:00, 12:00 and 18:00 for `every: 6`, also in a
-  half-hour zone such as Asia/Kolkata. A daylight-saving change makes its
-  bucket longer or shorter: both occurrences of a repeated hour fall in the
-  same bucket, and a bucket whose start hour is skipped starts at the
-  transition, as hourly floors do. Buckets always partition the timeline: in
-  the rare zone whose fall-back repeat contains a bucket boundary (the
-  two-hour repeat of Antarctica/Troll with `every: 2`), the instants after
-  the later bucket's start belong to that bucket. Other counts (5, 7, 36 …)
-  are elapsed blocks of `every` hours counted from 1970-01-01T00:00Z and
-  ignore `timeZone`, matching Pharos's own periods: 5-hour buckets in
-  Asia/Kolkata start at :30 local time, and `every: 48` hours is not two local
-  days. Use `interval: "day"` with `every` for spans of whole local days.
+- **Hours.** `every` must divide a day: 1, 2, 3, 4, 6, 8, 12 or 24. Buckets
+  start at local wall-clock hours that are multiples of `every` within each
+  local day in the grouping zone: 00:00, 06:00, 12:00 and 18:00 for
+  `every: 6`, also in a half-hour zone such as Asia/Kolkata. The restriction
+  keeps hour buckets aligned to local days, so changing `timeZone` reshapes
+  every hour count the same way. Any other count is refused (`date_grouping`
+  for a metric, `grouping` for a group key, and a diagnostic in links); use
+  `interval: "day"` with `every` for longer spans. Elapsed-hour blocks (such
+  as 5-hour periods counted from the epoch) could be added later as an explicit
+  opt-in if a host needs them; accepting more values then is
+  backward-compatible. A daylight-saving change makes its bucket longer or
+  shorter: both occurrences of a repeated hour fall in the same bucket, and a
+  bucket whose start hour is skipped starts at the transition, as hourly
+  floors do. Buckets always partition the timeline: in the rare zone whose
+  fall-back repeat contains a bucket boundary (the two-hour repeat of
+  Antarctica/Troll with `every: 2`), the instants after the later bucket's
+  start belong to that bucket.
 - **Days.** Groups of `every` local calendar dates counted from 1970-01-01
   (the local date's day number, floor-divided by `every`).
 - **Weeks.** Groups of `every` Monday weeks counted from the week of Monday
@@ -473,12 +476,14 @@ days and refuse `every` above 1 with a `date_grouping` diagnostic. Links and
 saved state leave out `every: 1`. Charts label a bucket with its range in the
 grouping zone: `Jul 04 09:00–12:00 -04:00` for hours, `Jan 01–Jan 03` for days
 and weeks (the last day included), `Apr–Jun 2026` for months and `2020–2029`
-for years. Metric settings offer an **Every** count beside Date interval,
-hidden for slots and reset to 1 when the interval changes.
+for years. Metric settings offer an **Every** count beside Date interval (a
+choice of 1, 2, 3, 4, 6, 8, 12 or 24 for hours), hidden for slots and reset to
+1 when the interval changes.
 
 `metricDateFloor(time, interval, timeZone, every)` and `metricDateNext(time,
 interval, timeZone, every)` expose the calendar; they throw a `RangeError`
-for an `every` that is not an integer 1–1,000. Go hosts use
+for an `every` that is not an integer 1–1,000, or that does not divide 24 for
+hours (`METRIC_HOUR_EVERY` lists those counts). Go hosts use
 `CalendarBucket(instant, interval, every, timeZone)`, which returns a
 bucket's start (its key) and the next bucket's start, so they can label or
 drill into buckets without reimplementing the anchors. In Go, `Every: 0` is

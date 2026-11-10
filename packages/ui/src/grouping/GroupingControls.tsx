@@ -5,6 +5,7 @@ import {
   isCalendarGroupKey,
   MAX_GROUP_BY_FIELDS,
   MAX_METRIC_DATE_EVERY,
+  METRIC_HOUR_EVERY,
   OP_LABEL,
   type CalendarGroupKey,
   type GroupKey,
@@ -125,6 +126,28 @@ function KeyEveryInput({
   onChange: (key: GroupKey) => void;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
+  const ariaLabel = `${value.interval[0]!.toUpperCase()}${value.interval.slice(1)}s per group for ${label}`;
+  if (value.interval === "hour")
+    // Hour groups divide a day, aligned to local midnight.
+    return (
+      <select
+        className="qt-group-key-every"
+        aria-label={ariaLabel}
+        title="Each group spans this many hours from each local midnight; the count divides a day"
+        value={value.every ?? 1}
+        onChange={(event) => {
+          const every = Number(event.target.value);
+          const { every: _every, ...rest } = value;
+          onChange(every > 1 ? { ...rest, every } : rest);
+        }}
+      >
+        {METRIC_HOUR_EVERY.map((n) => (
+          <option key={n} value={n}>
+            {n}
+          </option>
+        ))}
+      </select>
+    );
   const commit = () => {
     const n = Number(draft);
     if (draft !== null && draft.trim() && Number.isFinite(n)) {
@@ -141,8 +164,8 @@ function KeyEveryInput({
       min={1}
       max={MAX_METRIC_DATE_EVERY}
       step={1}
-      aria-label={`${value.interval[0]!.toUpperCase()}${value.interval.slice(1)}s per group for ${label}`}
-      title={`Each group spans this many ${value.interval}s, counted from 1970 (hours from each local midnight when they divide a day)`}
+      aria-label={ariaLabel}
+      title={`Each group spans this many ${value.interval}s, counted from 1970`}
       value={draft ?? value.every ?? 1}
       onChange={(event) => setDraft(event.currentTarget.value)}
       onBlur={commit}

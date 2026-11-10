@@ -450,6 +450,9 @@ export const tokenCases: TokenCase[] = [
           { field: "d", interval: "day", every: 2.5 },
           { field: "e", interval: "day", every: 1 },
           { field: "f", interval: "week", every: 1000, timeZone: "UTC" },
+          // Hour buckets must divide a day.
+          { field: "g", interval: "hour", every: 5 },
+          { field: "h", interval: "hour", every: 24 },
         ],
         summaries: [{ id: "n", op: "count" }],
         source: {},
@@ -460,6 +463,8 @@ export const tokenCases: TokenCase[] = [
         { id: "c", op: "count", groupBy: ["t"], dateGrouping: { field: "t", interval: "hour", every: 1, includeEmpty: false, range: "query" } },
         { id: "d", op: "count", groupBy: ["t"], dateGrouping: { field: "t", interval: "hourOfDay", every: 2, includeEmpty: false, range: "query" } },
         { id: "e", op: "count", groupBy: ["t"], dateGrouping: { field: "t", interval: "month", every: 2000, includeEmpty: false, range: "query" } },
+        { id: "f", op: "count", groupBy: ["t"], dateGrouping: { field: "t", interval: "hour", every: 5, includeEmpty: false, range: "query" } },
+        { id: "g", op: "count", groupBy: ["t"], dateGrouping: { field: "t", interval: "hour", every: 12, includeEmpty: false, range: "query" } },
       ],
     }),
   },

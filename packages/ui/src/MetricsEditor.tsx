@@ -15,6 +15,7 @@ import {
   MAX_AGGREGATIONS,
   MAX_METRIC_DATE_EVERY,
   MAX_METRIC_WINDOW_PERIODS,
+  METRIC_HOUR_EVERY,
   METRIC_FUNCTIONS,
   aggOpsForField,
   compileFormula,
@@ -1718,21 +1719,44 @@ export function MetricsEditor<Row>({
                         selected.dateGrouping.interval !== "dayOfWeek" && (
                           <label className="qt-metric-date-every">
                             Every
-                            <MetricNumberInput
-                              aria-label="Intervals per bucket"
-                              title={`Buckets of this many ${selected.dateGrouping.interval}s, counted from 1970 (hours from each local midnight when they divide a day)`}
-                              min={1}
-                              max={MAX_METRIC_DATE_EVERY}
-                              step={1}
-                              value={selected.dateGrouping.every ?? 1}
-                              onCommit={(n) => {
-                                const { every: _every, ...rest } =
-                                  selected.dateGrouping!;
-                                patch(selected.id, {
-                                  dateGrouping: n > 1 ? { ...rest, every: n } : rest,
-                                });
-                              }}
-                            />
+                            {selected.dateGrouping.interval === "hour" ? (
+                              // Hour buckets divide a day, aligned to local midnight.
+                              <select
+                                aria-label="Intervals per bucket"
+                                title="Buckets of this many hours from each local midnight; the count divides a day"
+                                value={selected.dateGrouping.every ?? 1}
+                                onChange={(e) => {
+                                  const n = Number(e.target.value);
+                                  const { every: _every, ...rest } =
+                                    selected.dateGrouping!;
+                                  patch(selected.id, {
+                                    dateGrouping: n > 1 ? { ...rest, every: n } : rest,
+                                  });
+                                }}
+                              >
+                                {METRIC_HOUR_EVERY.map((n) => (
+                                  <option key={n} value={n}>
+                                    {n}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <MetricNumberInput
+                                aria-label="Intervals per bucket"
+                                title={`Buckets of this many ${selected.dateGrouping.interval}s, counted from 1970`}
+                                min={1}
+                                max={MAX_METRIC_DATE_EVERY}
+                                step={1}
+                                value={selected.dateGrouping.every ?? 1}
+                                onCommit={(n) => {
+                                  const { every: _every, ...rest } =
+                                    selected.dateGrouping!;
+                                  patch(selected.id, {
+                                    dateGrouping: n > 1 ? { ...rest, every: n } : rest,
+                                  });
+                                }}
+                              />
+                            )}
                             <span aria-hidden="true">
                               {selected.dateGrouping.interval}
                               {(selected.dateGrouping.every ?? 1) > 1 ? "s" : ""}

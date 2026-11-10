@@ -21,7 +21,7 @@ import {
   isCalendarGroupKey,
   type GroupKey,
 } from "./groupKeys";
-import { isGroupingTimeZone, isMetricCycle, isMetricDateEvery } from "./metricDates";
+import { isGroupingTimeZone, isMetricCycle, metricDateEveryProblem } from "./metricDates";
 import { fillUrlTemplate, templateFields, urlTemplateProblem } from "./itemPage";
 import type { QueryPatch } from "./queryPatch";
 import { type QueryEvaluationOptions } from "./relativeTime";
@@ -842,10 +842,9 @@ export function createGroupingModel<InputRow>(
         throw new Error(
           `Group key ${field.label}: choose an hour, day, week, month or year interval.`,
         );
-      if (!isMetricDateEvery(key.every))
-        throw new Error(
-          `Group key ${field.label}: every is a whole number of intervals, 1–1,000.`,
-        );
+      const everyProblem = metricDateEveryProblem(key.every, key.interval);
+      if (everyProblem)
+        throw new Error(`Group key ${field.label}: ${everyProblem}`);
       if (field.type !== "datetime")
         throw new Error(
           `Group key ${field.label}: a calendar interval needs a datetime field.`,

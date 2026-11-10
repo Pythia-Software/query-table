@@ -357,7 +357,15 @@ it("picks a calendar interval for a datetime group key and shows it on the chip"
     interval.dispatchEvent(new Event("change", { bubbles: true }));
   });
   expect(api.query.grouping!.keys[0]).not.toHaveProperty("every");
-  expect(every("Hours").value).toBe("1");
+  // Hours offer only counts that divide a day.
+  const hours = container.querySelector<HTMLSelectElement>('select[aria-label="Hours per group for At"]')!;
+  expect([...hours.options].map((o) => o.value)).toEqual(["1", "2", "3", "4", "6", "8", "12", "24"]);
+  await act(async () => {
+    hours.value = "6";
+    hours.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  expect(api.query.grouping!.keys[0]).toMatchObject({ interval: "hour", every: 6 });
+  expect(container.querySelector(".qt-group-key-interval")?.textContent).toContain("by 6 hours");
   const exact = container.querySelector<HTMLSelectElement>('select[aria-label="Interval for At"]')!;
   await act(async () => {
     exact.value = "";

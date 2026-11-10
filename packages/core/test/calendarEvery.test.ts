@@ -54,7 +54,10 @@ const run = (data: Row[], c: AggregationClause, query: Partial<QueryState> = {},
 const pairs = (result: AggregationResultEntry) => result.buckets.map((b) => [...b.keys, b.count]);
 const iso = (time: number) => new Date(time).toISOString();
 type EveryCase = { name: string; zone: string; interval: "hour" | "day" | "week" | "month" | "year"; every: number; at: string; floor: string; next: string };
-const fixture = JSON.parse(readFileSync(new URL("../../../schema/fixtures/calendar-every.json", import.meta.url), "utf8")) as { cases: EveryCase[] };
+const fixture = JSON.parse(readFileSync(new URL("../../../schema/fixtures/calendar-every.json", import.meta.url), "utf8")) as {
+  cases: EveryCase[];
+  rejected: { interval: EveryCase["interval"]; every: number }[];
+};
 
 describe("calendar buckets of several intervals", () => {
   // Shared with backends/go/calendar_every_test.go.
@@ -68,7 +71,7 @@ describe("calendar buckets of several intervals", () => {
 
   it("tiles the timeline: each bucket's next start is the following floor", () => {
     for (const zone of ["America/New_York", "Asia/Kolkata", "Australia/Lord_Howe", "Antarctica/Troll", "UTC"])
-      for (const [interval, every] of [["hour", 2], ["hour", 3], ["hour", 5], ["hour", 12], ["day", 3], ["week", 2], ["month", 3]] as const)
+      for (const [interval, every] of [["hour", 2], ["hour", 3], ["hour", 8], ["hour", 12], ["hour", 24], ["day", 3], ["week", 2], ["month", 3]] as const)
         // Around both DST changes in New York, Lord Howe and Troll (a two-hour shift).
         for (const from of ["2026-03-07", "2026-03-27", "2026-04-03", "2026-10-02", "2026-10-24", "2026-10-31"]) {
           const span = Date.parse(`${from}T00:00:00Z`) + 3 * 86_400_000;
@@ -79,7 +82,7 @@ describe("calendar buckets of several intervals", () => {
             expect(metricDateFloor(end, interval, zone, every)).toBe(end);
           }
         }
-  });
+  }, 60_000); // Thousands of zoned conversions; the shared machine is slow.
 
   it("keys rows by bucket start and fills empty buckets of the range", () => {
     const data = rows(["2026-03-08T06:30:00Z", "2026-03-08T07:30:00Z", "2026-03-08T08:15:00Z", "2026-03-08T13:00:00Z", null]);
@@ -165,8 +168,17 @@ describe("calendar buckets of several intervals", () => {
 
   it("validates every and refuses it for cycles", () => {
     const message = (c: AggregationClause) => validateMetric(c, schema)[0]?.message;
-    expect(message(clause({ every: 1000 }))).toBeUndefined();
-    for (const every of [0, 1001, 1.5]) expect(message(clause({ every }))).toMatch(/1–1,000/);
+    expect(message(clause({ interval: "day", every: 1000 }))).toBeUndefined();
+    for (const every of [0, 1001, 1.5]) expect(message(clause({ interval: "day", every }))).toMatch(/1–1,000/);
+    // Hour buckets stay aligned to local days: every divides 24.
+    for (const every of [1, 2, 3, 4, 6, 8, 12, 24]) expect(message(clause({ every }))).toBeUndefined();
+    for (const every of [5, 7, 9, 36, 48])
+      expect(message(clause({ every }))).toBe("Hour buckets must divide a day: every is 1, 2, 3, 4, 6, 8, 12 or 24 hours.");
+    // Shared with the Go engine.
+    for (const { interval, every } of fixture.rejected) {
+      expect(message(clause({ interval, every })), `${interval} ${every}`).toBeDefined();
+      expect(() => metricDateFloor(0, interval, "UTC", every)).toThrow(RangeError);
+    }
     // The exported calendar refuses them too, rather than computing nonsense.
     for (const every of [0, -2, 2.5, 1001]) {
       expect(() => metricDateFloor(0, "day", "UTC", every)).toThrow(RangeError);
@@ -240,6 +252,16 @@ describe("calendar group keys of several intervals", () => {
       { field: "at", interval: "week" },
     ]);
     expect(normalizeQueryState(grouped({ field: "at", interval: "week", every: 0 })).grouping?.diagnostics?.[0]).toMatch(/every 1–1000/);
+    // Hour groups must divide a day.
+    expect(normalizeQueryState(grouped({ field: "at", interval: "hour", every: 5 })).grouping?.diagnostics?.[0]).toMatch(
+      /1, 2, 3, 4, 6, 8, 12 or 24 for hours/,
+    );
+    expect(normalizeQueryState(grouped({ field: "at", interval: "hour", every: 24 })).grouping?.keys).toEqual([
+      { field: "at", interval: "hour", every: 24 },
+    ]);
+    expect(() => createGroupingModel(schema).validate({ keys: [{ field: "at", interval: "hour", every: 5 }], summaries: [], representative: null })).toThrow(
+      "Group key At: Hour buckets must divide a day: every is 1, 2, 3, 4, 6, 8, 12 or 24 hours.",
+    );
   });
 
   it("needs a server that executes buckets of several intervals", () => {

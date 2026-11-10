@@ -8,11 +8,12 @@
   means 1) on a metric's `dateGrouping` and on calendar group keys, for 3-, 6-
   or 12-hour periods, N-day buckets, fortnights, quarters and so on. Buckets
   are keyed by their start and anchored independently of the query range:
-  hours dividing 24 start at local multiples of `every` within each local day
-  (a DST change lengthens or shortens its bucket; both occurrences of a
-  repeated hour share one; buckets always partition the timeline), other hour
-  counts are elapsed blocks from 1970-01-01T00:00Z that ignore the zone, days
-  count local dates from 1970-01-01, weeks from Monday 1969-12-29, months from
+  hours accept only counts dividing a day (1, 2, 3, 4, 6, 8, 12 or 24, so
+  buckets stay aligned to local days; elapsed-hour blocks could be an opt-in
+  later) and start at local multiples of `every` within each local day (a DST
+  change lengthens or shortens its bucket; both occurrences of a repeated hour
+  share one; buckets always partition the timeline), days count local dates
+  from 1970-01-01, weeks from Monday 1969-12-29, months from
   January 1970 and years from 1970. `includeEmpty`,
   query/observed/custom ranges, `partialIntervals: "exclude"`, windows (which
   count buckets) and drilldown (`[start, next)`) work on whole buckets.
@@ -24,11 +25,13 @@
   `capability_unsupported` diagnostic without it. Links and saved state
   round-trip `every` in TypeScript and Go and leave out `every: 1`.
   `metricDateFloor` and `metricDateNext` take `every` as an optional fourth
-  argument (a `RangeError` unless it is an integer 1–1,000), and Go hosts get
+  argument (a `RangeError` unless it is an integer 1–1,000 that divides 24 for
+  hours; `METRIC_HOUR_EVERY` lists those), and Go hosts get
   `CalendarBucket` for a bucket's start and end. Go refuses an explicit
   `"every": 0` on the wire. The metric editor offers an **Every** count beside
-  Date interval and the grouping key chip a small number input, both hidden for
-  slots and reset to 1 when the interval changes; charts label hour buckets
+  Date interval and the grouping key chip a small count control (the divisors
+  of 24 for hours), both hidden for slots and reset to 1 when the interval
+  changes; charts label hour buckets
   "Jul 04 09:00–12:00 -04:00" (both offsets across a DST change) and day
   buckets "Jan 01–Jan 03". See
   [Buckets of several intervals](docs/metrics.md#buckets-of-several-intervals).

@@ -437,7 +437,7 @@ describe("DuckDB native conformance", () => {
   it("fills buckets of several intervals like the local executor", async () => {
     for (const [interval, every, timeZone] of [
       ["hour", 6, "Asia/Kolkata"],
-      ["hour", 5, "America/New_York"],
+      ["hour", 8, "America/New_York"],
       ["day", 2, "America/New_York"],
       ["week", 2, "UTC"],
       ["month", 3, "America/Denver"],
@@ -456,6 +456,19 @@ describe("DuckDB native conformance", () => {
         evaluateMetrics(rows, query, schema, { now: Date.parse("2025-01-04T00:00:00Z") }).metrics[0]!.buckets,
       );
     }
+    // Hour buckets must divide a day, even in a request built by hand.
+    const request = (input: Parameters<typeof normalizeQueryState>[0]) =>
+      toQueryRequestV3(normalizeQueryState(input), schema, backend.capabilities, undefined, { now: Date.parse("2025-01-04T00:00:00Z") });
+    const metricRequest = request({
+      aggregations: [metric("COUNT()", { groupBy: ["date"], dateGrouping: { field: "date", interval: "hour", every: 6, includeEmpty: false, range: "query" } })],
+    });
+    metricRequest.metrics[0]!.dateGrouping!.every = 5;
+    expect((await backend.execute(metricRequest)).metrics[0]?.error).toMatch(/every is 1, 2, 3, 4, 6, 8, 12 or 24 hours/);
+    const keyRequest = request({
+      grouping: { source: normalizeQueryState({}), keys: [{ field: "date", interval: "hour", every: 6 }], summaries: [{ id: "n", op: "count" }], representative: null },
+    });
+    keyRequest.grouping!.keys = [{ field: "date", interval: "hour", every: 5 }];
+    await expect(backend.execute(keyRequest)).rejects.toThrow(/every is 1, 2, 3, 4, 6, 8, 12 or 24 hours/);
   });
   it("supports autocomplete, array suggestions and full item lookup", async () => {
     const transport = backend.transport();

@@ -631,12 +631,12 @@ function normalizeGroupingState(value: unknown, links: boolean): GroupingState {
     if (!isRecord(key)) continue;
     // A calendar key: the timezone's validity is checked with the schema.
     const field = boundedString(key.field, MAX_FIELD_NAME_LENGTH), zone = key.timeZone, every = key.every;
-    if (field && GROUP_KEY_INTERVALS.includes(key.interval as never) && isMetricDateEvery(every) &&
+    if (field && GROUP_KEY_INTERVALS.includes(key.interval as never) && isMetricDateEvery(every, key.interval as string) &&
       (zone === undefined || (typeof zone === "string" && zone.length > 0 && zone.length <= 80 && !/^[+-]/.test(zone))))
       // One interval per bucket is the default and is left out.
       keys.push({ field, interval: key.interval as CalendarGroupKey["interval"], ...(every !== undefined && every !== 1 ? { every: every as number } : {}),
         ...(zone !== undefined ? { timeZone: zone as string } : {}) });
-    else fail(`key ${index + 1} must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.`);
+    else fail(`key ${index + 1} must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.`);
   }
   const keyNames = groupKeyFields(keys);
   if (!Array.isArray(raw.keys) || !keys.length || keys.length !== raw.keys.length || new Set(keyNames).size !== keys.length)

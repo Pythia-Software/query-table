@@ -2,7 +2,9 @@ package postgrestests
 
 import (
 	"context"
+	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	qt "github.com/Pythia-Software/query-table/backends/go"
@@ -21,7 +23,7 @@ func TestPostgresCalendarGroupKeys(t *testing.T) {
 	for _, c := range []struct {
 		interval, zone string
 		every          int
-	}{{"day", "America/Denver", 0}, {"hour", "", 0}, {"week", "Asia/Kolkata", 0}, {"hour", "America/Denver", 3}, {"hour", "Asia/Kolkata", 5}, {"day", "America/Denver", 2}, {"month", "America/Denver", 3}} {
+	}{{"day", "America/Denver", 0}, {"hour", "", 0}, {"week", "Asia/Kolkata", 0}, {"hour", "America/Denver", 3}, {"hour", "Asia/Kolkata", 8}, {"day", "America/Denver", 2}, {"month", "America/Denver", 3}} {
 		q := groupedQuery()
 		q.Grouping.Keys = []string{"at", "k"}
 		q.Grouping.KeyIntervals = map[string]qt.GroupKeyInterval{"at": {Interval: c.interval, Every: c.every, TimeZone: c.zone}}
@@ -98,5 +100,24 @@ func TestPostgresCalendarEveryFillsQueryRange(t *testing.T) {
 		{"2026-03-09T00:00:00.000Z", int64(0)}, {"2026-03-09T03:00:00.000Z", int64(1)}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("buckets %v, want %v", got, want)
+	}
+}
+
+// Hour buckets must divide a day, for metrics and group keys.
+func TestPostgresCalendarEveryRejectsHoursNotDividingADay(t *testing.T) {
+	db, d := fixture(t)
+	metric := qt.QueryRequestV3{Version: 3, Profile: qt.ServerExpressionProfile, Result: qt.WireQuery{Select: []string{"id"}, Limit: 10},
+		Metrics: []qt.AggSpec{{ID: "m", Op: "count", GroupBy: []string{"at"}, DateGrouping: &qt.MetricDateGrouping{Field: "at", Interval: "hour", Every: 5, Range: "query"}}}}
+	if result, err := d.Execute(context.Background(), db, metric, qt.PlanOptions{}); err != nil || result.Metrics[0].ErrorCode != qt.ErrorCodeDateGrouping || !strings.Contains(result.Metrics[0].Error, "every is 1, 2, 3, 4, 6, 8, 12 or 24 hours") {
+		t.Fatalf("metric every 5 hours: %+v %v", result.Metrics, err)
+	}
+	q := groupedQuery()
+	q.Grouping.Keys = []string{"at"}
+	q.Grouping.KeyIntervals = map[string]qt.GroupKeyInterval{"at": {Interval: "hour", Every: 5}}
+	q.Grouping.Summaries = []qt.SummaryColumn{{ID: "num", Op: "count"}}
+	q.Result = qt.WireQuery{Select: []string{"at", "num"}, Limit: 10}
+	var diag *qt.PlanDiagnostic
+	if _, err := d.Execute(context.Background(), db, q, qt.PlanOptions{}); !errors.As(err, &diag) || diag.Code != qt.ErrorCodeGrouping {
+		t.Fatalf("group key every 5 hours: %v", err)
 	}
 }

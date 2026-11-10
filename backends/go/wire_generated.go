@@ -27,8 +27,8 @@ type MetricDateGrouping struct {
 	Field    string `json:"field"`
 	Interval string `json:"interval"`
 	// Calendar intervals only: buckets of this many intervals, anchored as
-	// CalendarGroupKey.every describes; omitted is 1. Cycles refuse values above
-	// 1.
+	// CalendarGroupKey.every describes; omitted is 1. Hours accept only 1, 2, 3,
+	// 4, 6, 8, 12 or 24; cycles refuse values above 1.
 	Every int `json:"every,omitempty"`
 	// IANA identifier; omitted is UTC.
 	TimeZone string `json:"timeZone,omitempty"`
@@ -99,11 +99,10 @@ type AggSpec struct {
 type CalendarGroupKey struct {
 	Field    string `json:"field"`
 	Interval string `json:"interval"`
-	// Buckets of this many intervals; omitted is 1. Anchors are fixed: hours
-	// dividing 24 start at local multiples of every within each day (other counts
-	// are elapsed blocks from 1970-01-01T00:00Z, whatever the timeZone), days
-	// count local dates from 1970-01-01, weeks from Monday 1969-12-29, months from
-	// January 1970 and years from 1970.
+	// Buckets of this many intervals; omitted is 1. Anchors are fixed: hours must
+	// divide a day (1, 2, 3, 4, 6, 8, 12 or 24) and start at local multiples of
+	// every within each day, days count local dates from 1970-01-01, weeks from
+	// Monday 1969-12-29, months from January 1970 and years from 1970.
 	Every int `json:"every,omitempty"`
 	// IANA identifier; omitted is UTC.
 	TimeZone string `json:"timeZone,omitempty"`

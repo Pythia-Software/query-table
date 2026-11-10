@@ -27,6 +27,9 @@ func calendarLocation(config MetricDateGrouping) (*time.Location, error) {
 	if config.Every < 0 || config.Every > MaxCalendarEvery {
 		return nil, diagnostic(ErrorCodeDateGrouping, "every is a whole number of intervals, 1-1000")
 	}
+	if config.Interval == "hour" && config.Every > 1 && !calendarHourEvery(config.Every) {
+		return nil, diagnostic(ErrorCodeDateGrouping, calendarHourEveryMessage)
+	}
 	if config.Every > 1 && calendarCycle(config.Interval) {
 		return nil, diagnostic(ErrorCodeDateGrouping, "hour-of-day and day-of-week slots are single hours or days: every applies to calendar intervals")
 	}
@@ -208,11 +211,15 @@ func floorMultiple(value, step int64) int64 {
 	return q * step
 }
 
-// calendarElapsedHours reports whether hourly buckets of every hours are
-// elapsed blocks from 1970-01-01T00:00Z: counts that do not divide a day.
-func calendarElapsedHours(interval string, every int) bool {
-	return interval == "hour" && 24%every != 0
+// calendarHourEvery reports whether every hours divide a day (1, 2, 3, 4, 6,
+// 8, 12 or 24), the hour counts Every accepts, so hour buckets stay aligned to
+// local days. Elapsed-hour blocks could be added later as an explicit opt-in.
+func calendarHourEvery(every int) bool {
+	return every >= 1 && 24%every == 0
 }
+
+// calendarHourEveryMessage names the hour counts Every accepts.
+const calendarHourEveryMessage = "hour buckets must divide a day: every is 1, 2, 3, 4, 6, 8, 12 or 24 hours"
 
 // calendarEveryWall is the local wall start (as a UTC wall time) of the
 // bucket of every intervals holding instant, moved by ahead buckets. Anchors
@@ -244,9 +251,6 @@ func calendarEveryWall(instant time.Time, interval string, every, ahead int, loc
 
 // calendarEveryAfter is the start of the bucket after the one starting at start.
 func calendarEveryAfter(start time.Time, interval string, every int, loc *time.Location) (time.Time, error) {
-	if calendarElapsedHours(interval, every) {
-		return start.Add(time.Duration(every) * time.Hour).UTC(), nil
-	}
 	next, err := calendarWall(calendarEveryWall(start, interval, every, 1, loc), loc, false)
 	return next.UTC(), err
 }
@@ -260,10 +264,6 @@ func calendarEveryAfter(start time.Time, interval string, every int, loc *time.L
 func calendarFloorEvery(instant time.Time, interval string, every int, loc *time.Location) (time.Time, error) {
 	if every <= 1 || calendarCycle(interval) {
 		return calendarFloor(instant, interval, loc)
-	}
-	if calendarElapsedHours(interval, every) {
-		block := int64(every) * 3600
-		return time.Unix(floorMultiple(instant.Unix(), block), 0).UTC(), nil
 	}
 	start, err := calendarWall(calendarEveryWall(instant, interval, every, 0, loc), loc, false)
 	if err != nil {

@@ -6867,7 +6867,7 @@
     },
     {
       "name": "unnormalized calendar every",
-      "token": "2j.eyJiIjp7ImtleXMiOlt7ImZpZWxkIjoiYSIsImludGVydmFsIjoiZGF5IiwiZXZlcnkiOjB9LHsiZmllbGQiOiJiIiwiaW50ZXJ2YWwiOiJkYXkiLCJldmVyeSI6MTAwMX0seyJmaWVsZCI6ImMiLCJpbnRlcnZhbCI6ImRheSIsImV2ZXJ5IjoiMiJ9LHsiZmllbGQiOiJkIiwiaW50ZXJ2YWwiOiJkYXkiLCJldmVyeSI6Mi41fSx7ImZpZWxkIjoiZSIsImludGVydmFsIjoiZGF5IiwiZXZlcnkiOjF9LHsiZmllbGQiOiJmIiwiaW50ZXJ2YWwiOiJ3ZWVrIiwiZXZlcnkiOjEwMDAsInRpbWVab25lIjoiVVRDIn1dLCJzdW1tYXJpZXMiOlt7ImlkIjoibiIsIm9wIjoiY291bnQifV0sInNvdXJjZSI6e319LCJnIjpbeyJpZCI6ImEiLCJvcCI6ImNvdW50IiwiZ3JvdXBCeSI6WyJ0Il0sImRhdGVHcm91cGluZyI6eyJmaWVsZCI6InQiLCJpbnRlcnZhbCI6ImhvdXIiLCJldmVyeSI6MCwiaW5jbHVkZUVtcHR5IjpmYWxzZSwicmFuZ2UiOiJxdWVyeSJ9fSx7ImlkIjoiYiIsIm9wIjoiY291bnQiLCJncm91cEJ5IjpbInQiXSwiZGF0ZUdyb3VwaW5nIjp7ImZpZWxkIjoidCIsImludGVydmFsIjoiaG91ciIsImV2ZXJ5IjoiMyIsImluY2x1ZGVFbXB0eSI6ZmFsc2UsInJhbmdlIjoicXVlcnkifX0seyJpZCI6ImMiLCJvcCI6ImNvdW50IiwiZ3JvdXBCeSI6WyJ0Il0sImRhdGVHcm91cGluZyI6eyJmaWVsZCI6InQiLCJpbnRlcnZhbCI6ImhvdXIiLCJldmVyeSI6MSwiaW5jbHVkZUVtcHR5IjpmYWxzZSwicmFuZ2UiOiJxdWVyeSJ9fSx7ImlkIjoiZCIsIm9wIjoiY291bnQiLCJncm91cEJ5IjpbInQiXSwiZGF0ZUdyb3VwaW5nIjp7ImZpZWxkIjoidCIsImludGVydmFsIjoiaG91ck9mRGF5IiwiZXZlcnkiOjIsImluY2x1ZGVFbXB0eSI6ZmFsc2UsInJhbmdlIjoicXVlcnkifX0seyJpZCI6ImUiLCJvcCI6ImNvdW50IiwiZ3JvdXBCeSI6WyJ0Il0sImRhdGVHcm91cGluZyI6eyJmaWVsZCI6InQiLCJpbnRlcnZhbCI6Im1vbnRoIiwiZXZlcnkiOjIwMDAsImluY2x1ZGVFbXB0eSI6ZmFsc2UsInJhbmdlIjoicXVlcnkifX1dfQ",
+      "token": "2j.eyJiIjp7ImtleXMiOlt7ImZpZWxkIjoiYSIsImludGVydmFsIjoiZGF5IiwiZXZlcnkiOjB9LHsiZmllbGQiOiJiIiwiaW50ZXJ2YWwiOiJkYXkiLCJldmVyeSI6MTAwMX0seyJmaWVsZCI6ImMiLCJpbnRlcnZhbCI6ImRheSIsImV2ZXJ5IjoiMiJ9LHsiZmllbGQiOiJkIiwiaW50ZXJ2YWwiOiJkYXkiLCJldmVyeSI6Mi41fSx7ImZpZWxkIjoiZSIsImludGVydmFsIjoiZGF5IiwiZXZlcnkiOjF9LHsiZmllbGQiOiJmIiwiaW50ZXJ2YWwiOiJ3ZWVrIiwiZXZlcnkiOjEwMDAsInRpbWVab25lIjoiVVRDIn0seyJmaWVsZCI6ImciLCJpbnRlcnZhbCI6ImhvdXIiLCJldmVyeSI6NX0seyJmaWVsZCI6ImgiLCJpbnRlcnZhbCI6ImhvdXIiLCJldmVyeSI6MjR9XSwic3VtbWFyaWVzIjpbeyJpZCI6Im4iLCJvcCI6ImNvdW50In1dLCJzb3VyY2UiOnt9fSwiZyI6W3siaWQiOiJhIiwib3AiOiJjb3VudCIsImdyb3VwQnkiOlsidCJdLCJkYXRlR3JvdXBpbmciOnsiZmllbGQiOiJ0IiwiaW50ZXJ2YWwiOiJob3VyIiwiZXZlcnkiOjAsImluY2x1ZGVFbXB0eSI6ZmFsc2UsInJhbmdlIjoicXVlcnkifX0seyJpZCI6ImIiLCJvcCI6ImNvdW50IiwiZ3JvdXBCeSI6WyJ0Il0sImRhdGVHcm91cGluZyI6eyJmaWVsZCI6InQiLCJpbnRlcnZhbCI6ImhvdXIiLCJldmVyeSI6IjMiLCJpbmNsdWRlRW1wdHkiOmZhbHNlLCJyYW5nZSI6InF1ZXJ5In19LHsiaWQiOiJjIiwib3AiOiJjb3VudCIsImdyb3VwQnkiOlsidCJdLCJkYXRlR3JvdXBpbmciOnsiZmllbGQiOiJ0IiwiaW50ZXJ2YWwiOiJob3VyIiwiZXZlcnkiOjEsImluY2x1ZGVFbXB0eSI6ZmFsc2UsInJhbmdlIjoicXVlcnkifX0seyJpZCI6ImQiLCJvcCI6ImNvdW50IiwiZ3JvdXBCeSI6WyJ0Il0sImRhdGVHcm91cGluZyI6eyJmaWVsZCI6InQiLCJpbnRlcnZhbCI6ImhvdXJPZkRheSIsImV2ZXJ5IjoyLCJpbmNsdWRlRW1wdHkiOmZhbHNlLCJyYW5nZSI6InF1ZXJ5In19LHsiaWQiOiJlIiwib3AiOiJjb3VudCIsImdyb3VwQnkiOlsidCJdLCJkYXRlR3JvdXBpbmciOnsiZmllbGQiOiJ0IiwiaW50ZXJ2YWwiOiJtb250aCIsImV2ZXJ5IjoyMDAwLCJpbmNsdWRlRW1wdHkiOmZhbHNlLCJyYW5nZSI6InF1ZXJ5In19LHsiaWQiOiJmIiwib3AiOiJjb3VudCIsImdyb3VwQnkiOlsidCJdLCJkYXRlR3JvdXBpbmciOnsiZmllbGQiOiJ0IiwiaW50ZXJ2YWwiOiJob3VyIiwiZXZlcnkiOjUsImluY2x1ZGVFbXB0eSI6ZmFsc2UsInJhbmdlIjoicXVlcnkifX0seyJpZCI6ImciLCJvcCI6ImNvdW50IiwiZ3JvdXBCeSI6WyJ0Il0sImRhdGVHcm91cGluZyI6eyJmaWVsZCI6InQiLCJpbnRlcnZhbCI6ImhvdXIiLCJldmVyeSI6MTIsImluY2x1ZGVFbXB0eSI6ZmFsc2UsInJhbmdlIjoicXVlcnkifX1dfQ",
       "normalized": {
         "select": [],
         "where": [],
@@ -6885,6 +6885,11 @@
               "interval": "week",
               "every": 1000,
               "timeZone": "UTC"
+            },
+            {
+              "field": "h",
+              "interval": "hour",
+              "every": 24
             }
           ],
           "summaries": [
@@ -6902,10 +6907,11 @@
             "offset": 0
           },
           "diagnostics": [
-            "Invalid grouping: key 1 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.",
-            "Invalid grouping: key 2 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.",
-            "Invalid grouping: key 3 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.",
-            "Invalid grouping: key 4 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.",
+            "Invalid grouping: key 1 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.",
+            "Invalid grouping: key 2 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.",
+            "Invalid grouping: key 3 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.",
+            "Invalid grouping: key 4 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.",
+            "Invalid grouping: key 7 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.",
             "Invalid grouping: keys must list 1–20 distinct field names."
           ]
         },
@@ -6982,10 +6988,40 @@
               "includeEmpty": false,
               "range": "query"
             }
+          },
+          {
+            "id": "f",
+            "op": "count",
+            "groupBy": [
+              "t"
+            ],
+            "dateGrouping": {
+              "field": "t",
+              "interval": "hour",
+              "includeEmpty": false,
+              "range": "query"
+            },
+            "diagnostics": [
+              "Invalid metric every."
+            ]
+          },
+          {
+            "id": "g",
+            "op": "count",
+            "groupBy": [
+              "t"
+            ],
+            "dateGrouping": {
+              "field": "t",
+              "interval": "hour",
+              "every": 12,
+              "includeEmpty": false,
+              "range": "query"
+            }
           }
         ]
       },
-      "packed": "{\"g\":[{\"id\":\"a\",\"op\":\"count\",\"groupBy\":[\"t\"],\"dateGrouping\":{\"field\":\"t\",\"interval\":\"hour\",\"includeEmpty\":false,\"range\":\"query\"},\"diagnostics\":[\"Invalid metric every.\"]},{\"id\":\"b\",\"op\":\"count\",\"groupBy\":[\"t\"],\"dateGrouping\":{\"field\":\"t\",\"interval\":\"hour\",\"includeEmpty\":false,\"range\":\"query\"},\"diagnostics\":[\"Invalid metric every.\"]},{\"id\":\"c\",\"op\":\"count\",\"groupBy\":[\"t\"],\"dateGrouping\":{\"field\":\"t\",\"interval\":\"hour\",\"includeEmpty\":false,\"range\":\"query\"}},{\"id\":\"d\",\"op\":\"count\",\"groupBy\":[\"t\"],\"dateGrouping\":{\"field\":\"t\",\"interval\":\"hourOfDay\",\"every\":2,\"includeEmpty\":false,\"range\":\"query\"}},{\"id\":\"e\",\"op\":\"count\",\"groupBy\":[\"t\"],\"dateGrouping\":{\"field\":\"t\",\"interval\":\"month\",\"every\":2000,\"includeEmpty\":false,\"range\":\"query\"}}],\"b\":{\"keys\":[{\"field\":\"e\",\"interval\":\"day\"},{\"field\":\"f\",\"interval\":\"week\",\"every\":1000,\"timeZone\":\"UTC\"}],\"summaries\":[{\"id\":\"n\",\"op\":\"count\"}],\"representative\":null,\"source\":{\"select\":[],\"where\":[],\"orderBy\":[],\"limit\":100,\"offset\":0},\"diagnostics\":[\"Invalid grouping: key 1 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 2 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 3 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 4 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: keys must list 1–20 distinct field names.\"]}}"
+      "packed": "{\"g\":[{\"id\":\"a\",\"op\":\"count\",\"groupBy\":[\"t\"],\"dateGrouping\":{\"field\":\"t\",\"interval\":\"hour\",\"includeEmpty\":false,\"range\":\"query\"},\"diagnostics\":[\"Invalid metric every.\"]},{\"id\":\"b\",\"op\":\"count\",\"groupBy\":[\"t\"],\"dateGrouping\":{\"field\":\"t\",\"interval\":\"hour\",\"includeEmpty\":false,\"range\":\"query\"},\"diagnostics\":[\"Invalid metric every.\"]},{\"id\":\"c\",\"op\":\"count\",\"groupBy\":[\"t\"],\"dateGrouping\":{\"field\":\"t\",\"interval\":\"hour\",\"includeEmpty\":false,\"range\":\"query\"}},{\"id\":\"d\",\"op\":\"count\",\"groupBy\":[\"t\"],\"dateGrouping\":{\"field\":\"t\",\"interval\":\"hourOfDay\",\"every\":2,\"includeEmpty\":false,\"range\":\"query\"}},{\"id\":\"e\",\"op\":\"count\",\"groupBy\":[\"t\"],\"dateGrouping\":{\"field\":\"t\",\"interval\":\"month\",\"every\":2000,\"includeEmpty\":false,\"range\":\"query\"}},{\"id\":\"f\",\"op\":\"count\",\"groupBy\":[\"t\"],\"dateGrouping\":{\"field\":\"t\",\"interval\":\"hour\",\"includeEmpty\":false,\"range\":\"query\"},\"diagnostics\":[\"Invalid metric every.\"]},{\"id\":\"g\",\"op\":\"count\",\"groupBy\":[\"t\"],\"dateGrouping\":{\"field\":\"t\",\"interval\":\"hour\",\"every\":12,\"includeEmpty\":false,\"range\":\"query\"}}],\"b\":{\"keys\":[{\"field\":\"e\",\"interval\":\"day\"},{\"field\":\"f\",\"interval\":\"week\",\"every\":1000,\"timeZone\":\"UTC\"},{\"field\":\"h\",\"interval\":\"hour\",\"every\":24}],\"summaries\":[{\"id\":\"n\",\"op\":\"count\"}],\"representative\":null,\"source\":{\"select\":[],\"where\":[],\"orderBy\":[],\"limit\":100,\"offset\":0},\"diagnostics\":[\"Invalid grouping: key 1 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 2 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 3 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 4 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 7 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: keys must list 1–20 distinct field names.\"]}}"
     },
     {
       "name": "unnormalized calendar group keys",
@@ -7031,18 +7067,18 @@
             "offset": 0
           },
           "diagnostics": [
-            "Invalid grouping: key 2 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.",
-            "Invalid grouping: key 3 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.",
-            "Invalid grouping: key 4 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.",
-            "Invalid grouping: key 5 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.",
-            "Invalid grouping: key 6 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.",
+            "Invalid grouping: key 2 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.",
+            "Invalid grouping: key 3 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.",
+            "Invalid grouping: key 4 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.",
+            "Invalid grouping: key 5 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.",
+            "Invalid grouping: key 6 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.",
             "Invalid grouping: keys must list 1–20 distinct field names.",
             "Invalid grouping: summary \"a\" uses the same id as group key \"a\"; summary ids must differ from source field names.",
             "Invalid grouping: summary \"f\" uses the same id as group key \"f\"; summary ids must differ from source field names."
           ]
         }
       },
-      "packed": "{\"b\":{\"keys\":[{\"field\":\"a\",\"interval\":\"week\",\"timeZone\":\"Europe/Berlin\"},{\"field\":\"a\",\"interval\":\"month\"},{\"field\":\"f\",\"interval\":\"year\"}],\"summaries\":[{\"id\":\"a\",\"op\":\"count\"},{\"id\":\"f\",\"op\":\"count\"}],\"representative\":null,\"source\":{\"select\":[],\"where\":[],\"orderBy\":[],\"limit\":100,\"offset\":0},\"diagnostics\":[\"Invalid grouping: keys must list 1–20 distinct field names.\",\"Invalid grouping: summary \\\"a\\\" uses the same id as group key \\\"a\\\"; summary ids must differ from source field names.\",\"Invalid grouping: summary \\\"f\\\" uses the same id as group key \\\"f\\\"; summary ids must differ from source field names.\",\"Invalid grouping: key 2 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 3 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 4 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 5 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 6 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.\"]}}"
+      "packed": "{\"b\":{\"keys\":[{\"field\":\"a\",\"interval\":\"week\",\"timeZone\":\"Europe/Berlin\"},{\"field\":\"a\",\"interval\":\"month\"},{\"field\":\"f\",\"interval\":\"year\"}],\"summaries\":[{\"id\":\"a\",\"op\":\"count\"},{\"id\":\"f\",\"op\":\"count\"}],\"representative\":null,\"source\":{\"select\":[],\"where\":[],\"orderBy\":[],\"limit\":100,\"offset\":0},\"diagnostics\":[\"Invalid grouping: keys must list 1–20 distinct field names.\",\"Invalid grouping: summary \\\"a\\\" uses the same id as group key \\\"a\\\"; summary ids must differ from source field names.\",\"Invalid grouping: summary \\\"f\\\" uses the same id as group key \\\"f\\\"; summary ids must differ from source field names.\",\"Invalid grouping: key 2 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 3 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 4 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 5 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 6 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.\"]}}"
     },
     {
       "name": "unnormalized item details",

@@ -3,6 +3,7 @@ package sqlitetests
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strconv"
 	"strings"
@@ -28,7 +29,7 @@ func TestV3CalendarBoundariesMatchWideRangeFallback(t *testing.T) {
 		for _, step := range []struct {
 			interval string
 			every    int
-		}{{"hour", 1}, {"hour", 2}, {"hour", 3}, {"hour", 5}, {"day", 1}, {"day", 3}, {"week", 1}, {"week", 2}, {"month", 1}, {"month", 3}, {"year", 1}, {"year", 2}} {
+		}{{"hour", 1}, {"hour", 2}, {"hour", 3}, {"hour", 8}, {"day", 1}, {"day", 3}, {"week", 1}, {"week", 2}, {"month", 1}, {"month", 3}, {"year", 1}, {"year", 2}} {
 			interval := step.interval
 			t.Run(zone.name+"/"+zone.start+"/"+interval+"/"+strconv.Itoa(step.every), func(t *testing.T) {
 				log := &statementLog{}
@@ -145,15 +146,29 @@ func TestV3CalendarGroupKeysRejectInvalidKeys(t *testing.T) {
 		"interval": {Interval: "minute"},
 		"zone":     {Interval: "day", TimeZone: "Mars/Olympus"},
 		"offset":   {Interval: "day", TimeZone: "+02:00"},
+		// Hour groups must divide a day.
+		"5 hours":  {Interval: "hour", Every: 5},
+		"48 hours": {Interval: "hour", Every: 48},
+		"1001":     {Interval: "day", Every: 1001},
 	} {
 		q := groupedRequest()
 		q.Grouping.Keys = []string{"at"}
 		q.Grouping.KeyIntervals = map[string]qt.GroupKeyInterval{"at": key}
 		q.Grouping.Representative, q.Grouping.Summaries = nil, []qt.SummaryColumn{{ID: "num", Op: "count"}}
 		q.Result.Select, q.Result.OrderBy = []string{"at", "num"}, nil
-		if _, err := d.Execute(context.Background(), db, q, qt.PlanOptions{}); err == nil {
+		_, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
+		var diag *qt.PlanDiagnostic
+		if err == nil {
 			t.Errorf("%s: accepted %v", name, key)
+		} else if strings.HasSuffix(name, "hours") && (!errors.As(err, &diag) || diag.Code != qt.ErrorCodeGrouping || !strings.Contains(err.Error(), "every is 1, 2, 3, 4, 6, 8, 12 or 24 hours")) {
+			t.Errorf("%s: %v", name, err)
 		}
+	}
+	// A metric's hour buckets must divide a day too.
+	metric := qt.QueryRequestV3{Version: 3, Profile: qt.SQLiteExpressionProfile, Result: qt.WireQuery{Select: []string{"id"}, Limit: 10},
+		Metrics: []qt.AggSpec{{ID: "m", Op: "count", GroupBy: []string{"at"}, DateGrouping: &qt.MetricDateGrouping{Field: "at", Interval: "hour", Every: 5, Range: "query"}}}}
+	if result, err := d.Execute(context.Background(), db, metric, qt.PlanOptions{}); err != nil || result.Metrics[0].ErrorCode != qt.ErrorCodeDateGrouping || !strings.Contains(result.Metrics[0].Error, "every is 1, 2, 3, 4, 6, 8, 12 or 24 hours") {
+		t.Errorf("metric every 5 hours: %+v %v", result.Metrics, err)
 	}
 	q := groupedRequest()
 	q.Grouping.KeyIntervals = map[string]qt.GroupKeyInterval{"k": {Interval: "day"}}

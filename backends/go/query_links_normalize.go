@@ -637,6 +637,11 @@ func normalizeLinkMetricOptions(raw *jsValue) *jsValue {
 				includeEmpty == nil || includeEmpty.kind != jsBool || !d.get("range").truthy() {
 				m.diagnostics = append(m.diagnostics, "Invalid metric date grouping.")
 			}
+			// Hour buckets must divide a day.
+			if every, interval := d.get("every"), d.get("interval"); every != nil && interval.isString() && interval.s == "hour" && !calendarHourEvery(int(every.n)) {
+				d.del("every")
+				m.diagnostics = append(m.diagnostics, "Invalid metric every.")
+			}
 			// One interval per bucket is the default and is left out.
 			if every := d.get("every"); every != nil && every.n == 1 {
 				d.del("every")
@@ -1127,7 +1132,7 @@ func normalizeLinkGrouping(value *jsValue, links bool) *jsValue {
 			field, fieldOK := boundedJSString(key.get("field"), linkMaxFieldName)
 			interval, zone, every := key.get("interval"), key.get("timeZone"), key.get("every")
 			if fieldOK && interval.isString() && includesString(groupKeyIntervals, interval.s) &&
-				(every == nil || (jsIsSafeInteger(every) && every.n >= 1 && every.n <= MaxCalendarEvery)) &&
+				(every == nil || (jsIsSafeInteger(every) && every.n >= 1 && every.n <= MaxCalendarEvery && (interval.s != "hour" || calendarHourEvery(int(every.n))))) &&
 				(zone == nil || (zone.isString() && zone.s != "" && jsLength(zone.s) <= 80 && !strings.HasPrefix(zone.s, "+") && !strings.HasPrefix(zone.s, "-"))) {
 				keys = append(keys, field)
 				calendar := jsObj().set("field", jsStr(field)).set("interval", jsStr(interval.s))
@@ -1140,7 +1145,7 @@ func normalizeLinkGrouping(value *jsValue, links bool) *jsValue {
 				}
 				normalizedKeys.a = append(normalizedKeys.a, calendar)
 			} else {
-				fail("key " + strconv.Itoa(index+1) + " must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.")
+				fail("key " + strconv.Itoa(index+1) + " must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.")
 			}
 		}
 	}

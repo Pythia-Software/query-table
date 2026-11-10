@@ -115,22 +115,32 @@ function metricOffsetTransition(
 
 /** Intervals per bucket accepted by `every`. */
 export const MAX_METRIC_DATE_EVERY = 1000;
+/** Hour counts `every` accepts: those dividing a day, so hour buckets stay
+ * aligned to local days. Elapsed-hour blocks could be added later as an
+ * explicit opt-in. */
+export const METRIC_HOUR_EVERY: readonly number[] = [1, 2, 3, 4, 6, 8, 12, 24];
 
-/** Whether `every` is a valid count of intervals per bucket: omitted, or an
- * integer 1–1,000. Cycles accept only 1. */
-export function isMetricDateEvery(every: unknown, interval?: string): boolean {
-  return (
-    every === undefined ||
-    (typeof every === "number" &&
-      Number.isInteger(every) &&
-      every >= 1 &&
-      every <= MAX_METRIC_DATE_EVERY &&
-      (every === 1 || !isMetricCycle(interval)))
-  );
+/** Why `every` is not a valid count of `interval`s per bucket, or undefined
+ * when it is: omitted, or an integer 1–1,000 that divides 24 for hours.
+ * Cycles accept only 1. */
+export function metricDateEveryProblem(every: unknown, interval?: string): string | undefined {
+  if (every === undefined) return undefined;
+  if (typeof every !== "number" || !Number.isInteger(every) || every < 1 || every > MAX_METRIC_DATE_EVERY)
+    return `Every is a whole number of intervals, 1–${MAX_METRIC_DATE_EVERY.toLocaleString("en-US")}.`;
+  if (every !== 1 && isMetricCycle(interval))
+    return "Hour-of-day and day-of-week slots are single hours or days: every applies to calendar intervals.";
+  if (interval === "hour" && !METRIC_HOUR_EVERY.includes(every))
+    return `Hour buckets must divide a day: every is ${METRIC_HOUR_EVERY.slice(0, -1).join(", ")} or 24 hours.`;
+  return undefined;
 }
 
-const HOUR_MS = 3_600_000,
-  DAY_MS = 86_400_000;
+/** Whether `every` is a valid count of `interval`s per bucket (see
+ * metricDateEveryProblem). */
+export function isMetricDateEvery(every: unknown, interval?: string): boolean {
+  return metricDateEveryProblem(every, interval) === undefined;
+}
+
+const DAY_MS = 86_400_000;
 const floorTo = (value: number, step: number) => Math.floor(value / step) * step;
 
 /** Epoch milliseconds of a UTC wall time; months and days may overflow. */
@@ -204,14 +214,10 @@ function metricEveryWall(
   return ((floorTo(week, every) + step) * 7 - 3) * DAY_MS;
 }
 
-/** Hour counts that do not divide a day are elapsed blocks from the epoch. */
-const elapsedHours = (interval: string, every: number) =>
-  interval === "hour" && 24 % every !== 0;
-
-/** A valid count of intervals per bucket, or a RangeError. */
-function metricEvery(every: number): number {
-  if (!Number.isInteger(every) || every < 1 || every > MAX_METRIC_DATE_EVERY)
-    throw RangeError(`every is a whole number of intervals, 1–${MAX_METRIC_DATE_EVERY}.`);
+/** A valid count of `interval`s per bucket, or a RangeError. */
+function metricEvery(every: number, interval: string): number {
+  const problem = metricDateEveryProblem(every, interval);
+  if (problem) throw RangeError(problem);
   return every;
 }
 
@@ -222,7 +228,6 @@ function metricEveryAfter(
   timeZone: string,
   every: number,
 ): number {
-  if (elapsedHours(interval, every)) return start + every * HOUR_MS;
   return metricWallTime(metricEveryWall(start, interval, timeZone, every, 1), timeZone);
 }
 
@@ -237,7 +242,6 @@ function metricEveryStart(
   timeZone: string,
   every: number,
 ): number {
-  if (elapsedHours(interval, every)) return floorTo(time, every * HOUR_MS);
   let start = metricWallTime(metricEveryWall(time, interval, timeZone, every, 0), timeZone);
   for (let step = 0; step < 4; step++) {
     const next = metricEveryAfter(start, interval, timeZone, every);
@@ -249,8 +253,8 @@ function metricEveryStart(
 
 /** The start of the interval (`every` > 1: the bucket of `every` intervals)
  * holding `time`. A cycle's interval is its hour or day. `every` must be an
- * integer 1–1,000 (a RangeError otherwise); cycles ignore it, and
- * validateDateGrouping refuses it above 1 for them. */
+ * integer 1–1,000 that divides 24 for hours (a RangeError otherwise); cycles
+ * ignore it, and validateDateGrouping refuses it above 1 for them. */
 export function metricDateFloor(
   time: number,
   cycleOrInterval: MetricDateGrouping["interval"],
@@ -258,7 +262,7 @@ export function metricDateFloor(
   every = 1,
 ): number {
   if (every !== 1 && !isMetricCycle(cycleOrInterval))
-    return metricEveryStart(time, cycleOrInterval, timeZone, metricEvery(every));
+    return metricEveryStart(time, cycleOrInterval, timeZone, metricEvery(every, cycleOrInterval));
   const interval = metricCalendarUnit(cycleOrInterval);
   if (timeZone !== "UTC") {
     const zoned =
@@ -296,7 +300,7 @@ export function metricDateNext(
   every = 1,
 ): number {
   if (every !== 1 && !isMetricCycle(cycleOrInterval)) {
-    const count = metricEvery(every);
+    const count = metricEvery(every, cycleOrInterval);
     return metricEveryAfter(
       metricEveryStart(time, cycleOrInterval, timeZone, count),
       cycleOrInterval,
@@ -379,12 +383,8 @@ export function validateDateGrouping(config: MetricDateGrouping): void {
       !["include", "exclude"].includes(config.partialIntervals))
   )
     throw Error("Invalid date grouping definition.");
-  if (!isMetricDateEvery(config.every))
-    throw Error("A date grouping's every is a whole number of intervals, 1–1,000.");
-  if (!isMetricDateEvery(config.every, config.interval))
-    throw Error(
-      "Hour-of-day and day-of-week slots are single hours or days: every applies to calendar intervals.",
-    );
+  const everyProblem = metricDateEveryProblem(config.every, config.interval);
+  if (everyProblem) throw Error(everyProblem);
   if (config.timeZone !== undefined && !isGroupingTimeZone(config.timeZone))
     throw Error(
       "Use a valid IANA grouping timezone, such as America/Denver or UTC.",
