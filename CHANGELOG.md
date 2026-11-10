@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+### Added
+
+- The Go SQLite and PostgreSQL expression profiles run the text functions
+  `LENGTH`, `TRIM`, `LTRIM`, `RTRIM`, two-argument `CONTAINS`, `STARTS_WITH`
+  and `ENDS_WITH`, and `ARRAY_LENGTH(SPLIT(text, separator))`, inside
+  aggregates, computed definitions, distribution inputs and grouped formula
+  summaries, so a metric such as `SUM(LENGTH([text]))` or a per-conversation
+  word count no longer fails with `arity`. Results match the browser runtime:
+  `LENGTH` counts code points, the trims remove JavaScript's white space set,
+  `SPLIT` counts like `String.prototype.split` (an empty separator splits
+  UTF-16 code units; more than 10,000 parts is the per-row error
+  `array_range`), and missing text stays NULL rather than empty. A text array
+  is accepted only inside `ARRAY_LENGTH`; `ignoreCase` matching, `LOWER`/`UPPER`
+  and other text functions are refused (`unsupported_function`).
+- The SQLite profile runs `REGEX_TEST`, `REGEX_EXTRACT` and `REGEX_REPLACE`
+  with literal JavaScript patterns, translated to RE2 only when the meaning is
+  identical; other patterns are refused with `unsupported_regex`. PostgreSQL
+  refuses formula regex. `RegexAggregateExpressions` stays false.
+- **SQLite hosts must register the complete current `SQLiteV2Functions()`
+  list**, which adds `qt_v2_length`, `qt_v2_split_count`, `qt_v2_regex_test`,
+  `qt_v2_regex_extract`, `qt_v2_regex_replace` and `qt_v2_regex_replace_error`.
+- Shared fixtures `schema/fixtures/text-functions.json` (local engine, DuckDB,
+  Go SQLite, Go PostgreSQL) and `schema/fixtures/formula-regex.json` (browser
+  regex results against the server translation). See
+  [Text and array functions](docs/backend-metrics.md#text-and-array-functions).
+
+### Fixed
+
+- DuckDB `TRIM`, `LTRIM` and `RTRIM` remove the JavaScript white space set
+  (DuckDB's own trim kept tabs and line breaks), and `SPLIT` with an empty
+  separator follows `String.prototype.split` (`SPLIT("", "")` is empty; text
+  with a supplementary character is an error rather than a different count,
+  except in `ARRAY_LENGTH`, which counts UTF-16 code units). `SPLIT` results
+  above 10,000 elements are an error, as in the browser.
+- Go server diagnostics name an unknown function `unsupported_function`
+  instead of `arity`.
+
 ## 1.0.4 — 2026-11-10
 
 ### Changed

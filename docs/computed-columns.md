@@ -152,9 +152,11 @@ Rules worth knowing:
 - `IF`, `IFS`, `SWITCH`, `COALESCE`, and `IFERROR` evaluate lazily. Invalid conversions, division by zero, and invalid arguments produce per-cell errors. `IFERROR` catches expression errors, not worker termination/timeouts.
 - `CONCAT_WS` skips null arguments. `IS_EMPTY` accepts null, empty text, or an empty array.
 - Text slicing counts Unicode code points (not grapheme clusters); positions are one-based. Negative lengths/indices are errors. Out-of-range split parts/array elements are null.
-- `URL_ENCODE` percent-encodes the UTF-8 bytes of its text, keeping only RFC 3986 unreserved characters (letters, digits, `-`, `.`, `_`, `~`). It matches DuckDB's `url_encode`. The Go SQLite/PostgreSQL server profile does not execute text functions, so it rejects `URL_ENCODE` as it rejects `LENGTH`.
+- `URL_ENCODE` percent-encodes the UTF-8 bytes of its text, keeping only RFC 3986 unreserved characters (letters, digits, `-`, `.`, `_`, `~`). It matches DuckDB's `url_encode`. The Go SQLite/PostgreSQL server profile does not execute it.
+- `LENGTH` counts code points. `TRIM`, `LTRIM` and `RTRIM` remove JavaScript white space and line terminators. `SPLIT` follows `String.prototype.split`: `SPLIT("", ",")` is one empty part and an empty separator splits UTF-16 code units; an array of more than 10,000 parts is an error.
 - Literal text matching is case-sensitive unless its optional third argument is true.
 - Regex uses native JavaScript Unicode semantics. Optional flags are `i`, `m`, and `s`; extraction group defaults to 0, the entire match. No match returns null. Replacement replaces all matches and supports `$$`, `$&`, and numbered captures. Prefix/suffix substitutions are unsupported.
+- The Go SQLite and PostgreSQL servers also run `LENGTH`, `TRIM`, `LTRIM`, `RTRIM`, two-argument `CONTAINS`/`STARTS_WITH`/`ENDS_WITH` and `ARRAY_LENGTH(SPLIT(...))`, and SQLite runs a subset of regex patterns; see [Text and array functions](backend-metrics.md#text-and-array-functions).
 - Dates use ISO date-only strings or ISO timestamps with explicit timezone. They are normalized to UTC. Date addition clamps month/year overflow to the last valid day. Weeks start Monday. `DATE_DIFF` measures elapsed whole units (week through millisecond), not calendar-boundary counts. Formatting tokens are `YYYY MM DD HH mm ss`.
 - `ROUND` uses JavaScript's `Math.round` tie behavior (toward positive infinity), with -15 through 15 decimal places. This is display arithmetic, not decimal financial arithmetic.
 

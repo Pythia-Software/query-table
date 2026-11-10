@@ -357,23 +357,34 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 	reductionFrom := " FROM " + b.rel + by
 	b.stage("SELECT " + strings.Join(reductions, ",") + reductionFrom)
 	reductionStage := len(b.stages) - 1
-	var lower func(*exprNode) (ValueSQL, error)
-	lower = func(n *exprNode) (ValueSQL, error) {
+	var lowerValue func(*exprNode) (ValueSQL, error)
+	lowerValue = func(n *exprNode) (ValueSQL, error) {
 		if v, ok := leaves[n]; ok {
 			return b.emitNative("CASE WHEN "+v.Error+" IS NULL THEN "+v.Value+" END", v.Error, v.Type), nil
 		}
 		if n.op == "literal" {
 			return b.row(n)
 		}
+		if formulaRegexFunction(n.op) {
+			return ValueSQL{}, diagnostic(ErrorCodeAggregateContext, "regex is supported only inside aggregate row expressions")
+		}
 		a := []ValueSQL{}
 		for _, arg := range n.args {
-			v, err := lower(arg)
+			v, err := lowerValue(arg)
 			if err != nil {
 				return v, err
 			}
 			a = append(a, v)
 		}
 		return b.operation(n.op, a)
+	}
+	// A text array occurs only inside ARRAY_LENGTH; a metric is scalar.
+	lower := func(n *exprNode) (ValueSQL, error) {
+		v, err := lowerValue(n)
+		if err == nil && v.Type == "textarray" {
+			return ValueSQL{}, textArrayRefusal()
+		}
+		return v, err
 	}
 	v, e := lower(n)
 	if e != nil {

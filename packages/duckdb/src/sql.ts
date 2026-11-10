@@ -39,6 +39,19 @@ const aggregates = new Set([
   "MAX",
   "MEDIAN",
 ]);
+/** ECMAScript white space and line terminators: what String.prototype.trim
+ * removes. DuckDB's own trim() uses a different set. */
+const JS_WHITESPACE = String.fromCharCode(
+  0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20, 0xa0, 0x1680, 0x2000, 0x2001, 0x2002,
+  0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009, 0x200a, 0x2028,
+  0x2029, 0x202f, 0x205f, 0x3000, 0xfeff,
+);
+/** Supplementary code points: two UTF-16 code units each (RE2 syntax). */
+const SUPPLEMENTARY = String.raw`[\x{10000}-\x{10FFFF}]`;
+const NOT_SUPPLEMENTARY = String.raw`[^\x{10000}-\x{10FFFF}]`;
+const MAX_ARRAY_ELEMENTS = 10000;
+const arrayBound = (list: string) =>
+  `(CASE WHEN len(${list}) > ${MAX_ARRAY_ELEMENTS} THEN error('Array result is too large.') ELSE ${list} END)`;
 const safeNumber = (value: string) =>
   `(CASE WHEN ${value} IS NULL OR (isfinite(${value}) AND abs(${value}) <= 9007199254740991) THEN ${value} ELSE error('Query Table numeric precision exceeded') END)`;
 
@@ -193,6 +206,14 @@ export class SQLBuilder {
     if (node.kind === "literal")
       return node.value === null ? "NULL" : this.bind(node.value);
     if (node.kind === "field") return this.field(node.name, false);
+    const input = node.args[0];
+    if (node.name === "ARRAY_LENGTH" && input?.kind === "call" && input.name === "SPLIT") {
+      // Count JavaScript's split without building the list: an empty
+      // separator yields UTF-16 code units.
+      const [text, separator] = input.args.map((arg) => this.node(arg));
+      const count = `(CASE WHEN ${text} IS NULL OR ${separator} IS NULL THEN NULL WHEN ${separator} = '' THEN length(${text}) + length(regexp_replace(${text}, ${this.bind(NOT_SUPPLEMENTARY)}, '', 'g')) ELSE len(string_split(${text}, ${separator})) END)`;
+      return `(CASE WHEN ${count} > ${MAX_ARRAY_ELEMENTS} THEN error('Array result is too large.') ELSE CAST(${count} AS DOUBLE) END)`;
+    }
     const name = node.name,
       vs = node.args.map((arg) => this.node(arg)),
       a = vs[0]!,
@@ -267,7 +288,14 @@ export class SQLBuilder {
     if (name === "URL_ENCODE") return `url_encode(${a})`;
     if (name === "TO_BOOLEAN") return `CAST(${a} AS BOOLEAN)`;
     if (name === "TO_DATETIME") return `CAST(${a} AS TIMESTAMPTZ)`;
-    if (name === "SPLIT") return `string_split(${a}, ${b})`;
+    if (name === "SPLIT")
+      // JavaScript splits an empty separator into UTF-16 code units, which
+      // DuckDB text cannot hold for a supplementary character; "" splits to [].
+      return arrayBound(
+        `(CASE WHEN ${a} IS NULL OR ${b} IS NULL THEN NULL WHEN ${b} <> '' THEN string_split(${a}, ${b}) WHEN regexp_matches(${a}, ${this.bind(SUPPLEMENTARY)}) THEN error('SPLIT with an empty separator cannot represent a supplementary character in the qt-duckdb-v1 profile.') WHEN ${a} = '' THEN CAST([] AS VARCHAR[]) ELSE string_split(${a}, '') END)`,
+      );
+    if (name === "TRIM" || name === "LTRIM" || name === "RTRIM")
+      return `${name.toLowerCase()}(${a}, ${this.bind(JS_WHITESPACE)})`;
     if (name === "JOIN") return `array_to_string(${a}, ${b})`;
     if (name === "ARRAY_LENGTH") return `len(${a})`;
     if (name === "ARRAY_CONTAINS") return `list_contains(${a}, ${b})`;
@@ -307,9 +335,6 @@ export class SQLBuilder {
         "LENGTH",
         "LOWER",
         "UPPER",
-        "TRIM",
-        "LTRIM",
-        "RTRIM",
         "REPLACE",
         "ABS",
         "FLOOR",

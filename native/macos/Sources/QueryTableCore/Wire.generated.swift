@@ -1401,7 +1401,7 @@ public enum ErrorCode: String, Codable, Equatable, Sendable, CaseIterable {
   case sort
   /// Text ordering needs a collation this profile does not provide.
   case collationRequired = "collation_required"
-  /// Regex filtering or sorting is outside this server profile.
+  /// Regex filtering, sorting or a formula regex pattern is outside this server profile.
   case unsupportedRegex = "unsupported_regex"
   /// A text value cannot be represented (for example NUL or an unpaired surrogate).
   case unsupportedLiteral = "unsupported_literal"

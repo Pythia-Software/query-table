@@ -449,7 +449,7 @@
         "filter_disabled": { "status": 400, "retry": "no", "description": "The field is not server-filterable (for a computed field: not in the host's filter allowlist)." },
         "sort": { "status": 400, "retry": "no", "description": "A sort term is invalid, or the field is not server-sortable." },
         "collation_required": { "status": 400, "retry": "no", "description": "Text ordering needs a collation this profile does not provide." },
-        "unsupported_regex": { "status": 400, "retry": "no", "description": "Regex filtering or sorting is outside this server profile." },
+        "unsupported_regex": { "status": 400, "retry": "no", "description": "Regex filtering, sorting or a formula regex pattern is outside this server profile." },
         "unsupported_literal": { "status": 400, "retry": "no", "description": "A text value cannot be represented (for example NUL or an unpaired surrogate)." },
         "unsupported_type": { "status": 400, "retry": "no", "description": "The value type does not support the operation (for example boolean extrema or arrays in expressions)." },
         "invalid_source_value": { "status": 400, "retry": "no", "description": "A stored source value does not match its declared type." },
