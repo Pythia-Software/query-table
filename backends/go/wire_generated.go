@@ -51,13 +51,18 @@ type MetricSort struct {
 	Nulls string `json:"nulls,omitempty"`
 }
 
-// MetricDistribution: A box or histogram over `input` per group instead of a
-// scalar value.
+// MetricDistribution: A box, histogram or quantile curve over `input` per group
+// instead of a scalar value.
 type MetricDistribution struct {
 	Kind     string `json:"kind"`
 	Input    string `json:"input"`
 	Whiskers string `json:"whiskers,omitempty"`
-	Bins     int    `json:"bins,omitempty"`
+	// Box whiskers at these exact-linear percentiles [lo, hi] with whiskers
+	// "percentile": 0 <= lo < 0.25 and 0.75 < hi <= 1. Default [0.1, 0.9].
+	WhiskerProbabilities []float64 `json:"whiskerProbabilities,omitempty"`
+	Bins                 int       `json:"bins,omitempty"`
+	// Quantiles: 1–101 strictly increasing probabilities in [0, 1].
+	Probabilities []float64 `json:"probabilities,omitempty"`
 }
 
 type MetricMinCountDistinct struct {
@@ -182,10 +187,16 @@ type QueryCapabilitiesV3 struct {
 	MetricMinCountMeasures bool `json:"metricMinCountMeasures"`
 	// Executes MetricSpec.interval (proportion and rate) and returns lower and
 	// upper bounds.
-	MetricIntervals  bool `json:"metricIntervals"`
-	Version          int  `json:"version"`
-	GroupedRows      bool `json:"groupedRows"`
-	CalendarGrouping bool `json:"calendarGrouping"`
+	MetricIntervals bool `json:"metricIntervals"`
+	// Executes PERCENTILE(expr, p) in metric and summary formulas.
+	MetricPercentiles bool `json:"metricPercentiles"`
+	// Executes box whiskers "percentile" with whiskerProbabilities.
+	BoxPercentileWhiskers bool `json:"boxPercentileWhiskers"`
+	// Executes the "quantiles" distribution.
+	QuantileDistributions bool `json:"quantileDistributions"`
+	Version               int  `json:"version"`
+	GroupedRows           bool `json:"groupedRows"`
+	CalendarGrouping      bool `json:"calendarGrouping"`
 	// Executes the hourOfDay and dayOfWeek intervals.
 	CalendarCycles bool `json:"calendarCycles"`
 	// Executes calendar grouping keys.
@@ -242,7 +253,10 @@ type MetricBoxSummary struct {
 	Outliers     WireList[float64] `json:"outliers"`
 	OutlierCount int64             `json:"outlierCount"`
 	Whiskers     string            `json:"whiskers"`
-	Method       string            `json:"method"`
+	// The [lo, hi] probabilities of percentile whiskers; present only when
+	// whiskers is "percentile".
+	WhiskerProbabilities []float64 `json:"whiskerProbabilities,omitempty"`
+	Method               string    `json:"method"`
 }
 
 type MetricBoxDistribution struct {
@@ -258,6 +272,19 @@ type MetricHistogramDistribution struct {
 	Edges  WireList[float64] `json:"edges"`
 	Counts WireList[int64]   `json:"counts"`
 	N      int64             `json:"n"`
+}
+
+type MetricQuantilesSummary struct {
+	N             int64             `json:"n"`
+	Probabilities WireList[float64] `json:"probabilities"`
+	// The exact-linear percentile at each probability.
+	Values WireList[float64] `json:"values"`
+}
+
+type MetricQuantilesDistribution struct {
+	Kind string `json:"kind"`
+	// null when the group has no numeric samples.
+	Summary *MetricQuantilesSummary `json:"summary"`
 }
 
 // MetricBucket: One group of a metric result. `keys` has one entry per groupBy

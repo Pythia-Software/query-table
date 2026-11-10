@@ -256,37 +256,49 @@ public struct MetricSort: Codable, Equatable, Sendable {
   }
 }
 
-/// A box or histogram over `input` per group instead of a scalar value.
+/// A box, histogram or quantile curve over `input` per group instead of a scalar value.
 public struct MetricDistribution: Codable, Equatable, Sendable {
   public var kind: String
   public var input: String
   public var whiskers: String?
+  /// Box whiskers at these exact-linear percentiles [lo, hi] with whiskers "percentile": 0 <= lo < 0.25 and 0.75 < hi <= 1. Default [0.1, 0.9].
+  public var whiskerProbabilities: [Double]?
   public var bins: Int?
+  /// Quantiles: 1–101 strictly increasing probabilities in [0, 1].
+  public var probabilities: [Double]?
   enum CodingKeys: String, CodingKey {
     case kind
     case input
     case whiskers
+    case whiskerProbabilities
     case bins
+    case probabilities
   }
-  public init(kind: String, input: String, whiskers: String? = nil, bins: Int? = nil) {
+  public init(kind: String, input: String, whiskers: String? = nil, whiskerProbabilities: [Double]? = nil, bins: Int? = nil, probabilities: [Double]? = nil) {
     self.kind = kind
     self.input = input
     self.whiskers = whiskers
+    self.whiskerProbabilities = whiskerProbabilities
     self.bins = bins
+    self.probabilities = probabilities
   }
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     kind = try c.decode(String.self, forKey: .kind)
     input = try c.decode(String.self, forKey: .input)
     whiskers = try c.decodeIfPresent(String.self, forKey: .whiskers)
+    whiskerProbabilities = try c.decodeIfPresent([Double].self, forKey: .whiskerProbabilities)
     bins = try c.decodeIfPresent(Int.self, forKey: .bins)
+    probabilities = try c.decodeIfPresent([Double].self, forKey: .probabilities)
   }
   public func encode(to encoder: Encoder) throws {
     var c = encoder.container(keyedBy: CodingKeys.self)
     try c.encode(kind, forKey: .kind)
     try c.encode(input, forKey: .input)
     try c.encodeIfPresent(whiskers, forKey: .whiskers)
+    try c.encodeIfPresent(whiskerProbabilities, forKey: .whiskerProbabilities)
     try c.encodeIfPresent(bins, forKey: .bins)
+    try c.encodeIfPresent(probabilities, forKey: .probabilities)
   }
 }
 
@@ -701,6 +713,12 @@ public struct QueryCapabilitiesV3: Codable, Equatable, Sendable {
   public var metricMinCountMeasures: Bool?
   /// Executes MetricSpec.interval (proportion and rate) and returns lower and upper bounds.
   public var metricIntervals: Bool?
+  /// Executes PERCENTILE(expr, p) in metric and summary formulas.
+  public var metricPercentiles: Bool?
+  /// Executes box whiskers "percentile" with whiskerProbabilities.
+  public var boxPercentileWhiskers: Bool?
+  /// Executes the "quantiles" distribution.
+  public var quantileDistributions: Bool?
   public var version: Int
   public var groupedRows: Bool
   public var calendarGrouping: Bool
@@ -723,6 +741,9 @@ public struct QueryCapabilitiesV3: Codable, Equatable, Sendable {
     case metricMinCount
     case metricMinCountMeasures
     case metricIntervals
+    case metricPercentiles
+    case boxPercentileWhiskers
+    case quantileDistributions
     case version
     case groupedRows
     case calendarGrouping
@@ -744,6 +765,9 @@ public struct QueryCapabilitiesV3: Codable, Equatable, Sendable {
     metricMinCount = try c.decodeIfPresent(Bool.self, forKey: .metricMinCount)
     metricMinCountMeasures = try c.decodeIfPresent(Bool.self, forKey: .metricMinCountMeasures)
     metricIntervals = try c.decodeIfPresent(Bool.self, forKey: .metricIntervals)
+    metricPercentiles = try c.decodeIfPresent(Bool.self, forKey: .metricPercentiles)
+    boxPercentileWhiskers = try c.decodeIfPresent(Bool.self, forKey: .boxPercentileWhiskers)
+    quantileDistributions = try c.decodeIfPresent(Bool.self, forKey: .quantileDistributions)
     version = try c.decode(Int.self, forKey: .version)
     groupedRows = try c.decode(Bool.self, forKey: .groupedRows)
     calendarGrouping = try c.decode(Bool.self, forKey: .calendarGrouping)
@@ -765,6 +789,9 @@ public struct QueryCapabilitiesV3: Codable, Equatable, Sendable {
     try c.encodeIfPresent(metricMinCount, forKey: .metricMinCount)
     try c.encodeIfPresent(metricMinCountMeasures, forKey: .metricMinCountMeasures)
     try c.encodeIfPresent(metricIntervals, forKey: .metricIntervals)
+    try c.encodeIfPresent(metricPercentiles, forKey: .metricPercentiles)
+    try c.encodeIfPresent(boxPercentileWhiskers, forKey: .boxPercentileWhiskers)
+    try c.encodeIfPresent(quantileDistributions, forKey: .quantileDistributions)
     try c.encode(version, forKey: .version)
     try c.encode(groupedRows, forKey: .groupedRows)
     try c.encode(calendarGrouping, forKey: .calendarGrouping)
@@ -864,6 +891,8 @@ public struct MetricBoxSummary: Codable, Equatable, Sendable {
   public var outliers: [Double]
   public var outlierCount: Int
   public var whiskers: String
+  /// The [lo, hi] probabilities of percentile whiskers; present only when whiskers is "percentile".
+  public var whiskerProbabilities: [Double]?
   public var method: String
   enum CodingKeys: String, CodingKey {
     case n
@@ -878,9 +907,10 @@ public struct MetricBoxSummary: Codable, Equatable, Sendable {
     case outliers
     case outlierCount
     case whiskers
+    case whiskerProbabilities
     case method
   }
-  public init(n: Int, min: Double, q1: Double, median: Double, q3: Double, max: Double, mean: Double, low: Double, high: Double, outliers: [Double], outlierCount: Int, whiskers: String, method: String) {
+  public init(n: Int, min: Double, q1: Double, median: Double, q3: Double, max: Double, mean: Double, low: Double, high: Double, outliers: [Double], outlierCount: Int, whiskers: String, whiskerProbabilities: [Double]? = nil, method: String) {
     self.n = n
     self.min = min
     self.q1 = q1
@@ -893,6 +923,7 @@ public struct MetricBoxSummary: Codable, Equatable, Sendable {
     self.outliers = outliers
     self.outlierCount = outlierCount
     self.whiskers = whiskers
+    self.whiskerProbabilities = whiskerProbabilities
     self.method = method
   }
   public init(from decoder: Decoder) throws {
@@ -909,6 +940,7 @@ public struct MetricBoxSummary: Codable, Equatable, Sendable {
     outliers = try c.decode([Double].self, forKey: .outliers)
     outlierCount = try c.decode(Int.self, forKey: .outlierCount)
     whiskers = try c.decode(String.self, forKey: .whiskers)
+    whiskerProbabilities = try c.decodeIfPresent([Double].self, forKey: .whiskerProbabilities)
     method = try c.decode(String.self, forKey: .method)
   }
   public func encode(to encoder: Encoder) throws {
@@ -925,6 +957,7 @@ public struct MetricBoxSummary: Codable, Equatable, Sendable {
     try c.encode(outliers, forKey: .outliers)
     try c.encode(outlierCount, forKey: .outlierCount)
     try c.encode(whiskers, forKey: .whiskers)
+    try c.encodeIfPresent(whiskerProbabilities, forKey: .whiskerProbabilities)
     try c.encode(method, forKey: .method)
   }
 }
@@ -993,9 +1026,66 @@ public struct MetricHistogramDistribution: Codable, Equatable, Sendable {
   }
 }
 
+public struct MetricQuantilesSummary: Codable, Equatable, Sendable {
+  public var n: Int
+  public var probabilities: [Double]
+  /// The exact-linear percentile at each probability.
+  public var values: [Double]
+  enum CodingKeys: String, CodingKey {
+    case n
+    case probabilities
+    case values
+  }
+  public init(n: Int, probabilities: [Double], values: [Double]) {
+    self.n = n
+    self.probabilities = probabilities
+    self.values = values
+  }
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    n = try c.decode(Int.self, forKey: .n)
+    probabilities = try c.decode([Double].self, forKey: .probabilities)
+    values = try c.decode([Double].self, forKey: .values)
+  }
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: CodingKeys.self)
+    try c.encode(n, forKey: .n)
+    try c.encode(probabilities, forKey: .probabilities)
+    try c.encode(values, forKey: .values)
+  }
+}
+
+public struct MetricQuantilesDistribution: Codable, Equatable, Sendable {
+  public var kind: String
+  /// null when the group has no numeric samples.
+  public var summary: MetricQuantilesSummary?
+  enum CodingKeys: String, CodingKey {
+    case kind
+    case summary
+  }
+  public init(summary: MetricQuantilesSummary? = nil) {
+    self.kind = "quantiles"
+    self.summary = summary
+  }
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    kind = try c.decode(String.self, forKey: .kind)
+    guard kind == "quantiles" else {
+      throw DecodingError.dataCorruptedError(forKey: .kind, in: c, debugDescription: "Expected quantiles")
+    }
+    summary = try c.decodeNil(forKey: .summary) ? nil : try c.decode(MetricQuantilesSummary.self, forKey: .summary)
+  }
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: CodingKeys.self)
+    try c.encode(kind, forKey: .kind)
+    if let v = summary { try c.encode(v, forKey: .summary) } else { try c.encodeNil(forKey: .summary) }
+  }
+}
+
 public enum MetricDistributionResult: Codable, Equatable, Sendable {
   case box(MetricBoxDistribution)
   case histogram(MetricHistogramDistribution)
+  case quantiles(MetricQuantilesDistribution)
   public init(from decoder: Decoder) throws {
     let c = try decoder.singleValueContainer()
     if let v = try? c.decode(MetricBoxDistribution.self) {
@@ -1006,6 +1096,10 @@ public enum MetricDistributionResult: Codable, Equatable, Sendable {
       self = .histogram(v)
       return
     }
+    if let v = try? c.decode(MetricQuantilesDistribution.self) {
+      self = .quantiles(v)
+      return
+    }
     throw DecodingError.dataCorruptedError(in: c, debugDescription: "Invalid MetricDistributionResult")
   }
   public func encode(to encoder: Encoder) throws {
@@ -1013,6 +1107,7 @@ public enum MetricDistributionResult: Codable, Equatable, Sendable {
     switch self {
     case .box(let v): try c.encode(v)
     case .histogram(let v): try c.encode(v)
+    case .quantiles(let v): try c.encode(v)
     }
   }
 }
