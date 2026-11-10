@@ -296,9 +296,11 @@ share results. The local engine, DuckDB and the Go SQLite and PostgreSQL
 executors compute it. Nothing in a request depends on it and there is no
 capability flag: clients key off whether `other` is present. A limited result
 without it (`groupCount` larger than the buckets) has no remainder the
-executor could compute. The UI draws Other rows and slices for
-additive metrics only; `metricOtherRemainder` is exported for hosts that rank
-and limit buckets themselves.
+executor could compute. The UI pools additive metrics into Other rows and
+slices itself, and a list with `showOther` shows a ratio's returned `other`
+(with its interval) when the display drops no further groups;
+`metricOtherRemainder` is exported for hosts that rank and limit buckets
+themselves.
 
 ## Population scope
 
