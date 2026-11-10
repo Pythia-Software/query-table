@@ -340,6 +340,7 @@ func (d QueryDatasetV3) SourcePlan(ctx context.Context, q QueryRequestV3, o Plan
 	o.ComputedGroupable = d.ComputedGroupable
 	o.ComputedFilterable = d.ComputedFilterable
 	fields := map[string]bool{d.Schema.IDField: true}
+	distinctBase := ""
 	if len(q.ExpectedRevisions) > 64 {
 		return out, diagnostic(ErrorCodeDependencyLimit, "revision envelope exceeds budget")
 	}
@@ -451,11 +452,18 @@ func (d QueryDatasetV3) SourcePlan(ctx context.Context, q QueryRequestV3, o Plan
 	} else if q.Distinct != nil {
 		// Distinct values read the source.where population. The target and its
 		// computed inputs/revisions are dependencies even though no row selects it.
-		if _, _, e := d.distinctTarget(q.Distinct.Field); e != nil {
+		_, computed, e := d.distinctTarget(q.Distinct.Field)
+		if e != nil {
 			return out, e
 		}
 		source = WireQuery{Where: q.Source.Where, Limit: pop + 1}
-		fields[q.Distinct.Field] = true
+		if computed {
+			fields[q.Distinct.Field] = true
+		} else {
+			// Execution reads a base target's raw binding, as native predicates
+			// do, so it joins BaseFields without the projection's typed compile.
+			distinctBase = q.Distinct.Field
+		}
 	} else {
 		source = q.Result
 		// The result stage reapplies ordinary-row predicates after the narrow
@@ -591,6 +599,9 @@ func (d QueryDatasetV3) SourcePlan(ctx context.Context, q QueryRequestV3, o Plan
 				out.BaseFields = append(out.BaseFields, predicate.Field)
 			}
 		}
+	}
+	if distinctBase != "" {
+		out.BaseFields = append(out.BaseFields, distinctBase)
 	}
 	sort.Strings(out.BaseFields)
 	out.BaseFields = uniqueStrings(out.BaseFields)

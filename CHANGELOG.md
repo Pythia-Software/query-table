@@ -4,12 +4,19 @@
 
 ### Fixed
 
-- `QueryDatasetV3.SourcePlan` now includes a `distinct` request's target field
-  in its projection and `BaseFields`, with a computed target's transitive
-  inputs and resolved revisions, over the request's `source.where` population.
-  Hosts that stage only the planned base fields previously got no values for a
-  distinct-only request over an otherwise unselected field. An unfilterable
-  target is rejected while planning, as it already was during execution.
+- `QueryDatasetV3.SourcePlan` now plans a `distinct` request over its
+  `source.where` population and includes the target: a base target in
+  `BaseFields` (read through its raw binding, as execution does, so numeric
+  bindings without `ExpressionNumeric` stay supported), a computed target in
+  the projection with its transitive base inputs. Hosts that stage only the
+  planned base fields previously got no values for a distinct-only request over
+  an otherwise unselected field. Related changes for distinct requests:
+  - an unfilterable target is rejected while planning, as it already was
+    during execution;
+  - a computed target missing from `expectedRevisions` is rejected with
+    `definition_changed` while planning, rather than only during execution;
+  - the response's `execution.fields` now includes a computed target's
+    capability (it was empty).
 
 ### Documentation
 

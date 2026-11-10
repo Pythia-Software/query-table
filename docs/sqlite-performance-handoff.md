@@ -205,7 +205,8 @@ can abort a transaction. Do not assume a cancelled transaction remains usable,
 and do not commit other host operations after an execution/cleanup error.
 
 The adapter never changes `temp_store`, temp cache sizes or other PRAGMAs. The
-host still owns leases, pools, deadlines and restoring any settings it changes.
+host owns leases, pools and deadlines, and chooses connection settings when it
+opens a connection.
 Changing `temp_store` while a connection has a temp database destroys its
 temporary objects and resets every schema on the connection, so the next
 statement re-parses the whole catalog. Set the storage mode once per connection
