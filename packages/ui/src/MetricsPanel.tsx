@@ -31,6 +31,7 @@ import {
   type MetricTheme,
   type MetricClassNames,
 } from "./metricColors";
+import { ClippedText } from "./hoverTitle";
 import {
   metricScale,
   metricGroupKeyLabel,
@@ -535,9 +536,10 @@ function BarList({
             }}
             key={`${keyText(b.keys[0])}-${i}`}
           >
-            <span
+            <ClippedText
               className={`qt-metric-bar-label${maxLabelLines ? " qt-metric-bar-label--clamped" : ""}`}
               style={maxLabelLines ? { WebkitLineClamp: maxLabelLines } : undefined}
+              text={metricGroupLabel(b, clause, locale)}
               title={metricGroupLabel(b, clause, locale, true)}
             >
               {options?.useGroupColors && (
@@ -552,7 +554,7 @@ function BarList({
                 />
               )}
               {metricGroupLabel(b, clause, locale)}
-            </span>
+            </ClippedText>
             {showBars && (
               <span className="qt-metric-bar-track">
                 <span

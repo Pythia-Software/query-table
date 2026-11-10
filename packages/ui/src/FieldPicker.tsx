@@ -111,6 +111,7 @@ export function FieldPicker<Row>({
             type="button"
             className="qt-icon-btn"
             aria-label="Back to fields"
+            title="Back to fields"
             onClick={onBack}
           >
             <Icon name="arrowLeft" />

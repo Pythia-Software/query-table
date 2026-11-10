@@ -4,6 +4,7 @@ import type { CellContext } from "./renderers";
 import { formatMetricOutput } from "./metricFormat";
 import { JsonCell, JsonValueView } from "./JsonCell";
 import { cellValueText } from "./jsonValue";
+import { ClippedText, distinctTitle, numberTitle } from "./hoverTitle";
 
 /** Declarative formats share the metric formatter's strict units and UTC default. */
 export function renderCellDisplay({ value, field, presentation }: CellContext, display: CellDisplay): ReactNode {
@@ -14,18 +15,20 @@ export function renderCellDisplay({ value, field, presentation }: CellContext, d
   if (display.kind === "text") {
     const text = cellValueText(value);
     // Clamped text wraps inside the cell; the virtualized table measures each
-    // rendered row, so taller rows keep correct scroll offsets.
-    if (display.lines) return <span className="qt-line-clamp" style={{ WebkitLineClamp: display.lines }} title={text}>{text}</span>;
-    return display.truncate ? <span className="qt-truncate" title={text}>{text}</span> : text;
+    // rendered row, so taller rows keep correct scroll offsets. The full text
+    // is hover help only while the cell actually clips it.
+    if (display.lines) return <ClippedText className="qt-line-clamp" style={{ WebkitLineClamp: display.lines }} text={text} />;
+    return display.truncate ? <ClippedText className="qt-truncate" text={text} /> : text;
   }
   if (display.kind === "chip") {
     const values = Array.isArray(value) ? value : [value];
     return <span className="qt-pills">{values.map((item, index) => {
       const key = cellValueText(item);
       const own = (map: Record<string, string> | undefined) => map && Object.prototype.hasOwnProperty.call(map, key) ? map[key] : undefined;
-      const tone = own(display.tones);
+      const tone = own(display.tones), label = own(display.labels) ?? key;
       const classes = { success: "qt-pill--pass", warning: "qt-pill--warn", danger: "qt-pill--fail", neutral: "" };
-      return <span key={index} className={`qt-pill ${classes[tone as keyof typeof classes] ?? ""}`} title={key}>{own(display.labels) ?? key}</span>;
+      // A renamed chip offers its raw key; a plain one shows it already.
+      return <span key={index} className={`qt-pill ${classes[tone as keyof typeof classes] ?? ""}`} title={distinctTitle(key, label)}>{label}</span>;
     })}</span>;
   }
   const raw = value instanceof Date && Number.isFinite(value.getTime()) ? value.toISOString() : value;
@@ -40,5 +43,7 @@ export function renderCellDisplay({ value, field, presentation }: CellContext, d
   const format = display.kind === "number" && display.decimals === undefined ? undefined
     : display.kind === "percent" ? { ...display, decimals: display.decimals ?? 2 } : display;
   const result = formatMetricOutput(numeric, format, "locale" in display ? display.locale ?? "en-US" : "en-US");
-  return result.error ? <span className="qt-cell-format-error" title={result.error}>{cellValueText(value)}</span> : <span title={cellValueText(value)}>{result.text}</span>;
+  if (result.error) return <span className="qt-cell-format-error" title={result.error}>{cellValueText(value)}</span>;
+  // The raw value is hover help only when formatting hides it (rounding, units).
+  return <span title={numberTitle(cellValueText(value), result.text)}>{result.text}</span>;
 }

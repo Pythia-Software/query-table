@@ -86,6 +86,11 @@ try {
   const rowChips = page.locator('.qt-qb-row--select .qt-column-label[data-column-role="row"]');
   assert.equal(await rowChips.locator("select").count(), 0);
   assert.equal(await rowChips.locator(".qt-column-role-badge").count(), 2);
+  // Grouped column labels never repeat their visible text as a tooltip.
+  const chipLabels = await page.locator('.qt-qb-row--select .qt-column-label .qt-chip-field').evaluateAll((nodes) =>
+    nodes.map((node) => [node.textContent, node.getAttribute("title")]));
+  assert.ok(chipLabels.length >= 2, "Grouped column labels are inspected");
+  for (const [text, title] of chipLabels) assert.notEqual(title, text, `Label ${text} repeats its tooltip`);
   await button("Add column").click();
   await pick("Job");
   assert.equal(await page.locator('.qt-picker-label').filter({ hasText: /^Representative row$/ }).count(), 0);
@@ -129,6 +134,7 @@ try {
   await page
     .getByLabel("Representative direction for Run", { exact: true })
     .click();
+  assert.equal(await button("Drag to reorder Run").getAttribute("title"), "Reorder");
   await button("Drag to reorder Run").press("ArrowUp");
   await button("Apply ordering").click();
   const reordered = await snapshot();

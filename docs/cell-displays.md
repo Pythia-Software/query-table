@@ -67,7 +67,7 @@ byte-for-byte unchanged, and older clients ignore the third member.
 
 `{ kind: "text", lines: n }` (1–20) wraps the text and clamps it to `n` lines
 with an ellipsis; line breaks in the value are kept, and the full text is in
-the tooltip. It takes precedence over `truncate`. `DataTable` measures every
+the tooltip while the cell actually clips it. It takes precedence over `truncate`. `DataTable` measures every
 rendered row, so clamped rows of different heights scroll, virtualize and
 re-measure after column resizes correctly. There is no unbounded wrap: one
 very long value would produce a row taller than the viewport, so use a large
@@ -91,6 +91,10 @@ carries rounded seconds into minutes/hours. Custom date patterns accept
 in [metric formatting](metrics.md); custom durations use `{h}`, `{mm}`, `{ss}`,
 `{ms}`, etc. Invalid values or format settings remain readable with an explanatory
 tooltip. Null and empty values show an em dash; zero and false are preserved.
+Hover help never repeats visible text: a formatted value offers its raw value
+only when formatting hides it (rounding, units, percentages, not digit
+grouping alone), a chip its raw key only when relabelled, and `truncate` or
+`lines` text its full value only while clipped.
 
 ## JSON inspector
 

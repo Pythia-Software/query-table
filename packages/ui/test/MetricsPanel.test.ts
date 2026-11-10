@@ -750,7 +750,7 @@ it("underline lists keep labels, values and bar proportions with independent vis
   expect(render({ ...clause, display: { kind: "list" } }, b)).not.toContain("qt-metric-bar-row--below");
 });
 
-it("limits only below-list labels while preserving the full label and title", () => {
+it("limits only below-list labels while preserving the full label", () => {
   const text = "A very long error signature that wraps across several lines without losing its full tooltip";
   const buckets: MetricBucket[] = [{ keys: [text], value: 5, count: 1 }];
   for (const barPosition of ["inline", "below"] as const) {
@@ -762,7 +762,8 @@ it("limits only below-list labels while preserving the full label and title", ()
       expect(label.classList.contains("qt-metric-bar-label--clamped")).toBe(limited);
       expect(label.style.webkitLineClamp).toBe(limited ? String(maxLabelLines) : "");
       expect(label.textContent).toBe(text);
-      expect(label.title).toBe(text);
+      // The same text is hover help only while it is clipped.
+      expect(label.title).toBe("");
     }
   }
 });

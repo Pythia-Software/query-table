@@ -90,6 +90,7 @@ export function RepresentativeEditor({
               type="button"
               className="qt-icon-btn qt-representative-back"
               aria-label="Back to column choices"
+              title="Back to columns"
               onClick={onBack}
             >
               <Icon name="arrowLeft" />

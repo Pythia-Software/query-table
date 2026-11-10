@@ -88,7 +88,8 @@ export function MenuDemo() {
         { name: "name", label: "Name", type: "text", source: { kind: "backend" }, group: "Identity" },
         { name: "email", label: "Email", type: "text", source: { kind: "backend" }, group: "Identity", aliases: ["contact"] },
         { name: "status", label: "Status", type: "enum", source: { kind: "backend" }, group: "Details" },
-      ]} onPick={field => { setResult(`Selected ${field.label}`); setPicker(false); }} onClose={() => setPicker(false)} />}
+      ]} stats={{ status: { distinct: 1 } }} gateOnDistinct /* Status shows an unavailable item. */
+        onPick={field => { setResult(`Selected ${field.label}`); setPicker(false); }} onClose={() => setPicker(false)} />}
       <PresentedValueInput field="category" value={value} options={[{ value: "alpha", label: "Alpha" }, { value: "beta", label: "Beta" }]}
         onChange={next => { setValue(next); setResult(`Selected ${next}`); }} />
       <button ref={settingsTrigger} aria-haspopup="dialog" aria-expanded={settings} onClick={() => setSettings(previous => !previous)}>Open settings</button>

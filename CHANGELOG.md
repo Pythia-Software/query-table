@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Changed
+
+- Icon-only buttons whose purpose is not obvious have native hover tooltips:
+  JSON tree toggles say "Expand" or "Collapse" as their state changes; column
+  and property editor arrows say "Move up" and "Move down"; picker back arrows
+  say "Back to fields" and "Back to columns"; reorder handles say "Reorder";
+  and the metric actions menu says "Metric actions". Accessible names, state and
+  keyboard behaviour are unchanged; close buttons keep no tooltip.
+- Tooltips no longer repeat visible text. Number and other formatted cells
+  offer the raw value only when formatting hides it (not for digit grouping
+  alone); chips offer their raw key only when relabelled; `truncate` and
+  `lines` text, compact metric axis labels, compact legend labels and list-bar
+  labels offer their full text only while clipped (or when the full label
+  differs); valid JSON previews and grouped column labels drop their duplicate
+  titles. JSON parse errors and other explanations remain.
+- Unavailable field picker items (`.qt-picker-item--disabled`) use the default
+  arrow cursor instead of `not-allowed`; they stay disabled and dimmed.
+
 ## 1.0.4 — 2026-11-10
 
 ### Changed

@@ -698,8 +698,9 @@ Set `display.list.maxLabelLines` to a positive integer to cap the wrapped label
 height when `barPosition` is `"below"`, for example
 `list: { barPosition: "below", maxLabelLines: 2 }`. Omit it for unlimited lines;
 the editor's **Maximum label lines** input accepts a blank value for unlimited.
-The limit has no effect on inline bars. Truncated labels keep their full text in
-the tooltip, and the limit survives query links and saved views.
+The limit has no effect on inline bars. Truncated labels offer their full text in
+the tooltip (and labels never repeat it while they fit), and the limit survives
+query links and saved views.
 
 ### Visible groups and remainder
 
