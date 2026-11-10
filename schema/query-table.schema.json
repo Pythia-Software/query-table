@@ -71,7 +71,6 @@
                 "currency",
                 "number",
                 "percent",
-                "compact",
                 "duration",
                 "date",
                 "time",
@@ -138,6 +137,23 @@
                 "required": [
                   "currency"
                 ]
+              }
+            },
+            {
+              "if": {
+                "required": [
+                  "notation"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "number",
+                      "currency"
+                    ]
+                  }
+                }
               }
             }
           ]
@@ -504,9 +520,35 @@
           "properties": {
             "kind": {
               "enum": [
-                "number",
-                "percent",
+                "number"
+              ]
+            },
+            "decimals": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 20
+            },
+            "notation": {
+              "enum": [
+                "standard",
                 "compact"
+              ]
+            },
+            "locale": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "percent"
               ]
             },
             "decimals": {

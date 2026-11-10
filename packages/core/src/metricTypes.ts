@@ -58,17 +58,17 @@ export type MetricMinCountOf =
   | (MetricMinCountDistinct & { sum?: never })
   | (MetricMinCountSum & { distinct?: never });
 /** How a metric value is labelled. `currency` needs an ISO 4217 `currency`
- * code; `compact` abbreviates large numbers with the locale's compact notation
- * (1.2K, 3.4M). Formatting never changes the computed values. */
+ * code. Formatting never changes the computed values. */
 export interface MetricValueFormat {
-  kind: "number" | "percent" | "currency" | "compact" | "duration" | "date" | "time" | "datetime";
-  /** Fraction digits (0–20). Number, percent and standard currency show
-   * exactly this many (currency defaults to the currency's own digits);
-   * compact output shows at most this many (default 1). */
+  kind: "number" | "percent" | "currency" | "duration" | "date" | "time" | "datetime";
+  /** Fraction digits (0–20): exactly this many for number, percent and
+   * currency (currency defaults to its own minor units); see `notation`. */
   decimals?: number;
   /** Currency only: an ISO 4217 code such as "USD". */
   currency?: string;
-  /** Currency only: "compact" abbreviates large amounts ($1.2M). */
+  /** Number and currency only. "compact" abbreviates with the locale's compact
+   * notation (1.2K, 3.4M, $1.2M) and shows at most `decimals` fraction digits
+   * (default 1) instead of exactly `decimals`. "standard" is the default. */
   notation?: "standard" | "compact";
   sourceUnit?:
     | "milliseconds"

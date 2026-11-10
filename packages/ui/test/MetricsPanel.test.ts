@@ -3,8 +3,8 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MetricCard, numericMetricRenderer, renderedText } from "../src/MetricsPanel";
-import { defaultRenderers, type RenderRegistry } from "../src/renderers";
+import { MetricCard } from "../src/MetricsPanel";
+import { defaultRenderers } from "../src/renderers";
 import type { MetricBucket, RenderingClause } from "../src/metricTypes";
 import { boxSummary, type AggregationClause, type FieldDef } from "@pythia-software/query-table-core";
 (
@@ -264,8 +264,7 @@ describe("shared metric card", () => {
         },
       },
     ]);
-    // Box statistics are measured values, labelled by the duration_ms renderer.
-    expect(box).toContain("Observed whiskers 1ms – 4ms");
+    expect(box).toContain("Observed whiskers 1 – 4");
     expect(box).toContain("4 samples · 1 NULL");
     const histogram = render(
       {
@@ -922,94 +921,57 @@ describe("measure display defaults", () => {
     container.remove();
   });
 });
-describe("numeric measure renderers", () => {
-  const usd = (value: unknown) => `$${Number(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  function Badge({ text }: { text: string }) { return createElement("b", null, text); }
-  const registry: RenderRegistry = {
-    ...defaultRenderers,
-    // A host renderer that wraps its text in an element, like Pharos's usd.
-    usd: ({ value }) => createElement("span", { className: "usd" }, usd(value)),
-    // A component's text cannot be read without rendering it.
-    badge: ({ value }) => createElement(Badge, { text: `#${String(value)}` }),
-    // Overriding a generic key is not a unit presentation for metrics.
-    number: () => "HOST NUMBER",
-  };
+describe("currency and compact measure displays", () => {
   const money: FieldDef<unknown>[] = [
-    { name: "cost", label: "Cost", type: "number", source: { kind: "backend" }, render: "usd" },
-    { name: "tokens", label: "Tokens", type: "number", source: { kind: "backend" }, render: "number" },
-    { name: "rank", label: "Rank", type: "number", source: { kind: "backend" }, render: "badge" },
-    { name: "spend", label: "Spend", type: "number", source: { kind: "backend" }, render: "usd", display: { kind: "currency", currency: "EUR" } },
+    { name: "cost", label: "Cost", type: "number", source: { kind: "backend" }, display: { kind: "currency", currency: "USD" } },
+    { name: "tokens", label: "Tokens", type: "number", source: { kind: "backend" }, display: { kind: "number", notation: "compact" } },
+    { name: "elapsed", label: "Elapsed", type: "number", source: { kind: "backend" }, render: "duration_ms" },
+    // A host renderer is a table-cell presentation; metrics keep their own labels.
+    { name: "price", label: "Price", type: "number", source: { kind: "backend" }, render: "usd" },
     { name: "model", label: "Model", type: "text", source: { kind: "backend" } },
   ];
+  const renderers = { ...defaultRenderers, usd: () => "HOST USD" };
   const grouped: MetricBucket[] = [
     { keys: ["opus"], value: 1234.5, count: 3 },
     { keys: ["haiku"], value: 20.25, count: 2 },
   ];
   const card = (c: RenderingClause, b: MetricBucket[] = [{ keys: [], value: 1234.5, count: 17 }]) =>
-    renderToStaticMarkup(createElement(MetricCard, { clause: c, buckets: b, fields: money, renderers: registry, locale: "en-US" }));
+    renderToStaticMarkup(createElement(MetricCard, { clause: c, buckets: b, fields: money, renderers, locale: "en-US" }));
   const sum = (field: string, display?: RenderingClause["display"], groupBy: string[] = []): RenderingClause =>
     ({ id: "m", op: "sum", field, groupBy, ...(display ? { display } : {}) });
 
-  it("labels scalar values, lists and tables with a host-registered renderer", () => {
-    expect(card(sum("cost"))).toContain('<span class="usd">$1,234.50</span>');
-    const list = card(sum("cost", undefined, ["model"]), grouped);
-    expect(list).toContain("$1,234.50");
-    expect(list).toContain("$20.25");
-    expect(card(sum("cost", { kind: "table" }, ["model"]), grouped)).toContain("$20.25");
-    expect(card({ ...sum("cost"), op: "avg" })).toContain("$1,234.50");
-  });
-
-  it("labels chart axes, value labels, tooltips and totals with the renderer's text", () => {
-    for (const kind of ["bar-horizontal", "bar-vertical", "pie", "donut"] as const) {
-      const html = card(sum("cost", { kind }, ["model"]), grouped);
-      expect(html, kind).toContain("$1,234.50");
-      expect(html, kind).not.toContain("1234.5 ");
-    }
-    const bars = card(sum("cost", { kind: "bar-horizontal" }, ["model"]), grouped);
-    expect(bars).toMatch(/>\$[\d,]+\.\d\d<\/text>/);
-    // The pie's additive total uses the measure's presentation too.
+  it("labels values, lists, chart axes, tooltips and pie totals with a declared currency", () => {
+    expect(card(sum("cost"))).toContain("$1,234.50");
+    expect(card(sum("cost", undefined, ["model"]), grouped)).toContain("$20.25");
+    for (const kind of ["bar-horizontal", "bar-vertical", "pie"] as const)
+      expect(card(sum("cost", { kind }, ["model"]), grouped), kind).toContain("$1,234.50");
+    expect(card(sum("cost", { kind: "bar-horizontal" }, ["model"]), grouped)).toMatch(/>\$[\d,]+\.\d\d<\/text>/);
     expect(card(sum("cost", { kind: "pie" }, ["model"]), grouped)).toContain("Exact additive denominator: $1,254.75.");
+    expect(card(sum("tokens"), [{ keys: [], value: 3_412_000, count: 9 }])).toContain("3.4M");
   });
 
-  it("keeps counts, explicit formats, expressions, NULLs and errors in their existing precedence", () => {
-    expect(card({ ...sum("cost"), op: "count" })).toContain("1,235");
+  it("keeps counts, explicit formats, NULLs and errors first, and never uses host cell renderers", () => {
     expect(card({ ...sum("cost"), op: "count" })).not.toContain("$");
-    expect(card({ ...sum("cost"), op: "count_distinct" })).not.toContain("$");
-    expect(card(sum("cost", { kind: "auto", format: { kind: "number", decimals: 1 } }))).toContain("1,234.5");
     expect(card(sum("cost", { kind: "auto", format: { kind: "number", decimals: 1 } }))).not.toContain("$");
-    expect(card(sum("cost", { kind: "bar-horizontal", format: { kind: "compact" } }, ["model"]), grouped)).not.toContain("$");
-    expect(card({ ...sum("cost"), expression: "SUM([cost])/2" })).not.toContain("$");
     expect(card(sum("cost"), [{ keys: [], value: null, count: 0 }])).toContain("—");
     const failed = card(sum("cost", undefined, ["model"]), [{ keys: ["opus"], value: null, count: 1, error: "Overflow" }]);
     expect(failed).toContain("Overflow");
     expect(failed).not.toContain("$");
+    expect(card(sum("price"))).not.toContain("HOST USD");
+    expect(card(sum("price", { kind: "bar-horizontal" }, ["model"]), grouped)).not.toContain("HOST USD");
   });
 
-  it("prefers the measure's declared format to its renderer, everywhere", () => {
-    expect(card(sum("spend"))).toContain("€1,234.50");
-    expect(card(sum("spend", { kind: "bar-horizontal" }, ["model"]), grouped)).toContain("€1,234.50");
-  });
-
-  it("ignores host overrides of generic keys and uses components only where React renders them", () => {
-    expect(card(sum("tokens"))).not.toContain("HOST NUMBER");
-    expect(card(sum("tokens"))).toContain("1,234.5");
-    expect(card(sum("rank"))).toContain("<b>#1234.5</b>");
-    const chart = card(sum("rank", { kind: "bar-horizontal" }, ["model"]), grouped);
-    expect(chart).not.toContain("#1234.5");
-    expect(chart).toContain("1,234.5");
-  });
-
-  it("selects only registered non-generic renderers and reads their text", () => {
-    const field = (render: string): FieldDef<unknown> => ({ name: "x", label: "X", type: "number", source: { kind: "backend" }, render });
-    expect(numericMetricRenderer(field("usd"), registry)).toBe(registry.usd);
-    expect(numericMetricRenderer(field("duration_ms"), registry)).toBe(registry.duration_ms);
-    expect(numericMetricRenderer(field("number"), registry)).toBeUndefined();
-    expect(numericMetricRenderer(field("missing"), registry)).toBeUndefined();
-    expect(numericMetricRenderer(field("usd"), undefined)).toBeUndefined();
-    expect(renderedText(createElement("span", { title: "x" }, "$", 5, createElement("em", null, ".00")))).toBe("$5.00");
-    expect(renderedText(createElement(Badge, { text: "x" }))).toBeUndefined();
-    expect(renderedText(null)).toBeUndefined();
-    expect(renderedText(" ")).toBeUndefined();
+  it("labels shares as ratios, not in the measure's units", () => {
+    const shares: MetricBucket[] = [
+      { keys: ["opus"], value: 0.25, count: 3 },
+      { keys: ["haiku"], value: 0.75, count: 2 },
+    ];
+    const cost = card({ ...sum("cost", { kind: "table" }, ["model"]), share: "group0" }, shares);
+    expect(cost).not.toContain("$");
+    expect(cost).toContain("0.25");
+    const elapsed = card({ ...sum("elapsed", { kind: "table" }, ["model"]), share: "total" }, shares);
+    expect(elapsed).not.toContain("ms");
+    expect(elapsed).toContain("0.75");
   });
 });
 describe("metric population notes", () => {

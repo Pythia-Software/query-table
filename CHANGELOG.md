@@ -5,28 +5,26 @@
 ### Added
 
 - Currency and compact number formats. `MetricValueFormat`, `CellDisplay` and
-  property formats accept `{ kind: "currency", currency: "USD", decimals?,
-  notation?: "compact" }` (`$1,234.50`, or `$1.2M` when compact) and
-  `{ kind: "compact", decimals? }` (`1.2K`, `3.4M`, following the locale's
-  compact notation). The metric editor offers both under Output type, with a
-  currency code and a Compact option. They round-trip through links and
-  saved queries, and the Go link codec and `schema/query-table.schema.json`
-  accept them. A currency without a valid ISO 4217 code shows a visible format
-  error. A field's `currency` or `compact` display is also the default format
-  of metrics over it. See [Output formatting](docs/metrics.md#output-formatting).
+  property formats accept `{ kind: "currency", currency: "USD", decimals? }`
+  (`$1,234.50`, using the currency's own minor units unless `decimals` is set),
+  and number and currency accept `notation: "compact"` (`1.2K`, `3.4M`,
+  `$1.2M`, following the locale; `decimals` is then a maximum, default 1).
+  The metric editor offers Currency under Output type and a Compact checkbox,
+  with Auto decimals. The formats round-trip through links and saved queries,
+  and the Go link codec and `schema/query-table.schema.json` accept them; link
+  normalisation drops `currency` and `notation` where they do not apply, and
+  the default `notation: "standard"`. A currency without a valid ISO 4217
+  code shows a visible format error. A field's `currency` or compact `number`
+  display is also the default format of metrics over it, in values, chart
+  axes, tooltips and totals. See
+  [Output formatting](docs/metrics.md#output-formatting).
 
-### Changed
+### Fixed
 
-- A numeric metric over a field whose `render` key the host registered (for
-  example `render: "usd"`) is labelled by that renderer in scalar values,
-  lists, tables and pivots, and by its text in chart axes, value labels,
-  tooltips, box statistics and pie totals. Previously only `duration_ms` and
-  `byte_size` reached a renderer, and charts ignored renderers entirely. Counts,
-  expression metrics, NULLs, errors, explicit metric formats and the measure's
-  declared numeric display keep precedence. Generic built-in keys such as
-  `number` are not used, even when a host overrides them. Hosts that aliased
-  money or token fields to `byte_size` can drop the alias. Box plots over a
-  `duration_ms` measure now show units in their statistics.
+- Share metrics (`share: "total" | "group0"`) and distributions over another
+  input no longer take the measure field's display or its `duration_ms` /
+  `byte_size` renderer: a share over a duration field was labelled in
+  milliseconds. They use the card's decimals unless the metric sets a format.
 
 ## 1.0.4 — 2026-11-10
 

@@ -42,7 +42,9 @@ export function validateMetricFormat(
       format.decimals > 20)
   )
     return "Decimals must be an integer from 0 to 20.";
-  if (format.kind === "number" || format.kind === "percent" || format.kind === "compact") return;
+  if (format.notation !== undefined && format.notation !== "standard" && format.notation !== "compact")
+    return "Notation must be standard or compact.";
+  if (format.kind === "number" || format.kind === "percent") return;
   if (format.kind === "currency") {
     if (typeof format.currency !== "string" || !/^[A-Z]{3}$/.test(format.currency))
       return "Enter a three-letter ISO 4217 currency code, such as USD.";
@@ -375,12 +377,13 @@ function calendarText(
           };
   return new Intl.DateTimeFormat(locale, { ...options, timeZone }).format(date);
 }
-/** `Intl.NumberFormat` options for the numeric output kinds (number, percent,
- * currency, compact). Compact output shows at most `decimals` fraction digits
- * (default 1); the others show exactly `decimals`, and currency without
- * `decimals` uses the currency's own minor units. */
+/** `Intl.NumberFormat` options for the numeric output kinds (number,
+ * percent, currency). `notation: "compact"` (number and currency) abbreviates
+ * with the locale's compact notation and shows at most `decimals` fraction
+ * digits (default 1); otherwise exactly `decimals` are shown, and currency
+ * without `decimals` uses the currency's own minor units. */
 export function metricNumberOptions(format: MetricValueFormat): Intl.NumberFormatOptions {
-  const compact = format.kind === "compact" || (format.kind === "currency" && format.notation === "compact");
+  const compact = format.notation === "compact" && (format.kind === "number" || format.kind === "currency");
   const digits: Intl.NumberFormatOptions = compact
     ? { notation: "compact", minimumFractionDigits: 0, maximumFractionDigits: format.decimals ?? 1 }
     : format.kind === "currency" && format.decimals === undefined
@@ -417,7 +420,7 @@ export function formatMetricOutput(
         ? durationText(value, format, locale)
         : ["date", "time", "datetime"].includes(format.kind)
           ? calendarText(value, format, locale)
-          : format.kind === "currency" || format.kind === "compact"
+          : format.kind === "currency" || (format.kind === "number" && format.notation === "compact")
             ? numberText(numeric(value), locale, metricNumberOptions(format))
             : typeof value === "number"
               ? numberText(value, locale, metricNumberOptions(format))
@@ -432,27 +435,36 @@ export function formatMetricOutput(
   }
 }
 
+/** Whether a metric's values are in its measure field's units, so the
+ * field's presentation (its numeric display, or a unit renderer) applies.
+ * Counts are dimensionless, expressions may change units, shares are ratios,
+ * and a distribution over another input measures something else. */
+export function metricUsesMeasureUnits(
+  clause: Pick<AggregationClause, "op" | "field" | "expression" | "share" | "distribution">,
+): boolean {
+  if (clause.expression !== undefined || clause.op === "count" || clause.op === "count_distinct" || clause.share)
+    return false;
+  const input = clause.distribution?.input;
+  return input === undefined || input === clause.field || input === `[${clause.field}]`;
+}
+
 /** Default value format for a builder metric whose measure field declares a
- * numeric cell display, e.g. AVG over a grouped `{ kind: "percent" }` summary.
- * Counts are dimensionless and expressions may change units, so neither inherits. */
+ * numeric cell display, e.g. AVG over a grouped `{ kind: "percent" }` summary,
+ * when the metric is in the measure's units (see metricUsesMeasureUnits). */
 export function metricFormatFromMeasure(
   clause: AggregationClause,
   measure: Pick<FieldDef, "display"> | undefined,
 ): MetricValueFormat | undefined {
   const display = measure?.display;
-  if (
-    !display ||
-    clause.expression !== undefined ||
-    clause.op === "count" ||
-    clause.op === "count_distinct"
-  )
-    return undefined;
+  if (!display || !metricUsesMeasureUnits(clause)) return undefined;
   if (display.kind === "percent")
     return { kind: "percent", decimals: display.decimals ?? 2 };
   if (display.kind === "number")
-    return display.decimals === undefined
-      ? undefined
-      : { kind: "number", decimals: display.decimals };
+    return display.notation === "compact"
+      ? { kind: "number", notation: "compact", ...(display.decimals !== undefined ? { decimals: display.decimals } : {}) }
+      : display.decimals === undefined
+        ? undefined
+        : { kind: "number", decimals: display.decimals };
   if (display.kind === "duration") {
     const { kind: _kind, ...options } = display;
     return { kind: "duration", ...options };
@@ -462,9 +474,7 @@ export function metricFormatFromMeasure(
       kind: "currency",
       currency: display.currency,
       ...(display.decimals !== undefined ? { decimals: display.decimals } : {}),
-      ...(display.notation ? { notation: display.notation } : {}),
+      ...(display.notation === "compact" ? { notation: "compact" as const } : {}),
     };
-  if (display.kind === "compact")
-    return { kind: "compact", ...(display.decimals !== undefined ? { decimals: display.decimals } : {}) };
   return undefined;
 }

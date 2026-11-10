@@ -190,7 +190,10 @@ describe("shared JSON and chip property formats", () => {
   });
   it("accepts compact numbers and compact currency, rejecting unknown notations", () => {
     const formats = (format: unknown) => normalizePropertyView({ version: 1, properties: [{ id: "x", field: "x", format }] }).properties[0]?.format;
-    expect(formats({ kind: "compact", decimals: 2 })).toEqual({ kind: "compact", decimals: 2 });
+    expect(formats({ kind: "number", notation: "compact", decimals: 2 })).toEqual({ kind: "number", decimals: 2, notation: "compact" });
+    expect(formats({ kind: "number", notation: "standard" })).toEqual({ kind: "number" });
+    expect(() => formats({ kind: "percent", notation: "compact" })).toThrow("Invalid format");
+    expect(() => formats({ kind: "compact" })).toThrow("Invalid format");
     expect(formats({ kind: "currency", currency: "EUR", notation: "compact" })).toEqual({ kind: "currency", currency: "EUR", notation: "compact" });
     expect(formats({ kind: "currency", currency: "EUR", notation: "standard" })).toEqual({ kind: "currency", currency: "EUR" });
     expect(() => formats({ kind: "currency", currency: "EUR", notation: "short" })).toThrow("Invalid format");

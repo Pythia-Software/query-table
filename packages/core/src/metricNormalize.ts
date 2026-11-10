@@ -78,7 +78,7 @@ export const METRIC_OPTION_SPECS = {
     max: "number",
   },
   format: {
-    kind: ["number", "percent", "currency", "compact", "duration", "date", "time", "datetime"],
+    kind: ["number", "percent", "currency", "duration", "date", "time", "datetime"],
     decimals: "integer",
     currency: "currencyCode",
     notation: ["standard", "compact"],
@@ -229,8 +229,14 @@ export function normalizeMetricOptions(
           diagnostics.push(`Invalid metric ${k}.`);
       }
       for (const k of ["format", "xFormat", "yFormat"])
-        if (record(raw.display[k]))
-          d[k] = copy(raw.display[k], METRIC_OPTION_SPECS.format);
+        if (record(raw.display[k])) {
+          const f = copy(raw.display[k], METRIC_OPTION_SPECS.format);
+          // Canonical links: currency and notation only where they apply, and
+          // no default notation.
+          if (f.kind !== "currency") delete f.currency;
+          if ((f.kind !== "number" && f.kind !== "currency") || f.notation === "standard") delete f.notation;
+          d[k] = f;
+        }
       if (record(raw.display.list))
         d.list = copy(raw.display.list, METRIC_OPTION_SPECS.list);
       if (record(raw.display.pivot))

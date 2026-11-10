@@ -80,8 +80,18 @@ export function compactMetricTick(value: number, format?: MetricValueFormat, loc
     return formatMetricOutput(value, { ...format, decimals: Math.min(12, Math.max(0, small, spacing)) }, locale).text;
   }
   if (format && ["date", "time", "datetime"].includes(format.kind)) return formatMetricOutput(value, format, locale).text;
-  if (format?.kind === "currency" && !validateMetricFormat(format))
-    return value.toLocaleString(locale, { style: "currency", currency: format.currency!, notation: "compact", minimumFractionDigits: 0, maximumSignificantDigits: digits(Math.abs(value)) });
+  if (format?.kind === "currency") {
+    // An invalid code is reported as it is in values and tooltips.
+    if (validateMetricFormat(format)) return formatMetricOutput(value, format, locale).text;
+    const currency = { style: "currency", currency: format.currency! } as const;
+    // Unabbreviated fractions show whole minor units ($0.50, never $0.5).
+    if (Math.abs(value) < 1000 && !Number.isInteger(value)) {
+      const minor = new Intl.NumberFormat(locale, currency).resolvedOptions().maximumFractionDigits ?? 2;
+      const fraction = Math.min(20, Math.max(minor, resolvable ? -Math.floor(Math.log10(step!)) : 0));
+      return value.toLocaleString(locale, { ...currency, minimumFractionDigits: fraction, maximumFractionDigits: fraction });
+    }
+    return value.toLocaleString(locale, { ...currency, notation: "compact", minimumFractionDigits: 0, maximumSignificantDigits: digits(Math.abs(value)) });
+  }
   return value.toLocaleString(locale, { notation: "compact", maximumSignificantDigits: digits(Math.abs(value)) });
 }
 

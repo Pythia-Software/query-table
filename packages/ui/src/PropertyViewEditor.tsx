@@ -32,7 +32,6 @@ const formatChoices = [
   "number",
   "percent",
   "currency",
-  "compact",
   "duration",
   "relative",
   "date",
@@ -260,7 +259,7 @@ export function PropertyViewEditor<Row>({
                   </label>
                 </>}
                 {format &&
-                ["number", "percent", "currency", "compact", "duration"].includes(
+                ["number", "percent", "currency", "duration"].includes(
                   format.kind,
                 ) ? (
                   <label>
@@ -303,16 +302,16 @@ export function PropertyViewEditor<Row>({
                     />
                   </label>
                 ) : null}
-                {format?.kind === "currency" ? (
+                {format?.kind === "currency" || format?.kind === "number" ? (
                   <label>
                     <input
                       type="checkbox"
-                      aria-label={`Compact currency for ${property.id}`}
+                      aria-label={`Compact notation for ${property.id}`}
                       checked={format.notation === "compact"}
                       onChange={(event) => {
                         const { notation: _notation, ...rest } = format;
                         update(property.id, {
-                          format: event.target.checked ? { ...rest, notation: "compact" } : rest,
+                          format: (event.target.checked ? { ...rest, notation: "compact" } : rest) as PropertyFormat,
                         });
                       }}
                     />

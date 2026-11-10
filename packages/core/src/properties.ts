@@ -110,9 +110,14 @@ export function normalizePropertyFormat(
     };
   }
   if (
-    !["number", "percent", "compact", "duration", "date", "time", "datetime"].includes(
+    !["number", "percent", "duration", "date", "time", "datetime"].includes(
       String(kind),
     )
+  )
+    return;
+  if (
+    input.notation !== undefined &&
+    (kind !== "number" || (input.notation !== "standard" && input.notation !== "compact"))
   )
     return;
   if (
@@ -165,6 +170,7 @@ export function normalizePropertyFormat(
     out.style = input.style;
   if (string(input.pattern, 1000)) out.pattern = input.pattern;
   if (string(input.timeZone)) out.timeZone = input.timeZone;
+  if (input.notation === "compact") out.notation = "compact";
   return out as unknown as PropertyFormat;
 }
 

@@ -27,11 +27,12 @@ export type CellDisplay =
   | ({ kind: "date" | "datetime"; sourceUnit?: "iso" | "epochSeconds" | "epochMilliseconds" } & CalendarDisplay)
   | ({ kind: "time"; sourceUnit?: "iso" | "epochSeconds" | "epochMilliseconds" | "secondsOfDay" | "millisecondsOfDay" } & CalendarDisplay)
   | { kind: "duration"; sourceUnit?: "milliseconds" | "seconds" | "minutes" | "hours" | "days"; style?: "human" | "long" | "clock" | "custom"; pattern?: string; decimals?: number }
-  | { kind: "number" | "percent"; decimals?: number; locale?: string }
-  /** `currency` is an ISO 4217 code; `notation: "compact"` abbreviates ($1.2M). */
+  /** `notation: "compact"` abbreviates with the locale's compact notation
+   * (1.2K, 3.4M) and shows at most `decimals` fraction digits (default 1). */
+  | { kind: "number"; decimals?: number; locale?: string; notation?: "standard" | "compact" }
+  | { kind: "percent"; decimals?: number; locale?: string }
+  /** `currency` is an ISO 4217 code; `notation` as for number ($1.2M). */
   | { kind: "currency"; currency: string; decimals?: number; notation?: "standard" | "compact"; locale?: string }
-  /** Locale compact notation (1.2K, 3.4M), at most `decimals` fraction digits (default 1). */
-  | { kind: "compact"; decimals?: number; locale?: string }
   | { kind: "chip"; labels?: Record<string, string>; tones?: Record<string, "neutral" | "success" | "warning" | "danger"> }
   /** `truncate` keeps one line with an ellipsis. `lines` (1–20) wraps the text
    * and clamps it to that many lines with an ellipsis; it takes precedence. */
@@ -48,7 +49,7 @@ const options: Record<string, Record<string, readonly string[] | readonly number
   datetime: { ...calendarOptions, sourceUnit: calendarUnits },
   time: { ...calendarOptions, sourceUnit: [...calendarUnits, "secondsOfDay", "millisecondsOfDay"] },
   duration: { sourceUnit: ["milliseconds", "seconds", "minutes", "hours", "days"], style: ["human", "long", "clock", "custom"], pattern: "string", decimals: [0, 20] },
-  number: numberOptions, percent: numberOptions, compact: numberOptions,
+  number: { ...numberOptions, notation: ["standard", "compact"] }, percent: numberOptions,
   currency: { ...numberOptions, currency: "currencyCode", notation: ["standard", "compact"] },
   chip: { labels: "labels", tones: "tones" },
   text: { truncate: "boolean", lines: [1, 20] },

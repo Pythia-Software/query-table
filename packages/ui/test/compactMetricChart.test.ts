@@ -40,9 +40,13 @@ describe("compact chart axes", () => {
     expect(compactMetricTick(.0001, { kind: "percent" })).toBe("0.01%");
     expect(compactMetricTick(.000001, { kind: "percent" })).toBe("0.0001%");
     expect(compactMetricTick(2_500_000, { kind: "currency", currency: "USD" }, "en-US", 500_000)).toBe("$2.5M");
-    expect(compactMetricTick(2000, { kind: "compact" }, "en-US")).toBe("2K");
-    // Without a valid code the tick stays a plain compact number.
-    expect(compactMetricTick(2000, { kind: "currency" }, "en-US")).toBe("2K");
+    expect(compactMetricTick(2000, { kind: "number", notation: "compact" }, "en-US")).toBe("2K");
+    // Unabbreviated fractions keep whole minor units; integers stay short.
+    expect(compactMetricTick(0.5, { kind: "currency", currency: "USD" }, "en-US", 0.5)).toBe("$0.50");
+    expect(compactMetricTick(0.25, { kind: "currency", currency: "USD" }, "en-US", 0.005)).toBe("$0.250");
+    expect(compactMetricTick(500, { kind: "currency", currency: "USD" }, "en-US", 250)).toBe("$500");
+    // An invalid code is reported, as in values and tooltips.
+    expect(compactMetricTick(2000, { kind: "currency" }, "en-US")).toBe("Invalid format");
     const narrow = compactMetricScale([140000, 170000], undefined, false, format);
     expect(narrow.ticks.map(v => compactMetricTick(v, format))).toEqual(["2m", "2.5m", "3m"]);
     const constant = compactMetricScale([160000, 160000], undefined, false, format);

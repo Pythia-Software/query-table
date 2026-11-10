@@ -533,7 +533,7 @@ var (
 		{key: "max", kind: optionNumber},
 	}
 	metricFormatOptions = []optionSpec{
-		enumOption("kind", "number", "percent", "currency", "compact", "duration", "date", "time", "datetime"),
+		enumOption("kind", "number", "percent", "currency", "duration", "date", "time", "datetime"),
 		{key: "decimals", kind: optionInteger},
 		{key: "currency", kind: optionCurrencyCode},
 		enumOption("notation", "standard", "compact"),
@@ -672,7 +672,20 @@ func normalizeLinkMetricOptions(raw *jsValue) *jsValue {
 			}
 			for _, key := range []string{"format", "xFormat", "yFormat"} {
 				if format := display.get(key); format.isRecord() {
-					d.set(key, m.copy(format, metricFormatOptions))
+					f := m.copy(format, metricFormatOptions)
+					// Canonical links: currency and notation only where they
+					// apply, and no default notation.
+					kind := ""
+					if k := f.get("kind"); k != nil {
+						kind = k.s // copy kept only an allowed kind string
+					}
+					if kind != "currency" {
+						f.del("currency")
+					}
+					if notation := f.get("notation"); notation != nil && ((kind != "number" && kind != "currency") || notation.s == "standard") {
+						f.del("notation")
+					}
+					d.set(key, f)
 				}
 			}
 			if list := display.get("list"); list.isRecord() {
@@ -791,9 +804,12 @@ var cellDisplayOptions = func() map[string]map[string]displayRule {
 			"pattern":    {kind: "string"},
 			"decimals":   displayRange(0, 20),
 		},
-		"number":  numbers,
+		"number": {
+			"decimals": displayRange(0, 20),
+			"locale":   {kind: "string"},
+			"notation": displayEnum("standard", "compact"),
+		},
 		"percent": numbers,
-		"compact": numbers,
 		"currency": {
 			"decimals": displayRange(0, 20),
 			"locale":   {kind: "string"},
@@ -891,7 +907,7 @@ func validPropertyDecimals(v *jsValue) bool {
 
 var (
 	propertySimpleKinds  = stringSet("text", "code", "boolean", "chips")
-	propertyMetricKinds  = stringSet("number", "percent", "compact", "duration", "date", "time", "datetime")
+	propertyMetricKinds  = stringSet("number", "percent", "duration", "date", "time", "datetime")
 	propertyRelativeUnit = stringSet("iso", "epochSeconds", "epochMilliseconds")
 	propertySourceUnits  = stringSet("milliseconds", "seconds", "minutes", "hours", "days", "iso", "epochSeconds",
 		"epochMilliseconds", "secondsOfDay", "millisecondsOfDay")
@@ -964,6 +980,10 @@ func normalizeLinkPropertyFormat(input *jsValue) *jsValue {
 	if timeZone != nil && !propertyString(timeZone, 256) {
 		return nil
 	}
+	notation := input.get("notation")
+	if notation != nil && (kind.s != "number" || !notation.isString() || (notation.s != "standard" && notation.s != "compact")) {
+		return nil
+	}
 	out := jsObj().set("kind", kind)
 	if validPropertyDecimals(decimals) {
 		out.set("decimals", decimals)
@@ -979,6 +999,9 @@ func normalizeLinkPropertyFormat(input *jsValue) *jsValue {
 	}
 	if propertyString(timeZone, 256) {
 		out.set("timeZone", timeZone)
+	}
+	if notation != nil && notation.s == "compact" {
+		out.set("notation", notation)
 	}
 	return out
 }

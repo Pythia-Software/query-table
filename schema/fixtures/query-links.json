@@ -1803,8 +1803,15 @@
           {
             "field": "tokens",
             "display": {
-              "kind": "compact",
+              "kind": "number",
+              "notation": "compact",
               "decimals": 1
+            }
+          },
+          {
+            "field": "old",
+            "display": {
+              "kind": "compact"
             }
           },
           {
@@ -1851,8 +1858,27 @@
             "display": {
               "kind": "value",
               "format": {
-                "kind": "compact",
+                "kind": "number",
+                "notation": "compact",
                 "decimals": 2
+              }
+            }
+          },
+          {
+            "id": "stray",
+            "op": "avg",
+            "field": "cost",
+            "groupBy": [],
+            "display": {
+              "kind": "value",
+              "format": {
+                "kind": "number",
+                "currency": "USD",
+                "notation": "standard"
+              },
+              "yFormat": {
+                "kind": "percent",
+                "notation": "compact"
               }
             }
           },
@@ -1901,7 +1927,8 @@
                   "id": "t",
                   "field": "tokens",
                   "format": {
-                    "kind": "compact",
+                    "kind": "number",
+                    "notation": "compact",
                     "decimals": 1
                   }
                 }
@@ -1910,7 +1937,7 @@
           }
         }
       },
-      "token": "2d.nVJBbsIwEPwK2rNBwDFHVKlqT0iIQxVFlXEMtXC8luNQ0Sh_79o0IYWkQr3Z653Z2RnXUEKSpiCw9MBMpTWr4ahMDgmIyjlpxBnY9ZjAdvNEhVwKVXBN4CUDg557hSZgsLBcEBVoFFxLKkkz3W6gyVgKHo_SlHdzOsyVdRH7g6p3WTnoLtycIcsYHEh1DSrASyuJhgHacKkKOh4cVnZFalMoMJea8LBXUl-mhU0hV6XVnFo6GTvuph_o1BcazzW17NEV3Pc6eoZclc4H3BkwpGka2jgKbl0YVtyT2jXeiz1xXclBjQNmLnvDd3zUq0dMGp_bekCjCMcPhiiUCL8LXgzBVD4ppHdKTNrWGfHcPLXGzSCjDwBEXMcEIw0dKBcqn5T8pEoNFlHHj3CSrox-LxhYh1Y6ryLoZ2sRJP_e7a90e4G-rt_GAm0tDQn9j_x5te7xROBt9A8FvGia6JeT--jLxalkTrk33w",
+      "token": "2d.pVPBbsIwDP0V5HNAsCNHNG3aTkiIw4SqKaSmi0iTKk07sar_PieDtnTtmLZTE8d-fn5-rSCH5W4HwuQOmC6UYhUcpY5hCaKwFrU4AWuPS9hu7ikQo5ApV1R8x0Abx5002teYNOOCoEAZwRVSCPV0u4E6Yjtw5og67_fRRbpHSyWDOG2nRcAwKgb_9YxfsbDthesTRBGDhCaqQHroPENqwcBk_lKkdEysKbIVTbKD1MSoqB4OEgnVd_UqQCzzTHFKaSjuuZ2-GSs_jHZcUcrB2JS7TkZHrJbxfEC5gSHruiY1AuGLQsOMO1SbxO9kS64KHOLYCH1rex1CubMEfubDy2SMz6h0t9jUDE4P_bcMrUB9RWTPRxf5LxrNgqgV1fFEE4QU_reAJ01lMp6k6KwUk0vqjHB6TxcRZxCRS4GAq2CvAEMHMg2FS4nvFKkgM0YFl5Zo86D9gkFmDc3tZCg6Ty085evZfrJex23P65cxtzW7_TP442rdwQmFfV_-xn009CDBoKHFQ9DqS73lnLxQfwI",
       "normalized": {
         "select": [
           {
@@ -1926,9 +1953,13 @@
           {
             "field": "tokens",
             "display": {
-              "kind": "compact",
+              "kind": "number",
+              "notation": "compact",
               "decimals": 1
             }
+          },
+          {
+            "field": "old"
           },
           {
             "field": "cost_eur"
@@ -1967,8 +1998,24 @@
             "display": {
               "kind": "value",
               "format": {
-                "kind": "compact",
-                "decimals": 2
+                "kind": "number",
+                "decimals": 2,
+                "notation": "compact"
+              }
+            }
+          },
+          {
+            "id": "stray",
+            "op": "avg",
+            "groupBy": [],
+            "field": "cost",
+            "display": {
+              "kind": "value",
+              "format": {
+                "kind": "number"
+              },
+              "yFormat": {
+                "kind": "percent"
               }
             }
           },
@@ -2018,8 +2065,9 @@
                   "id": "t",
                   "field": "tokens",
                   "format": {
-                    "kind": "compact",
-                    "decimals": 1
+                    "kind": "number",
+                    "decimals": 1,
+                    "notation": "compact"
                   }
                 }
               ]
@@ -2027,7 +2075,7 @@
           }
         }
       },
-      "packed": "{\"s\":[[\"cost\",null,{\"kind\":\"currency\",\"currency\":\"USD\",\"decimals\":2,\"notation\":\"compact\",\"locale\":\"en-US\"}],[\"tokens\",null,{\"kind\":\"compact\",\"decimals\":1}],[\"cost_eur\"],[\"cost_any\"]],\"g\":[{\"id\":\"spend\",\"op\":\"sum\",\"groupBy\":[\"model\"],\"field\":\"cost\",\"display\":{\"kind\":\"bar-horizontal\",\"format\":{\"kind\":\"currency\",\"decimals\":0,\"currency\":\"USD\",\"notation\":\"compact\"}}},{\"id\":\"tokens\",\"op\":\"sum\",\"groupBy\":[],\"field\":\"tokens\",\"display\":{\"kind\":\"value\",\"format\":{\"kind\":\"compact\",\"decimals\":2}}},{\"id\":\"bad\",\"op\":\"sum\",\"groupBy\":[],\"field\":\"cost\",\"display\":{\"kind\":\"value\",\"format\":{\"kind\":\"currency\"}},\"diagnostics\":[\"Invalid metric currency.\",\"Invalid metric notation.\"]}],\"d\":{\"modes\":[\"modal\"],\"views\":{\"pool\":[{\"version\":1,\"properties\":[{\"id\":\"c\",\"field\":\"cost\",\"format\":{\"kind\":\"currency\",\"currency\":\"JPY\",\"notation\":\"compact\"}},{\"id\":\"s\",\"field\":\"cost\",\"format\":{\"kind\":\"currency\",\"currency\":\"GBP\"}},{\"id\":\"t\",\"field\":\"tokens\",\"format\":{\"kind\":\"compact\",\"decimals\":1}}]}],\"refs\":{\"modal\":0}}}}"
+      "packed": "{\"s\":[[\"cost\",null,{\"kind\":\"currency\",\"currency\":\"USD\",\"decimals\":2,\"notation\":\"compact\",\"locale\":\"en-US\"}],[\"tokens\",null,{\"kind\":\"number\",\"notation\":\"compact\",\"decimals\":1}],[\"old\"],[\"cost_eur\"],[\"cost_any\"]],\"g\":[{\"id\":\"spend\",\"op\":\"sum\",\"groupBy\":[\"model\"],\"field\":\"cost\",\"display\":{\"kind\":\"bar-horizontal\",\"format\":{\"kind\":\"currency\",\"decimals\":0,\"currency\":\"USD\",\"notation\":\"compact\"}}},{\"id\":\"tokens\",\"op\":\"sum\",\"groupBy\":[],\"field\":\"tokens\",\"display\":{\"kind\":\"value\",\"format\":{\"kind\":\"number\",\"decimals\":2,\"notation\":\"compact\"}}},{\"id\":\"stray\",\"op\":\"avg\",\"groupBy\":[],\"field\":\"cost\",\"display\":{\"kind\":\"value\",\"format\":{\"kind\":\"number\"},\"yFormat\":{\"kind\":\"percent\"}}},{\"id\":\"bad\",\"op\":\"sum\",\"groupBy\":[],\"field\":\"cost\",\"display\":{\"kind\":\"value\",\"format\":{\"kind\":\"currency\"}},\"diagnostics\":[\"Invalid metric currency.\",\"Invalid metric notation.\"]}],\"d\":{\"modes\":[\"modal\"],\"views\":{\"pool\":[{\"version\":1,\"properties\":[{\"id\":\"c\",\"field\":\"cost\",\"format\":{\"kind\":\"currency\",\"currency\":\"JPY\",\"notation\":\"compact\"}},{\"id\":\"s\",\"field\":\"cost\",\"format\":{\"kind\":\"currency\",\"currency\":\"GBP\"}},{\"id\":\"t\",\"field\":\"tokens\",\"format\":{\"kind\":\"number\",\"decimals\":1,\"notation\":\"compact\"}}]}],\"refs\":{\"modal\":0}}}}"
     },
     {
       "name": "item details with pooled views",

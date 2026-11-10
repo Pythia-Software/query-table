@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { boxSummary, type AggregationBucket as MetricBucket, type AggregationClause as RenderingClause, type FieldDef } from "@pythia-software/query-table-core";
-import { MetricCard, defaultRenderers, type RenderRegistry } from "@pythia-software/query-table-ui";
+import { MetricCard } from "@pythia-software/query-table-ui";
 import "@pythia-software/query-table-ui/theme.css";
 import "./demo.css";
 
@@ -12,13 +12,11 @@ const fields: FieldDef<unknown>[] = [
   { name: "model_family", label: "Model family", type: "text", source: { kind: "backend" } },
   { name: "day", label: "Day", type: "datetime", source: { kind: "backend" } },
   { name: "tool", label: "Tool", type: "text", source: { kind: "backend" } },
-  // A host renderer labels a measure's metric values, axes and tooltips.
-  { name: "spend", label: "Spend", type: "number", source: { kind: "backend" }, render: "usd" },
-  // A declared cell display is the measure's default metric format.
-  { name: "tokens", label: "Tokens", type: "number", source: { kind: "backend" }, display: { kind: "compact" } },
+  // A measure's declared numeric display is its metrics' default format:
+  // values, axes, tooltips and totals.
+  { name: "spend", label: "Spend", type: "number", source: { kind: "backend" }, display: { kind: "currency", currency: "USD" } },
+  { name: "tokens", label: "Tokens", type: "number", source: { kind: "backend" }, display: { kind: "number", notation: "compact" } },
 ];
-const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
-const renderers: RenderRegistry = { ...defaultRenderers, usd: ({ value }) => <span>{usd.format(Number(value))}</span> };
 // Thirty-character labels, as repository and provider/model names often are.
 const repositories = ["pythia-software/query-table-go", "pythia-software/pharos-archive", "claude / claude-opus-4-20250514", "short"];
 const distribution = (i: number): MetricBucket => ({
@@ -61,7 +59,7 @@ export function ChartLayoutDemo() {
   const inspect = (bucket: MetricBucket) => setInspected(`Inspected ${bucket.keys.join(" / ")}`);
   const card = (clause: RenderingClause, buckets: MetricBucket[], compact = false) => (
     <div className="qt-demo-chart-card" data-chart={`${clause.id}${compact ? "-compact" : ""}`}>
-      <MetricCard clause={clause} buckets={buckets} fields={fields} renderers={renderers} compact={compact} locale="en-US" onInspect={inspect} />
+      <MetricCard clause={clause} buckets={buckets} fields={fields} compact={compact} locale="en-US" onInspect={inspect} />
     </div>
   );
   const labelled = repositories.map((_, i) => distribution(i));

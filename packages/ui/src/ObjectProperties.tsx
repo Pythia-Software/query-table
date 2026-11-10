@@ -125,7 +125,7 @@ export function formatPropertyValue(
           throw Error("Expected a scalar value.");
         return formatMetricOutput(
           value as MetricValue,
-          format.kind === "number" && format.decimals === undefined
+          format.kind === "number" && format.decimals === undefined && format.notation !== "compact"
             ? undefined
             : format,
           locale,
