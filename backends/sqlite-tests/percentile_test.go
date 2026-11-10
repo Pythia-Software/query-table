@@ -44,23 +44,21 @@ INSERT INTO big SELECT 'low'||i,-1000000-i,'all','low' FROM k UNION ALL SELECT '
 }
 
 // percentileSampleSize is the permutation size of the single-group test:
-// 250,000 samples. The race detector slows the pure-Go SQLite driver
-// tenfold, so under it the test uses 2,000 samples and lowers the in-memory
-// threshold below them, which still takes the overflow (ranked) path.
-func percentileSampleSize(t *testing.T) int {
+// 250,000 samples, or 2,000 under the race detector, which slows the pure-Go
+// SQLite driver tenfold.
+func percentileSampleSize() int {
 	if raceEnabled {
-		t.Cleanup(qt.TestOnlySetSQLiteInMemorySamples(500))
 		return 2000
 	}
 	return 250000
 }
 
 // One group far above the former 100,000-sample cap reduces exactly: MEDIAN,
-// min/max and Tukey boxes, with the default executor (ranked MEDIAN, direct
-// in-memory boxes) and grouped by a constant key in the staged executor
-// (ranked SQL throughout, since the group overflows the in-memory threshold).
+// min/max and Tukey boxes, with the default executor (MEDIAN sorted in
+// memory, direct in-memory boxes) and grouped by a constant key in the staged
+// executor with no in-memory budget (ranked SQL throughout).
 func TestPercentilesWithoutSampleCap(t *testing.T) {
-	size := percentileSampleSize(t)
+	size := percentileSampleSize()
 	db, d := percentilePopulation(t, size)
 	n := size + 30
 	// The sorted population: fifteen low outliers, 0..size-1, fifteen high.
@@ -101,13 +99,19 @@ func TestPercentilesWithoutSampleCap(t *testing.T) {
 	for _, run := range []struct {
 		dataset  qt.QueryDatasetV3
 		grouping []string
-	}{{d, nil}, {qt.TestOnlyStageUngrouped(d), []string{"g"}}} {
+		ranked   bool
+	}{{d, nil, false}, {qt.TestOnlyStageUngrouped(d), []string{"g"}, true}} {
+		restore := func() {}
+		if run.ranked {
+			restore = qt.TestOnlySetSQLiteInMemorySamples(0)
+		}
 		q := metricsV3(nil, nil, 0, 0,
 			qt.AggSpec{ID: "median", Expression: "MEDIAN([n])", GroupBy: run.grouping},
 			qt.AggSpec{ID: "minmax", Op: "count", GroupBy: run.grouping, Distribution: &qt.MetricDistribution{Kind: "box", Input: "[n]"}},
 			qt.AggSpec{ID: "tukey", Op: "count", GroupBy: run.grouping, Distribution: &qt.MetricDistribution{Kind: "box", Input: "[n]", Whiskers: "tukey"}},
 		)
 		r, err := run.dataset.Execute(context.Background(), db, q, qt.PlanOptions{})
+		restore()
 		if err != nil {
 			t.Fatal(run.grouping, err)
 		}

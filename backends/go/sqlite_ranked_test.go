@@ -171,3 +171,52 @@ func TestBoxSummaryFunctionMatchesSortedBox(t *testing.T) {
 		}
 	}
 }
+
+// In-memory aggregates reserve slice capacity from the process-wide budget,
+// overflow when it is exhausted, and return their reservation once valued.
+func TestInMemorySampleBudget(t *testing.T) {
+	if sqliteInMemoryReserved.Load() != 0 {
+		t.Fatal("leaked reservation", sqliteInMemoryReserved.Load())
+	}
+	restore := TestOnlySetSQLiteInMemorySamples(3 * sqliteSampleChunk)
+	defer restore()
+	a := &sqliteSampleQuantileAggregate{midpoint: true}
+	for i := 0; i < 2*sqliteSampleChunk; i++ {
+		if err := a.Step([]driver.Value{float64(i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if a.overflow || sqliteInMemoryReserved.Load() != 2*sqliteSampleChunk {
+		t.Fatal("reserved", sqliteInMemoryReserved.Load())
+	}
+	// A second live group gets the remaining chunk, then overflows.
+	b := &sqliteBoxSamplesAggregate{whiskers: "minmax"}
+	for i := 0; i < 2*sqliteSampleChunk; i++ {
+		if err := b.Step([]driver.Value{float64(i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !b.overflow || sqliteInMemoryReserved.Load() != 2*sqliteSampleChunk {
+		t.Fatal("overflow", b.overflow, sqliteInMemoryReserved.Load())
+	}
+	if v, _ := b.Value(); v != rankedOverflow {
+		t.Fatal(v)
+	}
+	if v, _ := a.Value(); v != float64(sqliteSampleChunk)-0.5 {
+		t.Fatal(v)
+	}
+	if sqliteInMemoryReserved.Load() != 0 {
+		t.Fatal("not released", sqliteInMemoryReserved.Load())
+	}
+}
+
+func TestSQLiteSampleLimitDefaults(t *testing.T) {
+	for dialect, want := range map[string]int{"sqlite": sqliteDirectPopulation, "postgres": DefaultMaxSamplesPerGroup} {
+		if got, err := (QueryDatasetV3{Dialect: dialect}).sampleLimit(); err != nil || got != want {
+			t.Fatal(dialect, got, err)
+		}
+		if got, _ := (QueryDatasetV3{Dialect: dialect, MaxSamplesPerGroup: 7}).sampleLimit(); got != 7 {
+			t.Fatal(dialect, got)
+		}
+	}
+}

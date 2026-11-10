@@ -67,7 +67,7 @@ func (b *MetricBucket) UnmarshalJSON(data []byte) error {
 // sample cap. It remains for hosts that call the aggregate directly.
 //
 // Deprecated: SQLite boxes are bounded by the population budgets only.
-const SQLiteMaxBoxSamples = SQLiteMaxMedianSamples
+const SQLiteMaxBoxSamples = DefaultMaxSamplesPerGroup
 
 type sqliteDistributionPayload struct {
 	Value        *float64                 `json:"value"`

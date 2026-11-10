@@ -399,7 +399,10 @@ extracted keys, and computed ordering retain normalization and checking.
 ## Formulas and computed execution
 
 Enable the profile by registering **both** `SQLiteFunctions()` and
-`SQLiteV2Functions()` scalar descriptors, plus `SQLiteV2Aggregates()`.
+`SQLiteV2Functions()` scalar descriptors, plus `SQLiteV2Aggregates()`. Register
+them only through these lists: the `qt_v2_*` helpers are private to the
+compiler, and their names, arities and arguments can change in any release.
+Register every connection from the same build of this module.
 The production module still imports no database driver. For modernc, supplement
 its scalar registration with this ordinary-aggregate bridge:
 
@@ -618,13 +621,16 @@ Numeric metric samples/results reject integral doubles outside MAX_SAFE_INTEGER;
 COUNT observes presence without that metric-only restriction. SUM also rejects
 an absolute sample sum above MAX_SAFE_INTEGER, even if cancellation would make
 the final sum small. MEDIAN returns the middle sample, or for even populations
-the exact decimal midpoint of the middle two rounded once to double. A group of
-at most 100,000 samples is sorted in memory, as before; a larger group is
-ranked in SQL instead, with identical results (see
-[Ranked percentiles](#ranked-percentiles)). There is no per-group sample cap:
-the population and staging budgets bound the work. A host may still set
-`MaxSamplesPerGroup` (at most 1,000,000); a group above it yields a
-`resource_limit` metric error, never an approximation.
+the exact decimal midpoint of the middle two rounded once to double. A group is
+sorted in memory, as before, while the process-wide in-memory sample budget
+has room for it; otherwise it is ranked in SQL instead, with identical results
+(see [Ranked percentiles](#ranked-percentiles)). `MaxSamplesPerGroup` defaults
+to 10,000,000 on SQLite: staged groups never reach it, and it bounds the CPU
+and temporary space an ungrouped request (which reads `SourceSQL` directly)
+can spend on one group. A host may set it lower (at most 1,000,000); a group
+above it yields a `resource_limit` metric error, never an approximation. The
+check costs a grouped count only when the counted population exceeds the
+budget.
 
 Wrong storage types, invalid/noncanonical datetime bindings, text over 100,000
 UTF-8 bytes, unsafe integers, range errors, and division by zero remain explicit.
@@ -667,17 +673,17 @@ Boxes return `MetricBoxDistribution` with a nullable `MetricBoxSummary`:
 min, q1, median, q3, max, mean, observed low/high endpoints, sample count, whisker
 mode, outliers, and total outlier count. Quartiles use the core's exact-linear
 IEEE interpolation, with rounding before addition and clamping to adjacent
-samples. Like MEDIAN, a group of at most 100,000 samples is summarised in
-memory and a larger one from its ranked samples, with identical results. The
+samples. Like MEDIAN, a group that fits the in-memory budget is summarised in
+memory and any other from its ranked samples, with identical results. The
 mean is the correctly rounded (exact) sum of the samples divided by their
 count, so it does not depend on visitation order; it may differ by roundoff
 from browser accumulation. Whiskers default to minmax; Tukey uses 1.5×IQR
 fences and actual observed endpoints (for a ranked group, native counts of the
 samples below and above the fences give the ranks of the endpoints and of the
 retained outliers). Responses retain all outliers up to 20; larger populations retain the
-first 10 and last 10 sorted outliers while reporting the full count. There is
-no per-group sample cap unless the host sets `MaxSamplesPerGroup`; exceeding
-that yields a `resource_limit` metric error rather than sampling.
+first 10 and last 10 sorted outliers while reporting the full count. A group
+above `MaxSamplesPerGroup` (see MEDIAN) yields a `resource_limit` metric error
+rather than sampling.
 The scalar `value` used for box sorting is the median.
 
 Histograms return `MetricHistogramDistribution` with edges, per-bin counts, and
@@ -704,10 +710,9 @@ inputs, `shownRows`, fields with a `ValueErrorExpr`, and other groupings use
 compiled plans, which materialize the population and sort it once per metric.
 So does the whole request when a scanned value cannot be read exactly (for
 example BLOB storage, a bool stored as 2, or text containing NUL). The scan
-retains 8 bytes per sample, so it only runs while the counted population times
-the number of such metrics is at most 1,000,000 samples; larger requests use
-the compiled (ranked) plans. It fails the request with `resource_limit` above
-10,000,000 matching rows.
+retains 8 bytes per sample, so it admits metrics in request order while the
+counted population times their number is at most 1,000,000 samples; the other
+metrics use their compiled plans.
 
 ### Ranked percentiles
 
@@ -715,10 +720,15 @@ MEDIAN and box quartiles need each group's samples in order. Compiled SQLite
 plans are hybrid, within one statement and so one snapshot:
 
 - The reduction pass feeds every group to an in-memory aggregate
-  (`qt_v2_sample_median`, `qt_v2_box_minmax`, `qt_v2_box_tukey`), which sorts it in Go, as
-  the former `qt_v2_median` and `qt_v2_box` did, while it has at most
-  100,000 samples (eight bytes each; one group per aggregate at a time).
-- A larger group reports an overflow instead of failing. Only then does the
+  (`qt_v2_sample_median`, `qt_v2_box_minmax`, `qt_v2_box_tukey`), which sorts
+  it in Go, as the former `qt_v2_median` and `qt_v2_box` did. The aggregates
+  reserve their slice capacity from one process-wide budget of 8,388,608
+  samples (64 MiB of Go memory), shared by every statement and every
+  order-statistic input. SQLite reduces the groups of an aggregate one at a
+  time, so a statement normally holds one group per input; groups of a few
+  million samples stay in memory.
+- A group that cannot reserve room reports an overflow instead of failing.
+  Only then does the
   plan rank the validated samples in SQL (`ROW_NUMBER()` over the group's
   partition, ordered by sample), read just the samples at the needed ranks,
   and let Go interpolate them (`qt_v2_quantile`, `qt_v2_midpoint`,
@@ -728,9 +738,9 @@ plans are hybrid, within one statement and so one snapshot:
 
 Both paths produce identical values, errors and box means (the mean is an
 exact, order-independent sum; `qt_v2_exact_mean` on the ranked path). Groups
-under the threshold cost what they did before; a group above it pays for the
-in-memory pass and a SQL window sort, which dominates (with the pure-Go
-modernc driver, a 1,000,000-sample MEDIAN takes a few seconds of CPU). The
+that fit the budget cost what they did before; a group that overflows pays for
+the in-memory pass and a SQL window sort, which dominates (with the pure-Go
+modernc driver, ranking 10,000,000 samples takes tens of seconds of CPU). The
 window sort uses the connection's sorter (`cache_size`, spilling to temporary
 files), so hosts with very large single groups should give SQLite enough
 `cache_size` and, where temporary files are slow, `temp_store=MEMORY`.

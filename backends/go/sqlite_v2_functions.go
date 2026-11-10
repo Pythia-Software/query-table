@@ -25,12 +25,16 @@ type SQLiteAggregateDescriptor struct {
 	New   func() SQLiteAggregateFunction
 }
 
-// SQLiteMaxMedianSamples is PostgreSQL's default MaxSamplesPerGroup and the
-// largest group SQLite plans sort in memory; larger SQLite groups are ranked
-// in SQL instead, so SQLite has no per-group default. The qt_v2_median
-// aggregate, which compiled plans no longer call, still returns
-// resource_limit above it rather than an approximate or truncated result.
-const SQLiteMaxMedianSamples = 100000
+// DefaultMaxSamplesPerGroup is PostgreSQL's default MaxSamplesPerGroup.
+// SQLite defaults to the dataset's population budget instead.
+const DefaultMaxSamplesPerGroup = 100000
+
+// SQLiteMaxMedianSamples bounds the qt_v2_median aggregate, which compiled
+// plans no longer call; it still returns resource_limit above it rather than
+// an approximate or truncated result.
+//
+// Deprecated: use DefaultMaxSamplesPerGroup, PostgreSQL's default budget.
+const SQLiteMaxMedianSamples = DefaultMaxSamplesPerGroup
 
 // maxFormulaTextBytes bounds text formula operands in both dialects. Plain
 // projected, filtered and sorted text values are not rejected by length.

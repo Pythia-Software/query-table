@@ -305,6 +305,7 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 				// validated input once per reduction, as before.
 				leaf := sqliteRankedLeaf{alias: a, input: expressionKey(n.args[0]), sample: raw, ranks: medianRanks(), midpoint: true}
 				reductions = append(reductions, "qt_v2_sample_median("+raw+") AS "+a+"_memory", "MIN("+errSQL+") AS "+a+"_input")
+				reductionKeys[a+"_memory"], reductionKeys[a+"_input"] = "memory\x00"+key, "input\x00"+key
 				ranked = append(ranked, leaf)
 			} else {
 				reductions = append(reductions, value+" AS "+a, errorExpr+" AS "+z)
@@ -463,11 +464,9 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 		}
 	}
 	plan := b.finish(sql, scope, cols)
-	if len(ranked) > 0 {
-		// Ranked leaves read the population after the reduction stage, so
-		// that stage alone cannot be cached or fused.
-		return plan, nil
-	}
+	// Ranked leaves keep the reduction stage reusable: they read it and the
+	// population before it, which a cached or fused reduction leaves intact
+	// (and the gated ranking only scans when a group overflowed).
 	if b.lateSource {
 		reductionStage++ // finish prepends the shared authorized source.
 	}

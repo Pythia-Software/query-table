@@ -6,43 +6,59 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"runtime"
 	"sort"
 	"strings"
+	"sync/atomic"
 )
 
 // Exact percentiles over SQLite populations are hybrid. The reduction pass
-// sorts each group in Go while it has at most sqliteInMemorySamples samples.
-// A larger group overflows, and the same statement ranks the validated samples
-// in SQL (ROW_NUMBER over the group's partition, ordered by sample) and reads
-// only the samples at the ranks a percentile needs; Go interpolates those with
-// the same IEEE operations as a sorted slice. Both paths give identical
-// results, and the only size limits are the population and staging budgets.
+// sorts each group in Go while the process-wide in-memory sample budget
+// (sqliteInMemorySamples) has room for it. A group that does not fit
+// overflows, and the same statement ranks the validated samples in SQL
+// (ROW_NUMBER over the group's partition, ordered by sample) and reads only
+// the samples at the ranks a percentile needs; Go interpolates those with the
+// same IEEE operations as a sorted slice. Both paths give identical results,
+// and the only size limits are the population and sample budgets.
 
-// sqliteInMemorySamples is the largest group an in-memory percentile
-// aggregate sorts in Go (eight bytes per sample, one group per aggregate at a
-// time). A larger group reports rankedOverflow and the plan ranks that input
-// in SQL instead, with identical results. Tests lower it to force ranking.
-var sqliteInMemorySamples = SQLiteMaxMedianSamples
+// sqliteInMemorySamples bounds the samples all in-memory percentile
+// aggregates of the process retain at once (8 bytes each, counted by slice
+// capacity): 8,388,608 samples, 64 MiB. SQLite reduces groups one at a time
+// per aggregate, so a statement normally holds one group per order-statistic
+// input; concurrent statements share the budget. A group that cannot reserve
+// room reports rankedOverflow and the plan ranks it in SQL instead, with
+// identical results. Tests lower it to force ranking.
+var sqliteInMemorySamples int64 = 8 << 20
 
-// rankedOverflow is the in-memory aggregates' result for a group above
-// sqliteInMemorySamples. Plans compare against it; it never reaches a result.
+// sqliteInMemoryReserved is the capacity the live in-memory aggregates hold.
+var sqliteInMemoryReserved atomic.Int64
+
+// rankedOverflow is the in-memory aggregates' result for a group that did not
+// fit. Plans compare against it; it never reaches a result.
 const rankedOverflow = "qt_sample_overflow"
 
-// TestOnlySetSQLiteInMemorySamples sets the in-memory group threshold and
-// returns a function restoring the previous one, so parity suites outside this
-// module can force the ranked SQL path. It exists only for those tests.
+// TestOnlySetSQLiteInMemorySamples sets the process-wide in-memory sample
+// budget and returns a function restoring the previous one, so parity suites
+// outside this module can force the ranked SQL path. It exists only for
+// those tests.
 //
 // Deprecated: test-only seam; hosts must not call it. Not safe for concurrent use.
 func TestOnlySetSQLiteInMemorySamples(n int) (restore func()) {
 	previous := sqliteInMemorySamples
-	sqliteInMemorySamples = n
+	sqliteInMemorySamples = int64(n)
 	return func() { sqliteInMemorySamples = previous }
 }
 
-// sqliteSamples collects one group's validated samples up to
-// sqliteInMemorySamples, then drops them and reports overflow.
+// sqliteSampleChunk is the smallest capacity a group reserves at a time.
+const sqliteSampleChunk = 4096
+
+// sqliteSamples collects one group's validated samples while the in-memory
+// budget has room, then drops them and reports overflow. It must be the
+// first field of its aggregate, whose finalizer returns an abandoned
+// reservation (SQLite may discard an aggregate without asking its value).
 type sqliteSamples struct {
 	samples  []float64
+	reserved int64
 	overflow bool
 	err      string
 }
@@ -59,11 +75,32 @@ func (s *sqliteSamples) add(v driver.Value) {
 	if s.err = sqliteDistributionNumberError(n); s.err != "" {
 		return
 	}
-	if len(s.samples) >= sqliteInMemorySamples {
-		s.samples, s.overflow = nil, true
-		return
+	if len(s.samples) == cap(s.samples) {
+		grow := int64(max(sqliteSampleChunk, cap(s.samples)))
+		if sqliteInMemoryReserved.Add(grow) > sqliteInMemorySamples {
+			sqliteInMemoryReserved.Add(-grow)
+			s.release()
+			s.overflow = true
+			return
+		}
+		if s.reserved == 0 {
+			runtime.SetFinalizer(s, (*sqliteSamples).release)
+		}
+		s.reserved += grow
+		grown := make([]float64, len(s.samples), int64(cap(s.samples))+grow)
+		copy(grown, s.samples)
+		s.samples = grown
 	}
 	s.samples = append(s.samples, n)
+}
+
+// release returns the group's reservation; Value calls it once done.
+func (s *sqliteSamples) release() {
+	if s.reserved != 0 {
+		sqliteInMemoryReserved.Add(-s.reserved)
+		s.reserved = 0
+	}
+	s.samples = nil
 }
 
 // sqliteSampleQuantileAggregate is the in-memory order statistic of a group
@@ -85,6 +122,7 @@ func (a *sqliteSampleQuantileAggregate) Step(v []driver.Value) error {
 }
 
 func (a *sqliteSampleQuantileAggregate) Value() (driver.Value, error) {
+	defer a.release()
 	switch {
 	case a.overflow:
 		return rankedOverflow, nil
@@ -118,6 +156,7 @@ func (a *sqliteBoxSamplesAggregate) Step(v []driver.Value) error {
 }
 
 func (a *sqliteBoxSamplesAggregate) Value() (driver.Value, error) {
+	defer a.release()
 	if a.overflow {
 		return rankedOverflow, nil
 	}

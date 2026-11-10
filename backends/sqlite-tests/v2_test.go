@@ -286,7 +286,7 @@ func TestV2MedianBudget(t *testing.T) {
 	}
 	// An explicit MaxSamplesPerGroup is checked before reducing and fails the
 	// metric, where v2 reported resource_limit on its bucket.
-	d.MaxSamplesPerGroup = qt.SQLiteMaxMedianSamples
+	d.MaxSamplesPerGroup = qt.DefaultMaxSamplesPerGroup
 	r, e := d.Execute(context.Background(), db, metricV2("MEDIAN([n])"), qt.PlanOptions{})
 	if m := metricFailure(t, r, e); m != "MEDIAN exceeded the 100,000-sample budget" {
 		t.Fatal(m)

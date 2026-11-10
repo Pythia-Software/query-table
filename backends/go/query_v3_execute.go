@@ -531,7 +531,8 @@ func (d QueryDatasetV3) stageGroups(ctx context.Context, tx *sql.Tx, table strin
 	identity.typedValue = d.Dialect == "sqlite"
 	result.Fields[GroupIdentityField] = identity
 	for _, summary := range g.Summaries {
-		if limit, _ := d.sampleLimit(); limit > 0 && sampledExpression(metricExpression(summarySpec(summary, g.Keys))) {
+		// The staged population is at most the population budget.
+		if limit, _ := d.sampleLimit(); limit < d.populationBudget() && sampledExpression(metricExpression(summarySpec(summary, g.Keys))) {
 			var excessive int64
 			if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+queryIdent(table)+" WHERE count>"+d.param(1), limit).Scan(&excessive); err != nil {
 				return result, err

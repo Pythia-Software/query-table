@@ -18,9 +18,9 @@ import (
 // request's and each metric's filters stay in SQL. Values the reducers cannot
 // read exactly (errRowsUnsupported) or a failed statement leave every metric
 // to its compiled plan: ok is false. total is the matching population.
-// The scan retains every sample of its metrics: when the counted population
-// could exceed sqliteDirectSamples of them, the compiled plans rank them in
-// SQL instead.
+// The scan retains every sample of its metrics: it admits metrics in request
+// order while the counted population times their number stays within
+// sqliteDirectSamples, and leaves the rest to their compiled plans.
 func (d sqliteV2Dataset) directDistributions(ctx context.Context, tx *sql.Tx, q metricRequest, failures []error, o PlanOptions, maxGroups, maxPopulation int, counted int64) (metrics map[int]MetricResult, total int64, ok bool, err error) {
 	include := make([]bool, len(q.Metrics))
 	selected, retained := false, int64(0)
@@ -33,6 +33,10 @@ func (d sqliteV2Dataset) directDistributions(ctx context.Context, tx *sql.Tx, q 
 		if e != nil {
 			continue
 		}
+		// Admit metrics while their samples fit; the rest run compiled plans.
+		if retained+counted > sqliteDirectSamples {
+			continue
+		}
 		include[i], selected = true, true
 		retained += counted
 		fields[m.field] = true
@@ -40,7 +44,7 @@ func (d sqliteV2Dataset) directDistributions(ctx context.Context, tx *sql.Tx, q 
 			fields[name] = true
 		}
 	}
-	if !selected || retained > sqliteDirectSamples {
+	if !selected {
 		return nil, 0, false, nil
 	}
 	sourceName := "qt_direct_source"

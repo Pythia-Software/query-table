@@ -149,7 +149,7 @@ func TestRowsDistributionErrorParity(t *testing.T) {
 
 func TestRowsDistributionBoxSampleBudget(t *testing.T) {
 	s := rowsSchema()
-	rows := make([]map[string]any, qt.SQLiteMaxMedianSamples+1)
+	rows := make([]map[string]any, qt.DefaultMaxSamplesPerGroup+1)
 	for i := range rows {
 		rows[i] = map[string]any{"id": fmt.Sprint(i), "n": int64(i % 1000), "enum": fmt.Sprint(i % 2)}
 	}
@@ -174,7 +174,7 @@ func TestRowsDistributionBoxSampleBudget(t *testing.T) {
 	}
 	// An explicit MaxSamplesPerGroup is checked before reducing and fails the
 	// over-budget metric; v2 reported resource_limit on its bucket.
-	d.MaxSamplesPerGroup = qt.SQLiteMaxMedianSamples
+	d.MaxSamplesPerGroup = qt.DefaultMaxSamplesPerGroup
 	compareStaged(t, tx, d, q, qt.PlanOptions{})
 	compareDirect(t, tx, d, q)
 	got = executeV3Tx(t, tx, d, q, qt.PlanOptions{})

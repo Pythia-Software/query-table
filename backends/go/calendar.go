@@ -300,7 +300,7 @@ func calendarRange(config MetricDateGrouping, q metricRequest, observed []time.T
 // direct execution reads them from the source plan.
 func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggSpec, q metricRequest, s Schema, computed map[string]FieldSpec, o PlanOptions, total int64, maxGroups int, tables *[]string) (MetricResult, error) {
 	if spec.DateGrouping == nil {
-		if err := d.checkMetricSamples(ctx, tx, spec, q, s, o, maxGroups); err != nil {
+		if err := d.checkMetricSamples(ctx, tx, spec, q, s, o, maxGroups, total); err != nil {
 			return MetricResult{}, err
 		}
 		p, err := compileMetricDialect(ctx, q, spec, s, o, d.Dialect == "sqlite")
@@ -436,7 +436,12 @@ func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggS
 	options := o
 	options.SourceSQL = "SELECT * FROM " + queryIdent(table)
 	options.SourceArgs = nil
-	if err = d.checkMetricSamples(ctx, tx, modified, metricRequest{Version: 2}, calendarSchema, options, maxGroups); err != nil {
+	_, _, population, _, err := d.limits()
+	if err != nil {
+		return MetricResult{}, err
+	}
+	// The calendar scratch holds at most the population budget.
+	if err = d.checkMetricSamples(ctx, tx, modified, metricRequest{Version: 2}, calendarSchema, options, maxGroups, int64(population)); err != nil {
 		return MetricResult{}, err
 	}
 	metricPlan, err := compileMetricDialect(ctx, metricRequest{Version: 2}, modified, calendarSchema, options, d.Dialect == "sqlite")
@@ -593,9 +598,13 @@ func fillCalendarBuckets(ctx context.Context, result *MetricResult, config Metri
 	}
 	return nil
 }
-func (d QueryDatasetV3) checkMetricSamples(ctx context.Context, tx *sql.Tx, spec AggSpec, q metricRequest, s Schema, o PlanOptions, maxGroups int) error {
+
+// checkMetricSamples fails a sampled metric with a group above the sample
+// budget. bound is an upper bound on the population (the counted rows, or the
+// staging budget); a population within the budget needs no probe.
+func (d QueryDatasetV3) checkMetricSamples(ctx context.Context, tx *sql.Tx, spec AggSpec, q metricRequest, s Schema, o PlanOptions, maxGroups int, bound int64) error {
 	limit, err := d.sampleLimit()
-	if err != nil || limit == 0 || !metricSampled(spec, d.Dialect == "sqlite") {
+	if err != nil || bound <= int64(limit) || !metricSampled(spec, d.Dialect == "sqlite") {
 		return err
 	}
 	probe := AggSpec{ID: "__qt_samples__", Op: "count", GroupBy: spec.GroupBy, Scope: spec.Scope, Where: spec.Where}
