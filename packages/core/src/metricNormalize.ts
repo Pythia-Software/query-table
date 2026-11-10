@@ -26,6 +26,10 @@ export const METRIC_OPTION_SPECS = {
     reduce: ["total", "mean"],
     partial: ["omit", "include"],
   },
+  interval: {
+    kind: ["proportion", "rate"],
+    level: "number",
+  },
   dateGrouping: {
     field: "string",
     interval: [
@@ -70,6 +74,7 @@ export const METRIC_OPTION_SPECS = {
     maxGroups: "positiveInteger",
     showOther: "boolean",
     boxMean: "boolean",
+    showIntervals: "boolean",
   },
   scale: {
     mode: ["linear", "log"],
@@ -188,6 +193,13 @@ export function normalizeMetricOptions(
       else diagnostics.push("Invalid metric window.");
       out.window = w;
     } else diagnostics.push("Invalid metric window.");
+  }
+  if (raw.interval !== undefined) {
+    if (record(raw.interval)) {
+      const i = copy(raw.interval, METRIC_OPTION_SPECS.interval);
+      if (!i.kind) diagnostics.push("Invalid metric interval.");
+      out.interval = i;
+    } else diagnostics.push("Invalid metric interval.");
   }
   if (raw.dateGrouping !== undefined) {
     if (record(raw.dateGrouping)) {

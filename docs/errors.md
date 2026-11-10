@@ -179,6 +179,7 @@ the stored object).
 | `min_count_grouping` | 400 | no | minCount needs a grouped metric. |
 | `min_count_field` | 400 | no | minCount's distinct or sum field is invalid. |
 | `min_count_distribution` | 400 | no | minCount cannot be combined with a distribution. |
+| `metric_interval` | 400 | no | An interval needs a single-value ratio of two additive aggregates (SUM, COUNT or COUNT_DISTINCT), scaled by positive constants. |
 | `group_disabled` | 400 | no | The field cannot be a group key (for a computed field: not in the host's grouping allowlist). |
 | `grouping` | 400 | no | A grouping definition is invalid: keys, summaries or a calendar key. |
 | `representative` | 400 | no | The representative-row ordering of a grouping is invalid. |

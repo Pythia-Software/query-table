@@ -35,6 +35,12 @@ import {
 } from "./query";
 import { opsForField } from "./ops";
 import { hasMetricSeries, planMetricSeries, validateMetricSeries } from "./metricSeries";
+import {
+  applyMetricInterval,
+  metricRatioParts,
+  validateMetricInterval,
+  type MetricRatioParts,
+} from "./metricIntervals";
 import { applyQuery } from "./apply";
 import { prepareGrouping, withoutGrouping, type GroupedRow } from "./grouping";
 import { computedInputAllowed } from "./apply";
@@ -526,6 +532,7 @@ export function validateMetric(
     if (c.scope !== "shownRows" && compiled.some(hasRegex))
       throw new FormulaError("Regex is unavailable for all-matching metrics.");
     validateMetricSeries(c, compiled[0]!);
+    validateMetricInterval(c, compiled[0]!);
     return [];
   } catch (e) {
     return [
@@ -698,11 +705,13 @@ export interface MetricPopulationSupport {
   minCount?: boolean | undefined;
   /** A `minCount` object: distinct values or a sum of a field. */
   minCountMeasures?: boolean | undefined;
+  /** `interval`: lower and upper bounds on each bucket. */
+  intervals?: boolean | undefined;
 }
 /** A clause the executor cannot run exactly gets its own error; it is never
  * sent with `where`/`minCount` silently dropped. */
 export function metricPopulationError(
-  clause: Pick<AggregationClause, "where" | "minCount">,
+  clause: Pick<AggregationClause, "where" | "minCount" | "interval">,
   support: MetricPopulationSupport,
 ): string | undefined {
   if (clause.where?.length && !support.filters)
@@ -711,6 +720,8 @@ export function metricPopulationError(
     return "This server does not support a minimum rows per group.";
   if (metricMinCountMeasure(clause) && !support.minCountMeasures)
     return "This server does not support a minimum of distinct values or a sum per group.";
+  if (clause.interval !== undefined && !support.intervals)
+    return "This server does not support metric intervals.";
   return undefined;
 }
 export function metricDependencies(
@@ -1207,6 +1218,52 @@ export function sortMetricBuckets(
     return 0;
   });
 }
+/** The Other remainder of a ratio of additive parts (SUM or COUNT over SUM or
+ * COUNT): each part pooled over the omitted groups, the formula evaluated on
+ * the pooled parts and its interval from them. COUNT_DISTINCT parts do not
+ * add across groups, so they have no remainder. */
+function pooledRatioOther(
+  c: AggregationClause,
+  plan: MetricPlan,
+  ratio: MetricRatioParts,
+  omitted: AggregationBucket[],
+  parts: Map<AggregationBucket, [FormulaResult | undefined, FormulaResult | undefined]>,
+): AggregationBucket | undefined {
+  const additive = (name: string) => name === "SUM" || name === "COUNT";
+  if (!additive(ratio.numerator.name) || !additive(ratio.denominator.name))
+    return undefined;
+  const pooled = [0, 1].map((side): FormulaResult | undefined => {
+    let total = 0,
+      seen = false;
+    for (const bucket of omitted) {
+      const part = parts.get(bucket)?.[side];
+      if (!part || part.error) return undefined;
+      if (part.value === null) continue;
+      if (typeof part.value !== "number") return undefined;
+      total += part.value;
+      seen = true;
+    }
+    const name = side ? ratio.denominator.name : ratio.numerator.name;
+    if (!Number.isFinite(total) || (Number.isInteger(total) && !Number.isSafeInteger(total)))
+      return undefined;
+    return { value: name === "COUNT" || seen ? total : null };
+  });
+  if (!pooled[0] || !pooled[1]) return undefined;
+  const result = evaluateMetricReductions(
+    plan,
+    plan.aggregates.map((node) =>
+      node === ratio.numerator ? pooled[0]! : pooled[1]!,
+    ),
+  );
+  const other: AggregationBucket = {
+    keys: [],
+    value: result.error ? null : scalar(result.value),
+    count: omitted.reduce((n, b) => n + b.count, 0),
+    ...(result.error ? { error: result.error } : {}),
+  };
+  applyMetricInterval(other, c.interval!, ratio.scale, pooled[0], pooled[1]);
+  return other;
+}
 export function evaluateMetrics<Row>(
   rows: Row[],
   q: QueryState,
@@ -1538,8 +1595,8 @@ export function evaluateMetrics<Row>(
           p: FormulaPlan,
           rs: Row[],
           inputErrors: Set<number>,
+          cache = new Map<FormulaNode, FormulaResult>(),
         ): FormulaResult => {
-          const cache = new Map<FormulaNode, FormulaResult>();
           return checkedMetricResult(
             formulaRuntime(p.ast, {}, (node) => {
               if (!aggregates.has(node.name)) return undefined;
@@ -1569,6 +1626,15 @@ export function evaluateMetrics<Row>(
           );
         };
         const populations = new Map<AggregationBucket, number[]>();
+        // An interval reads the exact numerator and denominator reductions.
+        const ratio =
+          c.interval && !distributionActive(c)
+            ? metricRatioParts(ps[0]!.ast)
+            : undefined;
+        const ratioParts = new Map<
+          AggregationBucket,
+          [FormulaResult | undefined, FormulaResult | undefined]
+        >();
         // An object minCount measures each group with its own aggregate, with
         // the same semantics as that aggregate in a metric expression.
         const minPlan = metricMinCountPlan(c, schema, options.resolveComputed);
@@ -1605,10 +1671,23 @@ export function evaluateMetrics<Row>(
               if (ps[1]) bucket.y = empty(ps[1]);
               return bucket;
             }
-            const inputErrors = new Set<number>();
-            const x = reduce(ps[0]!, g.rows, inputErrors);
+            const inputErrors = new Set<number>(),
+              reductions = new Map<FormulaNode, FormulaResult>();
+            const x = reduce(ps[0]!, g.rows, inputErrors, reductions);
             bucket.value = scalar(x.value);
             if (x.error) bucket.error = x.error;
+            if (ratio) {
+              // A null operand can leave the other part unevaluated.
+              for (const node of [ratio.numerator, ratio.denominator])
+                if (!reductions.has(node))
+                  reduce({ ...ps[0]!, ast: node }, g.rows, inputErrors, reductions);
+              const parts = [
+                reductions.get(ratio.numerator),
+                reductions.get(ratio.denominator),
+              ] as [FormulaResult | undefined, FormulaResult | undefined];
+              ratioParts.set(bucket, parts);
+              applyMetricInterval(bucket, c.interval!, ratio.scale, ...parts);
+            }
             if (ps[1]) {
               const y = reduce(ps[1], g.rows, inputErrors);
               bucket.y = scalar(y.value);
@@ -1665,7 +1744,8 @@ export function evaluateMetrics<Row>(
         if (c.groupLimit && buckets.length > c.groupLimit) {
           const omitted = buckets.slice(c.groupLimit),
             ast = ps[0]!.ast;
-          if (
+          if (ratio) other = pooledRatioOther(c, ps[0] as MetricPlan, ratio, omitted, ratioParts);
+          else if (
             !distributionActive(c) &&
             ast.kind === "call" &&
             ["SUM", "COUNT"].includes(ast.name) &&

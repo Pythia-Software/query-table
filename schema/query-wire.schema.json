@@ -126,6 +126,15 @@
         { "$ref": "#/$defs/MetricMinCountSum", "x-swift-case": "sum" }
       ]
     },
+    "MetricInterval": {
+      "x-ts-name": "MetricInterval",
+      "description": "A confidence interval around a ratio metric, returned as lower and upper on every bucket. The metric must be a ratio of two additive aggregates, numerator over denominator (SUM, COUNT or COUNT_DISTINCT), optionally scaled by constants and with NULLIF(denominator, 0): for example COUNT_DISTINCT(IF([events]>0,[turn_id],NULL))/COUNT_DISTINCT([turn_id]) or SUM([events])/NULLIF(COUNT_DISTINCT([message_id])/1000,0). proportion: a share of units (0 <= numerator <= denominator), Wilson score interval. rate: a count over an exposure, the exact (Garwood) Poisson interval on the numerator divided by the exposure. Bounds use the exact numerator and denominator of each bucket and are in the metric's units, after its constant scale.",
+      "type": "object", "additionalProperties": false, "required": ["kind"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["proportion", "rate"] },
+        "level": { "type": "number", "x-go-repr": "*float64", "exclusiveMinimum": 0, "exclusiveMaximum": 1, "description": "Confidence level; omitted is 0.95." }
+      }
+    },
     "MetricSpec": {
       "x-ts-name": "MetricSpecV3", "x-go-name": "AggSpec", "x-swift-name": "MetricSpecV3",
       "description": "One metric as sent: an AggregationClause without its presentation (label, layout, display other than scatter, window, share).",
@@ -144,7 +153,8 @@
         "field": { "$ref": "#/$defs/FieldName", "description": "Measure field; omitted only for count." },
         "groupBy": { "type": "array", "maxItems": 20, "items": { "$ref": "#/$defs/FieldName" }, "x-swift-default": "[]" },
         "where": { "type": "array", "items": { "$ref": "#/$defs/WhereTerm" }, "description": "The metric's own predicate, ANDed with the table WHERE.", "x-swift-name": "whereTerms" },
-        "minCount": { "$ref": "#/$defs/MetricMinCount", "x-go-omit": "omitzero" }
+        "minCount": { "$ref": "#/$defs/MetricMinCount", "x-go-omit": "omitzero" },
+        "interval": { "$ref": "#/$defs/MetricInterval", "description": "Return lower and upper bounds on every bucket; see MetricInterval. Servers advertise it as metricIntervals." }
       }
     },
     "CalendarGroupKey": {
@@ -221,6 +231,7 @@
         "metricFilters": { "type": "boolean", "x-go-omit": "none", "description": "Executes MetricSpec.where." },
         "metricMinCount": { "type": "boolean", "x-go-omit": "none", "description": "Executes a numeric minCount and reports hiddenGroups." },
         "metricMinCountMeasures": { "type": "boolean", "x-go-omit": "none", "description": "Also executes an object minCount." },
+        "metricIntervals": { "type": "boolean", "x-go-omit": "none", "description": "Executes MetricSpec.interval (proportion and rate) and returns lower and upper bounds." },
         "version": { "const": 3 },
         "groupedRows": { "type": "boolean" },
         "calendarGrouping": { "type": "boolean" },
@@ -309,7 +320,9 @@
         "count": { "type": "integer", "x-go-repr": "int64", "description": "COUNT(*) of rows in the group." },
         "error": { "type": "string" },
         "y": { "$ref": "#/$defs/MetricValue", "x-go-repr": "*any", "description": "The scatter y value." },
-        "yError": { "type": "string" }
+        "yError": { "type": "string" },
+        "lower": { "type": "number", "x-go-repr": "*float64", "description": "The interval's lower bound (MetricSpec.interval), in the value's units. Present only with upper, when the value is a number." },
+        "upper": { "type": "number", "x-go-repr": "*float64", "description": "The interval's upper bound." }
       }
     },
     "MetricResult": {
@@ -411,7 +424,7 @@
     "ErrorCode": {
       "description": "Every machine-readable error code the server or a client can produce. x-codes gives each code's HTTP status (null: never sent by a server), whether a retry can succeed (yes, no, or refresh: after refreshing the handshake or reloading) and its meaning; docs/errors.md is generated from it. Decoders must accept codes they do not know.",
       "type": "string",
-      "enum": ["invalid_json", "invalid_request", "method_not_allowed", "forbidden", "not_found", "request_too_large", "conflict", "quota_exceeded", "timeout", "cancelled", "unavailable", "internal", "version", "invalid_query", "profile_mismatch", "definition_changed", "execution_expired", "definition_unavailable", "definition_invalid", "datetime_value", "residual_query", "dataset", "schema", "source_required", "resolver_required", "resolver_scope", "snapshot_transaction_required", "snapshot_validation_required", "plan_token_validation_required", "numeric_domain_required", "unknown_field", "select_required", "filter", "filter_disabled", "sort", "collation_required", "unsupported_regex", "unsupported_literal", "unsupported_type", "invalid_source_value", "numeric_range", "encoding", "identity_required", "duplicate_identity", "scope", "window_required", "syntax", "unsupported_syntax", "unsupported_function", "arity", "type_error", "aggregate_required", "aggregate_context", "aggregate_disabled", "paired_expression_required", "dependency_cycle", "invalid_metric", "duplicate_metric", "metric_sort", "distribution", "date_grouping", "unsupported_date_grouping", "min_count_grouping", "min_count_field", "min_count_distribution", "group_disabled", "grouping", "representative", "resource_limit", "complexity_limit", "dependency_limit", "expansion_limit", "source_limit", "stage_limit", "schema_limit", "capability_unsupported", "unexpanded_series", "invalid", "too_large", "unsupported_version"],
+      "enum": ["invalid_json", "invalid_request", "method_not_allowed", "forbidden", "not_found", "request_too_large", "conflict", "quota_exceeded", "timeout", "cancelled", "unavailable", "internal", "version", "invalid_query", "profile_mismatch", "definition_changed", "execution_expired", "definition_unavailable", "definition_invalid", "datetime_value", "residual_query", "dataset", "schema", "source_required", "resolver_required", "resolver_scope", "snapshot_transaction_required", "snapshot_validation_required", "plan_token_validation_required", "numeric_domain_required", "unknown_field", "select_required", "filter", "filter_disabled", "sort", "collation_required", "unsupported_regex", "unsupported_literal", "unsupported_type", "invalid_source_value", "numeric_range", "encoding", "identity_required", "duplicate_identity", "scope", "window_required", "syntax", "unsupported_syntax", "unsupported_function", "arity", "type_error", "aggregate_required", "aggregate_context", "aggregate_disabled", "paired_expression_required", "dependency_cycle", "invalid_metric", "duplicate_metric", "metric_sort", "distribution", "date_grouping", "unsupported_date_grouping", "min_count_grouping", "min_count_field", "min_count_distribution", "metric_interval", "group_disabled", "grouping", "representative", "resource_limit", "complexity_limit", "dependency_limit", "expansion_limit", "source_limit", "stage_limit", "schema_limit", "capability_unsupported", "unexpanded_series", "invalid", "too_large", "unsupported_version"],
       "x-codes": {
         "invalid_json": { "status": 400, "retry": "no", "description": "The request body is not one well-formed JSON value." },
         "invalid_request": { "status": 400, "retry": "no", "description": "The request is malformed outside the query itself: a missing or invalid dataset or code parameter, or an invalid stored body." },
@@ -478,6 +491,7 @@
         "min_count_grouping": { "status": 400, "retry": "no", "description": "minCount needs a grouped metric." },
         "min_count_field": { "status": 400, "retry": "no", "description": "minCount's distinct or sum field is invalid." },
         "min_count_distribution": { "status": 400, "retry": "no", "description": "minCount cannot be combined with a distribution." },
+        "metric_interval": { "status": 400, "retry": "no", "description": "An interval needs a single-value ratio of two additive aggregates (SUM, COUNT or COUNT_DISTINCT), scaled by positive constants." },
         "group_disabled": { "status": 400, "retry": "no", "description": "The field cannot be a group key (for a computed field: not in the host's grouping allowlist)." },
         "grouping": { "status": 400, "retry": "no", "description": "A grouping definition is invalid: keys, summaries or a calendar key." },
         "representative": { "status": 400, "retry": "no", "description": "The representative-row ordering of a grouping is invalid." },

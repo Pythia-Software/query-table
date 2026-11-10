@@ -1,0 +1,117 @@
+import { describe, expect, it } from "vitest";
+import {
+  EMPTY_QUERY,
+  compileMetric,
+  evaluateMetrics,
+  gammaQuantile,
+  metricIntervalBounds,
+  metricRatioParts,
+  normalQuantile,
+  toQueryRequestV3,
+  validateMetric,
+  type AggregationClause,
+  type FieldSchema,
+  type QueryCapabilitiesV3,
+} from "../src/index";
+
+type Row = Record<string, unknown>;
+const schema: FieldSchema<Row> = {
+  name: "turns",
+  idField: "id",
+  fields: [
+    { name: "id", label: "ID", type: "text", source: { kind: "backend" } },
+    { name: "bucket", label: "Bucket", type: "text", source: { kind: "backend" } },
+    { name: "turn", label: "Turn", type: "text", source: { kind: "backend" } },
+    { name: "events", label: "Events", type: "number", source: { kind: "backend" } },
+  ],
+};
+// Pharos's prompt-length evidence: turns with an "unclear instructions" event.
+const groups: [string, number, number][] = [
+  ["31-100", 6, 128],
+  ["101-300", 8, 52],
+  ["300+", 6, 15],
+];
+const rows: Row[] = groups.flatMap(([bucket, hits, turns]) =>
+  Array.from({ length: turns }, (_, i) => ({
+    id: `${bucket}-${i}`,
+    bucket,
+    turn: `${bucket}-t${i}`,
+    events: i < hits ? 1 : 0,
+  })),
+);
+const share: AggregationClause = {
+  id: "share",
+  op: "count",
+  expression: "COUNT_DISTINCT(IF([events]>0,[turn],NULL))/NULLIF(COUNT_DISTINCT([turn]),0)",
+  groupBy: ["bucket"],
+  sort: [{ key: "group0", dir: "asc" }],
+  interval: { kind: "proportion" },
+};
+
+describe("metric interval numerics", () => {
+  it("matches reference quantiles", () => {
+    expect(normalQuantile(0.05)).toBeCloseTo(1.959963984540054, 14);
+    // Garwood bounds for 0..2 events: chi-square quantiles / 2.
+    expect(gammaQuantile(0.975, 1)).toBeCloseTo(3.6888794541139363, 12);
+    expect(gammaQuantile(0.025, 2)).toBeCloseTo(0.24220927854396496, 12);
+  });
+  it("computes Wilson bounds for the Pharos evidence", () => {
+    const bounds = groups.map(([, hits, turns]) => metricIntervalBounds({ kind: "proportion" }, hits, turns));
+    expect(bounds.map((b) => b && "lower" in b && [b.lower, b.upper])).toEqual([
+      [expect.closeTo(0.021658, 5), expect.closeTo(0.098498, 5)],
+      [expect.closeTo(0.080077, 5), expect.closeTo(0.275241, 5)],
+      [expect.closeTo(0.198245, 5), expect.closeTo(0.642532, 5)],
+    ]);
+  });
+  it("handles zero, full and invalid parts", () => {
+    expect(metricIntervalBounds({ kind: "proportion" }, 0, 10)).toMatchObject({ lower: 0 });
+    expect(metricIntervalBounds({ kind: "proportion" }, 10, 10)).toMatchObject({ upper: 1 });
+    expect(metricIntervalBounds({ kind: "proportion" }, 1, 0)).toBeUndefined();
+    expect(metricIntervalBounds({ kind: "proportion" }, 11, 10)).toHaveProperty("error");
+    expect(metricIntervalBounds({ kind: "rate" }, -1, 10)).toHaveProperty("error");
+    expect(metricIntervalBounds({ kind: "rate" }, 0, 10, 1000)).toEqual({ lower: 0, upper: expect.closeTo(368.88794541139363, 9) });
+  });
+});
+
+describe("metric ratio shapes", () => {
+  const parts = (expression: string) => {
+    const { numerator, denominator, scale } = metricRatioParts(compileMetric(expression, schema).ast);
+    return [numerator.name, denominator.name, scale];
+  };
+  it("accepts scaled ratios of additive aggregates", () => {
+    expect(parts("SUM([events])/(COUNT_DISTINCT([turn])/1000)")).toEqual(["SUM", "COUNT_DISTINCT", 1000]);
+    expect(parts("100*COUNT_DISTINCT(IF([events]>0,[turn],NULL))/NULLIF(COUNT_DISTINCT([turn]),0)")).toEqual(["COUNT_DISTINCT", "COUNT_DISTINCT", 100]);
+    expect(parts("SUM([events])/NULLIF(COUNT()/1000,0)")).toEqual(["SUM", "COUNT", 1000]);
+  });
+  it("refuses other shapes", () => {
+    for (const expression of ["SUM([events])", "AVG([events])", "SUM([events])-COUNT()", "-SUM([events])/COUNT()", "SUM([events])/COUNT()/COUNT()", "MAX([events])/COUNT()"])
+      expect(() => metricRatioParts(compileMetric(expression, schema).ast), expression).toThrow(/ratio of two aggregates/);
+  });
+  it("validates clauses", () => {
+    const issue = (c: Partial<AggregationClause>) => validateMetric({ ...share, ...c }, schema)[0]?.message;
+    expect(issue({})).toBeUndefined();
+    expect(issue({ expression: "AVG([events])" })).toMatch(/ratio/);
+    expect(issue({ interval: { kind: "wald" as never } })).toMatch(/kind/);
+    expect(issue({ interval: { kind: "rate", level: 1 } })).toMatch(/level/);
+    expect(issue({ display: { kind: "scatter" }, expressionY: "COUNT()" })).toMatch(/single-value/);
+    expect(issue({ expression: "COUNT()", share: "total", interval: { kind: "rate" } })).toMatch(/proportion/);
+    expect(issue({ expression: "COUNT()", share: "total" })).toBeUndefined();
+  });
+});
+
+describe("local engine", () => {
+  it("returns Wilson bounds per group from exact parts", () => {
+    const [metric] = evaluateMetrics(rows, { ...EMPTY_QUERY, aggregations: [share] }, schema).metrics;
+    expect(metric!.buckets.map((b) => [b.keys[0], b.value, b.lower, b.upper])).toEqual([
+      ["101-300", 8 / 52, expect.closeTo(0.080077, 5), expect.closeTo(0.275241, 5)],
+      ["300+", 6 / 15, expect.closeTo(0.198245, 5), expect.closeTo(0.642532, 5)],
+      ["31-100", 6 / 128, expect.closeTo(0.021658, 5), expect.closeTo(0.098498, 5)],
+    ]);
+  });
+  it("refuses a server without the capability", () => {
+    const capabilities: QueryCapabilitiesV3 = { version: 3, groupedRows: true, calendarGrouping: true, computedSourceFilters: false, regex: false, maxRows: 100, maxGroups: 100, maxPopulation: 1000, profile: "p" };
+    const query = { ...EMPTY_QUERY, aggregations: [share] };
+    expect(() => toQueryRequestV3(query, schema, capabilities)).toThrow(/metric intervals/);
+    expect(toQueryRequestV3(query, schema, { ...capabilities, metricIntervals: true }).metrics[0]!.interval).toEqual({ kind: "proportion" });
+  });
+});

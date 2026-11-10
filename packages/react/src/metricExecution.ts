@@ -97,7 +97,7 @@ export async function executeV3Metrics<Row>(
       refused.set(clause.id, new QueryError("invalid_metric", `Metric ${clause.id} uses an unsupported operation: ${clause.unsupportedOp}.`, { metricId: clause.id }));
       continue;
     }
-    const issue = metricPopulationError(clause, { filters: capabilities.metricFilters, minCount: capabilities.metricMinCount, minCountMeasures: capabilities.metricMinCountMeasures });
+    const issue = metricPopulationError(clause, { filters: capabilities.metricFilters, minCount: capabilities.metricMinCount, minCountMeasures: capabilities.metricMinCountMeasures, intervals: capabilities.metricIntervals });
     if (issue) refused.set(clause.id, new QueryError("capability_unsupported", issue, { metricId: clause.id }));
   }
   let runnable = (query.aggregations ?? []).filter(clause => !refused.has(clause.id));

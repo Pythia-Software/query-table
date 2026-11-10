@@ -121,6 +121,8 @@ export interface MetricDisplay {
     columnDir?: "asc" | "desc";
   };
   boxMean?: boolean;
+  /** Draw interval whiskers and bands when buckets have bounds (default true). */
+  showIntervals?: boolean;
   xScale?: MetricAxisScale;
   yScale?: MetricAxisScale;
 }

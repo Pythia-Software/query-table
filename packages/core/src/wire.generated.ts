@@ -93,6 +93,13 @@ export interface MetricMinCountSum {
 /** Drop small groups before sorting, groupLimit and Other: a number counts rows; an object counts a field's distinct non-null values or sums a numeric field. Removed groups are reported as hiddenGroups. */
 export type MetricMinCount = number | MetricMinCountDistinct | MetricMinCountSum;
 
+/** A confidence interval around a ratio metric, returned as lower and upper on every bucket. The metric must be a ratio of two additive aggregates, numerator over denominator (SUM, COUNT or COUNT_DISTINCT), optionally scaled by constants and with NULLIF(denominator, 0): for example COUNT_DISTINCT(IF([events]>0,[turn_id],NULL))/COUNT_DISTINCT([turn_id]) or SUM([events])/NULLIF(COUNT_DISTINCT([message_id])/1000,0). proportion: a share of units (0 <= numerator <= denominator), Wilson score interval. rate: a count over an exposure, the exact (Garwood) Poisson interval on the numerator divided by the exposure. Bounds use the exact numerator and denominator of each bucket and are in the metric's units, after its constant scale. */
+export interface MetricInterval {
+  kind: "proportion" | "rate";
+  /** Confidence level; omitted is 0.95. */
+  level?: number;
+}
+
 /** One metric as sent: an AggregationClause without its presentation (label, layout, display other than scatter, window, share). */
 export interface MetricSpecV3 {
   dateGrouping?: WireMetricDateGrouping;
@@ -114,6 +121,8 @@ export interface MetricSpecV3 {
   /** The metric's own predicate, ANDed with the table WHERE. */
   where?: WireWhereTerm[];
   minCount?: MetricMinCount;
+  /** Return lower and upper bounds on every bucket; see MetricInterval. Servers advertise it as metricIntervals. */
+  interval?: MetricInterval;
 }
 
 /** A grouping key that buckets a datetime field by calendar interval, keyed by the interval's start instant. Weeks start on Monday. */
@@ -171,6 +180,8 @@ export interface QueryCapabilitiesV3 {
   metricMinCount?: boolean;
   /** Also executes an object minCount. */
   metricMinCountMeasures?: boolean;
+  /** Executes MetricSpec.interval (proportion and rate) and returns lower and upper bounds. */
+  metricIntervals?: boolean;
   version: 3;
   groupedRows: boolean;
   calendarGrouping: boolean;
@@ -260,6 +271,10 @@ export interface MetricBucketV3 {
   /** The scatter y value. */
   y?: MetricValue;
   yError?: string;
+  /** The interval's lower bound (MetricSpec.interval), in the value's units. Present only with upper, when the value is a number. */
+  lower?: number;
+  /** The interval's upper bound. */
+  upper?: number;
 }
 
 /** One metric's result, in request order. */
@@ -419,6 +434,7 @@ export const ERROR_CODES = [
   "min_count_grouping",
   "min_count_field",
   "min_count_distribution",
+  "metric_interval",
   "group_disabled",
   "grouping",
   "representative",
