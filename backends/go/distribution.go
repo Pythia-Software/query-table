@@ -153,7 +153,7 @@ func (b *planBuilder) distribution(spec AggSpec, groups []ValueSQL, scope string
 	if e != nil {
 		return SQLPlan{}, e
 	}
-	sql := b.metricResult(spec, order)
+	sql := b.metricResult(spec, order, nil)
 	return b.finish(sql, scope, nil), nil
 }
 

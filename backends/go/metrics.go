@@ -387,13 +387,19 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 		return SQLPlan{}, e
 	}
 	v = b.metricNumber(v)
-	var intervalParts [2]ValueSQL
-	if spec.Interval != nil {
-		// The interval's exact parts, from this metric's own reductions.
-		if ratio, e = metricRatioParts(n); e != nil {
-			return SQLPlan{}, e
+	// A ratio's exact parts, from this metric's own reductions, for its
+	// interval and its Other remainder.
+	shape := metricOtherShapeOf(spec, n)
+	var ratioParts []ValueSQL
+	if spec.Interval != nil || shape.ratio != nil {
+		if spec.Interval != nil {
+			if ratio, e = metricRatioParts(n); e != nil {
+				return SQLPlan{}, e
+			}
+		} else {
+			ratio = *shape.ratio
 		}
-		intervalParts = [2]ValueSQL{leaves[ratio.numerator], leaves[ratio.denominator]}
+		ratioParts = []ValueSQL{leaves[ratio.numerator], leaves[ratio.denominator]}
 	}
 	extraValues := make([]ValueSQL, len(extraNodes))
 	for i, node := range extraNodes {
@@ -442,17 +448,17 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 		leaf := leaves[minNode]
 		fields = append(fields, leaf.Value+" AS min_measure", leaf.Error+" AS min_measure_error")
 	}
-	if spec.Interval != nil {
-		num, den := intervalParts[0], intervalParts[1]
-		fields = append(fields, num.Value+" AS interval_numerator", num.Error+" AS interval_numerator_error",
-			den.Value+" AS interval_denominator", den.Error+" AS interval_denominator_error")
+	if ratioParts != nil {
+		num, den := ratioParts[0], ratioParts[1]
+		fields = append(fields, num.Value+" AS ratio_numerator", num.Error+" AS ratio_numerator_error",
+			den.Value+" AS ratio_denominator", den.Error+" AS ratio_denominator_error")
 	}
 	b.stage("SELECT " + strings.Join(fields, ",") + " FROM " + b.rel)
 	order, e := metricOrder(spec, len(groups), y != nil, false)
 	if e != nil {
 		return SQLPlan{}, e
 	}
-	sql := b.metricResult(spec, order)
+	sql := b.metricResult(spec, order, shape.columns())
 	cols := []OutputColumn{}
 	{
 		for i, g := range groups {
@@ -490,12 +496,38 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 // rows are LEFT JOINed to a one-row hidden_groups count, so a result whose
 // every group is hidden still returns that count in one row whose count is
 // NULL (no bucket). Hidden groups never reach the ranking, LIMIT or Other.
-func (b *planBuilder) metricResult(spec AggSpec, order string) string {
-	limit := ""
+//
+// With other (the columns an Other remainder pools) and a group limit, window
+// aggregates over the kept groups ranked beyond the limit are added to every
+// row: other_groups, other_count, other_errors and, for each pooled column,
+// other_pN (its sum), other_pN_n (its non-NULL values) and other_pN_errors.
+func (b *planBuilder) metricResult(spec AggSpec, order string, other []ValueSQL) string {
+	limit, rankLimit := "", ""
 	if spec.GroupLimit > 0 {
-		limit = " LIMIT " + b.param(spec.GroupLimit, "integer")
+		rankLimit = b.param(spec.GroupLimit, "integer")
+		limit = " LIMIT " + rankLimit
+	}
+	pool := func() {
+		if rankLimit == "" || len(other) == 0 {
+			return
+		}
+		b.stage("SELECT *,ROW_NUMBER() OVER (" + strings.TrimSpace(order) + ") AS qt_rank FROM " + b.rel)
+		beyond := "qt_rank>" + rankLimit
+		cols := []string{
+			"COUNT(CASE WHEN " + beyond + " THEN 1 END) OVER () AS other_groups",
+			"SUM(CASE WHEN " + beyond + " THEN count END) OVER () AS other_count",
+			"COUNT(CASE WHEN " + beyond + " AND error IS NOT NULL THEN 1 END) OVER () AS other_errors",
+		}
+		for i, part := range other {
+			p := fmt.Sprintf("other_p%d", i)
+			cols = append(cols, "SUM(CASE WHEN "+beyond+" THEN "+part.Value+" END) OVER () AS "+p,
+				"COUNT(CASE WHEN "+beyond+" THEN "+part.Value+" END) OVER () AS "+p+"_n",
+				"COUNT(CASE WHEN "+beyond+" AND "+part.Error+" IS NOT NULL THEN 1 END) OVER () AS "+p+"_errors")
+		}
+		b.stage("SELECT *," + strings.Join(cols, ",") + " FROM " + b.rel)
 	}
 	if !spec.MinCount.Active() {
+		pool()
 		return "SELECT *,COUNT(*) OVER () AS group_count FROM " + b.rel + order + limit
 	}
 	groups := b.rel
@@ -510,6 +542,7 @@ func (b *planBuilder) metricResult(spec AggSpec, order string) string {
 		hide = "NOT " + keep
 	}
 	b.stage("SELECT *,COUNT(*) OVER () AS group_count FROM " + groups + " WHERE " + keep)
+	pool()
 	return "SELECT k.*,h.hidden_groups FROM (SELECT COUNT(*) AS hidden_groups FROM " + groups + " WHERE " + hide + ") AS h LEFT JOIN " + b.rel + " AS k ON 1=1" + order + limit
 }
 func groupSQL(groups []ValueSQL) ([]string, string) {

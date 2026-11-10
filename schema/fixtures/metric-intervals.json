@@ -420,6 +420,19 @@
       }
     },
     {
+      "name": "Other pools a ratio's additive parts, with an interval",
+      "metric": {"op": "count", "id": "m", "expression": "SUM([events])/NULLIF(SUM([messages])/1000,0)", "groupBy": ["band"], "sort": [{"key": "group0", "dir": "asc"}], "groupLimit": 3, "interval": {"kind": "rate"}},
+      "expected": {
+        "buckets": [
+          {"keys": ["all"], "count": 4, "value": 500.0, "lower": 136.23317170329062, "upper": 1280.1985844254618},
+          {"keys": ["big"], "count": 2, "value": 0.27, "lower": 0.26898252032296, "upper": 0.2710203758683911},
+          {"keys": ["long"], "count": 15, "value": 53.097345132743364, "lower": 19.485789853901338, "upper": 115.5705665709618}
+        ],
+        "groupCount": 8,
+        "other": {"keys": [], "count": 195, "value": 3.696857670979667, "lower": 2.113073579861721, "upper": 6.003465248974342}
+      }
+    },
+    {
       "name": "a share is a proportion of its total (planned on the client)",
       "planned": true,
       "metric": {"op": "count", "id": "m", "groupBy": ["band"], "share": "total", "sort": [{"key": "group0", "dir": "asc"}], "interval": {"kind": "proportion"}},
@@ -435,6 +448,104 @@
           {"keys": ["silent"], "count": 3, "value": 0.013888888888888888, "lower": 0.00473451726297602, "upper": 0.04003164683312817}
         ],
         "groupCount": 8
+      }
+    },
+    {
+      "name": "Other adds a single SUM's omitted groups",
+      "metric": {"op": "sum", "id": "m", "field": "events", "groupBy": ["band"], "groupLimit": 3},
+      "expected": {
+        "buckets": [
+          {"keys": ["big"], "count": 2, "value": 270000.0},
+          {"keys": ["medium"], "count": 52, "value": 8.0},
+          {"keys": ["short"], "count": 128, "value": 8.0}
+        ],
+        "groupCount": 8,
+        "other": {"keys": [], "count": 34, "value": 10.0}
+      }
+    },
+    {
+      "name": "Other excludes groups minCount hides",
+      "metric": {"op": "count", "id": "m", "groupBy": ["band"], "groupLimit": 2, "minCount": 5},
+      "expected": {
+        "buckets": [
+          {"keys": ["short"], "count": 128, "value": 128.0},
+          {"keys": ["medium"], "count": 52, "value": 52.0}
+        ],
+        "groupCount": 4,
+        "hiddenGroups": 4,
+        "other": {"keys": [], "count": 25, "value": 25.0}
+      }
+    },
+    {
+      "name": "Other pools a ratio's parts without an interval",
+      "metric": {"op": "count", "id": "m", "expression": "SUM([events])/NULLIF(SUM([messages]),0)", "groupBy": ["band"], "sort": [{"key": "group0", "dir": "asc"}], "groupLimit": 4},
+      "expected": {
+        "buckets": [
+          {"keys": ["all"], "count": 4, "value": 0.5},
+          {"keys": ["big"], "count": 2, "value": 0.00027},
+          {"keys": ["long"], "count": 15, "value": 0.05309734513274336},
+          {"keys": ["medium"], "count": 52, "value": 0.006279434850863423}
+        ],
+        "groupCount": 8,
+        "other": {"keys": [], "count": 143, "value": 0.0026195153896529143}
+      }
+    },
+    {
+      "name": "an Other whose pooled denominator is zero has no value",
+      "metric": {"op": "count", "id": "m", "expression": "SUM([events])/NULLIF(SUM([messages]),0)", "groupBy": ["band"], "sort": [{"key": "group0", "dir": "asc"}], "groupLimit": 7},
+      "expected": {
+        "buckets": [
+          {"keys": ["all"], "count": 4, "value": 0.5},
+          {"keys": ["big"], "count": 2, "value": 0.00027},
+          {"keys": ["long"], "count": 15, "value": 0.05309734513274336},
+          {"keys": ["medium"], "count": 52, "value": 0.006279434850863423},
+          {"keys": ["none"], "count": 10, "value": 0.0},
+          {"keys": ["orphan"], "count": 2, "value": 0.0},
+          {"keys": ["short"], "count": 128, "value": 0.002664890073284477}
+        ],
+        "groupCount": 8,
+        "other": {"keys": [], "count": 3, "value": null}
+      }
+    },
+    {
+      "name": "NULLIF around a whole ratio: Other divides by its pooled zero",
+      "metric": {"op": "count", "id": "m", "expression": "NULLIF(SUM([events])/SUM([messages]),0)", "groupBy": ["band"], "sort": [{"key": "group0", "dir": "asc"}], "groupLimit": 7},
+      "expected": {
+        "buckets": [
+          {"keys": ["all"], "count": 4, "value": 0.5},
+          {"keys": ["big"], "count": 2, "value": 0.00027},
+          {"keys": ["long"], "count": 15, "value": 0.05309734513274336},
+          {"keys": ["medium"], "count": 52, "value": 0.006279434850863423},
+          {"keys": ["none"], "count": 10, "value": null},
+          {"keys": ["orphan"], "count": 2, "value": null},
+          {"keys": ["short"], "count": 128, "value": 0.002664890073284477}
+        ],
+        "groupCount": 8,
+        "other": {"keys": [], "count": 3, "error": true}
+      }
+    },
+    {
+      "name": "a ratio of distinct counts has no Other",
+      "metric": {"op": "count", "id": "m", "expression": "COUNT_DISTINCT(IF([events]>0,[turn],NULL))/NULLIF(COUNT_DISTINCT([turn]),0)", "groupBy": ["band"], "sort": [{"key": "group0", "dir": "asc"}], "groupLimit": 3, "interval": {"kind": "proportion"}},
+      "expected": {
+        "buckets": [
+          {"keys": ["all"], "count": 4, "value": 1.0, "lower": 0.5101091635454027, "upper": 1.0},
+          {"keys": ["big"], "count": 2, "value": 1.0, "lower": 0.34238022750665303, "upper": 1.0},
+          {"keys": ["long"], "count": 15, "value": 0.4, "lower": 0.1982449614134158, "upper": 0.6425316987937539}
+        ],
+        "groupCount": 8
+      }
+    },
+    {
+      "name": "calendar days: Other pools the omitted days",
+      "metric": {"op": "count", "id": "m", "expression": "SUM([events])/NULLIF(SUM([messages])/1000,0)", "groupBy": ["at"], "interval": {"kind": "rate"}, "groupLimit": 2, "dateGrouping": {"field": "at", "interval": "day", "includeEmpty": true, "range": "custom", "start": "2026-02-28", "end": "2026-03-04"}},
+      "expected": {
+        "buckets": [
+          {"keys": ["2026-02-28T00:00:00.000Z"], "count": 0, "value": null},
+          {"keys": ["2026-03-01T00:00:00.000Z"], "count": 72, "value": 0.24001928666268005, "lower": 0.23866322653141614, "upper": 0.24138114104389985}
+        ],
+        "groupCount": 5,
+        "other": {"keys": [], "count": 144, "value": 0.3000302220209043, "lower": 0.2985138636579923, "upper": 0.3015523740197582}
       }
     },
     {

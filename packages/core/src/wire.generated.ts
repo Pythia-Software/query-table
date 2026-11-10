@@ -182,6 +182,8 @@ export interface QueryCapabilitiesV3 {
   metricMinCountMeasures?: boolean;
   /** Executes MetricSpec.interval (proportion and rate) and returns lower and upper bounds. */
   metricIntervals?: boolean;
+  /** Computes MetricResult.other, the exact remainder of the groups beyond groupLimit, for every metric shape it can (see docs/metrics.md; the shapes may grow). Clients key off the presence of other: from a server with this flag, a limited result without other has no computable remainder; from one without it, the remainder is unknown. */
+  metricOther?: boolean;
   version: 3;
   groupedRows: boolean;
   calendarGrouping: boolean;
@@ -294,7 +296,7 @@ export interface MetricResultV3 {
   errorCode?: ErrorCode | (string & {});
   /** Groups removed by minCount; present whenever it is set. */
   hiddenGroups?: number;
-  /** The exact omitted additive quantity beyond groupLimit, when an executor computes it. */
+  /** The exact remainder of the groups beyond groupLimit (hidden groups excluded): the sum of a single SUM or COUNT, or a ratio of SUM or COUNT parts evaluated on the pooled parts, with its interval. Executors that advertise metricOther compute it. */
   other?: MetricBucketV3;
 }
 

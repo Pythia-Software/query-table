@@ -451,7 +451,7 @@ func (b *planBuilder) sqliteDistribution(spec AggSpec, groups []ValueSQL, scope 
 	if e != nil {
 		return SQLPlan{}, e
 	}
-	sql := b.metricResult(spec, order)
+	sql := b.metricResult(spec, order, nil)
 	cols = append(cols, OutputColumn{ValueAlias: "value", Type: "number"})
 	return b.finish(sql, scope, cols), nil
 }

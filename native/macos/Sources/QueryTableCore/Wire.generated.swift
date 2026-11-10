@@ -689,6 +689,8 @@ public struct QueryCapabilitiesV3: Codable, Equatable, Sendable {
   public var metricMinCountMeasures: Bool?
   /// Executes MetricSpec.interval (proportion and rate) and returns lower and upper bounds.
   public var metricIntervals: Bool?
+  /// Computes MetricResult.other, the exact remainder of the groups beyond groupLimit, for every metric shape it can (see docs/metrics.md; the shapes may grow). Clients key off the presence of other: from a server with this flag, a limited result without other has no computable remainder; from one without it, the remainder is unknown.
+  public var metricOther: Bool?
   public var version: Int
   public var groupedRows: Bool
   public var calendarGrouping: Bool
@@ -709,6 +711,7 @@ public struct QueryCapabilitiesV3: Codable, Equatable, Sendable {
     case metricMinCount
     case metricMinCountMeasures
     case metricIntervals
+    case metricOther
     case version
     case groupedRows
     case calendarGrouping
@@ -729,6 +732,7 @@ public struct QueryCapabilitiesV3: Codable, Equatable, Sendable {
     metricMinCount = try c.decodeIfPresent(Bool.self, forKey: .metricMinCount)
     metricMinCountMeasures = try c.decodeIfPresent(Bool.self, forKey: .metricMinCountMeasures)
     metricIntervals = try c.decodeIfPresent(Bool.self, forKey: .metricIntervals)
+    metricOther = try c.decodeIfPresent(Bool.self, forKey: .metricOther)
     version = try c.decode(Int.self, forKey: .version)
     groupedRows = try c.decode(Bool.self, forKey: .groupedRows)
     calendarGrouping = try c.decode(Bool.self, forKey: .calendarGrouping)
@@ -749,6 +753,7 @@ public struct QueryCapabilitiesV3: Codable, Equatable, Sendable {
     try c.encodeIfPresent(metricMinCount, forKey: .metricMinCount)
     try c.encodeIfPresent(metricMinCountMeasures, forKey: .metricMinCountMeasures)
     try c.encodeIfPresent(metricIntervals, forKey: .metricIntervals)
+    try c.encodeIfPresent(metricOther, forKey: .metricOther)
     try c.encode(version, forKey: .version)
     try c.encode(groupedRows, forKey: .groupedRows)
     try c.encode(calendarGrouping, forKey: .calendarGrouping)
@@ -1083,7 +1088,7 @@ public struct AggregationResultEntry: Codable, Equatable, Sendable {
   public var errorCode: ErrorCode?
   /// Groups removed by minCount; present whenever it is set.
   public var hiddenGroups: Int?
-  /// The exact omitted additive quantity beyond groupLimit, when an executor computes it.
+  /// The exact remainder of the groups beyond groupLimit (hidden groups excluded): the sum of a single SUM or COUNT, or a ratio of SUM or COUNT parts evaluated on the pooled parts, with its interval. Executors that advertise metricOther compute it.
   public var other: AggregationBucket?
   enum CodingKeys: String, CodingKey {
     case id

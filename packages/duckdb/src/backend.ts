@@ -1,5 +1,9 @@
 import {
+  additiveRatioParts,
   applyMetricInterval,
+  metricOtherRemainder,
+  type FormulaResult,
+  type MetricPlan,
   compileMetric,
   metricRatioParts,
   compileFormula,
@@ -218,6 +222,7 @@ export class DuckDBBackend {
       metricMinCount: true,
       metricMinCountMeasures: true,
       metricIntervals: true,
+      metricOther: true,
       maxRows: positive(options.maxRows, 10000, 10000),
       maxGroups: positive(options.maxGroups, 10000, 10000),
       maxPopulation: positive(options.maxPopulation, 250000, 10000000),
@@ -741,14 +746,22 @@ export class DuckDBBackend {
       projections.push(
         `${builder.expression(clause.expressionY ?? "COUNT()", true).sql} AS y`,
       );
-    // An interval reads the exact numerator and denominator of the ratio.
-    let ratio: ReturnType<typeof metricRatioParts> | undefined;
-    if (clause.interval && !distribution) {
+    // An interval and a ratio's Other remainder read the exact numerator
+    // and denominator of the ratio.
+    const plan: MetricPlan | undefined = distribution
+      ? undefined
+      : compileMetric(metricExpression(clause), schema);
+    const ratio = !plan
+      ? undefined
+      : clause.interval
+        ? metricRatioParts(plan.ast)
+        : additiveRatioParts(plan.ast);
+    const ratioParts = new Map<object, [FormulaResult, FormulaResult]>();
+    if (ratio) {
       const source = metricExpression(clause);
-      ratio = metricRatioParts(compileMetric(source, schema).ast);
       for (const [name, node] of [
-        ["interval_numerator", ratio.numerator],
-        ["interval_denominator", ratio.denominator],
+        ["ratio_numerator", ratio.numerator],
+        ["ratio_denominator", ratio.denominator],
       ] as const)
         projections.push(
           `${builder.expression(source.slice(node.from, node.to), true).sql} AS ${name}`,
@@ -825,13 +838,13 @@ export class DuckDBBackend {
         const part = (value: unknown) => ({
           value: value === null || value === undefined ? null : Number(value),
         });
-        applyMetricInterval(
-          bucket,
-          clause.interval!,
-          ratio.scale,
-          part(row.interval_numerator),
-          part(row.interval_denominator),
-        );
+        const parts: [FormulaResult, FormulaResult] = [
+          part(row.ratio_numerator),
+          part(row.ratio_denominator),
+        ];
+        ratioParts.set(bucket, parts);
+        if (clause.interval)
+          applyMetricInterval(bucket, clause.interval, ratio.scale, ...parts);
       }
       return bucket;
     });
@@ -938,11 +951,18 @@ export class DuckDBBackend {
       return JSON.stringify(a.keys).localeCompare(JSON.stringify(b.keys));
     });
     const limit = clause.groupLimit ?? 10000;
+    // Every group was read, so a limited result is exact, with the omitted
+    // groups' remainder where they have one.
+    const other =
+      plan && buckets.length > limit
+        ? metricOtherRemainder(clause, plan, buckets.slice(limit), (b) => ratioParts.get(b))
+        : undefined;
     return {
       id: clause.id,
       buckets: buckets.slice(0, limit),
       groupCount: buckets.length,
-      coverage: buckets.length > limit ? "partial" : "exact",
+      coverage: "exact",
+      ...(other ? { other } : {}),
       ...(clause.scope ? { scope: clause.scope } : {}),
       ...(hiddenGroups !== undefined ? { hiddenGroups } : {}),
     };

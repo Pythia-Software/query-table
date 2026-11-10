@@ -95,6 +95,18 @@ export function metricRatioParts(ast: FormulaNode): MetricRatioParts {
   return { numerator: above[0]!, denominator: below[0]!, scale };
 }
 
+/** The parts of a ratio whose numerator and denominator are both SUM or
+ * COUNT, which add across groups; undefined for any other metric. */
+export function additiveRatioParts(ast: FormulaNode): MetricRatioParts | undefined {
+  try {
+    const ratio = metricRatioParts(ast);
+    const additive = (node: Call) => node.name === "SUM" || node.name === "COUNT";
+    return additive(ratio.numerator) && additive(ratio.denominator) ? ratio : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Throws a FormulaError when an interval option is malformed. */
 export function validateMetricIntervalOption(interval: MetricInterval): void {
   if (

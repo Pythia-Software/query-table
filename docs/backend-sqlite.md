@@ -564,12 +564,14 @@ The result is a `QueryResultV3`:
 Computed values appear inline in rows under their `@computed/id` field, as the
 value or `{"computedError":"divide_by_zero"}` for a per-cell error. Each
 `metrics` entry is a `MetricResult`:
-`{id,buckets,scope,processedRows,groupCount,coverage,error?,hiddenGroups?}`.
+`{id,buckets,scope,processedRows,groupCount,coverage,error?,hiddenGroups?,other?}`.
 Metric bucket `error`/`yError` are strings. X and Y share one grouped
 population; null measures never realign buckets. Group counts are computed
 before the final sort/top-N. Returned coverage is exact for the requested
-scope, including when only the highest-ranked groups are returned; no additive
-`other` is invented for ratios, medians, or distinct counts.
+scope, including when only the highest-ranked groups are returned. `other` is
+the exact remainder of the omitted groups for a SUM or COUNT and for a ratio of
+SUM or COUNT parts; none is invented for averages, medians or distinct counts
+(see [Other remainders](metrics.md#other-remainders)).
 
 Default execution budgets are 10,000 page rows, 2,000 groups, 250,000 staged
 source rows and 64 MiB of staged value payload. Trusted hosts may explicitly

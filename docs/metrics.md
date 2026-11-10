@@ -47,7 +47,7 @@ const ratio: AggregationClause = {
 
 Aggregate formulas reduce row expressions and then compute once per group. `SUM([x]) / SUM([y])` is a ratio of sums, not an average of row ratios. Use `NULLIF` for an intentionally nullable denominator. Nested aggregates and bare row references outside reductions are invalid. `COUNT()`, `COUNT(expr)`, `COUNT_DISTINCT`, `SUM`, `AVG`, `MIN`, `MAX`, and `MEDIAN` retain scalar semantics. `MEDIAN` accepts numeric expressions, ignores nulls, and averages the middle two values for even populations; an empty population returns null. It is available in aggregate formulas, not the legacy `AggOp` selector. The local expression compiler also supports its documented row functions; each server profile advertises a narrower subset.
 
-`sort` is a stable multi-term order over `value`, scatter `y`, `count`, distribution `samples`, or `group0`, `group1`, etc. Each term has ascending/descending direction and optional null placement. `groupLimit` (1–10,000) applies after reductions, formulas, `minCount`, and sorting. Results expose total group count/coverage so truncated charts can be identified. An Other bucket is available only when the engine can derive an exact additive remainder; ratios are not treated as additive.
+`sort` is a stable multi-term order over `value`, scatter `y`, `count`, distribution `samples`, or `group0`, `group1`, etc. Each term has ascending/descending direction and optional null placement. `groupLimit` (1–10,000) applies after reductions, formulas, `minCount`, and sorting. Results expose total group count/coverage so truncated charts can be identified. An Other bucket (`other` on the result) is the exact remainder of the groups `groupLimit` omits; see [Other remainders](#other-remainders).
 
 Scatter stores the primary reduction in `expression` and the second in `expressionY`, with `display.kind: "scatter"`. Each typed group tuple produces one X/Y pair from the same population. Format X/Y independently through `xFormat`/`yFormat`, and label them through `xLabel`/`yLabel`.
 
@@ -235,8 +235,11 @@ error, ranking, `minCount`, `groupLimit` or Other remainder.
   changing the chart. This rejects the common misuse, a SUM of amounts such as
   revenue or durations, but the engine cannot know units: `proportion` on a
   share is meaningful only when the SUM counts units.
-- **Totals.** A grand total (`groupBy: []`) is one bucket like any other.
-  Groups hidden by `minCount` have no bucket.
+- **Totals and Other.** A grand total (`groupBy: []`) is one bucket like any
+  other. Groups hidden by `minCount` have no bucket. When `groupLimit` omits
+  groups of a ratio whose parts are SUM or COUNT, the Other remainder pools
+  each part and carries bounds from the pooled parts (see
+  [Other remainders](#other-remainders)); COUNT_DISTINCT parts have none.
 - **Windows and shares.** A window total pools each part over the window
   before the interval is computed, so a 7-day point's interval covers its 7
   days of counts; a mean per interval has no interval. A share
@@ -265,6 +268,39 @@ gives that clause its own error, so a host on an older server sees an
 explicit "does not support metric intervals" rather than bars without them.
 `metricRatioParts`, `metricIntervalBounds` and `applyMetricInterval` are
 exported for hosts that compute their own buckets.
+
+## Other remainders
+
+When `groupLimit` omits groups, the result's `other` bucket (no keys) is
+their exact remainder, in every engine:
+
+- **A single SUM or COUNT**: the sum of the omitted values. A SUM group with no
+  values adds nothing; an omitted group with an error means there is no
+  remainder.
+- **A ratio of SUM or COUNT parts** (the shapes an interval accepts, such as
+  `SUM([failures]) / NULLIF(SUM([calls]), 0)` or `100 * COUNT() / SUM([n])`):
+  each part is summed over the omitted groups and the formula is evaluated on
+  the pooled parts, so Other is the remainder's own rate, not an average of
+  the omitted rates. The expression's own semantics apply to the pooled parts:
+  a pooled denominator of 0 gives no value under `NULLIF(denominator, 0)` and a
+  division error without it, and `NULLIF(ratio, 0)` nulls only a zero result. An error in a part means there is no
+  remainder. With `interval`, Other has `lower` and `upper` from the pooled
+  parts.
+
+`count` is the omitted groups' rows. Groups hidden by `minCount` are never part
+of Other, and empty calendar fill-ins add nothing. Other is not computed for
+distinct counts (including a ratio with a COUNT_DISTINCT part, which do not add
+across groups), averages (whose remainder could be pooled like a ratio's;
+not computed yet), extrema, medians, distributions, scatters, or windowed and
+share results. Executors that compute it advertise
+`queryCapabilities.metricOther` (DuckDB and the Go SQLite and PostgreSQL
+executors; the local engine always computes it). Nothing in a request depends
+on it, so clients key off the presence of `other`: from a server with the flag,
+a limited result without `other` has no computable remainder; from a server
+without it, `groupCount` larger than the buckets says groups were omitted and
+their remainder is unknown. The UI draws Other rows and slices for
+additive metrics only; `metricOtherRemainder` is exported for hosts that rank
+and limit buckets themselves.
 
 ## Population scope
 

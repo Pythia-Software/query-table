@@ -31,7 +31,7 @@
     "test": "vitest run",
     "test:go": "cd backends/go && go test ./...",
     "test:sqlite": "(cd backends/sqlite-tests && go test -race ./... && go vet ./...) && tsc -p backends/sqlite-tests/tsconfig.json && vitest run --config backends/sqlite-tests/vitest.config.ts",
-    "test:postgres": "cd backends/postgres-tests && go test -race ./... && go vet ./...",
+    "test:postgres": "(cd backends/postgres-tests && go test -race ./... && go vet ./...) && tsc -p backends/postgres-tests/tsconfig.json && vitest run --config backends/postgres-tests/vitest.config.ts",
     "vet:go": "cd backends/go && go vet ./...",
     "version:check": "node scripts/verify-release-version.mjs",
     "audit": "npm audit",

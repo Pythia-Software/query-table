@@ -1,5 +1,8 @@
 import { mergeConfig } from "vitest/config";
 import base from "../../vitest.config";
-export default mergeConfig(base, {
-  test: { include: ["backends/sqlite-tests/*parity.test.ts"] },
-});
+
+// mergeConfig concatenates arrays, so set include after merging: this suite
+// runs only its own parity tests, not the whole TypeScript suite again.
+const config = mergeConfig(base, {});
+config.test!.include = ["backends/sqlite-tests/*parity.test.ts"];
+export default config;
