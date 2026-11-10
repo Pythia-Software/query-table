@@ -3,6 +3,7 @@ import { jsonInspectionScopeKey, type JsonCellDisplay, type JsonInspectionState,
 import { ModalSurface } from "./AdaptiveOverlay";
 import { boundedJsonOption, inspectJsonValue, searchJsonEntries, JSON_MAX_CHARACTERS, JSON_MAX_ENTRIES, type JsonEntry, type JsonInspection } from "./jsonValue";
 import { Icon } from "./Icon";
+import { ClippedText } from "./hoverTitle";
 import { jsonBucketId, jsonLines, jsonSearchMatches, JSON_ARRAY_BUCKET_SIZE, type JsonSearchMatch } from "./jsonTree";
 
 export interface JsonInspectionResolution {
@@ -61,7 +62,7 @@ export function JsonCell(props: JsonCellProps): ReactNode {
       onClick={(event) => { event.stopPropagation(); openInspector(false); }} onDoubleClick={(event) => event.stopPropagation()}>
       <span className="qt-json-badge">{inspection.error ? "JSON?" : "JSON"}</span>
     </button>
-    <code className="qt-json-preview-text" title={inspection.error ?? inspection.preview}>{inspection.preview}</code>
+    <ClippedText as="code" className="qt-json-preview-text" text={inspection.preview} title={inspection.error ?? inspection.preview} />
     {state.open && <JsonViewerModal {...props} preserveFocus={preserveFocus.current} inspectionState={state} onInspectionStateChange={change} onClose={() => change({ ...state, open: false })} />}
   </div>;
 }
@@ -286,7 +287,7 @@ function JsonValueContent({ inspection, label, onClose, compact = false, state, 
           const parent = entry.parent === null ? null : byPath.get(entry.parent);
           return <div key={`${entry.path}:${kind}`} className={`qt-json-line${kind === "value" && attentionPath === entry.path ? " qt-attention-target" : ""}${kind === "value" ? " qt-json-entry" : ""}${searching && kind === "value" && matchedPaths.has(entry.path) ? " qt-json-match" : ""}${searching && kind === "value" && activeMatch?.path === entry.path ? " qt-json-match--active" : ""}`}
             data-json-path={entry.path} title={entry.path} style={{ paddingInlineStart: `${Math.min(entry.depth + (kind === "omitted" ? 1 : 0), 32) * 16}px` }}>
-            {kind === "value" && entry.children > 0 ? <button type="button" className="qt-json-toggle" aria-label={`${folded ? "Expand" : "Collapse"} ${entry.path}`} aria-expanded={!folded} onClick={() => toggle(entry.path)}><Icon name={folded ? "chevronRight" : "chevronDown"} size={12} /></button> : <span className="qt-json-toggle-space" />}
+            {kind === "value" && entry.children > 0 ? <button type="button" className="qt-json-toggle" title={folded ? "Expand" : "Collapse"} aria-label={`${folded ? "Expand" : "Collapse"} ${entry.path}`} aria-expanded={!folded} onClick={() => toggle(entry.path)}><Icon name={folded ? "chevronRight" : "chevronDown"} size={12} /></button> : <span className="qt-json-toggle-space" />}
             <code className="qt-json-line-code">
               {kind === "close" ? <span className="qt-json-punctuation">{closing}{comma ? "," : ""}</span> : kind === "omitted" ? <span className="qt-muted">…</span> : <>
                 {parent?.type === "object" && <><span className="qt-json-key">{highlight(JSON.stringify(entry.key), search, entry, "key", activeMatch)}</span><span className="qt-json-punctuation">: </span></>}

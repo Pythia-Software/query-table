@@ -13,6 +13,7 @@ import type { CellDisplay, FieldDef, LinkTargets, QueryState } from "@pythia-sof
 import { isGroupLinkField, isGroupLinkValue, resolveGroupLink } from "@pythia-software/query-table-core";
 import { renderCellDisplay } from "./cellFormatting";
 import { JsonCell, JsonValueView } from "./JsonCell";
+import { ClippedText } from "./hoverTitle";
 
 export interface CellContext<Row = any, V = unknown> {
   value: V;
@@ -66,11 +67,11 @@ export const defaultRenderers: RenderRegistry = {
     return String(value);
   },
 
-  // single-line ellipsis (CSS does the truncation; title carries the full text)
+  // single-line ellipsis (CSS does the truncation; a title carries the full
+  // text only while it is clipped)
   truncate({ value }) {
     if (isEmpty(value)) return muted(EMPTY);
-    const s = String(value);
-    return createElement("span", { className: "qt-truncate", title: s }, s);
+    return createElement(ClippedText, { className: "qt-truncate", text: String(value) });
   },
 
   // locale-grouped number

@@ -29,9 +29,11 @@ describe("declarative cell displays", () => {
   });
   it("supports labeled scalar/array chips without changing raw values", () => {
     const display: CellDisplay = { kind: "chip", labels: { ok: "Ready" }, tones: { ok: "success" } };
+    // A renamed chip offers its raw key; a plain chip shows it already.
     expect(render(["ok", "other"], display)).toContain('class="qt-pill qt-pill--pass" title="ok">Ready');
+    expect(render(["ok", "other"], display)).toContain('<span class="qt-pill ">other</span>');
     expect(render("__proto__", display)).toContain("__proto__");
-    expect(render(0, display)).toContain('title="0">0');
+    expect(render(0, display)).toContain('<span class="qt-pill ">0</span>');
   });
   it("resolves explicit custom renderers before display hints and preserves legacy fallback", () => {
     expect(render("42", { kind: "json" }, () => "custom")).toBe("<div>custom</div>");

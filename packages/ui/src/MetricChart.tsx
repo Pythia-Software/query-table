@@ -14,6 +14,7 @@ import {
   type MetricClassNames,
   type MetricTheme,
 } from "./metricColors";
+import { ClippedText } from "./hoverTitle";
 import { formatMetricOutput } from "./metricFormat";
 import {
   chronologicalBuckets,
@@ -922,12 +923,12 @@ export function MetricChart({
             aria-label="Legend"
           >
             {legend.map((e) => (
-              <li key={e.key} title={[e.label, e.value, e.share].filter(Boolean).join(" · ")}>
+              <li key={e.key}>
                 <span
                   className="qt-metric-swatch"
                   style={{ background: e.color }}
                 />
-                <span className="qt-metric-legend-label">{e.label}</span>
+                <ClippedText className="qt-metric-legend-label" text={e.label} />
                 {e.value !== undefined && <span className="qt-metric-legend-value">{e.value}</span>}
                 {e.share !== undefined && <span className="qt-metric-legend-share">{e.share}</span>}
               </li>
@@ -937,12 +938,12 @@ export function MetricChart({
       </div>
       {compact && !compactBox && !["pie", "donut"].includes(kind) && (
         <div className="qt-metric-axis-labels">
-          <span title={yAxisLabel}>
+          <ClippedText text={yAxisLabel}>
             <span aria-hidden="true">↑ </span>{yAxisLabel}
-          </span>
-          <span title={xAxisLabel}>
+          </ClippedText>
+          <ClippedText text={xAxisLabel}>
             <span aria-hidden="true">→ </span>{xAxisLabel}
-          </span>
+          </ClippedText>
         </div>
       )}
       {compactBox && <p className="qt-metric-compact-guide">Shared {display.xScale?.mode === "log" ? "log " : ""}axis · Box: middle 50% · line: median · dots: outliers and extremes</p>}

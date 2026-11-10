@@ -79,6 +79,17 @@ for (const [name, engine] of [["Chromium", chromium], ["WebKit", webkit]]) {
       await fieldDialog.waitFor({ state: "visible" });
       const color = await fieldDialog.evaluate(element => getComputedStyle(element).backgroundColor);
       assert.equal(color, palette === "dark" ? "rgb(17, 24, 32)" : palette === "warm" ? "rgb(255, 247, 235)" : "rgb(255, 255, 255)", `${name}: ${palette} picker theme`);
+      // An unavailable field shows the ordinary arrow and stays unavailable;
+      // enabled fields keep the hand.
+      const unavailable = fieldDialog.locator(".qt-picker-item").filter({ has: page.locator(".qt-picker-label", { hasText: /^Status$/ }) });
+      const enabled = fieldDialog.locator(".qt-picker-item").filter({ has: page.locator(".qt-picker-label", { hasText: /^Name$/ }) });
+      assert.equal(await unavailable.isDisabled(), true, `${name}: Status is unavailable`);
+      await unavailable.hover({ force: true });
+      assert.equal(await unavailable.evaluate(element => getComputedStyle(element).cursor), "default", `${name}: unavailable picker item cursor`);
+      assert.equal(await enabled.evaluate(element => getComputedStyle(element).cursor), "pointer", `${name}: enabled picker item cursor`);
+      await unavailable.click({ force: true });
+      assert.equal(await fieldDialog.isVisible(), true, `${name}: clicking an unavailable field keeps the picker open`);
+      assert.notEqual(await page.getByRole("status").innerText(), "Selected Status");
       await page.getByRole("textbox", { name: "Search fields" }).fill("contact");
       await page.getByRole("textbox", { name: "Search fields" }).press("Enter");
       assert.equal(await page.getByRole("status").innerText(), "Selected Email");

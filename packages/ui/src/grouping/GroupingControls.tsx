@@ -17,6 +17,7 @@ import type {
   QueryTableApi,
 } from "@pythia-software/query-table-react";
 import { Icon } from "../Icon";
+import { ClippedText } from "../hoverTitle";
 import { PickerAnchor } from "../PickerAnchor";
 import { FieldPicker } from "../FieldPicker";
 import { QueryFilterRow, type SelectPresentation } from "../QueryBuilder";
@@ -334,17 +335,18 @@ export function useGroupingPresentation<Row>(
         renderChip: (field, label) => {
           const role = columnRole(field, view, model);
           const column = view.summaries.find((c) => c.id === field);
-          if (!column || column.op === "formula" || column.op === "row" || column.op === "link")
+          if (!column || column.op === "formula" || column.op === "row" || column.op === "link") {
+            const shown = column?.op === "row" && column.field
+              ? (model.sourceField(column.field)?.label ?? label)
+              : label;
+            // A ROW column shows its source field; its own label is then help.
             return (
               <span className="qt-column-label" data-column-role={role?.kind}>
                 <ColumnRoleBadge role={role} />
-                <span className="qt-chip-field" title={label}>
-                  {column?.op === "row" && column.field
-                    ? (model.sourceField(column.field)?.label ?? label)
-                    : label}
-                </span>
+                <ClippedText className="qt-chip-field" text={shown} title={label} />
               </span>
             );
+          }
           return (
             <span className="qt-column-label" data-column-role={role?.kind}>
               <span className="qt-group-op-control">

@@ -11,6 +11,18 @@ async function verifyReadingLayout(page, mobile) {
   await commands.first().waitFor();
   const clamp = await commands.first().evaluate(el => ({ clamp: getComputedStyle(el).webkitLineClamp, lineHeight: parseFloat(getComputedStyle(el).lineHeight) || 16, height: el.getBoundingClientRect().height, scroll: el.scrollHeight }));
   assert.equal(clamp.clamp, "3");
+  if (!mobile) {
+    // A clamped command offers its full text on hover only while it is
+    // clipped. Element handles stay on the same rows while virtualizing.
+    const handles = await commands.elementHandles();
+    const clipped = await Promise.all(handles.map(handle => handle.evaluate(node => node.scrollHeight > node.clientHeight || node.scrollWidth > node.clientWidth)));
+    assert.ok(clipped.includes(true) && clipped.includes(false), "Reading layout has clipped and fitting commands");
+    const long = handles[clipped.indexOf(true)], short = handles[clipped.indexOf(false)];
+    await long.hover();
+    assert.equal(await long.getAttribute("title"), await long.textContent(), "A clipped command offers its full text");
+    await short.hover();
+    assert.equal(await short.getAttribute("title"), null, "A fitting command has no tooltip");
+  }
   const wrap = layout.locator(".qt-table-wrap");
   const rowsTile = async () => wrap.evaluate(root => {
     const rows = [...root.querySelectorAll("tbody tr.qt-row")].map(row => row.getBoundingClientRect());
@@ -70,6 +82,12 @@ try {
     await section.getByRole("button", { name: "Inspect Payload", exact: true }).first().waitFor();
     assert.equal(await section.getByRole("button", { name: "Inspect Payload", exact: true }).count(), 7);
     assert.equal(await section.locator('.qt-cell[data-qt-field="elapsed"]').first().innerText(), "00:01:01.250");
+    // A valid preview repeats nothing; an unparseable one explains why.
+    const previews = await section.locator(".qt-json-preview-text").evaluateAll(nodes => nodes.map(node => ({
+      title: node.getAttribute("title"), invalid: node.closest(".qt-json-cell").querySelector(".qt-json-badge").textContent === "JSON?",
+    })));
+    assert.ok(previews.some(p => p.invalid) && previews.some(p => !p.invalid), "Valid and invalid previews are inspected");
+    for (const p of previews) assert.equal(Boolean(p.title), p.invalid, `Preview title ${JSON.stringify(p)}`);
     const payloadCell = section.locator('.qt-cell[data-qt-field="payload"]').first();
     const preview = payloadCell.locator(".qt-json-preview-text");
     await preview.click();
@@ -140,6 +158,12 @@ try {
         assert.equal(JSON.parse(pretty).customer.name, "Ada");
         await dialog.getByRole("button", { name: 'Copy value at $["customer"]', exact: true }).click();
         assert.deepEqual(JSON.parse(await page.evaluate(() => navigator.clipboard.readText())), json.customer);
+        // Icon-only toggles say what they will do, and follow their state.
+        assert.equal(await dialog.getByRole("button", { name: 'Collapse $["customer"]', exact: true }).getAttribute("title"), "Collapse");
+        await dialog.getByRole("button", { name: 'Collapse $["customer"]', exact: true }).click();
+        assert.equal(await dialog.getByRole("button", { name: 'Expand $["customer"]', exact: true }).getAttribute("title"), "Expand");
+        await dialog.getByRole("button", { name: 'Expand $["customer"]', exact: true }).click();
+        assert.equal(await dialog.getByRole("button", { name: 'Collapse $["customer"]', exact: true }).getAttribute("title"), "Collapse");
         await page.screenshot({ path: `.context/json-inspector-${mobile ? "mobile" : "desktop"}.png` });
       }
       await dialog.getByRole("button", { name: "Close Payload · JSON", exact: true }).click();

@@ -748,7 +748,7 @@ export function MetricsEditor<Row>({
     );
   const menu = (c: AggregationClause, index: number) => (
     <span className="qt-metric-actions">
-      <MenuButton label={`Actions for ${titleOf(c, fields)}`} width={200} trigger={<span aria-hidden>⋯</span>}>
+      <MenuButton label={`Actions for ${titleOf(c, fields)}`} width={200} buttonProps={{ title: "Metric actions" }} trigger={<span aria-hidden>⋯</span>}>
         {view === "dashboard" && <MenuItem onSelect={() => navigate("editor", c.id)}>Edit metric</MenuItem>}
         <MenuItem disabled={drafts.length >= MAX_AGGREGATIONS} onSelect={() => duplicate(c)}>Duplicate</MenuItem>
         <MenuItem disabled={index === 0} onSelect={() => move(c.id, index - 1)}>Move up</MenuItem>
