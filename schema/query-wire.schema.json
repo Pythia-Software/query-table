@@ -232,7 +232,6 @@
         "metricMinCount": { "type": "boolean", "x-go-omit": "none", "description": "Executes a numeric minCount and reports hiddenGroups." },
         "metricMinCountMeasures": { "type": "boolean", "x-go-omit": "none", "description": "Also executes an object minCount." },
         "metricIntervals": { "type": "boolean", "x-go-omit": "none", "description": "Executes MetricSpec.interval (proportion and rate) and returns lower and upper bounds." },
-        "metricOther": { "type": "boolean", "x-go-omit": "none", "description": "Computes MetricResult.other, the exact remainder of the groups beyond groupLimit, for every metric shape it can (see docs/metrics.md; the shapes may grow). Clients key off the presence of other: from a server with this flag, a limited result without other has no computable remainder; from one without it, the remainder is unknown." },
         "version": { "const": 3 },
         "groupedRows": { "type": "boolean" },
         "calendarGrouping": { "type": "boolean" },
@@ -341,7 +340,7 @@
         "error": { "type": "string", "description": "The metric could not be computed; siblings are unaffected." },
         "errorCode": { "$ref": "#/$defs/ErrorCode", "x-ts-type": "ErrorCode | (string & {})", "description": "The machine-readable code of error; present with it. A newer server may send a code this client does not know." },
         "hiddenGroups": { "type": "integer", "x-go-repr": "*int64", "description": "Groups removed by minCount; present whenever it is set." },
-        "other": { "$ref": "#/$defs/MetricBucket", "x-go-repr": "*MetricBucket", "description": "The exact remainder of the groups beyond groupLimit (hidden groups excluded): the sum of a single SUM or COUNT, or a ratio of SUM or COUNT parts evaluated on the pooled parts, with its interval. Executors that advertise metricOther compute it." }
+        "other": { "$ref": "#/$defs/MetricBucket", "x-go-repr": "*MetricBucket", "description": "The exact remainder of the groups beyond groupLimit (hidden groups excluded): the sum of a single SUM or COUNT, or a ratio of SUM or COUNT parts evaluated on the pooled parts, with its interval. Absent when the executor does not compute one: clients key off its presence." }
       }
     },
     "FieldType": { "type": "string", "enum": ["text", "number", "enum", "datetime", "bool", "textarray"] },

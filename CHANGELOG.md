@@ -11,7 +11,7 @@
   the formula evaluated on the parts pooled over the omitted groups, with
   interval bounds when the metric has `interval`. Groups hidden by `minCount`
   are never part of it; distinct counts and averages still have none.
-  Executors advertise `queryCapabilities.metricOther`. Go pools the omitted
+  Clients key off whether `other` is present. Go pools the omitted
   groups with window aggregates in the same statement, and DuckDB reports
   limited results as `coverage: "exact"` like the other engines. The local
   engine's remainder is `metricOtherRemainder`. See

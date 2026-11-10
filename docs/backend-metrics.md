@@ -187,8 +187,7 @@ propagation and `divide_by_zero` as in SQL), with interval bounds when the
 metric has `Interval`. PostgreSQL computes per-group values in `numeric`, so a
 remainder evaluated in double precision can differ from a group with the same
 parts in the last bits. Calendar metrics rank and limit in Go and pool their omitted
-buckets there; an empty fill-in adds 0. Both dialects advertise
-`QueryCapabilitiesV3.MetricOther`.
+buckets there; an empty fill-in adds 0.
 
 ## Required service behavior and limits
 

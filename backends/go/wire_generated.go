@@ -173,13 +173,7 @@ type QueryCapabilitiesV3 struct {
 	MetricMinCountMeasures bool `json:"metricMinCountMeasures"`
 	// Executes MetricSpec.interval (proportion and rate) and returns lower and
 	// upper bounds.
-	MetricIntervals bool `json:"metricIntervals"`
-	// Computes MetricResult.other, the exact remainder of the groups beyond
-	// groupLimit, for every metric shape it can (see docs/metrics.md; the shapes
-	// may grow). Clients key off the presence of other: from a server with this
-	// flag, a limited result without other has no computable remainder; from one
-	// without it, the remainder is unknown.
-	MetricOther      bool `json:"metricOther"`
+	MetricIntervals  bool `json:"metricIntervals"`
 	Version          int  `json:"version"`
 	GroupedRows      bool `json:"groupedRows"`
 	CalendarGrouping bool `json:"calendarGrouping"`
@@ -306,8 +300,8 @@ type MetricResult struct {
 	HiddenGroups *int64 `json:"hiddenGroups,omitempty"`
 	// The exact remainder of the groups beyond groupLimit (hidden groups
 	// excluded): the sum of a single SUM or COUNT, or a ratio of SUM or COUNT
-	// parts evaluated on the pooled parts, with its interval. Executors that
-	// advertise metricOther compute it.
+	// parts evaluated on the pooled parts, with its interval. Absent when the
+	// executor does not compute one: clients key off its presence.
 	Other *MetricBucket `json:"other,omitempty"`
 }
 

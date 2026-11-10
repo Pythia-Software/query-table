@@ -59,10 +59,7 @@ beforeAll(async () => {
 afterAll(() => native?.closeSync());
 
 describe("shared metric interval fixture (DuckDB)", () => {
-  it("advertises intervals and Other remainders", () => {
-    expect(backend.capabilities.metricIntervals).toBe(true);
-    expect(backend.capabilities.metricOther).toBe(true);
-  });
+  it("advertises intervals", () => expect(backend.capabilities.metricIntervals).toBe(true));
   for (const c of fixture.cases) {
     // DuckDB fails a whole metric on a division by zero rather than one
     // bucket, with or without an interval.

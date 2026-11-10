@@ -292,13 +292,11 @@ of Other, and empty calendar fill-ins add nothing. Other is not computed for
 distinct counts (including a ratio with a COUNT_DISTINCT part, which do not add
 across groups), averages (whose remainder could be pooled like a ratio's;
 not computed yet), extrema, medians, distributions, scatters, or windowed and
-share results. Executors that compute it advertise
-`queryCapabilities.metricOther` (DuckDB and the Go SQLite and PostgreSQL
-executors; the local engine always computes it). Nothing in a request depends
-on it, so clients key off the presence of `other`: from a server with the flag,
-a limited result without `other` has no computable remainder; from a server
-without it, `groupCount` larger than the buckets says groups were omitted and
-their remainder is unknown. The UI draws Other rows and slices for
+share results. The local engine, DuckDB and the Go SQLite and PostgreSQL
+executors compute it. Nothing in a request depends on it and there is no
+capability flag: clients key off whether `other` is present. A limited result
+without it (`groupCount` larger than the buckets) has no remainder the
+executor could compute. The UI draws Other rows and slices for
 additive metrics only; `metricOtherRemainder` is exported for hosts that rank
 and limit buckets themselves.
 

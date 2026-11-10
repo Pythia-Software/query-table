@@ -136,8 +136,8 @@ func setupIntervals(t *testing.T) (*sql.DB, qt.QueryDatasetV3, intervalFixture, 
 
 func TestPostgresMetricIntervalFixture(t *testing.T) {
 	db, d, f, now := setupIntervals(t)
-	if caps := d.Capabilities(); !caps.MetricIntervals || !caps.MetricOther {
-		t.Fatal("metricIntervals or metricOther is not advertised")
+	if !d.Capabilities().MetricIntervals {
+		t.Fatal("metricIntervals is not advertised")
 	}
 	for _, c := range f.Cases {
 		if c.Planned {

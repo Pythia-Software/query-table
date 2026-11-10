@@ -52,7 +52,7 @@ export function checkMetricFixtureThroughGo(suite: URL, profile: string, env: Re
   const capabilities: QueryCapabilitiesV3 = {
     version: 3, profile, groupedRows: true, calendarGrouping: true, calendarCycles: true, computedSourceFilters: false,
     regex: false, metricFilters: true, metricMinCount: true, metricMinCountMeasures: true, metricIntervals: true,
-    metricOther: true, maxRows: 10000, maxGroups: 2000, maxPopulation: 250000,
+    maxRows: 10000, maxGroups: 2000, maxPopulation: 250000,
   };
   const cases = fixture.cases.filter((c) => !c.expected.error);
   const plans = cases.map((c) => {
