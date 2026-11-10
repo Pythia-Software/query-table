@@ -28,6 +28,12 @@ import {
   metricBoxOutliers,
   metricLabelWidth,
   truncateMetricLabel,
+  metricDrawnInterval,
+  metricValueAxisValues,
+  metricIntervalSpan,
+  metricIntervalText,
+  metricIntervalLevelText,
+  metricBandPath,
 } from "./metricChartHelpers";
 import type {
   MetricBucket,
@@ -124,8 +130,14 @@ export function MetricChart({
         : tupleShade(b.keys);
   const groupLabel = (b: MetricBucket) => metricGroupLabel(b, clause, locale);
   const groupFormat = metricDateGroupFormat(clause);
-  const detail = (b: MetricBucket) =>
-    `${metricGroupLabel(b, clause, locale, true)}\n${b.error ?? fmt(b.value, kind === "scatter" ? display.xFormat : display.format)}${kind === "scatter" ? ` / ${b.yError ?? fmt(b.y, display.yFormat)}` : ""}\n${b.count.toLocaleString(locale)} rows`;
+  // Hover and accessible text name a bucket's interval even when the display
+  // hides whiskers and bands.
+  const intervalText = (b: MetricBucket) =>
+    kind === "scatter" ? undefined : metricIntervalText(clause, b, (v) => fmt(v, display.format), { locale });
+  const detail = (b: MetricBucket) => {
+    const interval = intervalText(b);
+    return `${metricGroupLabel(b, clause, locale, true)}\n${b.error ?? fmt(b.value, kind === "scatter" ? display.xFormat : display.format)}${kind === "scatter" ? ` / ${b.yError ?? fmt(b.y, display.yFormat)}` : ""}${interval ? `\n${interval}` : ""}\n${b.count.toLocaleString(locale)} rows`;
+  };
   const interaction = (
     b: MetricBucket,
     label = detail(b),
@@ -620,16 +632,48 @@ export function MetricChart({
     if (buckets.some((b) => b.value !== null && !finiteMetricNumber(b.value)))
       problem = "This chart requires finite numeric values.";
     const horizontal = kind === "bar-horizontal",
+      valueScale = horizontal ? display.xScale : display.yScale,
+      // The extent includes drawn interval bounds, so whiskers and bands fit.
       axis = scale(
-        buckets.flatMap((b) =>
-          !b.error && finiteMetricNumber(b.value) ? [b.value] : [],
-        ),
-        horizontal ? display.xScale : display.yScale,
+        metricValueAxisValues(clause, buckets, valueScale?.mode === "log"),
+        valueScale,
         true,
         display.format,
       );
+    // The part of a bucket's drawn interval inside the value axis.
+    const span = (b: MetricBucket) => {
+      const interval = metricDrawnInterval(clause, b);
+      return interval ? metricIntervalSpan(interval, axis.min, axis.max) : undefined;
+    };
+    let intervalsDrawn = 0;
     const x = (v: number) => left + axis.fraction(v) * plotW,
       y = (v: number) => bottom - axis.fraction(v) * plotH;
+    // An error bar along the value axis, centred at `at` across it, with caps
+    // `half` px wide on the ends that are not clamped to the axis.
+    const whisker = (b: MetricBucket, at: number, half: number) => {
+      const s = span(b);
+      if (!s) return null;
+      intervalsDrawn++;
+      const pos = horizontal ? x : y;
+      const segment = (key: string, v1: number, c1: number, v2: number, c2: number) =>
+        horizontal
+          ? <line key={key} x1={v1} x2={v2} y1={c1} y2={c2} />
+          : <line key={key} x1={c1} x2={c2} y1={v1} y2={v2} />;
+      const segments = [
+        segment("span", pos(s.low), at, pos(s.high), at),
+        s.lowCap && segment("low", pos(s.low), at - half, pos(s.low), at + half),
+        s.highCap && segment("high", pos(s.high), at - half, pos(s.high), at + half),
+      ];
+      // A halo in the surface colour keeps the whisker legible over dark bars.
+      return (
+        <g className="qt-metric-interval" stroke={colors.token("text")} strokeWidth={1.5} strokeLinecap="round" pointerEvents="none">
+          <g className="qt-metric-interval-halo" stroke={colors.token("surface")} strokeWidth={3.5} strokeOpacity={0.85}>
+            {segments}
+          </g>
+          {segments}
+        </g>
+      );
+    };
     if (kind === "line") {
       try {
         const ordered = chronologicalBuckets(buckets),
@@ -658,6 +702,9 @@ export function MetricChart({
           let open = false,
             path = "";
           const byTime = new Map(points.map((p) => [p.time, p.bucket]));
+          // The interval band follows the line and also breaks where a point
+          // has no bounds.
+          const bandPoints: Array<{ x: number; high: number; low: number; lowCap: boolean; highCap: boolean } | null> = [];
           for (const time of times) {
             const bucket = byTime.get(time);
             if (
@@ -668,11 +715,15 @@ export function MetricChart({
               !timeAxis.accepts(time)
             ) {
               open = false;
+              bandPoints.push(null);
               continue;
             }
             path += `${open ? "L" : "M"}${tx(time)},${y(bucket.value)} `;
             open = true;
+            const s = span(bucket);
+            bandPoints.push(s ? { x: tx(time), high: y(s.high), low: y(s.low), lowCap: s.lowCap, highCap: s.highCap } : null);
           }
+          const band = metricBandPath(bandPoints);
           const first = points[0]!.bucket;
           const color =
             clause.groupBy.length > 1
@@ -681,12 +732,31 @@ export function MetricChart({
           return {
             key,
             path,
+            band,
             color,
             label: metricGroupLabel({ ...first, keys: first.keys.slice(1) }),
           };
         });
+        for (const { band } of paths)
+          intervalsDrawn += (band.d ? 1 : 0) + band.singles.length;
         marks = (
           <>
+            {/* Bands sit beneath every line, so no series' band covers another's line. */}
+            {paths.map((series) =>
+              series.band.d || series.band.singles.length ? (
+                <g key={`band-${series.key}`} className="qt-metric-interval-band" clipPath={`url(#${clipId})`} pointerEvents="none">
+                  {series.band.d && <path d={series.band.d} fill={series.color} fillOpacity={0.15} stroke="none" />}
+                  {/* A point between gaps has no area; draw its interval as a whisker. */}
+                  {series.band.singles.map((p, i) => (
+                    <g key={i} stroke={series.color} strokeOpacity={0.6} strokeWidth={1.5}>
+                      <line x1={p.x} x2={p.x} y1={p.high} y2={p.low} />
+                      {p.highCap && <line x1={p.x - 4} x2={p.x + 4} y1={p.high} y2={p.high} />}
+                      {p.lowCap && <line x1={p.x - 4} x2={p.x + 4} y1={p.low} y2={p.low} />}
+                    </g>
+                  ))}
+                </g>
+              ) : null,
+            )}
             {paths.map((series) => (
               <path
                 key={series.key}
@@ -735,7 +805,7 @@ export function MetricChart({
         if (missing)
           disclosure = `${missing} missing/error points; lines break at gaps.`;
         note =
-          "Chronological spacing; NULL/error values break the line. All returned points are drawn.";
+          `Chronological spacing; NULL/error values break the line. All returned points are drawn.${intervalsDrawn ? ` Shaded bands show each point's ${metricIntervalLevelText(clause, locale)} interval.` : ""}`;
         legend =
           clause.groupBy.length > 1
             ? paths.map((s) => ({ key: s.key, label: s.label, color: s.color }))
@@ -793,6 +863,11 @@ export function MetricChart({
                   }
                   fill={shade(b)}
                 />
+                {/* Every bar is its own group (bars never stack: a bucket
+                    with several keys is one bar coloured by its whole key),
+                    so each bar with bounds gets a whisker. A stacked segment
+                    would not, as its interval is not about the stack's end. */}
+                {whisker(b, center, Math.min(5, step * (horizontal ? 0.15 : 0.16)))}
               </g>
             ) : horizontal ? (
               text((left + right) / 2, center + 4, b.error ? "Error" : "—")
@@ -806,7 +881,7 @@ export function MetricChart({
         (b) => b.error || !finiteMetricNumber(b.value),
       ).length;
       if (missing) disclosure += ` ${missing} missing/error values.`;
-      note = `${axis.accepts(0) ? "Signed values use a zero baseline." : "Logarithmic values use the positive domain minimum as baseline."} ${visible.length} of ${result?.groupCount ?? buckets.length} groups drawn; Hover a mark for its value.`;
+      note = `${axis.accepts(0) ? "Signed values use a zero baseline." : "Logarithmic values use the positive domain minimum as baseline."} ${visible.length} of ${result?.groupCount ?? buckets.length} groups drawn; Hover a mark for its value.${intervalsDrawn ? ` Whiskers show each value's ${metricIntervalLevelText(clause, locale)} interval.` : ""}`;
     }
     axes = axis.ticks.map((v, i) => (
       <g key={i}>

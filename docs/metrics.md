@@ -296,9 +296,11 @@ share results. The local engine, DuckDB and the Go SQLite and PostgreSQL
 executors compute it. Nothing in a request depends on it and there is no
 capability flag: clients key off whether `other` is present. A limited result
 without it (`groupCount` larger than the buckets) has no remainder the
-executor could compute. The UI draws Other rows and slices for
-additive metrics only; `metricOtherRemainder` is exported for hosts that rank
-and limit buckets themselves.
+executor could compute. The UI pools additive metrics into Other rows and
+slices itself, and a list with `showOther` shows a ratio's returned `other`
+(with its interval) when the display drops no further groups;
+`metricOtherRemainder` is exported for hosts that rank and limit buckets
+themselves.
 
 ## Population scope
 
@@ -678,6 +680,54 @@ grouping explicitly. An unsupported server operation never triggers a population
 download. Settings are
 serialized with the query and participate in metric computation identity.
 
+### Drawing intervals
+
+When buckets carry `lower` and `upper` (a metric with `interval`), vertical and
+horizontal bars draw an error-bar whisker with end caps on each bar that has
+finite bounds. Bars never stack (a bucket with several keys is one bar), so
+every bounded bar gets its own whisker. Line charts shade a low-opacity band in
+the series colour beneath the line, breaking it wherever a point has no bounds;
+a bounded point between gaps is drawn as a whisker. The value axis extends to
+the drawn bounds, so nothing is clipped by inferred extents. Explicit axis
+bounds still clip: a whisker cut by the axis, or a nonpositive lower bound on a
+logarithmic axis, runs to the plot edge without a cap and is never shifted.
+Whiskers are drawn in the text colour over a wider halo in the surface colour,
+so they stay legible over dark bars; `.qt-metric-interval` and
+`.qt-metric-interval-halo` can restyle them.
+
+Hover text, tooltips and each mark's accessible label add the interval on its
+own line, for example `95% interval 2.2%–9.8%`: the level as a percent (up to
+four decimals, so no accepted level reads as 100%), and the bounds in the
+metric's value format. A bucket with `intervalError: "interval_domain"` reads
+`No interval: needs whole counts, at most the total` (a proportion) or
+`No interval: needs a whole, nonnegative count` (a rate). Lists and tables put
+the text in the value's title and in visually hidden text read with the value.
+A single value shows it beside its row count, as in
+`95% interval 2.2%–9.8% · 128 rows`. Compact axis labels and legends never
+include it. `display.showIntervals: false` hides whiskers, bands and the
+single-value line; hover and screen-reader text remain.
+
+A list with `display.showOther` shows a ratio's `other` remainder as returned
+by the engine, including its interval, when the display drops no further groups
+(`maxGroups` is unset or keeps every returned group). Ratios cannot be pooled
+from displayed values, so a list that truncates groups itself shows no Other.
+
+Host-rendered views can use the same reading: `metricBucketInterval(bucket)`
+returns finite, ordered bounds of a bucket without an error, and
+`metricIntervalText(clause, bucket, format, { locale, label })` returns the
+hover line, with `label` replacing the word "interval".
+`formatMetricIntervalLevel(level, locale)` formats a level.
+
+In the metrics editor, **Confidence interval** (after Window & share) sets
+`interval.kind` to None, Proportion (Wilson) or Rate (Poisson), and a 90%, 95%
+or 99% **Confidence level**; 95% is stored by omitting `level`. A kind that
+`validateMetricInterval` rejects for the metric, such as Rate on a share, is
+disabled with the reason as its tooltip, and the section is hidden while no
+interval is set and no kind applies (for example a plain count). A chosen
+interval that has become invalid stays selected and its reason is shown in
+the section. Bar and line displays add **Show interval whiskers and bands**,
+bound to `display.showIntervals`. Turning the interval off, or choosing a box,
+histogram or scatter display, removes the interval and its display setting.
 
 ### Windows, running values and shares
 

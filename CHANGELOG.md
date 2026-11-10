@@ -168,6 +168,23 @@
   cases, including the Pharos evidence (6 of 128, 8 of 52 and 6 of 15 turns),
   are in `schema/fixtures/metric-intervals.json`. See
   [Intervals for rates and shares](docs/metrics.md#intervals-for-rates-and-shares).
+- Metric charts draw intervals: an error-bar whisker on each vertical or
+  horizontal bar with `lower`/`upper` bounds and a shaded band beneath each
+  line series, breaking where a point has none. Value axes include the bounds;
+  explicit and logarithmic axes clamp them without shifting; whiskers have a
+  surface-coloured halo. Tooltips and mark labels add `95% interval 2.2%–9.8%`
+  in the metric's value format, or `No interval: …` for an `intervalError`.
+  Lists and tables carry it as a title and as screen-reader text; a single
+  value shows it beside its row count. `display.showIntervals: false` hides
+  whiskers, bands and the single-value line. Lists with `showOther` show a
+  ratio's returned `other` remainder, with its interval. `metricBucketInterval`,
+  `metricIntervalText` (with a replaceable `label`) and
+  `formatMetricIntervalLevel` are exported for host-rendered views. See
+  [Drawing intervals](docs/metrics.md#drawing-intervals).
+- The metrics editor's **Confidence interval** settings choose None,
+  Proportion (Wilson) or Rate (Poisson) with a 90/95/99% level, and toggle
+  whiskers and bands. Kinds that validation rejects for the metric are
+  disabled with the reason, and the section is hidden while none applies.
 
 ## 1.0.4 — 2026-11-10
 

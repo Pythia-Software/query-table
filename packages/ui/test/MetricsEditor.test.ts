@@ -1331,3 +1331,112 @@ it("chooses buckets of several calendar intervals, hidden for slots", async () =
     expect(saved().dateGrouping).not.toHaveProperty("every");
   } finally { act(() => root.unmount()); host.remove(); }
 });
+
+it("turns on an interval with a level, hides its whiskers, and drops it with a display that cannot draw it", async () => {
+  const host = document.createElement("div"); document.body.append(host);
+  const root = createRoot(host), setQuery = vi.fn();
+  const fields: FieldDef<unknown>[] = [
+    { name: "bucket", label: "Bucket", type: "text", source: { kind: "backend" }, aggregate: { groupable: true } },
+    { name: "hits", label: "Hits", type: "number", source: { kind: "backend" } },
+  ];
+  const clause: AggregationClause = {
+    id: "m", op: "count", expression: "SUM([hits])/NULLIF(COUNT(),0)", groupBy: ["bucket"], display: { kind: "bar-vertical" },
+  };
+  const api = { aggregations: { clauses: [clause] }, setQuery, rows: [], total: 0, query: { where: [] } } as unknown as QueryTableApi<unknown>;
+  const choose = (label: string, value: string) => act(() => {
+    const select = host.querySelector<HTMLSelectElement>(`[aria-label="${label}"]`)!;
+    select.value = value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  const saved = () => {
+    act(() => [...host.querySelectorAll("button")].find((b) => b.textContent === "Apply metrics")!.click());
+    return setQuery.mock.calls.at(-1)![0]({ where: [] }).aggregations[0] as AggregationClause;
+  };
+  const toggle = () => host.querySelector<HTMLInputElement>('[aria-label="Show interval whiskers and bands"]');
+  try {
+    await act(async () => root.render(createElement(MetricsEditor, { api, fields, onClose: vi.fn() })));
+    expect(host.querySelector('[aria-label="Confidence level"]')).toBeNull();
+    expect(toggle()).toBeNull();
+    choose("Confidence interval", "proportion");
+    expect(host.textContent).toContain("95% proportion (Wilson)");
+    expect(toggle()!.checked).toBe(true);
+    choose("Confidence level", "0.99");
+    act(() => toggle()!.click());
+    expect(saved()).toMatchObject({
+      interval: { kind: "proportion", level: 0.99 },
+      display: { kind: "bar-vertical", showIntervals: false },
+    });
+    // The default level stays implicit; switching kind keeps the level.
+    choose("Confidence interval", "rate");
+    expect(host.textContent).toContain("99% rate (Poisson)");
+    choose("Confidence level", "0.95");
+    expect(saved().interval).toEqual({ kind: "rate" });
+    // Turning the interval off drops its display setting too.
+    choose("Confidence interval", "none");
+    let next = saved();
+    expect(next.interval).toBeUndefined();
+    expect(next.display).toEqual({ kind: "bar-vertical" });
+    // Tables keep the interval for hover text but have no whiskers to toggle.
+    choose("Confidence interval", "proportion");
+    act(() => toggle()!.click());
+    choose("Metric display", "table");
+    expect(toggle()).toBeNull();
+    expect(host.querySelector('[aria-label="Confidence level"]')).not.toBeNull();
+    // A distribution has no interval: it leaves with its display setting.
+    choose("Metric display", "box");
+    expect(host.querySelector('[aria-label="Confidence interval"]')).toBeNull();
+    next = saved();
+    expect(next.interval).toBeUndefined();
+    expect(next.display).toEqual({ kind: "box" });
+  } finally { act(() => root.unmount()); host.remove(); }
+});
+
+it("reports an interval on a metric that is not a ratio", async () => {
+  const host = document.createElement("div"); document.body.append(host);
+  const root = createRoot(host);
+  const fields: FieldDef<unknown>[] = [
+    { name: "hits", label: "Hits", type: "number", source: { kind: "backend" } },
+  ];
+  const clause: AggregationClause = { id: "n", op: "count", expression: "COUNT()", groupBy: [], interval: { kind: "rate" } };
+  const schema = { name: "t", idField: "hits", fields } as FieldSchema;
+  // The host's compile runs validateMetric, as useQueryTable's does.
+  const compile = (c: AggregationClause) => {
+    const issues = validateMetric(c, schema);
+    if (issues.length) throw new Error(issues.map((i) => i.message).join(" "));
+  };
+  const api = { aggregations: { clauses: [clause], compile }, setQuery: vi.fn(), rows: [], total: 0, query: { where: [] } } as unknown as QueryTableApi<unknown>;
+  try {
+    await act(async () => root.render(createElement(MetricsEditor, { api, fields, onClose: vi.fn() })));
+    expect(host.textContent).toContain("Review 1 issue");
+    expect(host.querySelector(`[title^="An interval needs a ratio of two aggregates"]`)).not.toBeNull();
+    expect(host.querySelector<HTMLSelectElement>('[aria-label="Confidence interval"]')!.value).toBe("rate");
+    expect(host.textContent).toContain("An interval needs a ratio of two aggregates");
+  } finally { act(() => root.unmount()); host.remove(); }
+});
+
+it("offers only the interval kinds validation accepts for the metric", async () => {
+  const host = document.createElement("div"); document.body.append(host);
+  let root = createRoot(host);
+  const fields: FieldDef<unknown>[] = [
+    { name: "bucket", label: "Bucket", type: "text", source: { kind: "backend" }, aggregate: { groupable: true } },
+    { name: "hits", label: "Hits", type: "number", source: { kind: "backend" } },
+  ];
+  const kinds = async (clause: AggregationClause) => {
+    const api = { aggregations: { clauses: [clause] }, setQuery: vi.fn(), rows: [], total: 0, query: { where: [] } } as unknown as QueryTableApi<unknown>;
+    act(() => root.unmount());
+    root = createRoot(host);
+    await act(async () => root.render(createElement(MetricsEditor, { api, fields, onClose: vi.fn() })));
+    const select = host.querySelector<HTMLSelectElement>('[aria-label="Confidence interval"]');
+    return select && Object.fromEntries([...select.options].map((o) => [o.value, o.disabled ? o.title : "ok"]));
+  };
+  try {
+    // A ratio can have either kind.
+    expect(await kinds({ id: "r", op: "count", expression: "SUM([hits])/NULLIF(COUNT(),0)", groupBy: ["bucket"] }))
+      .toEqual({ none: "ok", proportion: "ok", rate: "ok" });
+    // A share is a proportion of its total.
+    expect(await kinds({ id: "s", op: "count", groupBy: ["bucket"], share: "total" }))
+      .toEqual({ none: "ok", proportion: "ok", rate: "A share is a proportion of its total: use a proportion interval." });
+    // A plain count can have neither, so the section is hidden.
+    expect(await kinds({ id: "c", op: "count", groupBy: ["bucket"] })).toBeNull();
+  } finally { act(() => root.unmount()); host.remove(); }
+});

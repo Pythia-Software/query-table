@@ -39,6 +39,7 @@ import {
   metricDisplayBuckets,
   isMetricOtherBucket,
   metricKeyedLimit,
+  metricIntervalText,
 } from "./metricChartHelpers";
 import { formatMetricOutput, metricFormatFromMeasure, metricUsesMeasureUnits } from "./metricFormat";
 import type {
@@ -251,6 +252,16 @@ export function MetricCard<Row>({
       ).text;
     return formatMetricValue(v, clause.op, measure, renderers, decimals, metricUsesMeasureUnits(clause));
   };
+  // Hover text for a bucket's interval, e.g. "95% interval 2.2%–9.8%". Bounds
+  // use the metric's value format, else the card's shared decimals.
+  const interval = (b: AggregationBucket) =>
+    metricIntervalText(
+      clause,
+      b,
+      (v) =>
+        formatMetricOutput(v, clause.display?.format ?? { kind: "number", decimals }, locale).text,
+      { locale },
+    );
   // Hosts receive the clause they defined, not one with a derived default format.
   const inspect = onInspect ? (b: AggregationBucket) => onInspect(b, sourceClause) : undefined;
   const kind = clause.display?.kind ?? "auto";
@@ -314,14 +325,15 @@ export function MetricCard<Row>({
       />
     );
   else if (kind === "value" || (kind === "auto" && clause.groupBy.length === 0))
-    body = <BigNumber bucket={buckets[0]!} fmt={fmt} onInspect={inspect} />;
+    body = <BigNumber bucket={buckets[0]!} fmt={fmt} interval={interval}
+      showInterval={clause.display?.showIntervals !== false} onInspect={inspect} />;
   else if (kind === "list" || (kind === "auto" && clause.groupBy.length === 1))
     body = (
       <BarList
         clause={clause}
         theme={theme}
         buckets={buckets}
-        fmt={fmt}
+        fmt={fmt} interval={interval}
         locale={locale}
         onInspect={inspect}
       />
@@ -332,7 +344,7 @@ export function MetricCard<Row>({
         clause={clause}
         locale={locale}
         buckets={buckets}
-        fmt={fmt}
+        fmt={fmt} interval={interval}
         rowLabel={groupLabels[0]!}
         colLabel={groupLabels[1]!}
         onInspect={inspect}
@@ -344,7 +356,7 @@ export function MetricCard<Row>({
         clause={clause}
         locale={locale}
         buckets={buckets}
-        fmt={fmt}
+        fmt={fmt} interval={interval}
         groupLabels={groupLabels}
         valueLabel={clause.display?.valueLabel ?? metricTitle(clause, measure)}
         onInspect={inspect}
@@ -468,19 +480,28 @@ function seriesNote(clause: AggregationClause): string {
 function BigNumber({
   bucket,
   fmt,
+  interval,
+  showInterval,
   onInspect,
 }: {
   bucket: AggregationBucket;
   fmt: (v: MetricValue) => ReactNode;
+  interval: (b: AggregationBucket) => string | undefined;
+  showInterval: boolean;
   onInspect: ((bucket: AggregationBucket) => void) | undefined;
 }) {
   const inspect = inspectProps(bucket, onInspect);
+  // A lone value is where its uncertainty matters most: the interval is shown
+  // beside the row count unless the display turns intervals off.
+  const text = interval(bucket);
   return (
     <div {...inspect} className={cx("qt-metric-big", inspect.className)}>
-      <span className="qt-metric-big-value">
+      <span className="qt-metric-big-value" title={text}>
         {bucket.error ?? fmt(bucket.value)}
+        {!showInterval && <IntervalNote text={text} />}
       </span>
       <span className="qt-metric-big-sub">
+        {showInterval && text && <span className="qt-metric-big-interval">{text} · </span>}
         {bucket.count.toLocaleString()} rows
       </span>
     </div>
@@ -492,6 +513,7 @@ function BigNumber({
 function BarList({
   buckets,
   fmt,
+  interval,
   clause,
   theme,
   locale,
@@ -499,6 +521,7 @@ function BarList({
 }: {
   buckets: AggregationBucket[];
   fmt: (v: MetricValue) => ReactNode;
+  interval: (b: AggregationBucket) => string | undefined;
   clause: AggregationClause;
   theme: MetricTheme | undefined;
   locale: string | undefined;
@@ -559,7 +582,7 @@ function BarList({
               {metricGroupLabel(b, clause, locale)}
             </ClippedText>
             {showBars && (
-              <span className="qt-metric-bar-track">
+              <span className="qt-metric-bar-track" title={showValues ? undefined : interval(b)}>
                 <span
                   className="qt-metric-bar-fill"
                   style={{
@@ -576,8 +599,9 @@ function BarList({
               </span>
             )}
             {showValues && (
-              <span className="qt-metric-bar-value">
+              <span className="qt-metric-bar-value" title={interval(b)}>
                 {b.error ?? fmt(b.value)}
+                <IntervalNote text={interval(b)} />
               </span>
             )}
           </div>
@@ -592,6 +616,7 @@ function BarList({
 function Pivot({
   buckets,
   fmt,
+  interval,
   rowLabel,
   colLabel,
   clause,
@@ -600,6 +625,7 @@ function Pivot({
 }: {
   buckets: AggregationBucket[];
   fmt: (v: MetricValue) => ReactNode;
+  interval: (b: AggregationBucket) => string | undefined;
   rowLabel: string;
   colLabel: string;
   clause: AggregationClause;
@@ -655,12 +681,13 @@ function Pivot({
               {colKeys.map((c) => {
                 const v = cell.get(metricTupleKey([r, c]));
                 return (
-                  <td key={typedMetricKey(c)} className="qt-metric-pivot-cell">
+                  <td key={typedMetricKey(c)} className="qt-metric-pivot-cell" title={v && interval(v)}>
                     {v === undefined ? (
                       <span className="qt-muted">·</span>
                     ) : (
                       <InspectableValue bucket={v} onInspect={onInspect}>
                         {v.error ?? fmt(v.value)}
+                        <IntervalNote text={interval(v)} />
                       </InspectableValue>
                     )}
                   </td>
@@ -679,6 +706,7 @@ function Pivot({
 function FlatTable({
   buckets,
   fmt,
+  interval,
   groupLabels,
   valueLabel,
   clause,
@@ -687,6 +715,7 @@ function FlatTable({
 }: {
   buckets: AggregationBucket[];
   fmt: (v: MetricValue) => ReactNode;
+  interval: (b: AggregationBucket) => string | undefined;
   groupLabels: string[];
   valueLabel: string;
   clause: AggregationClause;
@@ -713,9 +742,10 @@ function FlatTable({
               {groupLabels.map((_, j) => (
                 <td key={j}>{keyNode(b.keys[j], j, clause, locale)}</td>
               ))}
-              <td className="qt-metric-flat-value">
+              <td className="qt-metric-flat-value" title={interval(b)}>
                 <InspectableValue bucket={b} onInspect={onInspect}>
                   {b.error ?? fmt(b.value)}
+                  <IntervalNote text={interval(b)} />
                 </InspectableValue>
               </td>
             </tr>
@@ -747,6 +777,12 @@ function inspectProps(
       }
     },
   };
+}
+
+/** A value's interval for assistive technology; sighted pointer users get the
+ *  same text as the value's title. */
+function IntervalNote({ text }: { text: string | undefined }) {
+  return text ? <span className="qt-sr-only">, {text}</span> : null;
 }
 
 /** Table cells keep their table semantics; the value inside becomes the button. */
