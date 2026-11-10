@@ -470,6 +470,8 @@ const (
 	// optionMinCount is a positive integer, or a metricMinCountOptions object
 	// with min and exactly one of distinct and sum.
 	optionMinCount
+	// optionCurrencyCode is a three-letter upper-case ISO 4217 code.
+	optionCurrencyCode
 )
 
 type optionSpec struct {
@@ -533,8 +535,10 @@ var (
 		{key: "max", kind: optionNumber},
 	}
 	metricFormatOptions = []optionSpec{
-		enumOption("kind", "number", "percent", "duration", "date", "time", "datetime"),
+		enumOption("kind", "number", "percent", "currency", "duration", "date", "time", "datetime"),
 		{key: "decimals", kind: optionInteger},
+		{key: "currency", kind: optionCurrencyCode},
+		enumOption("notation", "standard", "compact"),
 		enumOption("sourceUnit", "milliseconds", "seconds", "minutes", "hours", "days", "iso", "epochSeconds",
 			"epochMilliseconds", "secondsOfDay", "millisecondsOfDay"),
 		enumOption("style", "human", "long", "clock", "custom", "iso"),
@@ -594,6 +598,8 @@ func (m *metricNormalizer) copy(input *jsValue, specs []optionSpec) *jsValue {
 			ok = jsIsFinite(v)
 		case optionBoolean:
 			ok = v.kind == jsBool
+		case optionCurrencyCode:
+			ok = v.isString() && propertyCurrency.MatchString(v.s)
 		case optionInteger, optionPositiveInteger:
 			min := 0.0
 			if spec.kind == optionPositiveInteger {
@@ -677,7 +683,20 @@ func normalizeLinkMetricOptions(raw *jsValue) *jsValue {
 			}
 			for _, key := range []string{"format", "xFormat", "yFormat"} {
 				if format := display.get(key); format.isRecord() {
-					d.set(key, m.copy(format, metricFormatOptions))
+					f := m.copy(format, metricFormatOptions)
+					// Canonical links: currency and notation only where they
+					// apply, and no default notation.
+					kind := ""
+					if k := f.get("kind"); k != nil {
+						kind = k.s // copy kept only an allowed kind string
+					}
+					if kind != "currency" {
+						f.del("currency")
+					}
+					if notation := f.get("notation"); notation != nil && ((kind != "number" && kind != "currency") || notation.s == "standard") {
+						f.del("notation")
+					}
+					d.set(key, f)
 				}
 			}
 			if list := display.get("list"); list.isRecord() {
@@ -796,10 +815,20 @@ var cellDisplayOptions = func() map[string]map[string]displayRule {
 			"pattern":    {kind: "string"},
 			"decimals":   displayRange(0, 20),
 		},
-		"number":  numbers,
+		"number": {
+			"decimals": displayRange(0, 20),
+			"locale":   {kind: "string"},
+			"notation": displayEnum("standard", "compact"),
+		},
 		"percent": numbers,
-		"chip":    {"labels": {kind: "labels"}, "tones": {kind: "tones"}},
-		"text":    {"truncate": {kind: "boolean"}, "lines": displayRange(1, 20)},
+		"currency": {
+			"decimals": displayRange(0, 20),
+			"locale":   {kind: "string"},
+			"currency": {kind: "currencyCode"},
+			"notation": displayEnum("standard", "compact"),
+		},
+		"chip": {"labels": {kind: "labels"}, "tones": {kind: "tones"}},
+		"text": {"truncate": {kind: "boolean"}, "lines": displayRange(1, 20)},
 	}
 }()
 
@@ -847,6 +876,10 @@ func parseLinkCellDisplay(raw *jsValue, context string) (*jsValue, string) {
 					return fail("invalid " + key + " map")
 				}
 			}
+		case "currencyCode":
+			if !value.isString() || !propertyCurrency.MatchString(value.s) {
+				return fail(key + " must be an ISO 4217 code such as USD")
+			}
 		case "string":
 			if !value.isString() {
 				return fail(key + " must be string")
@@ -859,6 +892,9 @@ func parseLinkCellDisplay(raw *jsValue, context string) (*jsValue, string) {
 		if key == "pattern" && jsLength(value.s) > 160 {
 			return fail("pattern must be at most 160 characters")
 		}
+	}
+	if kind.s == "currency" && raw.get("currency") == nil {
+		return fail("currency is required")
 	}
 	out := raw.spread()
 	for _, key := range []string{"labels", "tones"} {
@@ -921,13 +957,19 @@ func normalizeLinkPropertyFormat(input *jsValue) *jsValue {
 		return out
 	}
 	if kind.isString() && kind.s == "currency" {
-		currency := input.get("currency")
+		currency, notation := input.get("currency"), input.get("notation")
 		if !currency.isString() || !propertyCurrency.MatchString(currency.s) {
+			return nil
+		}
+		if notation != nil && !(notation.isString() && (notation.s == "standard" || notation.s == "compact")) {
 			return nil
 		}
 		out := jsObj().set("kind", kind).set("currency", currency)
 		if validPropertyDecimals(decimals) {
 			out.set("decimals", decimals)
+		}
+		if notation != nil && notation.s == "compact" {
+			out.set("notation", notation)
 		}
 		return out
 	}
@@ -949,6 +991,10 @@ func normalizeLinkPropertyFormat(input *jsValue) *jsValue {
 	if timeZone != nil && !propertyString(timeZone, 256) {
 		return nil
 	}
+	notation := input.get("notation")
+	if notation != nil && (kind.s != "number" || !notation.isString() || (notation.s != "standard" && notation.s != "compact")) {
+		return nil
+	}
 	out := jsObj().set("kind", kind)
 	if validPropertyDecimals(decimals) {
 		out.set("decimals", decimals)
@@ -964,6 +1010,9 @@ func normalizeLinkPropertyFormat(input *jsValue) *jsValue {
 	}
 	if propertyString(timeZone, 256) {
 		out.set("timeZone", timeZone)
+	}
+	if notation != nil && notation.s == "compact" {
+		out.set("notation", notation)
 	}
 	return out
 }

@@ -14,7 +14,7 @@ export type PropertyFormat =
       kind: "relative";
       sourceUnit?: "iso" | "epochSeconds" | "epochMilliseconds";
     }
-  | { kind: "currency"; currency: string; decimals?: number };
+  | { kind: "currency"; currency: string; decimals?: number; notation?: "standard" | "compact" };
 
 export interface PropertyFieldConfig {
   enabled?: boolean;
@@ -91,7 +91,10 @@ export function normalizePropertyFormat(
   if (kind === "currency") {
     if (
       typeof input.currency !== "string" ||
-      !/^[A-Z]{3}$/.test(input.currency)
+      !/^[A-Z]{3}$/.test(input.currency) ||
+      (input.notation !== undefined &&
+        input.notation !== "standard" &&
+        input.notation !== "compact")
     )
       return;
     return {
@@ -103,12 +106,18 @@ export function normalizePropertyFormat(
       input.decimals <= 20
         ? { decimals: input.decimals }
         : {}),
+      ...(input.notation === "compact" ? { notation: "compact" as const } : {}),
     };
   }
   if (
     !["number", "percent", "duration", "date", "time", "datetime"].includes(
       String(kind),
     )
+  )
+    return;
+  if (
+    input.notation !== undefined &&
+    (kind !== "number" || (input.notation !== "standard" && input.notation !== "compact"))
   )
     return;
   if (
@@ -161,6 +170,7 @@ export function normalizePropertyFormat(
     out.style = input.style;
   if (string(input.pattern, 1000)) out.pattern = input.pattern;
   if (string(input.timeZone)) out.timeZone = input.timeZone;
+  if (input.notation === "compact") out.notation = "compact";
   return out as unknown as PropertyFormat;
 }
 

@@ -12,6 +12,10 @@ const fields: FieldDef<unknown>[] = [
   { name: "model_family", label: "Model family", type: "text", source: { kind: "backend" } },
   { name: "day", label: "Day", type: "datetime", source: { kind: "backend" } },
   { name: "tool", label: "Tool", type: "text", source: { kind: "backend" } },
+  // A measure's declared numeric display is its metrics' default format:
+  // values, axes, tooltips and totals.
+  { name: "spend", label: "Spend", type: "number", source: { kind: "backend" }, display: { kind: "currency", currency: "USD" } },
+  { name: "tokens", label: "Tokens", type: "number", source: { kind: "backend" }, display: { kind: "number", notation: "compact" } },
 ];
 // Thirty-character labels, as repository and provider/model names often are.
 const repositories = ["pythia-software/query-table-go", "pythia-software/pharos-archive", "claude / claude-opus-4-20250514", "short"];
@@ -33,6 +37,19 @@ const days = ["2026-10-01", "2026-10-02", "2026-10-03"];
 const series: MetricBucket[] = [
   ...days.map((day, i) => ({ keys: [day, "Read"], value: [3, 4, 3][i]!, count: 1 })),
   ...days.map((day, i) => ({ keys: [day, "Bash"], value: [0, 120, 0][i]!, count: 1 })),
+];
+const spend: RenderingClause = { id: "spend", op: "sum", field: "spend", groupBy: ["provider"], label: "Spend by provider", display: { kind: "bar-horizontal" } };
+const spendBuckets: MetricBucket[] = [
+  { keys: ["anthropic"], value: 1834.5, count: 9 },
+  { keys: ["openai"], value: 912.25, count: 7 },
+  { keys: ["google"], value: 87.1, count: 3 },
+];
+const total: RenderingClause = { id: "total", op: "sum", field: "spend", groupBy: [], label: "Spend (compact currency)", display: { kind: "value", format: { kind: "currency", currency: "USD", notation: "compact" } } };
+const tokens: RenderingClause = { id: "tokens", op: "sum", field: "tokens", groupBy: ["provider"], label: "Tokens by provider", display: { kind: "bar-vertical" } };
+const tokenBuckets: MetricBucket[] = [
+  { keys: ["anthropic"], value: 3_412_000, count: 9 },
+  { keys: ["openai"], value: 1_250_000, count: 7 },
+  { keys: ["google"], value: 84_300, count: 3 },
 ];
 const line: RenderingClause = { id: "line", op: "sum", field: "calls", groupBy: ["day", "tool"], label: "Calls by day and tool", display: { kind: "line" } };
 
@@ -58,6 +75,10 @@ export function ChartLayoutDemo() {
         {card(columns, labelled)}
         {card(pie, pairs)}
         {card(line, series)}
+        {card(spend, spendBuckets)}
+        {card(total, [{ keys: [], value: 2_833_850, count: 19 }])}
+        {card(tokens, tokenBuckets)}
+        {card(tokens, tokenBuckets, true)}
       </div>
     </main>
   );

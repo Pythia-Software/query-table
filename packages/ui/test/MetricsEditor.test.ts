@@ -67,6 +67,54 @@ it("allows Apply on controllers without optional preview or replace methods", as
   }
 });
 
+it("edits currency and compact output formats and applies them to the metric", async () => {
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const setQuery = vi.fn();
+  const clause: AggregationClause = { id: "m", op: "sum", field: "cost", groupBy: [], display: { kind: "value" } };
+  const api = { aggregations: { clauses: [clause] }, setQuery, rows: [], total: 0, query: { where: [] } } as unknown as QueryTableApi<unknown>;
+  const fields: FieldDef<unknown>[] = [{ name: "cost", label: "Cost", type: "number", source: { kind: "backend" } }];
+  const select = (label: string, value: string) => {
+    const element = host.querySelector<HTMLSelectElement>(`[aria-label="${label}"]`)!;
+    act(() => {
+      element.value = value;
+      element.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  };
+  const example = () => host.querySelector(".qt-metric-format-example strong")?.textContent;
+  try {
+    await act(async () => root.render(createElement(MetricsEditor, { api, fields, onClose: vi.fn(), locale: "en-US" })));
+    const decimals = () => host.querySelector<HTMLInputElement>('[aria-label="Metric decimals"]')!;
+    const compact = () => act(() => host.querySelector<HTMLInputElement>('[aria-label="Compact notation"]')!.click());
+    // Compact is a notation of Number (and Currency), with Auto decimals.
+    compact();
+    expect(example()).toBe("1.2M");
+    expect(decimals().value).toBe("");
+    expect(decimals().placeholder).toBe("Auto");
+    compact();
+    expect(decimals().value).toBe("0");
+    // Currency starts at the currency's own minor units.
+    select("Metric output type", "currency");
+    expect(host.querySelector<HTMLInputElement>('[aria-label="Metric currency code"]')?.value).toBe("USD");
+    expect(decimals().value).toBe("");
+    expect(example()).toBe("$1,234,567.89");
+    editInput(host.querySelector('[aria-label="Metric currency code"]')!, "jpy");
+    expect(example()).toBe("¥1,234,568");
+    compact();
+    expect(example()).toBe("¥1.2M");
+    editInput(decimals(), "2");
+    commitInput(decimals());
+    expect(example()).toBe("¥1.23M");
+    act(() => [...host.querySelectorAll("button")].find((b) => b.textContent === "Apply metrics")!.click());
+    expect(setQuery.mock.calls[0]![0]({ where: [] }).aggregations[0].display.format)
+      .toEqual({ kind: "currency", currency: "JPY", notation: "compact", decimals: 2 });
+  } finally {
+    act(() => root.unmount());
+    host.remove();
+  }
+});
+
 it("preserves intermediate numeric and name typing and commits bounded sizes and histogram bins on blur", async () => {
   vi.useFakeTimers();
   const host = document.createElement("div");

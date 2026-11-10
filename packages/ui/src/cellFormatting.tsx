@@ -40,7 +40,7 @@ export function renderCellDisplay({ value, field, presentation }: CellContext, d
     numeric = typeof raw === "string" && /^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(raw.trim()) ? Number(raw) : raw;
     if (typeof numeric !== "number" || !Number.isFinite(numeric)) return <span className="qt-cell-format-error" title="Expected a finite number">{String(raw)}</span>;
   }
-  const format = display.kind === "number" && display.decimals === undefined ? undefined
+  const format = display.kind === "number" && display.decimals === undefined && display.notation !== "compact" ? undefined
     : display.kind === "percent" ? { ...display, decimals: display.decimals ?? 2 } : display;
   const locale = "locale" in display ? display.locale ?? "en-US" : "en-US";
   const result = formatMetricOutput(numeric, format, locale);

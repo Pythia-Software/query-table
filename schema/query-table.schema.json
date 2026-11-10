@@ -86,6 +86,12 @@
               "type": "string",
               "pattern": "^[A-Z]{3}$"
             },
+            "notation": {
+              "enum": [
+                "standard",
+                "compact"
+              ]
+            },
             "sourceUnit": {
               "enum": [
                 "milliseconds",
@@ -131,6 +137,23 @@
                 "required": [
                   "currency"
                 ]
+              }
+            },
+            {
+              "if": {
+                "required": [
+                  "notation"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "number",
+                      "currency"
+                    ]
+                  }
+                }
               }
             }
           ]
@@ -497,7 +520,34 @@
           "properties": {
             "kind": {
               "enum": [
-                "number",
+                "number"
+              ]
+            },
+            "decimals": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 20
+            },
+            "notation": {
+              "enum": [
+                "standard",
+                "compact"
+              ]
+            },
+            "locale": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
                 "percent"
               ]
             },
@@ -505,6 +555,39 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 20
+            },
+            "locale": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "currency"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "currency"
+              ]
+            },
+            "currency": {
+              "type": "string",
+              "pattern": "^[A-Z]{3}$"
+            },
+            "decimals": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 20
+            },
+            "notation": {
+              "enum": [
+                "standard",
+                "compact"
+              ]
             },
             "locale": {
               "type": "string"

@@ -27,7 +27,12 @@ export type CellDisplay =
   | ({ kind: "date" | "datetime"; sourceUnit?: "iso" | "epochSeconds" | "epochMilliseconds" } & CalendarDisplay)
   | ({ kind: "time"; sourceUnit?: "iso" | "epochSeconds" | "epochMilliseconds" | "secondsOfDay" | "millisecondsOfDay" } & CalendarDisplay)
   | { kind: "duration"; sourceUnit?: "milliseconds" | "seconds" | "minutes" | "hours" | "days"; style?: "human" | "long" | "clock" | "custom"; pattern?: string; decimals?: number }
-  | { kind: "number" | "percent"; decimals?: number; locale?: string }
+  /** `notation: "compact"` abbreviates with the locale's compact notation
+   * (1.2K, 3.4M) and shows at most `decimals` fraction digits (default 1). */
+  | { kind: "number"; decimals?: number; locale?: string; notation?: "standard" | "compact" }
+  | { kind: "percent"; decimals?: number; locale?: string }
+  /** `currency` is an ISO 4217 code; `notation` as for number ($1.2M). */
+  | { kind: "currency"; currency: string; decimals?: number; notation?: "standard" | "compact"; locale?: string }
   | { kind: "chip"; labels?: Record<string, string>; tones?: Record<string, "neutral" | "success" | "warning" | "danger"> }
   /** `truncate` keeps one line with an ellipsis. `lines` (1–20) wraps the text
    * and clamps it to that many lines with an ellipsis; it takes precedence. */
@@ -44,7 +49,8 @@ const options: Record<string, Record<string, readonly string[] | readonly number
   datetime: { ...calendarOptions, sourceUnit: calendarUnits },
   time: { ...calendarOptions, sourceUnit: [...calendarUnits, "secondsOfDay", "millisecondsOfDay"] },
   duration: { sourceUnit: ["milliseconds", "seconds", "minutes", "hours", "days"], style: ["human", "long", "clock", "custom"], pattern: "string", decimals: [0, 20] },
-  number: numberOptions, percent: numberOptions,
+  number: { ...numberOptions, notation: ["standard", "compact"] }, percent: numberOptions,
+  currency: { ...numberOptions, currency: "currencyCode", notation: ["standard", "compact"] },
   chip: { labels: "labels", tones: "tones" },
   text: { truncate: "boolean", lines: [1, 20] },
 };
@@ -66,9 +72,12 @@ export function parseCellDisplay(raw: unknown, context = "cell display"): CellDi
       } else if (!rule.includes(value as never)) return fail(`unsupported ${key}`);
     } else if (rule === "labels" || rule === "tones") {
       if (!value || typeof value !== "object" || Array.isArray(value) || !Object.values(value).every((item) => typeof item === "string" && (rule === "labels" || ["neutral", "success", "warning", "danger"].includes(item)))) return fail(`invalid ${key} map`);
+    } else if (rule === "currencyCode") {
+      if (typeof value !== "string" || !/^[A-Z]{3}$/.test(value)) return fail(`${key} must be an ISO 4217 code such as USD`);
     } else if (typeof value !== rule) return fail(`${key} must be ${rule}`);
     if (key === "pattern" && (value as string).length > 160) return fail("pattern must be at most 160 characters");
   }
+  if (record.kind === "currency" && record.currency === undefined) return fail("currency is required");
   return { ...record,
     ...(record.labels ? { labels: { ...record.labels as Record<string, string> } } : {}),
     ...(record.tones ? { tones: { ...record.tones as Record<string, string> } } : {}),

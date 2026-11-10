@@ -322,7 +322,20 @@ Hosts own authorization, endpoint implementation, execution budgets, cancellatio
 
 ## Output formatting
 
-`format`, `xFormat`, and `yFormat` use `MetricValueFormat`. Output types are `number`, `percent`, `duration`, `date`, `time`, or `datetime`. Formatting changes labels, tooltips, and table cells; reductions and sorts retain original typed values.
+`format`, `xFormat`, and `yFormat` use `MetricValueFormat`. Output types are `number`, `percent`, `currency`, `duration`, `date`, `time`, or `datetime`. Formatting changes labels, tooltips, and table cells; reductions and sorts retain original typed values.
+
+Currency needs an ISO 4217 code: `{ kind: "currency", currency: "USD" }` shows `$1,234.50`, using the currency's own minor units (`¥1,235`) unless `decimals` is set. Number and currency also take `notation: "compact"`, the locale's compact notation for large amounts and token totals: `{ kind: "number", notation: "compact" }` shows `1.2K` and `3.4M` in English and `1,2 Mio.` in German, and compact currency shows `$1.2M`. With compact notation `decimals` is a maximum (default 1) rather than an exact count. A currency format without a valid code shows **Invalid format** with the reason rather than guessing a currency. The metric editor offers Currency under Output type, with its code, and a Compact checkbox for Number and Currency; leaving Decimals empty (Auto) keeps the currency's own digits or compact's single digit. The formats travel in links, saved queries and the Go link codec like the other formats; link normalisation keeps `currency` only on currency formats and `notation` only on number and currency formats, and drops the default `notation: "standard"`.
+
+A numeric metric's value is labelled by the first of these that applies:
+
+1. NULL is `—`; a value or group error shows the error.
+2. An explicit `display.format` on the metric (including for counts).
+3. An expression metric, whose units may differ from any field, uses the card's shared decimals.
+4. COUNT and COUNT_DISTINCT are integer counts.
+5. If the metric is in the measure's units, the measure field's numeric `display` (`number` with `decimals` or compact notation, `percent`, `currency` or `duration`) becomes its default format. Shares (`share`) are ratios and a box or histogram over another input measures something else, so neither takes the measure's display (or its `duration_ms`/`byte_size` renderer).
+6. Otherwise the card's shared decimals. Values (not chart labels) of a measure rendered with the built-in `duration_ms` or `byte_size` keys use that renderer; other renderers, including host-registered keys, are table-cell presentations and are not used for metrics.
+
+Steps 2 and 5 apply wherever the value appears: scalar values, lists, tables and pivots, chart value axes, bar and slice labels, tooltips, box statistics and pie totals. To show a money or token measure the same way everywhere, declare `display: { kind: "currency", currency: "USD" }` or `display: { kind: "number", notation: "compact" }` on the field; table cells keep a registered `render`, which resolves before `display`.
 
 Duration units are milliseconds (default), seconds, minutes, hours, or days. Human style turns 84,000 seconds into `23h20m`; long and clock styles are also available. Custom patterns use `{d}`, `{h}`, `{hh}`, `{m}`, `{mm}`, `{s}`, `{ss}`, `{ms}`. Hours are total hours unless the pattern includes `{d}`.
 

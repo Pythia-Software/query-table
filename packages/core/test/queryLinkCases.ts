@@ -238,6 +238,36 @@ export const stateCases: StateCase[] = [
     },
   },
   {
+    name: "currency and compact formats",
+    state: {
+      ...EMPTY_QUERY,
+      select: [
+        { field: "cost", display: { kind: "currency", currency: "USD", decimals: 2, notation: "compact", locale: "en-US" } },
+        { field: "tokens", display: { kind: "number", notation: "compact", decimals: 1 } },
+        { field: "old", display: { kind: "compact" } as never },
+        { field: "cost_eur", display: { kind: "currency", currency: "eur" } as never },
+        { field: "cost_any", display: { kind: "currency" } as never },
+      ],
+      aggregations: [
+        { id: "spend", op: "sum", field: "cost", groupBy: ["model"], display: { kind: "bar-horizontal", format: { kind: "currency", currency: "USD", decimals: 0, notation: "compact" } } },
+        { id: "tokens", op: "sum", field: "tokens", groupBy: [], display: { kind: "value", format: { kind: "number", notation: "compact", decimals: 2 } } },
+        // Canonical: currency only on currency, notation only on number/currency, no default notation.
+        { id: "stray", op: "avg", field: "cost", groupBy: [], display: { kind: "value", format: { kind: "number", currency: "USD", notation: "standard" } as never, yFormat: { kind: "percent", notation: "compact" } as never } },
+        { id: "bad", op: "sum", field: "cost", groupBy: [], display: { kind: "value", format: { kind: "currency", currency: "usd", notation: "short" } as never } },
+      ],
+      itemDetails: {
+        modes: ["modal"],
+        views: {
+          modal: { version: 1, properties: [
+            { id: "c", field: "cost", format: { kind: "currency", currency: "JPY", notation: "compact" } },
+            { id: "s", field: "cost", format: { kind: "currency", currency: "GBP", notation: "standard" } },
+            { id: "t", field: "tokens", format: { kind: "number", notation: "compact", decimals: 1 } },
+          ] },
+        },
+      },
+    },
+  },
+  {
     name: "item details with pooled views",
     state: {
       ...EMPTY_QUERY,

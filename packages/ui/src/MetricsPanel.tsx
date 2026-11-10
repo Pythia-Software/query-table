@@ -40,7 +40,7 @@ import {
   isMetricOtherBucket,
   metricKeyedLimit,
 } from "./metricChartHelpers";
-import { formatMetricOutput, metricFormatFromMeasure } from "./metricFormat";
+import { formatMetricOutput, metricFormatFromMeasure, metricUsesMeasureUnits } from "./metricFormat";
 import type {
   MetricBucket as AggregationBucket,
   RenderingClause as AggregationClause,
@@ -249,7 +249,7 @@ export function MetricCard<Row>({
         typeof v === "number" ? { kind: "number", decimals } : undefined,
         locale,
       ).text;
-    return formatMetricValue(v, clause.op, measure, renderers, decimals);
+    return formatMetricValue(v, clause.op, measure, renderers, decimals, metricUsesMeasureUnits(clause));
   };
   // Hosts receive the clause they defined, not one with a derived default format.
   const inspect = onInspect ? (b: AggregationBucket) => onInspect(b, sourceClause) : undefined;
@@ -788,6 +788,7 @@ function formatMetricValue<Row>(
   measure: FieldDef<Row> | undefined,
   renderers: RenderRegistry<Row> | undefined,
   decimals: number,
+  measureUnits = true,
 ): ReactNode {
   if (value == null) return <span className="qt-muted">—</span>;
   // Counts are dimensionless integers — never run them through a column renderer.
@@ -797,7 +798,8 @@ function formatMetricValue<Row>(
   if (typeof value === "number") {
     const key =
       typeof measure?.render === "string" ? measure.render : undefined;
-    if (key && UNIT_RENDER_KEYS.has(key) && measure && renderers) {
+    // Only values in the measure's units (not shares) take its unit renderer.
+    if (measureUnits && key && UNIT_RENDER_KEYS.has(key) && measure && renderers) {
       const node = tryRender(measure, renderers, value);
       if (node != null) return node;
     }

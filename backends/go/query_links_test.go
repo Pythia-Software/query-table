@@ -336,6 +336,7 @@ func TestMetricOptionTablesMatchTypeScript(t *testing.T) {
 	kinds := map[string]optionKind{
 		"string": optionString, "boolean": optionBoolean, "integer": optionInteger,
 		"positiveInteger": optionPositiveInteger, "number": optionNumber, "minCount": optionMinCount,
+		"currencyCode": optionCurrencyCode,
 	}
 	names := specs.o.keys()
 	if len(names) != len(tables) {

@@ -112,6 +112,29 @@
 - Unavailable field picker items (`.qt-picker-item--disabled`) use the default
   arrow cursor instead of `not-allowed` and no longer highlight on hover; they
   stay disabled and dimmed.
+### Added
+
+- Currency and compact number formats. `MetricValueFormat`, `CellDisplay` and
+  property formats accept `{ kind: "currency", currency: "USD", decimals? }`
+  (`$1,234.50`, using the currency's own minor units unless `decimals` is set),
+  and number and currency accept `notation: "compact"` (`1.2K`, `3.4M`,
+  `$1.2M`, following the locale; `decimals` is then a maximum, default 1).
+  The metric editor offers Currency under Output type and a Compact checkbox,
+  with Auto decimals. The formats round-trip through links and saved queries,
+  and the Go link codec and `schema/query-table.schema.json` accept them; link
+  normalisation drops `currency` and `notation` where they do not apply, and
+  the default `notation: "standard"`. A currency without a valid ISO 4217
+  code shows a visible format error. A field's `currency` or compact `number`
+  display is also the default format of metrics over it, in values, chart
+  axes, tooltips and totals. See
+  [Output formatting](docs/metrics.md#output-formatting).
+
+### Fixed
+
+- Share metrics (`share: "total" | "group0"`) and distributions over another
+  input no longer take the measure field's display or its `duration_ms` /
+  `byte_size` renderer: a share over a duration field was labelled in
+  milliseconds. They use the card's decimals unless the metric sets a format.
 
 ## 1.0.4 — 2026-11-10
 

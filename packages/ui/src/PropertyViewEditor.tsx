@@ -302,6 +302,22 @@ export function PropertyViewEditor<Row>({
                     />
                   </label>
                 ) : null}
+                {format?.kind === "currency" || format?.kind === "number" ? (
+                  <label>
+                    <input
+                      type="checkbox"
+                      aria-label={`Compact notation for ${property.id}`}
+                      checked={format.notation === "compact"}
+                      onChange={(event) => {
+                        const { notation: _notation, ...rest } = format;
+                        update(property.id, {
+                          format: (event.target.checked ? { ...rest, notation: "compact" } : rest) as PropertyFormat,
+                        });
+                      }}
+                    />
+                    Compact
+                  </label>
+                ) : null}
                 {format &&
                 ["duration", "relative", "date", "time", "datetime"].includes(
                   format.kind,

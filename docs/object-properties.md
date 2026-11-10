@@ -218,8 +218,9 @@ and `setDefault`, along with loading/error state. History is bounded to 50 entri
 
 ## Formats and renderers
 
-Formats include text, code, JSON, booleans, chips, numbers, percentages, currency,
-relative times, dates, times, datetimes, and durations. Time and duration formats
+Formats include text, code, JSON, booleans, chips, numbers and currency (either
+optionally compact, e.g. `{ kind: "currency", currency: "USD", notation: "compact" }`),
+percentages, relative times, dates, times, datetimes, and durations. Time and duration formats
 reuse metric formatting; configure their input units explicitly when the source
 is numeric. Relative time defaults to ISO input and refreshes every minute. Pass
 `now` for deterministic output, and `locale`/`theme` to match the host.
