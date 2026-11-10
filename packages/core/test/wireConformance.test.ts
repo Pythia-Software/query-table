@@ -32,7 +32,7 @@ const serialize = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
 const capabilities: QueryCapabilitiesV3 = {
   regexSourceFilters: true, regexAggregateExpressions: true, metricFilters: true, metricMinCount: true,
   metricMinCountMeasures: true, version: 3, groupedRows: true, calendarGrouping: true, calendarCycles: true,
-  calendarGroupKeys: true, computedSourceFilters: true, regex: true, maxRows: 10000, maxGroups: 2000,
+  calendarGroupKeys: true, calendarEvery: true, computedSourceFilters: true, regex: true, maxRows: 10000, maxGroups: 2000,
   maxPopulation: 250000, profile: "qt-fixture-v1",
 };
 const schema = loadSchema({

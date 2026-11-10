@@ -63,4 +63,10 @@ describe("compact chart axes", () => {
     clause.dateGrouping!.timeZone = "UTC";
     expect([...compactCalendarLabels(buckets.map((bucket, i) => ({ bucket, x: i * 100 })), clause, "en-US").values()]).toEqual(["Oct 9 00h"]);
   });
+  it("labels the starts of buckets of several hours past the round-hour filter", () => {
+    // 8-hour buckets start at 00:00, 08:00 and 16:00; only 00:00 is a multiple of 6.
+    const clause: RenderingClause = { id: "m", op: "count", groupBy: ["at"], dateGrouping: { field: "at", interval: "hour", every: 8, timeZone: "UTC", range: "observed", includeEmpty: true } };
+    const buckets: MetricBucket[] = ["2026-01-01T00:00:00Z", "2026-01-01T08:00:00Z", "2026-01-01T16:00:00Z"].map(key => ({ keys: [key], value: 1, count: 1 }));
+    expect([...compactCalendarLabels(buckets.map((bucket, i) => ({ bucket, x: i * 100 })), clause, "en-US").values()]).toEqual(["00h", "08h", "16h"]);
+  });
 });

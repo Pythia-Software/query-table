@@ -165,6 +165,29 @@ it("keeps interpolated whiskers outside quartiles and sampled extremes complete 
   }
 });
 
+describe("labels of buckets of several intervals", () => {
+  const clause = (interval: "hour" | "day" | "week" | "month" | "year", every: number, timeZone = "UTC"): RenderingClause =>
+    ({ id: "m", op: "count", groupBy: ["at"], dateGrouping: { field: "at", interval, every, timeZone, includeEmpty: true, range: "query" } });
+  it("shows each bucket's range in the grouping zone", () => {
+    // 09:00–12:00 EDT, and 00:00 EDT to 03:00 EST (both offsets) across the repeated hour.
+    expect(metricGroupKeyLabel("2026-07-04T13:00:00.000Z", 0, clause("hour", 3, "America/New_York"))).toBe("Jul 04 09:00–12:00 -04:00");
+    expect(metricGroupKeyLabel("2026-11-01T04:00:00.000Z", 0, clause("hour", 3, "America/New_York"))).toBe("Nov 01 00:00 -04:00–03:00 -05:00");
+    expect(metricGroupKeyLabel("2026-03-02T00:30:00.000Z", 0, clause("hour", 6, "Asia/Kolkata"))).toBe("Mar 02 06:00–12:00 +05:30");
+    expect(metricGroupKeyLabel("2026-01-01T00:00:00.000Z", 0, clause("day", 3))).toBe("Jan 01–Jan 03");
+    expect(metricGroupKeyLabel("2025-12-29T00:00:00.000Z", 0, clause("week", 2))).toBe("Dec 29–Jan 11");
+    expect(metricGroupKeyLabel("2026-04-01T04:00:00.000Z", 0, clause("month", 3, "America/New_York"))).toBe("Apr–Jun 2026");
+    // Month 680 since January 1970 starts a 5-month bucket.
+    expect(metricGroupKeyLabel("2026-09-01T00:00:00.000Z", 0, clause("month", 5))).toBe("Sep 2026–Jan 2027");
+    expect(metricGroupKeyLabel("2020-01-01T00:00:00.000Z", 0, clause("year", 10))).toBe("2020–2029");
+    expect(metricGroupKeyLabel("2026-01-01T00:00:00.000Z", 0, clause("day", 3), "en-US", true)).toBe("2026-01-01 00:00 +00:00 – 2026-01-04 00:00 +00:00");
+    expect(metricGroupLabel({ keys: ["2026-01-01T00:00:00.000Z", "a"], value: 1, count: 1 }, clause("day", 3))).toBe("Jan 01–Jan 03 / a");
+    // Ranges replace the single-date format; one interval keeps it.
+    expect(metricDateGroupFormat(clause("day", 3))).toBeUndefined();
+    expect(metricDateGroupFormat(clause("day", 1))).toMatchObject({ pattern: "MMM DD" });
+    expect(metricGroupKeyLabel("2026-01-01T00:00:00.000Z", 0, clause("day", 1))).toBe("Jan 01");
+  });
+});
+
 describe("cyclic slot labels", () => {
   const hours: RenderingClause = { id: "h", op: "count", groupBy: ["at"], dateGrouping: { field: "at", interval: "hourOfDay", timeZone: "Asia/Kolkata", includeEmpty: true, range: "query" } };
   const days: RenderingClause = { ...hours, dateGrouping: { ...hours.dateGrouping!, interval: "dayOfWeek" } };

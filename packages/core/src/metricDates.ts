@@ -113,11 +113,156 @@ function metricOffsetTransition(
   return end;
 }
 
+/** Intervals per bucket accepted by `every`. */
+export const MAX_METRIC_DATE_EVERY = 1000;
+/** Hour counts `every` accepts: those dividing a day, so hour buckets stay
+ * aligned to local days. Elapsed-hour blocks could be added later as an
+ * explicit opt-in. */
+export const METRIC_HOUR_EVERY: readonly number[] = [1, 2, 3, 4, 6, 8, 12, 24];
+
+/** Why `every` is not a valid count of `interval`s per bucket, or undefined
+ * when it is: omitted, or an integer 1–1,000 that divides 24 for hours.
+ * Cycles accept only 1. */
+export function metricDateEveryProblem(every: unknown, interval?: string): string | undefined {
+  if (every === undefined) return undefined;
+  if (typeof every !== "number" || !Number.isInteger(every) || every < 1 || every > MAX_METRIC_DATE_EVERY)
+    return `Every is a whole number of intervals, 1–${MAX_METRIC_DATE_EVERY.toLocaleString("en-US")}.`;
+  if (every !== 1 && isMetricCycle(interval))
+    return "Hour-of-day and day-of-week slots are single hours or days: every applies to calendar intervals.";
+  if (interval === "hour" && !METRIC_HOUR_EVERY.includes(every))
+    return `Hour buckets must divide a day: every is ${METRIC_HOUR_EVERY.slice(0, -1).join(", ")} or 24 hours.`;
+  return undefined;
+}
+
+/** Whether `every` is a valid count of `interval`s per bucket (see
+ * metricDateEveryProblem). */
+export function isMetricDateEvery(every: unknown, interval?: string): boolean {
+  return metricDateEveryProblem(every, interval) === undefined;
+}
+
+const DAY_MS = 86_400_000;
+const floorTo = (value: number, step: number) => Math.floor(value / step) * step;
+
+/** Epoch milliseconds of a UTC wall time; months and days may overflow. */
+function utcWall(year: number, month: number, day = 1, hour = 0): number {
+  const date = new Date(0);
+  date.setUTCFullYear(year, month, day);
+  date.setUTCHours(hour);
+  return date.getTime();
+}
+
+/** A local wall time, given as the epoch milliseconds of the same UTC wall
+ * time, as an instant in `timeZone`: the earlier occurrence of a repeated
+ * time, and the transition ending a skipped one (as day floors resolve a
+ * skipped midnight). */
+function metricWallTime(wall: number, timeZone: string): number {
+  if (timeZone === "UTC") return wall;
+  const date = new Date(wall);
+  const plain = new Temporal.PlainDateTime(
+    date.getUTCFullYear(),
+    date.getUTCMonth() + 1,
+    date.getUTCDate(),
+    date.getUTCHours(),
+  );
+  const earlier = plain.toZonedDateTime(timeZone, { disambiguation: "earlier" });
+  if (Temporal.PlainDateTime.compare(earlier.toPlainDateTime(), plain) === 0)
+    return earlier.epochMilliseconds;
+  const later = plain.toZonedDateTime(timeZone, {
+    disambiguation: "later",
+  }).epochMilliseconds;
+  return metricOffsetTransition(earlier.epochMilliseconds, later, timeZone) ?? later;
+}
+
+/** The local wall start of the bucket of `every` intervals holding `time`,
+ * moved by `ahead` buckets. Anchors are fixed: hours at local multiples of
+ * `every` within each day, days counted from 1970-01-01, weeks from Monday
+ * 1969-12-29, months from January 1970 and years from 1970. */
+function metricEveryWall(
+  time: number,
+  interval: "hour" | "day" | "week" | "month" | "year",
+  timeZone: string,
+  every: number,
+  ahead: number,
+): number {
+  let year: number, month: number, day: number, hour: number;
+  if (timeZone === "UTC") {
+    const date = new Date(time);
+    year = date.getUTCFullYear();
+    month = date.getUTCMonth();
+    day = date.getUTCDate();
+    hour = date.getUTCHours();
+  } else {
+    const zoned =
+      Temporal.Instant.fromEpochMilliseconds(time).toZonedDateTimeISO(timeZone);
+    year = zoned.year;
+    month = zoned.month - 1;
+    day = zoned.day;
+    hour = zoned.hour;
+  }
+  const step = every * ahead;
+  if (interval === "hour")
+    return utcWall(year, month, day, floorTo(hour, every) + step);
+  if (interval === "month") {
+    const index = floorTo((year - 1970) * 12 + month, every) + step;
+    return utcWall(1970, index);
+  }
+  if (interval === "year") return utcWall(1970 + floorTo(year - 1970, every) + step, 0);
+  const epochDay = Math.round(utcWall(year, month, day) / DAY_MS);
+  if (interval === "day") return (floorTo(epochDay, every) + step) * DAY_MS;
+  // Monday 1969-12-29 is epoch day -3.
+  const week = Math.floor((epochDay + 3) / 7);
+  return ((floorTo(week, every) + step) * 7 - 3) * DAY_MS;
+}
+
+/** A valid count of `interval`s per bucket, or a RangeError. */
+function metricEvery(every: number, interval: string): number {
+  const problem = metricDateEveryProblem(every, interval);
+  if (problem) throw RangeError(problem);
+  return every;
+}
+
+/** The start of the bucket after the one starting at `start`. */
+function metricEveryAfter(
+  start: number,
+  interval: "hour" | "day" | "week" | "month" | "year",
+  timeZone: string,
+  every: number,
+): number {
+  return metricWallTime(metricEveryWall(start, interval, timeZone, every, 1), timeZone);
+}
+
+/** The start of the bucket of `every` intervals holding `time`. The wall
+ * start resolves to its earlier occurrence; when a fall-back repeat contains
+ * a bucket boundary (a two-hour repeat such as Antarctica/Troll's), a later
+ * bucket can start before `time` too, so step to it. Buckets then partition
+ * the timeline: every instant is in exactly one `[start, next)`. */
+function metricEveryStart(
+  time: number,
+  interval: "hour" | "day" | "week" | "month" | "year",
+  timeZone: string,
+  every: number,
+): number {
+  let start = metricWallTime(metricEveryWall(time, interval, timeZone, every, 0), timeZone);
+  for (let step = 0; step < 4; step++) {
+    const next = metricEveryAfter(start, interval, timeZone, every);
+    if (next > time || next <= start) break;
+    start = next;
+  }
+  return start;
+}
+
+/** The start of the interval (`every` > 1: the bucket of `every` intervals)
+ * holding `time`. A cycle's interval is its hour or day. `every` must be an
+ * integer 1–1,000 that divides 24 for hours (a RangeError otherwise); cycles
+ * ignore it, and validateDateGrouping refuses it above 1 for them. */
 export function metricDateFloor(
   time: number,
   cycleOrInterval: MetricDateGrouping["interval"],
   timeZone = "UTC",
+  every = 1,
 ): number {
+  if (every !== 1 && !isMetricCycle(cycleOrInterval))
+    return metricEveryStart(time, cycleOrInterval, timeZone, metricEvery(every, cycleOrInterval));
   const interval = metricCalendarUnit(cycleOrInterval);
   if (timeZone !== "UTC") {
     const zoned =
@@ -146,11 +291,23 @@ export function metricDateFloor(
   return date.getTime();
 }
 
+/** The start of the interval (or bucket of `every` intervals) after the one
+ * holding `time`. */
 export function metricDateNext(
   time: number,
   cycleOrInterval: MetricDateGrouping["interval"],
   timeZone = "UTC",
+  every = 1,
 ): number {
+  if (every !== 1 && !isMetricCycle(cycleOrInterval)) {
+    const count = metricEvery(every, cycleOrInterval);
+    return metricEveryAfter(
+      metricEveryStart(time, cycleOrInterval, timeZone, count),
+      cycleOrInterval,
+      timeZone,
+      count,
+    );
+  }
   const interval = metricCalendarUnit(cycleOrInterval);
   if (timeZone !== "UTC") {
     const zoned =
@@ -226,6 +383,8 @@ export function validateDateGrouping(config: MetricDateGrouping): void {
       !["include", "exclude"].includes(config.partialIntervals))
   )
     throw Error("Invalid date grouping definition.");
+  const everyProblem = metricDateEveryProblem(config.every, config.interval);
+  if (everyProblem) throw Error(everyProblem);
   if (config.timeZone !== undefined && !isGroupingTimeZone(config.timeZone))
     throw Error(
       "Use a valid IANA grouping timezone, such as America/Denver or UTC.",
@@ -285,11 +444,13 @@ export function metricDateRange(
       metricDateTime(config.start ?? "", config.timeZone),
       config.interval,
       config.timeZone,
+      config.every,
     );
     const end = metricDateFloor(
       metricCustomEndTime(config.end ?? "", config.timeZone),
       config.interval,
       config.timeZone,
+      config.every,
     );
     if (observed.length && (start > min || end < max))
       throw Error(
@@ -324,7 +485,7 @@ export function metricDateRange(
   }
   if (end < start) return undefined;
   return [
-    metricDateFloor(start, config.interval, config.timeZone),
-    metricDateFloor(end, config.interval, config.timeZone),
+    metricDateFloor(start, config.interval, config.timeZone, config.every),
+    metricDateFloor(end, config.interval, config.timeZone, config.every),
   ];
 }

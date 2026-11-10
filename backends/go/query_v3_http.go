@@ -42,6 +42,20 @@ func DecodeQueryRequestV3(data []byte) (QueryRequestV3, error) {
 			}
 		}
 	}
+	// Go's zero Every stands only for an omitted every; an explicit 0 is
+	// invalid on the wire, as the schema and the TypeScript engine have it.
+	var metrics []struct {
+		DateGrouping *struct {
+			Every *int `json:"every"`
+		} `json:"dateGrouping"`
+	}
+	if raw, ok := object["metrics"]; ok && json.Unmarshal(raw, &metrics) == nil {
+		for _, metric := range metrics {
+			if metric.DateGrouping != nil && metric.DateGrouping.Every != nil && *metric.DateGrouping.Every < 1 {
+				return q, diagnostic(ErrorCodeDateGrouping, "every is a whole number of intervals, 1-1000")
+			}
+		}
+	}
 	if err := q.Validate(); err != nil {
 		return q, err
 	}

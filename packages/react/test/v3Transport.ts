@@ -18,7 +18,7 @@ import {
 } from "@pythia-software/query-table-core";
 
 export const MEMORY_V3_CAPABILITIES: QueryCapabilitiesV3 = {
-  version: 3, profile: "memory-v3", groupedRows: true, calendarGrouping: true, calendarCycles: true, calendarGroupKeys: true,
+  version: 3, profile: "memory-v3", groupedRows: true, calendarGrouping: true, calendarCycles: true, calendarGroupKeys: true, calendarEvery: true,
   computedSourceFilters: true, regex: true, regexSourceFilters: true, metricFilters: true, metricMinCount: true,
   metricMinCountMeasures: true, maxRows: 10000, maxGroups: 10000, maxPopulation: 1_000_000,
 };

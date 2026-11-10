@@ -156,6 +156,8 @@ public struct OrderByClause: Codable, Equatable, Sendable {
 public struct MetricDateGrouping: Codable, Equatable, Sendable {
   public var field: String
   public var interval: String
+  /// Calendar intervals only: buckets of this many intervals, anchored as CalendarGroupKey.every describes; omitted is 1. Hours accept only 1, 2, 3, 4, 6, 8, 12 or 24; cycles refuse values above 1.
+  public var every: Int?
   /// IANA identifier; omitted is UTC.
   public var timeZone: String?
   /// Add a bucket for every interval of the range.
@@ -166,15 +168,17 @@ public struct MetricDateGrouping: Codable, Equatable, Sendable {
   enum CodingKeys: String, CodingKey {
     case field
     case interval
+    case every
     case timeZone
     case includeEmpty
     case range
     case start
     case end
   }
-  public init(field: String, interval: String, timeZone: String? = nil, includeEmpty: Bool, range: String, start: String? = nil, end: String? = nil) {
+  public init(field: String, interval: String, every: Int? = nil, timeZone: String? = nil, includeEmpty: Bool, range: String, start: String? = nil, end: String? = nil) {
     self.field = field
     self.interval = interval
+    self.every = every
     self.timeZone = timeZone
     self.includeEmpty = includeEmpty
     self.range = range
@@ -185,6 +189,7 @@ public struct MetricDateGrouping: Codable, Equatable, Sendable {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     field = try c.decode(String.self, forKey: .field)
     interval = try c.decode(String.self, forKey: .interval)
+    every = try c.decodeIfPresent(Int.self, forKey: .every)
     timeZone = try c.decodeIfPresent(String.self, forKey: .timeZone)
     includeEmpty = try c.decode(Bool.self, forKey: .includeEmpty)
     range = try c.decode(String.self, forKey: .range)
@@ -195,6 +200,7 @@ public struct MetricDateGrouping: Codable, Equatable, Sendable {
     var c = encoder.container(keyedBy: CodingKeys.self)
     try c.encode(field, forKey: .field)
     try c.encode(interval, forKey: .interval)
+    try c.encodeIfPresent(every, forKey: .every)
     try c.encodeIfPresent(timeZone, forKey: .timeZone)
     try c.encode(includeEmpty, forKey: .includeEmpty)
     try c.encode(range, forKey: .range)
@@ -454,28 +460,34 @@ public struct MetricSpecV3: Codable, Equatable, Sendable {
 public struct CalendarGroupKey: Codable, Equatable, Sendable {
   public var field: String
   public var interval: String
+  /// Buckets of this many intervals; omitted is 1. Anchors are fixed: hours must divide a day (1, 2, 3, 4, 6, 8, 12 or 24) and start at local multiples of every within each day, days count local dates from 1970-01-01, weeks from Monday 1969-12-29, months from January 1970 and years from 1970.
+  public var every: Int?
   /// IANA identifier; omitted is UTC.
   public var timeZone: String?
   enum CodingKeys: String, CodingKey {
     case field
     case interval
+    case every
     case timeZone
   }
-  public init(field: String, interval: String, timeZone: String? = nil) {
+  public init(field: String, interval: String, every: Int? = nil, timeZone: String? = nil) {
     self.field = field
     self.interval = interval
+    self.every = every
     self.timeZone = timeZone
   }
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     field = try c.decode(String.self, forKey: .field)
     interval = try c.decode(String.self, forKey: .interval)
+    every = try c.decodeIfPresent(Int.self, forKey: .every)
     timeZone = try c.decodeIfPresent(String.self, forKey: .timeZone)
   }
   public func encode(to encoder: Encoder) throws {
     var c = encoder.container(keyedBy: CodingKeys.self)
     try c.encode(field, forKey: .field)
     try c.encode(interval, forKey: .interval)
+    try c.encodeIfPresent(every, forKey: .every)
     try c.encodeIfPresent(timeZone, forKey: .timeZone)
   }
 }
@@ -663,6 +675,8 @@ public struct QueryCapabilitiesV3: Codable, Equatable, Sendable {
   public var calendarCycles: Bool?
   /// Executes calendar grouping keys.
   public var calendarGroupKeys: Bool?
+  /// Executes multi-interval buckets: MetricDateGrouping.every and CalendarGroupKey.every.
+  public var calendarEvery: Bool?
   public var computedSourceFilters: Bool
   public var regex: Bool
   public var maxRows: Int
@@ -680,6 +694,7 @@ public struct QueryCapabilitiesV3: Codable, Equatable, Sendable {
     case calendarGrouping
     case calendarCycles
     case calendarGroupKeys
+    case calendarEvery
     case computedSourceFilters
     case regex
     case maxRows
@@ -699,6 +714,7 @@ public struct QueryCapabilitiesV3: Codable, Equatable, Sendable {
     calendarGrouping = try c.decode(Bool.self, forKey: .calendarGrouping)
     calendarCycles = try c.decodeIfPresent(Bool.self, forKey: .calendarCycles)
     calendarGroupKeys = try c.decodeIfPresent(Bool.self, forKey: .calendarGroupKeys)
+    calendarEvery = try c.decodeIfPresent(Bool.self, forKey: .calendarEvery)
     computedSourceFilters = try c.decode(Bool.self, forKey: .computedSourceFilters)
     regex = try c.decode(Bool.self, forKey: .regex)
     maxRows = try c.decode(Int.self, forKey: .maxRows)
@@ -718,6 +734,7 @@ public struct QueryCapabilitiesV3: Codable, Equatable, Sendable {
     try c.encode(calendarGrouping, forKey: .calendarGrouping)
     try c.encodeIfPresent(calendarCycles, forKey: .calendarCycles)
     try c.encodeIfPresent(calendarGroupKeys, forKey: .calendarGroupKeys)
+    try c.encodeIfPresent(calendarEvery, forKey: .calendarEvery)
     try c.encode(computedSourceFilters, forKey: .computedSourceFilters)
     try c.encode(regex, forKey: .regex)
     try c.encode(maxRows, forKey: .maxRows)

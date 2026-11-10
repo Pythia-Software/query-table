@@ -52,6 +52,8 @@ export type MetricScope = "allMatching" | "shownRows";
 export interface WireMetricDateGrouping {
   field: string;
   interval: "hour" | "day" | "week" | "month" | "year" | "hourOfDay" | "dayOfWeek";
+  /** Calendar intervals only: buckets of this many intervals, anchored as CalendarGroupKey.every describes; omitted is 1. Hours accept only 1, 2, 3, 4, 6, 8, 12 or 24; cycles refuse values above 1. */
+  every?: number;
   /** IANA identifier; omitted is UTC. */
   timeZone?: string;
   /** Add a bucket for every interval of the range. */
@@ -120,6 +122,8 @@ export interface MetricSpecV3 {
 export interface CalendarGroupKey {
   field: string;
   interval: "hour" | "day" | "week" | "month" | "year";
+  /** Buckets of this many intervals; omitted is 1. Anchors are fixed: hours must divide a day (1, 2, 3, 4, 6, 8, 12 or 24) and start at local multiples of every within each day, days count local dates from 1970-01-01, weeks from Monday 1969-12-29, months from January 1970 and years from 1970. */
+  every?: number;
   /** IANA identifier; omitted is UTC. */
   timeZone?: string;
 }
@@ -178,6 +182,8 @@ export interface QueryCapabilitiesV3 {
   calendarCycles?: boolean;
   /** Executes calendar grouping keys. */
   calendarGroupKeys?: boolean;
+  /** Executes multi-interval buckets: MetricDateGrouping.every and CalendarGroupKey.every. */
+  calendarEvery?: boolean;
   computedSourceFilters: boolean;
   regex: boolean;
   maxRows: number;

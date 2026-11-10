@@ -76,6 +76,8 @@ export function toQueryRequestV3<Row>(query: QueryState, baseSchema: FieldSchema
     if (!capabilities.groupedRows) refusals.push(unsupported("groupedRows", "This server does not support grouped rows."));
     else if (q.grouping.keys.some(isCalendarGroupKey) && !capabilities.calendarGroupKeys)
       refusals.push(unsupported("calendarGroupKeys", "This server does not support grouping keys by calendar interval."));
+    else if (q.grouping.keys.some((key) => isCalendarGroupKey(key) && (key.every ?? 1) > 1) && !capabilities.calendarEvery)
+      refusals.push(unsupported("calendarEvery", "This server does not support grouping keys by several calendar intervals (every)."));
     for (const message of q.grouping.diagnostics ?? []) refusals.push({ code: "grouping", message });
     try { const model = createGroupingModel(sourceSchema); model.validate(q.grouping); resultSchema = model.resultSchema(q.grouping.keys, q.grouping.summaries); }
     catch (error) { refusals.push({ code: "grouping", message: error instanceof Error ? error.message : String(error) }); }
@@ -105,13 +107,20 @@ export function toQueryRequestV3<Row>(query: QueryState, baseSchema: FieldSchema
     const { diagnostics: _diagnostics, ...projected } = clause;
     if (unsupportedOp)
       refusals.push({ code: "invalid_metric", message: `Metric ${projected.id} uses an unsupported operation: ${unsupportedOp}.`, metricId: projected.id });
-    const dateGrouping = q.aggregations?.find(c => c.id === projected.id)?.dateGrouping;
+    let dateGrouping = q.aggregations?.find(c => c.id === projected.id)?.dateGrouping;
+    // One interval per bucket is the default, which every server executes.
+    if (dateGrouping?.every === 1) {
+      const { every: _every, ...rest } = dateGrouping;
+      dateGrouping = rest;
+    }
     for (const issue of validateMetric({ ...clause, ...(dateGrouping ? { dateGrouping } : {}) } as AggregationClause, resultSchema))
       refusals.push({ code: "invalid_metric", message: issue.message, metricId: projected.id });
     if (dateGrouping && !capabilities.calendarGrouping)
       refusals.push({ ...unsupported("calendarGrouping", "This server does not support calendar grouping."), metricId: projected.id });
     else if (isMetricCycle(dateGrouping?.interval) && !capabilities.calendarCycles)
       refusals.push({ ...unsupported("calendarCycles", "This server does not support hour-of-day or day-of-week grouping."), metricId: projected.id });
+    else if ((dateGrouping?.every ?? 1) > 1 && !capabilities.calendarEvery)
+      refusals.push({ ...unsupported("calendarEvery", "This server does not support buckets of several calendar intervals (every)."), metricId: projected.id });
     // The projection keeps only the scatter display hint.
     metrics.push((dateGrouping ? { ...projected, dateGrouping } : projected) as MetricSpecV3);
   }

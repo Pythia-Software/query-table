@@ -417,12 +417,15 @@ export function MetricCard<Row>({
 /** What one point of a windowed, share or per-occurrence metric is. */
 function seriesNote(clause: AggregationClause): string {
   const interval = clause.dateGrouping?.interval,
+    every = clause.dateGrouping?.every ?? 1,
     unit =
       interval === "hourOfDay"
         ? "hour of the day"
         : interval === "dayOfWeek"
           ? "weekday"
-          : (interval ?? "interval"),
+          : interval && every > 1
+            ? `${every}-${interval} bucket`
+            : (interval ?? "interval"),
     window = clause.window,
     occurrence = clause.dateGrouping?.occurrence;
   const parts: string[] = [];

@@ -219,7 +219,7 @@ export const stateCases: StateCase[] = [
           id: "all", op: "avg", field: "latency", groupBy: ["provider"], label: "Latency",
           expression: "AVG([latency])", expressionY: "AVG([cost])", scope: "allMatching", groupLimit: 5, minCount: 3, share: "total",
           window: { periods: 3, reduce: "total", partial: "include" },
-          dateGrouping: { field: "time", interval: "week", timeZone: "Europe/Paris", includeEmpty: false, range: "custom", start: "2026-01-01", end: "2026-02-01", partialIntervals: "include" },
+          dateGrouping: { field: "time", interval: "week", every: 2, timeZone: "Europe/Paris", includeEmpty: false, range: "custom", start: "2026-01-01", end: "2026-02-01", partialIntervals: "include" },
           display: {
             kind: "scatter", valueLabel: "V", xLabel: "X", yLabel: "Y", legendPosition: "bottom", colorBy: "provider", maxGroups: 8, showOther: true, boxMean: false,
             xScale: { mode: "linear", min: -1.5, max: 10 }, yScale: { mode: "log", min: 0.001, max: 1e6 },
@@ -285,6 +285,23 @@ export const stateCases: StateCase[] = [
         representative: { orderBy: [{ field: "time", dir: "desc" }] },
         source: { ...EMPTY_QUERY, where: [{ field: "provider", op: "=", value: "anthropic" }], aggregations: [{ id: "n", op: "count", groupBy: [] }] },
       } as never,
+    },
+  },
+  {
+    name: "grouping with calendar keys of several intervals",
+    state: {
+      ...EMPTY_QUERY,
+      select: [{ field: "called_at" }, { field: "ended_at" }, { field: "rows" }],
+      grouping: {
+        keys: [{ field: "called_at", interval: "hour", every: 6, timeZone: "Asia/Kolkata" }, { field: "ended_at", interval: "month", every: 1 }],
+        summaries: [{ id: "rows", op: "count" }],
+        representative: null,
+        source: { ...EMPTY_QUERY },
+      },
+      aggregations: [
+        { id: "hours", op: "count", groupBy: ["called_at"], dateGrouping: { field: "called_at", interval: "hour", every: 3, timeZone: "America/New_York", includeEmpty: true, range: "observed" } },
+        { id: "days", op: "count", groupBy: ["called_at"], dateGrouping: { field: "called_at", interval: "day", every: 1, includeEmpty: false, range: "query" } },
+      ],
     },
   },
   {
@@ -432,6 +449,35 @@ export const tokenCases: TokenCase[] = [
         source: { grouping: { keys: ["nested"] }, where: [{ field: "a", op: "=", value: "1" }, { field: "b" }] },
         diagnostics: ["Earlier problem.", "", 5, "Earlier problem."],
       },
+    }),
+  },
+  {
+    name: "unnormalized calendar every",
+    token: plain({
+      b: {
+        keys: [
+          { field: "a", interval: "day", every: 0 },
+          { field: "b", interval: "day", every: 1001 },
+          { field: "c", interval: "day", every: "2" },
+          { field: "d", interval: "day", every: 2.5 },
+          { field: "e", interval: "day", every: 1 },
+          { field: "f", interval: "week", every: 1000, timeZone: "UTC" },
+          // Hour buckets must divide a day.
+          { field: "g", interval: "hour", every: 5 },
+          { field: "h", interval: "hour", every: 24 },
+        ],
+        summaries: [{ id: "n", op: "count" }],
+        source: {},
+      },
+      g: [
+        { id: "a", op: "count", groupBy: ["t"], dateGrouping: { field: "t", interval: "hour", every: 0, includeEmpty: false, range: "query" } },
+        { id: "b", op: "count", groupBy: ["t"], dateGrouping: { field: "t", interval: "hour", every: "3", includeEmpty: false, range: "query" } },
+        { id: "c", op: "count", groupBy: ["t"], dateGrouping: { field: "t", interval: "hour", every: 1, includeEmpty: false, range: "query" } },
+        { id: "d", op: "count", groupBy: ["t"], dateGrouping: { field: "t", interval: "hourOfDay", every: 2, includeEmpty: false, range: "query" } },
+        { id: "e", op: "count", groupBy: ["t"], dateGrouping: { field: "t", interval: "month", every: 2000, includeEmpty: false, range: "query" } },
+        { id: "f", op: "count", groupBy: ["t"], dateGrouping: { field: "t", interval: "hour", every: 5, includeEmpty: false, range: "query" } },
+        { id: "g", op: "count", groupBy: ["t"], dateGrouping: { field: "t", interval: "hour", every: 12, includeEmpty: false, range: "query" } },
+      ],
     }),
   },
   {

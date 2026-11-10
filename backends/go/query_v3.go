@@ -28,9 +28,12 @@ type GroupingDefinition struct {
 // GroupKeyInterval buckets a datetime grouping key by calendar interval: one
 // group per hour, day, week (from Monday), month or year in TimeZone (an IANA
 // name; empty means UTC), keyed by the interval's start instant. Intervals
-// follow the metric calendar, including daylight-saving changes.
+// follow the metric calendar, including daylight-saving changes. Every > 1
+// groups that many intervals per bucket, anchored as CalendarGroupKey.Every
+// describes; 0 and 1 are one interval.
 type GroupKeyInterval struct {
 	Interval string `json:"interval"`
+	Every    int    `json:"every,omitempty"`
 	TimeZone string `json:"timeZone,omitempty"`
 }
 
@@ -50,7 +53,7 @@ func (g GroupingDefinition) MarshalJSON() ([]byte, error) {
 	for _, key := range g.Keys {
 		var value any = key
 		if interval, ok := g.KeyIntervals[key]; ok {
-			value = CalendarGroupKey{key, interval.Interval, interval.TimeZone}
+			value = CalendarGroupKey{Field: key, Interval: interval.Interval, Every: interval.Every, TimeZone: interval.TimeZone}
 		}
 		raw, err := json.Marshal(value)
 		if err != nil {
@@ -81,7 +84,14 @@ func (g *GroupingDefinition) UnmarshalJSON(data []byte) error {
 		keyDecoder := json.NewDecoder(bytes.NewReader(raw))
 		keyDecoder.DisallowUnknownFields()
 		if err := keyDecoder.Decode(&key); err != nil {
-			return diagnostic(ErrorCodeGrouping, "a group key is a field name or {field, interval, timeZone}")
+			return diagnostic(ErrorCodeGrouping, "a group key is a field name or {field, interval, every, timeZone}")
+		}
+		// Every 0 stands only for an omitted every; an explicit 0 is invalid.
+		var explicit struct {
+			Every *int `json:"every"`
+		}
+		if json.Unmarshal(raw, &explicit) == nil && explicit.Every != nil && *explicit.Every < 1 {
+			return diagnostic(ErrorCodeGrouping, "a group key's every is a whole number of intervals, 1-1000")
 		}
 		if g.KeyIntervals == nil {
 			g.KeyIntervals = map[string]GroupKeyInterval{}
@@ -90,7 +100,7 @@ func (g *GroupingDefinition) UnmarshalJSON(data []byte) error {
 			return diagnostic(ErrorCodeGrouping, "invalid or duplicate group key")
 		}
 		g.Keys = append(g.Keys, key.Field)
-		g.KeyIntervals[key.Field] = GroupKeyInterval{key.Interval, key.TimeZone}
+		g.KeyIntervals[key.Field] = GroupKeyInterval{Interval: key.Interval, Every: key.Every, TimeZone: key.TimeZone}
 	}
 	if in.Keys != nil && g.Keys == nil {
 		g.Keys = []string{}
@@ -107,7 +117,13 @@ func groupKeyLocation(typ, field string, interval GroupKeyInterval) (*time.Locat
 	if typ != "datetime" {
 		return nil, diagnostic(ErrorCodeGrouping, "a calendar group key needs a datetime field")
 	}
-	return calendarLocation(MetricDateGrouping{Field: field, Interval: interval.Interval, TimeZone: interval.TimeZone, Range: "query"})
+	if interval.Every < 0 || interval.Every > MaxCalendarEvery {
+		return nil, diagnostic(ErrorCodeGrouping, "a group key's every is a whole number of intervals, 1-1000")
+	}
+	if interval.Interval == "hour" && interval.Every > 1 && !calendarHourEvery(interval.Every) {
+		return nil, diagnostic(ErrorCodeGrouping, "a group key's "+calendarHourEveryMessage)
+	}
+	return calendarLocation(MetricDateGrouping{Field: field, Interval: interval.Interval, Every: interval.Every, TimeZone: interval.TimeZone, Range: "query"})
 }
 
 // Validate classifies malformed wire stages and metrics as request diagnostics,
@@ -212,7 +228,7 @@ func (d QueryDatasetV3) Capabilities() QueryCapabilitiesV3 {
 	if d.Dialect == "sqlite" {
 		profile = SQLiteExpressionProfile
 	}
-	return QueryCapabilitiesV3{Version: 3, GroupedRows: true, CalendarGrouping: true, CalendarCycles: true, CalendarGroupKeys: true, ComputedSourceFilters: len(d.ComputedFilterable) > 0, Regex: false, RegexSourceFilters: d.Dialect == "sqlite", MetricFilters: true, MetricMinCount: true, MetricMinCountMeasures: true, MaxRows: rows, MaxGroups: groups, MaxPopulation: pop, Profile: profile}
+	return QueryCapabilitiesV3{Version: 3, GroupedRows: true, CalendarGrouping: true, CalendarCycles: true, CalendarGroupKeys: true, CalendarEvery: true, ComputedSourceFilters: len(d.ComputedFilterable) > 0, Regex: false, RegexSourceFilters: d.Dialect == "sqlite", MetricFilters: true, MetricMinCount: true, MetricMinCountMeasures: true, MaxRows: rows, MaxGroups: groups, MaxPopulation: pop, Profile: profile}
 }
 func (d QueryDatasetV3) options(ctx context.Context, tx *sql.Tx, q QueryRequestV3, o PlanOptions) (PlanOptions, error) {
 	if err := ctx.Err(); err != nil {

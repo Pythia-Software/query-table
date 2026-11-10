@@ -1227,3 +1227,59 @@ it("offers hour-of-day and day-of-week slots with per-occurrence summaries", asy
     expect(saved().dateGrouping?.occurrence).toBeUndefined();
   } finally { act(() => root.unmount()); host.remove(); }
 });
+
+it("chooses buckets of several calendar intervals, hidden for slots", async () => {
+  const host = document.createElement("div"); document.body.append(host);
+  const root = createRoot(host), setQuery = vi.fn();
+  const fields: FieldDef<unknown>[] = [
+    { name: "at", label: "At", type: "datetime", source: { kind: "backend" }, aggregate: { groupable: true } },
+  ];
+  const clause: AggregationClause = {
+    id: "m", op: "count", groupBy: ["at"], display: { kind: "line" },
+    dateGrouping: { field: "at", interval: "hour", includeEmpty: true, range: "query", timeZone: "America/New_York" },
+  };
+  const api = { aggregations: { clauses: [clause] }, setQuery, rows: [], total: 0, query: { where: [] } } as unknown as QueryTableApi<unknown>;
+  const choose = (label: string, value: string) => act(() => {
+    const select = host.querySelector<HTMLSelectElement>(`[aria-label="${label}"]`)!;
+    select.value = value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  const every = () => host.querySelector<HTMLInputElement>('[aria-label="Intervals per bucket"]');
+  const saved = () => {
+    act(() => [...host.querySelectorAll("button")].find((b) => b.textContent === "Apply metrics")!.click());
+    return setQuery.mock.calls.at(-1)![0]({ where: [] }).aggregations[0] as AggregationClause;
+  };
+  try {
+    await act(async () => root.render(createElement(MetricsEditor, { api, fields, onClose: vi.fn() })));
+    const enter = (value: string) => { editInput(every()!, value); commitInput(every()!); };
+    // Hours offer only counts that divide a day.
+    expect(every()!.tagName).toBe("SELECT");
+    expect([...(every() as unknown as HTMLSelectElement).options].map((o) => o.value)).toEqual(["1", "2", "3", "4", "6", "8", "12", "24"]);
+    choose("Intervals per bucket", "6");
+    expect(saved().dateGrouping).toMatchObject({ interval: "hour", every: 6, timeZone: "America/New_York" });
+    // A new interval starts at one per bucket: 6 hours must not become 6 months.
+    choose("Date interval", "month");
+    expect(every()!.tagName).toBe("INPUT");
+    expect(every()!.value).toBe("1");
+    expect(saved().dateGrouping).not.toHaveProperty("every");
+    // Typing is a draft: clearing the field does not snap back or apply.
+    editInput(every()!, "");
+    expect(every()!.value).toBe("");
+    editInput(every()!, "3");
+    commitInput(every()!);
+    expect(saved().dateGrouping).toMatchObject({ interval: "month", every: 3 });
+    // An empty field restores the count; out-of-range counts are clamped.
+    enter("");
+    expect(every()!.value).toBe("3");
+    enter("1001");
+    expect(saved().dateGrouping?.every).toBe(1000);
+    // Slots have no count.
+    choose("Date interval", "hourOfDay");
+    expect(every()).toBeNull();
+    expect(saved().dateGrouping).not.toHaveProperty("every");
+    choose("Date interval", "day");
+    enter("2");
+    enter("1");
+    expect(saved().dateGrouping).not.toHaveProperty("every");
+  } finally { act(() => root.unmount()); host.remove(); }
+});
