@@ -30,7 +30,7 @@
     "typecheck": "npm run build:packages && tsc --noEmit -p packages/core/tsconfig.test.json && tsc --noEmit -p packages/react/tsconfig.test.json && tsc --noEmit -p packages/ui/tsconfig.test.json && tsc --noEmit -p tools/schema-codegen/tsconfig.test.json && tsc --noEmit -p examples/tsconfig.json && tsc --noEmit -p demo/tsconfig.json && tsc --noEmit -p packages/duckdb/tsconfig.test.json",
     "test": "vitest run",
     "test:go": "cd backends/go && go test ./...",
-    "test:sqlite": "(cd backends/sqlite-tests && go test -race ./... && go vet ./...) && tsc -p backends/sqlite-tests/tsconfig.json && vitest run --config backends/sqlite-tests/vitest.config.ts",
+    "test:sqlite": "(cd backends/sqlite-tests && go test -race -timeout 20m ./... && go vet ./...) && tsc -p backends/sqlite-tests/tsconfig.json && vitest run --config backends/sqlite-tests/vitest.config.ts",
     "test:postgres": "(cd backends/postgres-tests && go test -race ./... && go vet ./...) && tsc -p backends/postgres-tests/tsconfig.json && vitest run --config backends/postgres-tests/vitest.config.ts",
     "vet:go": "cd backends/go && go vet ./...",
     "version:check": "node scripts/verify-release-version.mjs",

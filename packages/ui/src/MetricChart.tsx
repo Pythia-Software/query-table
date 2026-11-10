@@ -129,6 +129,18 @@ export function MetricChart({
         ? colors.color(clause.groupBy[0] ?? "", b.keys[0] ?? null)
         : tupleShade(b.keys);
   const groupLabel = (b: MetricBucket) => metricGroupLabel(b, clause, locale);
+  // Percentile whiskers are interpolated; minmax and Tukey ones are observed.
+  // Labelled from the result, which names its own whisker probabilities.
+  const whiskerLabel = (s: { whiskers: string; whiskerProbabilities?: number[] }) => {
+    if (s.whiskers !== "percentile") return "Observed whiskers";
+    const [lo, hi] = s.whiskerProbabilities ?? [0.1, 0.9];
+    return `P${Math.round(lo! * 1000) / 10}–P${Math.round(hi! * 1000) / 10} whiskers`;
+  };
+  // Percentile boxes list no outliers; their markers are the extremes.
+  const outlierText = (s: { whiskers: string; outlierCount: number }, markers: number) =>
+    s.whiskers === "percentile"
+      ? `${s.outlierCount} samples beyond the whiskers (minimum and maximum marked)`
+      : `${s.outlierCount} outliers (${markers} retained markers)`;
   const groupFormat = metricDateGroupFormat(clause);
   // Hover and accessible text name a bucket's interval even when the display
   // hides whiskers and bands.
@@ -337,7 +349,7 @@ export function MetricChart({
       const whisker = s ? metricBoxWhiskers(s) : null;
       const outliers = s ? metricBoxOutliers(s) : [];
       const detailLabel = s
-        ? `${fullLabel}\nMin ${fmt(s.min, display.format)} · Q1 ${fmt(s.q1, display.format)} · Median ${fmt(s.median, display.format)} · Q3 ${fmt(s.q3, display.format)} · Max ${fmt(s.max, display.format)} · Mean ${fmt(s.mean, display.format)}\nObserved whiskers ${fmt(s.low, display.format)} – ${fmt(s.high, display.format)}${s.low > s.q1 || s.high < s.q3 ? "\nInterpolated quartile extends beyond observed inliers; whisker meets the box edge." : ""}\n${s.n} samples · ${b.nullCount ?? 0} NULL · ${s.outlierCount} outliers (${outliers.length} retained markers). Shared ${display.xScale?.mode === "log" ? "logarithmic" : "linear"} axis.`
+        ? `${fullLabel}\nMin ${fmt(s.min, display.format)} · Q1 ${fmt(s.q1, display.format)} · Median ${fmt(s.median, display.format)} · Q3 ${fmt(s.q3, display.format)} · Max ${fmt(s.max, display.format)} · Mean ${fmt(s.mean, display.format)}\n${whiskerLabel(s)} ${fmt(s.low, display.format)} – ${fmt(s.high, display.format)}${s.low > s.q1 || s.high < s.q3 ? "\nInterpolated quartile extends beyond observed inliers; whisker meets the box edge." : ""}\n${s.n} samples · ${b.nullCount ?? 0} NULL · ${outlierText(s, outliers.length)}. Shared ${display.xScale?.mode === "log" ? "logarithmic" : "linear"} axis.`
         : detail(b);
       return <g key={i} className="qt-metric-box-row">
         <text x={left} y={y - 12} textAnchor="start" className="qt-metric-axis qt-metric-box-label"><title>{fullLabel}</title>{shortLabel}</text>
@@ -380,7 +392,7 @@ export function MetricChart({
         color = shade(b);
       const whisker = s ? metricBoxWhiskers(s) : null, outliers = s ? metricBoxOutliers(s) : [];
       const label = s
-        ? `${groupLabel(b)}\nMin ${fmt(s.min, display.format)} · Q1 ${fmt(s.q1, display.format)} · Median ${fmt(s.median, display.format)} · Q3 ${fmt(s.q3, display.format)} · Max ${fmt(s.max, display.format)} · Mean ${fmt(s.mean, display.format)}\nObserved whiskers ${fmt(s.low, display.format)} – ${fmt(s.high, display.format)}${s.low > s.q1 || s.high < s.q3 ? "\nInterpolated quartile extends beyond observed inliers; whisker meets the box edge." : ""}\n${s.n} samples · ${b.nullCount ?? 0} NULL · ${s.outlierCount} outliers (${outliers.length} retained markers)`
+        ? `${groupLabel(b)}\nMin ${fmt(s.min, display.format)} · Q1 ${fmt(s.q1, display.format)} · Median ${fmt(s.median, display.format)} · Q3 ${fmt(s.q3, display.format)} · Max ${fmt(s.max, display.format)} · Mean ${fmt(s.mean, display.format)}\n${whiskerLabel(s)} ${fmt(s.low, display.format)} – ${fmt(s.high, display.format)}${s.low > s.q1 || s.high < s.q3 ? "\nInterpolated quartile extends beyond observed inliers; whisker meets the box edge." : ""}\n${s.n} samples · ${b.nullCount ?? 0} NULL · ${outlierText(s, outliers.length)}`
         : detail(b);
       return (
         <g key={i}>
@@ -584,6 +596,79 @@ export function MetricChart({
     if (series.length < buckets.length)
       disclosure = `${series.length} of ${buckets.length} returned groups drawn; ${buckets.length - valid.length} empty/error groups. Additional bins are not drawn.`;
     note = `${series.length} of ${result?.groupCount ?? buckets.length} groups drawn; Hover a bin for its count. Shared edges; final upper bound included. Frequencies are row counts.`;
+  } else if (kind === "quantiles") {
+    // A cumulative curve per group: x is the value at each probability, y the
+    // probability. Groups share both axes.
+    const curves = buckets.flatMap((b) =>
+        !b.error &&
+        b.distribution?.kind === "quantiles" &&
+        b.distribution.summary
+          ? [{ bucket: b, summary: b.distribution.summary }]
+          : [],
+      ),
+      series = curves.slice(0, display.maxGroups ?? 8);
+    if (!curves.length) problem = "No numeric samples to summarize.";
+    const xa = scale(
+        series.flatMap((c) => c.summary.values),
+        display.xScale,
+        false,
+        display.xFormat,
+      ),
+      x = (v: number) => left + xa.fraction(v) * plotW,
+      y = (p: number) => bottom - p * plotH,
+      percent = (p: number) => `${Math.round(p * 1000) / 10}%`;
+    axes = (
+      <>
+        {[0, 0.25, 0.5, 0.75, 1].map((p) => (
+          <g key={`y${p}`}>
+            {grid(left, y(p), right, y(p))}
+            {text(left - 7, y(p) + 4, percent(p), "end")}
+          </g>
+        ))}
+        {xa.ticks.map((v, i) => (
+          <g key={`x${i}`}>
+            {text(x(v), bottom + 18, tickFmt(v, display.xFormat, xa.ticks))}
+          </g>
+        ))}
+      </>
+    );
+    marks = series.map(({ bucket, summary }, j) => {
+      const points = summary.values.flatMap((v, i) =>
+        xa.accepts(v) ? [`${x(v)},${y(summary.probabilities[i]!)}`] : [],
+      );
+      const label = `${groupLabel(bucket)}\n${summary.probabilities
+        .map((p, i) => `P${Math.round(p * 1000) / 10} ${fmt(summary.values[i], display.xFormat)}`)
+        .join(" · ")}\n${summary.n} samples · ${bucket.nullCount ?? 0} NULL`;
+      return (
+        <g key={j} {...interaction(bucket, label, true, shade(bucket))}>
+          <polyline
+            points={points.join(" ")}
+            fill="none"
+            stroke={shade(bucket)}
+            strokeWidth={2}
+          />
+          {summary.values.map((v, i) =>
+            xa.accepts(v) ? (
+              <circle
+                key={i}
+                cx={x(v)}
+                cy={y(summary.probabilities[i]!)}
+                r={summary.values.length > 21 ? 1.5 : 3}
+                fill={shade(bucket)}
+              />
+            ) : null,
+          )}
+        </g>
+      );
+    });
+    legend = series.map(({ bucket }, i) => ({
+      key: String(i),
+      label: groupLabel(bucket),
+      color: shade(bucket),
+    }));
+    if (series.length < buckets.length)
+      disclosure = `${series.length} of ${buckets.length} returned groups drawn; ${buckets.length - curves.length} empty/error groups.`;
+    note = `${series.length} of ${result?.groupCount ?? buckets.length} groups drawn. Each curve plots the exact-linear percentile (x) at each probability (y). Hover a curve for its values.`;
   } else if (kind === "scatter") {
     const paired = buckets.filter(
       (b) =>
@@ -924,13 +1009,13 @@ export function MetricChart({
       "Calendar outputs work in values, tables or lists. Use duration formatting for elapsed quantities.";
   const position =
     display.legendPosition ??
-    (["pie", "donut", "scatter", "histogram"].includes(kind)
+    (["pie", "donut", "scatter", "histogram", "quantiles"].includes(kind)
       ? "right"
       : "none");
   const xAxisLabel = display.xLabel ?? (kind === "scatter" ? "X value"
-    : kind === "histogram" ? display.valueLabel ?? "Value" : horizontalLabel(kind, clause));
+    : kind === "histogram" || kind === "quantiles" ? display.valueLabel ?? "Value" : horizontalLabel(kind, clause));
   const yAxisLabel = display.yLabel ?? (kind === "scatter" ? "Y value"
-    : kind === "histogram" ? "Count" : kind === "bar-horizontal" ? clause.groupBy.join(" / ") : display.valueLabel ?? "Value");
+    : kind === "histogram" ? "Count" : kind === "quantiles" ? "Share of samples ≤ value" : kind === "bar-horizontal" ? clause.groupBy.join(" / ") : display.valueLabel ?? "Value");
   return (
     <MetricTooltip id={tooltipId}>
       <div
@@ -974,7 +1059,7 @@ export function MetricChart({
                     display.xLabel ??
                       (kind === "scatter"
                         ? "X value"
-                        : kind === "box" || kind === "histogram"
+                        : kind === "box" || kind === "histogram" || kind === "quantiles"
                           ? (display.valueLabel ?? "Value")
                           : horizontalLabel(kind, clause)),
                   )}

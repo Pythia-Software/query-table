@@ -9,7 +9,7 @@ export const FUNCTION_CATEGORIES = [
     id: "aggregates",
     label: "Aggregate functions",
     description: "Combine values from the rows in each group.",
-    keywords: "aggregate summary group median average count sum",
+    keywords: "aggregate summary group median percentile average count sum",
   },
   {
     id: "strings",
@@ -77,9 +77,16 @@ export function functionResultLabel(result: FormulaType | "branch"): string {
 /** Concept is separate from return type: LENGTH is a string operation returning a number. */
 export function functionCategory(fn: FormulaFunction): FunctionCategory {
   if (
-    ["COUNT", "COUNT_DISTINCT", "SUM", "AVG", "MIN", "MAX", "MEDIAN"].includes(
-      fn.name,
-    )
+    [
+      "COUNT",
+      "COUNT_DISTINCT",
+      "SUM",
+      "AVG",
+      "MIN",
+      "MAX",
+      "MEDIAN",
+      "PERCENTILE",
+    ].includes(fn.name)
   )
     return "aggregates";
   if (fn.name.startsWith("TO_")) return "conversion";
@@ -123,6 +130,7 @@ const SEARCH_ALIASES: Record<string, string> = {
   IFERROR: "recover error default fallback",
   ARRAY_LENGTH: "size count elements",
   DATE_DIFF: "difference elapsed duration",
+  PERCENTILE: "quantile p90 p95 p99 tail rank",
 };
 const normalize = (text: string) =>
   text.toLowerCase().replace(/[_-]/g, " ").trim();

@@ -150,8 +150,13 @@ func TestSQLiteDistributionErrorsAndBudgets(t *testing.T) {
 	d.SourceSQL = "WITH RECURSIVE samples(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM samples WHERE n<100001) SELECT n,CAST(n AS TEXT) AS id FROM samples"
 	d.SourceArgs = nil
 	d.Schema.Fields = map[string]qt.FieldSpec{"id": d.Schema.Fields["id"], "n": d.Schema.Fields["n"]}
-	// v3 checks the MaxSamplesPerGroup budget (default 100000) before reducing
-	// and fails the metric, where v2 reported resource_limit on its bucket.
+	// SQLite ranks samples in SQL: no per-group budget applies by default.
+	if m := runMetric(t, db, d, q); m.Buckets[0].Distribution.(*qt.MetricBoxDistribution).Summary.N != 100001 {
+		t.Fatal(m)
+	}
+	// An explicit MaxSamplesPerGroup is checked before reducing and fails the
+	// metric, where v2 reported resource_limit on its bucket.
+	d.MaxSamplesPerGroup = qt.DefaultMaxSamplesPerGroup
 	r, e := d.Execute(context.Background(), db, q, qt.PlanOptions{})
 	if message := metricFailure(t, r, e); !strings.Contains(message, "100,000-sample budget") {
 		t.Fatal(message)

@@ -104,7 +104,8 @@ export interface MetricDisplay {
     | "donut"
     | "scatter"
     | "box"
-    | "histogram";
+    | "histogram"
+    | "quantiles";
   valueLabel?: string;
   xLabel?: string;
   yLabel?: string;

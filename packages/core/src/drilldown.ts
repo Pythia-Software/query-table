@@ -30,7 +30,7 @@ function metricSchema(query: QueryState, schema: FieldSchema): FieldSchema {
 }
 
 function distributionActive(clause: AggregationClause): boolean {
-  return !!clause.distribution && (!clause.display || clause.display.kind === "box" || clause.display.kind === "histogram");
+  return !!clause.distribution && (!clause.display || ["box", "histogram", "quantiles"].includes(clause.display.kind));
 }
 
 /** The query selecting the records behind one metric bucket, or null when no

@@ -81,7 +81,8 @@
       "donut",
       "scatter",
       "box",
-      "histogram"
+      "histogram",
+      "quantiles"
     ],
     "valueLabel": "string",
     "xLabel": "string",
@@ -169,14 +170,18 @@
   "distribution": {
     "kind": [
       "box",
-      "histogram"
+      "histogram",
+      "quantiles"
     ],
     "input": "string",
     "whiskers": [
       "minmax",
-      "tukey"
+      "tukey",
+      "percentile"
     ],
-    "bins": "integer"
+    "whiskerProbabilities": "numberList",
+    "bins": "integer",
+    "probabilities": "numberList"
   },
   "layout": {
     "widthRem": "integer",

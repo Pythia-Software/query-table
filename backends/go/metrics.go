@@ -223,22 +223,29 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 	reductionMemo := map[string]ValueSQL{}
 	reductions := []string{}
 	reductionKeys := map[string]string{}
+	ranked := []sqliteRankedLeaf{}
 	var collect func(*exprNode) error
 	collect = func(n *exprNode) error {
 		op := strings.ToLower(n.op)
-		if aggOpKnown(op) || op == "median" {
+		if aggOpKnown(op) || sampledOp(op) {
 			key := expressionKey(n)
 			if cached, ok := reductionMemo[key]; ok {
 				leaves[n] = cached
 				return nil
 			}
-			if len(n.args) > 1 || (len(n.args) == 0 && op != "count") {
+			probability := 0.0
+			if op == "percentile" {
+				var err error
+				if probability, err = percentileProbability(n); err != nil {
+					return err
+				}
+			} else if len(n.args) > 1 || (len(n.args) == 0 && op != "count") {
 				return diagnostic(ErrorCodeArity, "aggregate requires one row expression (COUNT also accepts none)")
 			}
 			raw := "*"
 			errSQL := b.nullError()
 			typ := "number"
-			if len(n.args) == 1 {
+			if len(n.args) > 0 {
 				v, err := b.row(n.args[0])
 				if err != nil {
 					return err
@@ -252,7 +259,7 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 				raw = v.Value
 				errSQL = v.Error
 				typ = v.Type
-				if (op == "sum" || op == "avg" || op == "median") && typ != "number" && typ != "null" {
+				if (op == "sum" || op == "avg" || sampledOp(op)) && typ != "number" && typ != "null" {
 					return diagnostic(ErrorCodeTypeError, "numeric aggregate requires numeric input")
 				}
 				if (op == "min" || op == "max") && typ == "bool" {
@@ -271,6 +278,9 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 					typ = "number"
 				case "median":
 					value = "percentile_cont(0.5) WITHIN GROUP (ORDER BY " + raw + ")"
+					typ = "number"
+				case "percentile":
+					value = b.postgresPercentile(raw, probability)
 					typ = "number"
 				case "sum", "avg":
 					value = strings.ToUpper(op) + "((" + raw + ")::text::numeric)"
@@ -294,7 +304,7 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 				}
 
 			}
-			if b.sqlite {
+			if b.sqlite && !sampledOp(op) {
 				if op == "count" || op == "count_distinct" {
 					typ = "number"
 				}
@@ -303,7 +313,24 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 			index := len(leaves)
 			a := fmt.Sprintf("a%d", index)
 			z := a + "_error"
-			reductions = append(reductions, value+" AS "+a, errorExpr+" AS "+z)
+			if b.sqlite && sampledOp(op) {
+				// Sorted in memory per group, or ranked after the reduction
+				// for a group above sqliteInMemorySamples: keep the input
+				// error here; sqliteMemoryColumns adds the in-memory result and
+				// sqliteRankedLeaves supplies a and z. The sample count is read
+				// from the ranking, so each row evaluates its validated input
+				// once per reduction, as before.
+				reductions = append(reductions, "MIN("+errSQL+") AS "+a+"_input")
+				leaf := sqliteRankedLeaf{alias: a, input: expressionKey(n.args[0]), sample: raw, ranks: medianRanks(), midpoint: true}
+				reductionKeys[a+"_input"] = "input\x00" + key
+				if op == "percentile" {
+					leaf.midpoint, leaf.probability = false, probability
+					leaf.ranks, leaf.p = b.quantileRanks(probability)
+				}
+				ranked = append(ranked, leaf)
+			} else {
+				reductions = append(reductions, value+" AS "+a, errorExpr+" AS "+z)
+			}
 			reductionKeys[a], reductionKeys[z] = "value\x00"+key, "error\x00"+key
 			leaves[n] = ValueSQL{a, z, typ}
 			reductionMemo[key] = leaves[n]
@@ -361,9 +388,14 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 	}
 	reductionKeys["count"] = "count"
 	reductions = append(selectGroups, append(reductions, "COUNT(*) AS count")...)
+	population := b.rel
+	reductions = append(reductions, b.sqliteMemoryColumns(ranked)...)
 	reductionFrom := " FROM " + b.rel + by
 	b.stage("SELECT " + strings.Join(reductions, ",") + reductionFrom)
 	reductionStage := len(b.stages) - 1
+	if len(ranked) > 0 {
+		b.sqliteRankedLeaves(population, groups, ranked)
+	}
 	var lower func(*exprNode) (ValueSQL, error)
 	lower = func(n *exprNode) (ValueSQL, error) {
 		if v, ok := leaves[n]; ok {
@@ -477,6 +509,9 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 		}
 	}
 	plan := b.finish(sql, scope, cols)
+	// Ranked leaves keep the reduction stage reusable: they read it and the
+	// population before it, which a cached or fused reduction leaves intact
+	// (and the gated ranking only scans when a group overflowed).
 	if b.lateSource {
 		reductionStage++ // finish prepends the shared authorized source.
 	}
@@ -633,12 +668,14 @@ func (b *planBuilder) aggregatePolicy(n *exprNode, op string, seen map[string]bo
 			return diagnostic(ErrorCodeUnknownField, n.text)
 		}
 		if f.AggregateOps != nil {
-			if (op == "box" || op == "histogram") && len(f.AggregateOps) > 0 {
+			// Distributions are not scalar ops: any admitted op admits them.
+			if distributionKinds[op] && len(f.AggregateOps) > 0 {
 				return nil
 			}
 			allowed := false
 			for _, a := range f.AggregateOps {
-				allowed = allowed || a == op
+				// A field admitting MEDIAN also admits PERCENTILE.
+				allowed = allowed || a == op || op == "percentile" && a == "median"
 			}
 			if !allowed {
 				return fieldDiagnostic(ErrorCodeAggregateDisabled, n.text, "aggregate "+op+" disabled for "+n.text)
@@ -651,6 +688,35 @@ func (b *planBuilder) aggregatePolicy(n *exprNode, op string, seen map[string]bo
 		}
 	}
 	return nil
+}
+
+// sampledOp reports an order-statistic reduction, which needs each group's
+// sorted samples.
+func sampledOp(op string) bool { return op == "median" || op == "percentile" }
+
+// percentileProbability is the second argument of PERCENTILE(expr, p): a
+// number literal in [0, 1].
+func percentileProbability(n *exprNode) (float64, error) {
+	if len(n.args) != 2 {
+		return 0, diagnostic(ErrorCodeArity, "PERCENTILE requires a row expression and a probability")
+	}
+	p, ok := n.args[1].value.(float64)
+	if n.args[1].op != "literal" || !ok || !(p >= 0 && p <= 1) {
+		return 0, &PlanDiagnostic{Code: ErrorCodeTypeError, Message: "PERCENTILE needs a probability between 0 and 1 as a number literal", Offset: n.args[1].pos}
+	}
+	return p, nil
+}
+
+// postgresPercentile is the exact-linear percentile of raw's non-NULL values
+// in each group, from their sorted array: position (n-1)*p, then
+// (1-f)*a+f*b in double precision, clamped to [a,b]. percentile_cont computes
+// a+(b-a)*f, which can differ by an ULP. PostgreSQL evaluates identical
+// array_agg calls once, so every PERCENTILE of one input shares the sort.
+func (b *planBuilder) postgresPercentile(raw string, p float64) string {
+	sample := "(" + raw + ")::double precision"
+	sorted := "array_agg(" + sample + " ORDER BY " + sample + ") FILTER (WHERE (" + raw + ") IS NOT NULL)"
+	position := "(n-1)::double precision*" + b.param(p, "double precision")
+	return "(SELECT CASE WHEN n>0 THEN LEAST(s[u],GREATEST(s[l],(1::double precision-f)*s[l]+f*s[u])) END FROM (SELECT s,n,floor(position)::integer+1 AS l,LEAST(floor(position)::integer+2,n) AS u,position-floor(position) AS f FROM (SELECT s,n," + position + " AS position FROM (SELECT " + sorted + " AS s,COALESCE(cardinality(" + sorted + "),0) AS n) samples) positions) ranks)"
 }
 
 func fieldGroupable(f FieldSpec) bool {

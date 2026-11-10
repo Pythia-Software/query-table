@@ -212,6 +212,24 @@ export const stateCases: StateCase[] = [
     },
   },
   {
+    name: "percentile whiskers and quantile distributions",
+    state: {
+      ...EMPTY_QUERY,
+      aggregations: [
+        {
+          id: "whiskers", op: "count", groupBy: ["provider"],
+          distribution: { kind: "box", input: "latency", whiskers: "percentile", whiskerProbabilities: [0.05, 0.95] },
+          display: { kind: "box" },
+        },
+        {
+          id: "curve", op: "count", groupBy: ["provider"],
+          distribution: { kind: "quantiles", input: "latency", probabilities: [0, 0.25, 0.5, 0.9, 1] },
+          display: { kind: "quantiles" },
+        },
+      ],
+    },
+  },
+  {
     name: "every metric option",
     state: {
       ...EMPTY_QUERY,

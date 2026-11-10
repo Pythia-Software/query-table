@@ -20,6 +20,7 @@ import {
   MAX_METRIC_WINDOW_PERIODS,
   METRIC_HOUR_EVERY,
   METRIC_FUNCTIONS,
+  MAX_QUANTILE_PROBABILITIES,
   aggOpsForField,
   compileFormula,
   compileMetric,
@@ -85,7 +86,10 @@ const kinds: Array<[MetricDisplay["kind"], string]> = [
   ["scatter", "Scatterplot"],
   ["box", "Box & whisker"],
   ["histogram", "Histogram"],
+  ["quantiles", "Quantile curve"],
 ];
+/** A new quantile curve reads 0, 0.01, …, 1 (MAX_QUANTILE_PROBABILITIES points). */
+const defaultProbabilities = Array.from({ length: 101 }, (_, i) => i / 100);
 const panes: Array<{ label: string; icon: IconName }> = [
   { label: "Metric list", icon: "panelList" },
   { label: "Definition", icon: "panelDefinition" },
@@ -182,7 +186,7 @@ export function MetricsEditor<Row>({
   // A distribution reads a row formula, except a box over a slot's
   // occurrences, which summarises the metric itself.
   const rowInput =
-    ["box", "histogram"].includes(chosen.kind) &&
+    ["box", "histogram", "quantiles"].includes(chosen.kind) &&
     !selected?.dateGrouping?.occurrence;
   const dateField = fields.find(
     (f) => f.name === selected?.groupBy[0] && f.type === "datetime",
@@ -216,7 +220,7 @@ export function MetricsEditor<Row>({
         else if (
           c.distribution &&
           !c.dateGrouping?.occurrence &&
-          ["box", "histogram"].includes(c.display?.kind ?? c.distribution.kind)
+          ["box", "histogram", "quantiles"].includes(c.display?.kind ?? c.distribution.kind)
         )
           compileFormula(c.distribution.input, fields);
         else {
@@ -584,7 +588,7 @@ export function MetricsEditor<Row>({
     if (!selected) return;
     // Distributions and scatters have no window or share, and hide their
     // settings, so leaving them set would strand an invalid metric.
-    const single = !["box", "histogram", "scatter"].includes(kind);
+    const single = !["box", "histogram", "quantiles", "scatter"].includes(kind);
     let display =
       (!single && shareDisplay(selected.share, undefined).display) || chosen;
     // They have no interval either; it leaves with its display setting.
@@ -597,12 +601,12 @@ export function MetricsEditor<Row>({
         ? {}
         : { window: undefined, share: undefined, interval: undefined }),
     };
-    setFormatTarget(kind === "scatter" || kind === "histogram" ? "x" : "value");
+    setFormatTarget(kind === "scatter" || kind === "histogram" || kind === "quantiles" ? "x" : "value");
     if (selected.sort)
       next.sort = selected.sort.filter(
         (s) =>
           (s.key !== "y" || kind === "scatter") &&
-          (s.key !== "samples" || kind === "box" || kind === "histogram"),
+          (s.key !== "samples" || kind === "box" || kind === "histogram" || kind === "quantiles"),
       );
     if (kind === "scatter" && !selected.expressionY)
       next.expressionY = "COUNT()";
@@ -610,11 +614,17 @@ export function MetricsEditor<Row>({
       next.expression = metricExpression(selected);
     // Distributions count rows for their minimum; a distinct or summed one
     // would be rejected, so it keeps its threshold over rows.
-    if ((kind === "box" || kind === "histogram") && metricMinCountMeasure(selected))
+    const distributionKind = kind === "box" || kind === "histogram" || kind === "quantiles";
+    if (distributionKind && metricMinCountMeasure(selected))
       next.minCount = metricMinCount(selected);
-    if (kind === "box" || kind === "histogram")
+    if (distributionKind) {
+      // Options of other kinds are retained as inactive alternatives, which
+      // every engine ignores, so a box → quantiles → box round trip keeps them.
       next.distribution = {
         ...selected.distribution,
+        ...(kind === "quantiles" && !selected.distribution?.probabilities
+          ? { probabilities: defaultProbabilities }
+          : {}),
         kind,
         input:
           selected.distribution?.input ??
@@ -624,6 +634,7 @@ export function MetricsEditor<Row>({
               ? fieldSource(measurable[0].name)
               : "NULL"),
       };
+    }
     // Retain inactive expressions in the draft; only the active shape executes.
     patch(selected.id, next);
   }
@@ -634,7 +645,7 @@ export function MetricsEditor<Row>({
       patch(selected.id, {
         distribution: {
           ...(selected.distribution ?? {
-            kind: chosen.kind as "box" | "histogram",
+            kind: chosen.kind as "box" | "histogram" | "quantiles",
             input: source,
           }),
           input: source,
@@ -739,7 +750,7 @@ export function MetricsEditor<Row>({
           wrap: false,
         }))
       : [
-          ...(concept !== "row" && !["box", "histogram"].includes(chosen.kind)
+          ...(concept !== "row" && !["box", "histogram", "quantiles"].includes(chosen.kind)
             ? aggregateFunctions
             : []),
           ...(concept !== "aggregate" ? FORMULA_FUNCTIONS : []),
@@ -1386,13 +1397,13 @@ export function MetricsEditor<Row>({
                 </label>
                 <div className="qt-metric-expression-heading">
                   <strong>
-                    {["box", "histogram"].includes(chosen.kind)
+                    {["box", "histogram", "quantiles"].includes(chosen.kind)
                       ? "Values to summarize"
                       : chosen.kind === "scatter"
                         ? "X expression"
                         : "Expression"}
                   </strong>
-                  {!["box", "histogram", "scatter"].includes(chosen.kind) && (
+                  {!["box", "histogram", "quantiles", "scatter"].includes(chosen.kind) && (
                     <div
                       className="qt-metric-mode"
                       role="group"
@@ -1438,7 +1449,7 @@ export function MetricsEditor<Row>({
                   )}
                 </div>
                 {selected.expression === undefined &&
-                !["box", "histogram", "scatter"].includes(chosen.kind) ? (
+                !["box", "histogram", "quantiles", "scatter"].includes(chosen.kind) ? (
                   <div className="qt-metric-basic">
                     <select
                       aria-label="Aggregation function"
@@ -1553,7 +1564,7 @@ export function MetricsEditor<Row>({
                 {diagnostics.get(selected.id) &&
                   (!computationDiagnostics.has(selected.id) ||
                     (selected.expression === undefined &&
-                      !["box", "histogram", "scatter"].includes(
+                      !["box", "histogram", "quantiles", "scatter"].includes(
                         chosen.kind,
                       ))) && (
                     <p className="qt-metric-editor-error" role="status">
@@ -2061,7 +2072,7 @@ export function MetricsEditor<Row>({
                   </select>
                 </Settings>
                 {selected.groupBy.length > 0 &&
-                  !["box", "histogram", "scatter"].includes(chosen.kind) && (
+                  !["box", "histogram", "quantiles", "scatter"].includes(chosen.kind) && (
                     <MetricSeriesSettings
                       clause={selected}
                       fields={fields}
@@ -2141,7 +2152,7 @@ export function MetricsEditor<Row>({
                           <option value="y">Y value</option>
                         )}
                         <option value="count">Rows</option>
-                        {["box", "histogram"].includes(chosen.kind) && (
+                        {["box", "histogram", "quantiles"].includes(chosen.kind) && (
                           <option value="samples">Numeric samples</option>
                         )}
                         {selected.groupBy.map((g, i) => (
@@ -2362,6 +2373,7 @@ export function MetricsEditor<Row>({
                     "scatter",
                     "box",
                     "histogram",
+                    "quantiles",
                     "list",
                   ].includes(chosen.kind) && (
                     <details className="qt-metric-settings">
@@ -2372,6 +2384,7 @@ export function MetricsEditor<Row>({
                         ? (["xScale", "yScale"] as const)
                         : ([
                             chosen.kind === "box" ||
+                            chosen.kind === "quantiles" ||
                             chosen.kind === "bar-horizontal" ||
                             chosen.kind === "list"
                               ? "xScale"
@@ -2430,7 +2443,7 @@ export function MetricsEditor<Row>({
                       </p>
                     </details>
                   )}
-                  {["pie", "donut", "scatter", "histogram"].includes(
+                  {["pie", "donut", "scatter", "histogram", "quantiles"].includes(
                     chosen.kind,
                   ) && (
                     <label>
@@ -2617,7 +2630,10 @@ export function MetricsEditor<Row>({
                             patch(selected.id, {
                               distribution: {
                                 ...selected.distribution!,
-                                whiskers: e.target.value as "minmax" | "tukey",
+                                whiskers: e.target.value as
+                                  | "minmax"
+                                  | "tukey"
+                                  | "percentile",
                               },
                             })
                           }
@@ -2626,8 +2642,49 @@ export function MetricsEditor<Row>({
                           <option value="tukey">
                             1.5 × IQR · show outliers
                           </option>
+                          <option value="percentile">Percentiles</option>
                         </select>
                       </label>
+                      {selected.distribution.whiskers === "percentile" &&
+                        ([0, 1] as const).map((side) => {
+                          const range = selected.distribution!
+                            .whiskerProbabilities ?? [0.1, 0.9];
+                          return (
+                            <label key={side}>
+                              {side === 0
+                                ? "Lower whisker percentile"
+                                : "Upper whisker percentile"}
+                              <MetricNumberInput
+                                key={`${selected.id}-${side}`}
+                                aria-label={
+                                  side === 0
+                                    ? "Lower whisker percentile"
+                                    : "Upper whisker percentile"
+                                }
+                                min={side === 0 ? 0 : 76}
+                                max={side === 0 ? 24 : 100}
+                                step={1}
+                                value={Math.round(range[side]! * 1000) / 10}
+                                onCommit={(n) => {
+                                  const next: [number, number] = [range[0]!, range[1]!];
+                                  next[side] = n / 100;
+                                  if (
+                                    next[0] >= 0 &&
+                                    next[0] < 0.25 &&
+                                    next[1] > 0.75 &&
+                                    next[1] <= 1
+                                  )
+                                    patch(selected.id, {
+                                      distribution: {
+                                        ...selected.distribution!,
+                                        whiskerProbabilities: next,
+                                      },
+                                    });
+                                }}
+                              />
+                            </label>
+                          );
+                        })}
                       <label>
                         <input
                           type="checkbox"
@@ -2640,6 +2697,49 @@ export function MetricsEditor<Row>({
                       </label>
                     </>
                   )}
+                  {chosen.kind === "quantiles" && selected.distribution && (() => {
+                    const shown = (
+                      selected.distribution.probabilities ?? defaultProbabilities
+                    )
+                      .map((p) => Math.round(p * 1e6) / 1e4)
+                      .join(", ");
+                    return (
+                      <label>
+                        Probabilities (percent, increasing)
+                        <input
+                          // Re-mount when the list changes elsewhere (undo,
+                          // links, kind switches), so the text never goes stale.
+                          key={`${selected.id}:${shown}`}
+                          aria-label="Quantile probabilities"
+                          defaultValue={shown}
+                          onBlur={(e) => {
+                            const probabilities = e.target.value
+                              .split(/[\s,]+/)
+                              .filter(Boolean)
+                              .map((text) => Number(text) / 100);
+                            if (
+                              probabilities.length >= 1 &&
+                              probabilities.length <= MAX_QUANTILE_PROBABILITIES &&
+                              probabilities.every(
+                                (p, i) =>
+                                  p >= 0 &&
+                                  p <= 1 &&
+                                  (i === 0 || p > probabilities[i - 1]!),
+                              )
+                            )
+                              patch(selected.id, {
+                                distribution: {
+                                  ...selected.distribution!,
+                                  probabilities,
+                                },
+                              });
+                            // An invalid list reverts to the one that runs.
+                            else e.target.value = shown;
+                          }}
+                        />
+                      </label>
+                    );
+                  })()}
                   {chosen.kind === "histogram" && selected.distribution && (
                     <label>
                       Equal-width bins
@@ -3091,7 +3191,7 @@ function minimumOf(key: string, min: number): MinCount {
  * values cannot be combined across a window's intervals. */
 function minimumAllowed(c: AggregationClause, key: string): boolean {
   if (key === "rows") return true;
-  const distribution = !!c.distribution && (!c.display || c.display.kind === "box" || c.display.kind === "histogram");
+  const distribution = !!c.distribution && (!c.display || ["box", "histogram", "quantiles"].includes(c.display.kind));
   if (distribution || c.dateGrouping?.occurrence) return false;
   return !(key.startsWith("distinct:") && c.window);
 }
@@ -3851,9 +3951,9 @@ function MetricInspection({
       [
         "Numeric samples",
         String(
-          bucket.distribution.kind === "box"
-            ? (bucket.distribution.summary?.n ?? 0)
-            : bucket.distribution.n,
+          bucket.distribution.kind === "histogram"
+            ? bucket.distribution.n
+            : (bucket.distribution.summary?.n ?? 0),
         ),
       ],
       ["NULL values", String(bucket.nullCount ?? 0)],
@@ -3863,7 +3963,7 @@ function MetricInspection({
       <code className="qt-metric-inspection-expression">
         {clause.distribution &&
         !clause.dateGrouping?.occurrence &&
-        ["box", "histogram"].includes(clause.display?.kind ?? "")
+        ["box", "histogram", "quantiles"].includes(clause.display?.kind ?? "")
           ? clause.distribution.input
           : metricExpression(clause)}
       </code>

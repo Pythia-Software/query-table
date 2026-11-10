@@ -120,7 +120,7 @@ func (d sqliteV2Dataset) executeMetrics(ctx context.Context, tx *sql.Tx, metrics
 			err = errors.Join(err, cleanupErr)
 		}
 	}()
-	direct, _, _, directErr := d.directDistributions(ctx, tx, metrics, failures, o, maxGroups, maxPopulation)
+	direct, _, _, directErr := d.directDistributions(ctx, tx, metrics, failures, o, maxGroups, maxPopulation, total)
 	if directErr != nil {
 		return nil, directErr
 	}
@@ -355,6 +355,10 @@ func (d sqliteV2Dataset) readV2Metric(ctx context.Context, tx *sql.Tx, p metricS
 					var payload MetricHistogramDistribution
 					e = json.Unmarshal([]byte(data), &payload)
 					b.Distribution = &payload
+				case "quantiles":
+					var payload MetricQuantilesDistribution
+					e = json.Unmarshal([]byte(data), &payload)
+					b.Distribution = &payload
 				default:
 					return out, fmt.Errorf("unknown distribution result")
 				}
@@ -467,6 +471,18 @@ func cloneSQLiteMetric(m MetricResult) MetricResult {
 			if d.Summary != nil {
 				summary := *d.Summary
 				summary.Outliers = append([]float64{}, d.Summary.Outliers...)
+				if d.Summary.WhiskerProbabilities != nil {
+					summary.WhiskerProbabilities = append([]float64{}, d.Summary.WhiskerProbabilities...)
+				}
+				c.Summary = &summary
+			}
+			b.Distribution = &c
+		case *MetricQuantilesDistribution:
+			c := *d
+			if d.Summary != nil {
+				summary := *d.Summary
+				summary.Probabilities = append([]float64{}, d.Summary.Probabilities...)
+				summary.Values = append([]float64{}, d.Summary.Values...)
 				c.Summary = &summary
 			}
 			b.Distribution = &c

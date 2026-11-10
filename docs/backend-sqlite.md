@@ -27,7 +27,8 @@ other drivers can register the same function descriptors.
 - Scoped computed-definition persistence with atomic revision checks.
 - The `qt-sqlite-v1` expression profile: composed aggregate formulas, paired
   X/Y metrics, all-matching and shown-row scopes, computed SELECT/ORDER BY,
-  final group sorting and top-N, metric `where`/`minCount`, exact MEDIAN, box
+  final group sorting and top-N, metric `where`/`minCount`, exact MEDIAN and
+  PERCENTILE, box
   plots/histograms, and transaction-based execution.
 
 `DecodeQueryRequestV3` is deliberately strict: it accepts one JSON object of at
@@ -405,7 +406,10 @@ extracted keys, and computed ordering retain normalization and checking.
 ## Formulas and computed execution
 
 Enable the profile by registering **both** `SQLiteFunctions()` and
-`SQLiteV2Functions()` scalar descriptors, plus `SQLiteV2Aggregates()`.
+`SQLiteV2Functions()` scalar descriptors, plus `SQLiteV2Aggregates()`. Register
+them only through these lists: the `qt_v2_*` helpers are private to the
+compiler, and their names, arities and arguments can change in any release.
+Register every connection from the same build of this module.
 The production module still imports no database driver. For modernc, supplement
 its scalar registration with this ordinary-aggregate bridge:
 
@@ -465,7 +469,12 @@ the older `qt_lower` used by text filters is unchanged.)
 Formula regex is separate from the Go/RE2 regex filters above: it is translated
 from JavaScript syntax and refuses patterns whose meaning differs. Text ordering comparisons are rejected;
 text equality, distinctness, extrema, and group ordering use BINARY collation.
-Aggregate leaves are COUNT, COUNT_DISTINCT, SUM, AVG, MIN, MAX, and MEDIAN.
+Aggregate leaves are COUNT, COUNT_DISTINCT, SUM, AVG, MIN, MAX, MEDIAN and
+`PERCENTILE(expr, p)` (a number literal `p` in [0, 1]; see
+[Ranked percentiles](#ranked-percentiles)). Every MEDIAN and PERCENTILE of one
+row expression in a metric shares one in-memory sort per group
+(`qt_v2_sample_quantiles`), or one ranking for a group beyond the in-memory
+budget.
 Nested reductions and row fields outside reductions are rejected. Aggregate
 allowlists apply through every transitive computed dependency. Base numeric/date
 grouping requires explicit `aggregate.groupable`; computed grouping requires a
@@ -637,10 +646,17 @@ promise arbitrary-precision accounting or identical browser accumulation order.
 Numeric metric samples/results reject integral doubles outside MAX_SAFE_INTEGER;
 COUNT observes presence without that metric-only restriction. SUM also rejects
 an absolute sample sum above MAX_SAFE_INTEGER, even if cancellation would make
-the final sum small. MEDIAN sorts exact samples and uses a linear midpoint for
-even populations. A group above `MaxSamplesPerGroup` (default
-`SQLiteMaxMedianSamples`, 100,000; at most 1,000,000) yields a `resource_limit`
-metric error, never an approximation.
+the final sum small. MEDIAN returns the middle sample, or for even populations
+the exact decimal midpoint of the middle two rounded once to double. A group is
+sorted in memory, as before, while the process-wide in-memory sample budget
+has room for it; otherwise it is ranked in SQL instead, with identical results
+(see [Ranked percentiles](#ranked-percentiles)). `MaxSamplesPerGroup` defaults
+to 10,000,000 on SQLite: staged groups never reach it, and it bounds the CPU
+and temporary space an ungrouped request (which reads `SourceSQL` directly)
+can spend on one group. A host may set it lower (at most 1,000,000); a group
+above it yields a `resource_limit` metric error, never an approximation. The
+check costs a grouped count only when the counted population exceeds the
+budget.
 
 Wrong storage types, invalid/noncanonical datetime bindings, formula text over
 100,000 UTF-8 bytes (except a field read directly by a counting function; see
@@ -652,9 +668,13 @@ enter formulas. Box plots and histograms are described below.
 
 ### Box plots and histograms
 
-`SQLiteV2Aggregates()` now includes `qt_v2_box` and `qt_v2_histogram`, and
-`SQLiteV2Functions()` includes the shared-edge helper. The same registration
-loops pick up these descriptors; no additional driver dependencies are required.
+`SQLiteV2Aggregates()` includes `qt_v2_histogram` and `qt_v2_ranked_values`,
+and `SQLiteV2Functions()` includes the shared-edge helper and the per-group
+percentile helpers `qt_v2_quantile`, `qt_v2_midpoint`, `qt_v2_box_fence` and
+`qt_v2_box_summary`. The same registration loops pick up these descriptors; no
+additional driver dependencies are required. The `qt_v2_median` and
+`qt_v2_box` aggregates stay registered for compatibility, but compiled plans no
+longer call them.
 `Capabilities().Distributions` is true. Both distributions accept numeric row
 formulas, including canonical computed fields, and honor allMatching/shownRows,
 transitive revision/measure policy, null/error diagnostics, and host limits.
@@ -681,13 +701,24 @@ Boxes return `MetricBoxDistribution` with a nullable `MetricBoxSummary`:
 min, q1, median, q3, max, mean, observed low/high endpoints, sample count, whisker
 mode, outliers, and total outlier count. Quartiles use the core's exact-linear
 IEEE interpolation, with rounding before addition and clamping to adjacent
-samples. Mean is a compensated (Neumaier) sum of the sorted samples divided by
-their count, and may differ by roundoff from browser accumulation. Whiskers default to minmax; Tukey uses
-1.5×IQR fences and actual observed endpoints. Responses retain all outliers up
-to 20; larger populations retain the first 10 and last 10 sorted outliers while
-reporting the full count. The per-group sample budget is `MaxSamplesPerGroup`
-(default `SQLiteMaxBoxSamples`, 100,000). Exceeding it yields a
-`resource_limit` metric error rather than sampling.
+samples. Like MEDIAN, a group that fits the in-memory budget is summarised in
+memory and any other from its ranked samples, with identical results. The
+mean is the correctly rounded (exact) sum of the samples divided by their
+count, so it does not depend on visitation order; it may differ by roundoff
+from browser accumulation. Whiskers default to minmax; Tukey uses 1.5×IQR
+fences and actual observed endpoints (for a ranked group, native counts of the
+samples below and above the fences give the ranks of the endpoints and of the
+retained outliers). Responses retain all outliers up to 20; larger populations retain the
+first 10 and last 10 sorted outliers while reporting the full count. Percentile
+whiskers (`qt_v2_box_percentile` in memory) read two more ranked pairs for a
+ranked group and count the samples beyond them natively. Quantile curves
+(`kind: "quantiles"`) sort a group in memory with `qt_v2_quantiles_samples`;
+a group beyond the in-memory budget asks Go for the distinct ranks its
+probabilities and the median need (`qt_v2_quantile_ranks`), reads those
+samples by rank (`qt_v2_rank_samples`, at most 204 per group) and
+interpolates them once (`qt_v2_quantiles_summary`). A group above
+`MaxSamplesPerGroup` (see MEDIAN) yields a `resource_limit` metric error
+rather than sampling.
 The scalar `value` used for box sorting is the median.
 
 Histograms return `MetricHistogramDistribution` with edges, per-bin counts, and
@@ -714,8 +745,40 @@ inputs, `shownRows`, fields with a `ValueErrorExpr`, and other groupings use
 compiled plans, which materialize the population and sort it once per metric.
 So does the whole request when a scanned value cannot be read exactly (for
 example BLOB storage, a bool stored as 2, or text containing NUL). The scan
-retains 8 bytes per sample and fails the request with `resource_limit` above
-10,000,000 matching rows.
+retains 8 bytes per sample, so it admits metrics in request order while the
+counted population times their number is at most 1,000,000 samples; the other
+metrics use their compiled plans.
+
+### Ranked percentiles
+
+MEDIAN and box quartiles need each group's samples in order. Compiled SQLite
+plans are hybrid, within one statement and so one snapshot:
+
+- The reduction pass feeds every group to an in-memory aggregate
+  (`qt_v2_sample_median`, `qt_v2_box_minmax`, `qt_v2_box_tukey`), which sorts
+  it in Go, as the former `qt_v2_median` and `qt_v2_box` did. The aggregates
+  reserve their slice capacity from one process-wide budget of 8,388,608
+  samples (64 MiB of Go memory), shared by every statement and every
+  order-statistic input. SQLite reduces the groups of an aggregate one at a
+  time, so a statement normally holds one group per input; groups of a few
+  million samples stay in memory.
+- A group that cannot reserve room reports an overflow instead of failing.
+  Only then does the
+  plan rank the validated samples in SQL (`ROW_NUMBER()` over the group's
+  partition, ordered by sample), read just the samples at the needed ranks,
+  and let Go interpolate them (`qt_v2_quantile`, `qt_v2_midpoint`,
+  `qt_v2_box_summary`) for the overflowing groups. The ranking is guarded by an
+  uncorrelated `EXISTS` over the reduced groups, which SQLite evaluates once
+  before the scan, so populations without a large group never sort.
+
+Both paths produce identical values, errors and box means (the mean is an
+exact, order-independent sum; `qt_v2_exact_mean` on the ranked path). Groups
+that fit the budget cost what they did before; a group that overflows pays for
+the in-memory pass and a SQL window sort, which dominates (with the pure-Go
+modernc driver, ranking 10,000,000 samples takes tens of seconds of CPU). The
+window sort uses the connection's sorter (`cache_size`, spilling to temporary
+files), so hosts with very large single groups should give SQLite enough
+`cache_size` and, where temporary files are slow, `temp_store=MEMORY`.
 
 Distribution buckets include `nullCount` and `inputErrorCount`; nulls are not
 errors or numeric zero. Errors clear both scalar value and distribution payload.

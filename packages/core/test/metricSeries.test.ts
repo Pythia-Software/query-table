@@ -136,6 +136,7 @@ describe("metric windows", () => {
     const message = (clause: AggregationClause) => validateMetric(clause, schema)[0]?.message;
     expect(message({ ...daily, expression: "COUNT_DISTINCT([user])", window: { periods: 7 } })).toMatch(/COUNT_DISTINCT.*mean per interval/);
     expect(message({ ...daily, expression: "MEDIAN([input])", window: { periods: 7 } })).toMatch(/MEDIAN/);
+    expect(message({ ...daily, expression: "PERCENTILE([input], 0.9)", window: { periods: 7 } })).toMatch(/cannot combine PERCENTILE/);
     expect(message({ ...daily, expression: "SUM([read]) / SUM([input])", window: { periods: 7, reduce: "mean" } })).toMatch(/pools/);
     expect(message({ ...daily, window: { periods: 1 } })).toMatch(/2–1,000/);
     expect(message({ ...daily, dateGrouping: { ...daily.dateGrouping!, includeEmpty: false }, window: { periods: 7 } })).toMatch(/empty dates/);

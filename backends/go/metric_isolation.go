@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 // Request-level diagnostics describe the request, handshake, view or host
@@ -76,9 +77,25 @@ func isolateMetric(ctx context.Context, tx *sql.Tx, id, scope string, run func()
 	return failedMetric(id, scope, code, message), nil
 }
 
+// callsOp reports whether the expression calls the lower-case function op.
+func callsOp(n *exprNode, op string) bool {
+	if strings.EqualFold(n.op, op) {
+		return true
+	}
+	for _, a := range n.args {
+		if callsOp(a, op) {
+			return true
+		}
+	}
+	return false
+}
+
 // sampleBudgetMessage names the sampled reduction and the host budget.
 func sampleBudgetMessage(spec AggSpec, limit int) string {
 	what := "MEDIAN"
+	if n, err := parseExpression(metricExpression(spec)); err == nil && !callsOp(n, "median") {
+		what = "PERCENTILE"
+	}
 	if spec.Distribution != nil {
 		what = "The " + spec.Distribution.Kind + " distribution"
 	}

@@ -177,7 +177,13 @@ type QueryDatasetV3 struct {
 	MaxRows, MaxGroups, MaxPopulation int
 	// UTF-8 value/error payload of the narrow source, checked before its copy.
 	// Database storage overhead and query scratch space remain host-managed.
-	MaxStagingBytes    int64
+	MaxStagingBytes int64
+	// MaxSamplesPerGroup bounds the rows of one group of a MEDIAN, PERCENTILE
+	// or distribution metric (at most 1,000,000 when set). PostgreSQL defaults
+	// to DefaultMaxSamplesPerGroup, since it sorts each group's samples in an
+	// array. SQLite defaults to 10,000,000, a CPU and temporary-space bound for
+	// ungrouped requests: it sorts groups in memory within a process-wide
+	// budget, or ranks them in SQL.
 	MaxSamplesPerGroup int
 	// PredicateRelations optionally supplies host relations for base-field
 	// source and row filter predicates (SQLite only). Group filters over
@@ -228,7 +234,7 @@ func (d QueryDatasetV3) Capabilities() QueryCapabilitiesV3 {
 	if d.Dialect == "sqlite" {
 		profile = SQLiteExpressionProfile
 	}
-	return QueryCapabilitiesV3{Version: 3, GroupedRows: true, CalendarGrouping: true, CalendarCycles: true, CalendarGroupKeys: true, CalendarEvery: true, ComputedSourceFilters: len(d.ComputedFilterable) > 0, Regex: false, RegexSourceFilters: d.Dialect == "sqlite", MetricFilters: true, MetricMinCount: true, MetricMinCountMeasures: true, MetricIntervals: true, MaxRows: rows, MaxGroups: groups, MaxPopulation: pop, Profile: profile}
+	return QueryCapabilitiesV3{Version: 3, GroupedRows: true, CalendarGrouping: true, CalendarCycles: true, CalendarGroupKeys: true, CalendarEvery: true, ComputedSourceFilters: len(d.ComputedFilterable) > 0, Regex: false, RegexSourceFilters: d.Dialect == "sqlite", MetricFilters: true, MetricMinCount: true, MetricMinCountMeasures: true, MetricIntervals: true, MetricPercentiles: true, BoxPercentileWhiskers: true, QuantileDistributions: true, MaxRows: rows, MaxGroups: groups, MaxPopulation: pop, Profile: profile}
 }
 func (d QueryDatasetV3) options(ctx context.Context, tx *sql.Tx, q QueryRequestV3, o PlanOptions) (PlanOptions, error) {
 	if err := ctx.Err(); err != nil {
@@ -695,10 +701,20 @@ func computedInputPolicy(plan SQLPlan, s Schema) []string {
 	sort.Strings(result)
 	return result
 }
+
+// sampleLimit is the exact sample budget per group. PostgreSQL retains each
+// group's sorted samples and defaults to DefaultMaxSamplesPerGroup. SQLite
+// sorts groups in memory or ranks them in SQL and defaults to
+// sqliteDirectPopulation (10,000,000): staged groups never reach it, and it
+// bounds the CPU and temporary space an ungrouped request, which reads
+// SourceSQL directly, can spend sorting one group.
 func (d QueryDatasetV3) sampleLimit() (int, error) {
 	limit := d.MaxSamplesPerGroup
 	if limit == 0 {
-		limit = SQLiteMaxMedianSamples
+		if d.Dialect == "sqlite" {
+			return sqliteDirectPopulation, nil
+		}
+		limit = DefaultMaxSamplesPerGroup
 	}
 	if limit < 1 || limit > 1000000 {
 		return 0, diagnostic(ErrorCodeDataset, "invalid exact sample budget")
@@ -712,7 +728,7 @@ func sampledExpression(source string) bool {
 	}
 	var visit func(*exprNode) bool
 	visit = func(n *exprNode) bool {
-		if strings.EqualFold(n.op, "median") {
+		if sampledOp(strings.ToLower(n.op)) {
 			return true
 		}
 		for _, child := range n.args {
@@ -723,4 +739,14 @@ func sampledExpression(source string) bool {
 		return false
 	}
 	return visit(node)
+}
+
+// populationBudget is the staged population budget (MaxPopulation or its
+// default), or zero for an invalid dataset, which limits reports.
+func (d QueryDatasetV3) populationBudget() int {
+	_, _, population, _, err := d.limits()
+	if err != nil {
+		return 0
+	}
+	return population
 }

@@ -1,7 +1,8 @@
 import { createGroupingModel, withoutGrouping, type GroupingDefinition } from "./grouping";
 import { MAX_AGGREGATIONS, normalizeQueryState, predicatesOf, type QueryState, type AggregationClause } from "./query";
 import { toServerQuery } from "./encode";
-import { validateMetric, toMetricQuery } from "./metrics";
+import { compileMetric, validateMetric, toMetricQuery } from "./metrics";
+import type { FormulaNode } from "./formula";
 import { isMetricCycle } from "./metricDates";
 import type { ComputedExecution } from "./computed";
 import type { FieldSchema, FieldDef } from "./schema";
@@ -59,6 +60,26 @@ function requestEnvelope(capabilities: QueryCapabilitiesV3, execution: ComputedE
     ...(execution?.planToken ? { planToken: execution.planToken } : {}), ...(execution?.snapshot !== undefined ? { snapshot: execution.snapshot } : {}) };
 }
 const profileRefusal: Refusal = { code: "profile_mismatch", message: "The negotiated query profile is unavailable." };
+/** Formula functions a server runs only when it advertises a capability. */
+const GATED_FUNCTIONS: Readonly<Record<string, { capability: keyof QueryCapabilitiesV3; message: string }>> = {
+  PERCENTILE: { capability: "metricPercentiles", message: "This server does not support PERCENTILE in metric formulas." },
+};
+/** Refusals for gated functions a metric formula calls and the server lacks.
+ * An expression that does not compile is refused by validation instead. */
+function gatedFunctionRefusals(expressions: readonly (string | undefined)[], schema: FieldSchema<any>, capabilities: QueryCapabilitiesV3, metricId?: string): Refusal[] {
+  const missing = new Set<string>();
+  const visit = (node: FormulaNode) => {
+    if (node.kind !== "call") return;
+    const gate = GATED_FUNCTIONS[node.name];
+    if (gate && !capabilities[gate.capability]) missing.add(node.name);
+    node.args.forEach(visit);
+  };
+  for (const expression of expressions) {
+    if (!expression) continue;
+    try { visit(compileMetric(expression, schema).ast); } catch { /* validation reports it */ }
+  }
+  return [...missing].map(name => ({ ...unsupported(GATED_FUNCTIONS[name]!.capability, GATED_FUNCTIONS[name]!.message), ...(metricId ? { metricId } : {}) }));
+}
 /** The v3 request for a query. Throws a QueryError, before anything is sent,
  * when the query needs a capability the server does not advertise or would
  * leave a filter or sort on the client (see docs/errors.md). */
@@ -79,6 +100,7 @@ export function toQueryRequestV3<Row>(query: QueryState, baseSchema: FieldSchema
     else if (q.grouping.keys.some((key) => isCalendarGroupKey(key) && (key.every ?? 1) > 1) && !capabilities.calendarEvery)
       refusals.push(unsupported("calendarEvery", "This server does not support grouping keys by several calendar intervals (every)."));
     for (const message of q.grouping.diagnostics ?? []) refusals.push({ code: "grouping", message });
+    refusals.push(...gatedFunctionRefusals(q.grouping.summaries.map(summary => summary.expression), sourceSchema, capabilities));
     try { const model = createGroupingModel(sourceSchema); model.validate(q.grouping); resultSchema = model.resultSchema(q.grouping.keys, q.grouping.summaries); }
     catch (error) { refusals.push({ code: "grouping", message: error instanceof Error ? error.message : String(error) }); }
   }
@@ -115,6 +137,12 @@ export function toQueryRequestV3<Row>(query: QueryState, baseSchema: FieldSchema
     }
     for (const issue of validateMetric({ ...clause, ...(dateGrouping ? { dateGrouping } : {}) } as AggregationClause, resultSchema))
       refusals.push({ code: (issue.code ?? "invalid_metric") as ErrorCode, message: issue.message, metricId: projected.id });
+    refusals.push(...gatedFunctionRefusals([projected.expression, projected.expressionY], resultSchema, capabilities, projected.id));
+    const distribution = (projected as MetricSpecV3).distribution;
+    if (distribution?.kind === "quantiles" && !capabilities.quantileDistributions)
+      refusals.push({ ...unsupported("quantileDistributions", "This server does not support quantile distributions."), metricId: projected.id });
+    if (distribution?.kind === "box" && distribution.whiskers === "percentile" && !capabilities.boxPercentileWhiskers)
+      refusals.push({ ...unsupported("boxPercentileWhiskers", "This server does not support percentile box whiskers."), metricId: projected.id });
     if (dateGrouping && !capabilities.calendarGrouping)
       refusals.push({ ...unsupported("calendarGrouping", "This server does not support calendar grouping."), metricId: projected.id });
     else if (isMetricCycle(dateGrouping?.interval) && !capabilities.calendarCycles)

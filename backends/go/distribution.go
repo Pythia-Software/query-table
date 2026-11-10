@@ -6,23 +6,69 @@ import (
 	"strings"
 )
 
-func (b *planBuilder) distribution(spec AggSpec, groups []ValueSQL, scope string) (SQLPlan, error) {
-	d := spec.Distribution
-	if d.Kind != "box" && d.Kind != "histogram" {
-		return SQLPlan{}, diagnostic(ErrorCodeDistribution, "unknown distribution kind")
+// distributionKinds are the MetricDistribution kinds.
+var distributionKinds = map[string]bool{"box": true, "histogram": true, "quantiles": true}
+
+// maxQuantileProbabilities bounds a quantile distribution's probabilities.
+const maxQuantileProbabilities = 101
+
+// validQuantileProbabilities: 1–maxQuantileProbabilities strictly increasing
+// values in [0, 1].
+func validQuantileProbabilities(probabilities []float64) bool {
+	if len(probabilities) < 1 || len(probabilities) > maxQuantileProbabilities {
+		return false
 	}
-	if d.Kind == "histogram" && len(groups) > 1 {
-		return SQLPlan{}, diagnostic(ErrorCodeDistribution, "histograms support at most one grouping key")
+	for i, p := range probabilities {
+		if !(p >= 0 && p <= 1) || i > 0 && p <= probabilities[i-1] {
+			return false
+		}
 	}
-	if d.Whiskers != "" && d.Whiskers != "minmax" && d.Whiskers != "tukey" {
-		return SQLPlan{}, diagnostic(ErrorCodeDistribution, "unknown whisker mode")
+	return true
+}
+
+// validateDistribution checks a distribution's kind and options and returns
+// its histogram bins (default 10).
+func validateDistribution(d *MetricDistribution, groups int) (int, error) {
+	if !distributionKinds[d.Kind] {
+		return 0, diagnostic(ErrorCodeDistribution, "unknown distribution kind")
+	}
+	if d.Kind == "histogram" && groups > 1 {
+		return 0, diagnostic(ErrorCodeDistribution, "histograms support at most one grouping key")
+	}
+	if d.Whiskers != "" && d.Whiskers != "minmax" && d.Whiskers != "tukey" && d.Whiskers != "percentile" {
+		return 0, diagnostic(ErrorCodeDistribution, "unknown whisker mode")
+	}
+	// Options of another kind (or another whisker mode) are inactive
+	// alternatives the editor retains: they are ignored, not validated.
+	if w := d.WhiskerProbabilities; d.Kind == "box" && d.Whiskers == "percentile" && w != nil && (len(w) != 2 || !(w[0] >= 0 && w[0] < 0.25) || !(w[1] > 0.75 && w[1] <= 1)) {
+		return 0, diagnostic(ErrorCodeDistribution, "percentile whiskers need [lo, hi] with 0 <= lo < 0.25 and 0.75 < hi <= 1")
+	}
+	if d.Kind == "quantiles" && !validQuantileProbabilities(d.Probabilities) {
+		return 0, diagnostic(ErrorCodeDistribution, "quantiles need 1–101 strictly increasing probabilities in [0, 1]")
 	}
 	bins := d.Bins
 	if bins == 0 {
 		bins = 10
 	}
 	if bins < 2 || bins > 30 {
-		return SQLPlan{}, diagnostic(ErrorCodeDistribution, "histogram bins must be 2–30")
+		return 0, diagnostic(ErrorCodeDistribution, "histogram bins must be 2–30")
+	}
+	return bins, nil
+}
+
+// whiskerProbabilities are a percentile box's whisker probabilities.
+func whiskerProbabilities(d *MetricDistribution) [2]float64 {
+	if len(d.WhiskerProbabilities) == 2 {
+		return [2]float64{d.WhiskerProbabilities[0], d.WhiskerProbabilities[1]}
+	}
+	return [2]float64{0.1, 0.9}
+}
+
+func (b *planBuilder) distribution(spec AggSpec, groups []ValueSQL, scope string) (SQLPlan, error) {
+	d := spec.Distribution
+	bins, err := validateDistribution(d, len(groups))
+	if err != nil {
+		return SQLPlan{}, err
 	}
 	n, e := parseExpression(d.Input)
 	if e != nil {
@@ -57,42 +103,78 @@ func (b *planBuilder) distribution(spec AggSpec, groups []ValueSQL, scope string
 		by = " GROUP BY " + strings.Join(groupCols, ",")
 	}
 	stats := append(append([]string{}, groupCols...), "COUNT(*) AS count", "COUNT(sample) AS samples", "COUNT(*) FILTER (WHERE sample IS NULL AND sample_error IS NULL) AS null_count", "MIN(sample_error) AS error", "MIN(sample) AS min", "MAX(sample) AS max", "AVG(sample::text::numeric)::double precision AS mean")
-	if d.Kind == "box" {
+	if d.Kind != "histogram" {
 		// Retain the exact sorted population: percentile_cont uses a+(b-a)*f,
 		// which can move a Tukey fence by one ULP relative to the browser.
 		stats = append(stats, "array_agg(sample ORDER BY sample) FILTER (WHERE sample IS NOT NULL) AS sorted_samples")
 	}
 	b.stage("SELECT " + strings.Join(stats, ",") + " FROM " + rows + by)
-	if d.Kind == "box" {
+	whiskers := d.Whiskers
+	if whiskers == "" {
+		whiskers = "minmax"
+	}
+	// Box quartiles (then percentile whiskers), or each quantile and then the
+	// median: the percentiles every group interpolates, in this order.
+	probabilities := []string{"0.25", "0.5", "0.75"}
+	if d.Kind == "box" && whiskers == "percentile" {
+		w := whiskerProbabilities(d)
+		probabilities = append(probabilities, b.param(w[0], "double precision"), b.param(w[1], "double precision"))
+	}
+	if d.Kind == "quantiles" {
+		probabilities = []string{}
+		for _, p := range d.Probabilities {
+			probabilities = append(probabilities, b.param(p, "double precision"))
+		}
+		probabilities = append(probabilities, "0.5")
+	}
+	keepSamples := d.Kind == "box" && whiskers != "minmax"
+	if d.Kind != "histogram" {
 		// PostgreSQL arrays are one-based; the browser position is (n-1)*p.
 		// Cast constants/positions explicitly so every operation is IEEE double,
 		// including (1-f)*a+f*b. Clamp b for singleton/integer positions.
-		quartiles := "CASE WHEN samples>0 THEN ARRAY(SELECT (1::double precision-fraction)*sorted_samples[lower_index+1]+fraction*sorted_samples[LEAST(lower_index+2,samples)::integer] FROM (SELECT floor(position)::integer AS lower_index,position-floor(position) AS fraction,p FROM (SELECT (samples-1)::double precision*p AS position,p FROM unnest(ARRAY[0.25,0.5,0.75]::double precision[]) p) positions) fractions ORDER BY p) END"
+		quartiles := "CASE WHEN samples>0 THEN ARRAY(SELECT (1::double precision-fraction)*sorted_samples[lower_index+1]+fraction*sorted_samples[LEAST(lower_index+2,samples)::integer] FROM (SELECT floor(position)::integer AS lower_index,position-floor(position) AS fraction,ord FROM (SELECT (samples-1)::double precision*p AS position,ord FROM unnest(ARRAY[" + strings.Join(probabilities, ",") + "]::double precision[]) WITH ORDINALITY AS u(p,ord)) positions) fractions ORDER BY ord) END"
 		fields := append(append([]string{}, groupCols...), "count", "samples", "null_count", "error", "min", "max", "mean", quartiles+" AS quartiles")
-		// Tukey endpoints use the already partitioned population, avoiding
-		// correlated scans of all rows for every group. Never return this array.
-		if d.Whiskers == "tukey" {
+		// Tukey endpoints and percentile tails use the already partitioned
+		// population, avoiding correlated scans of all rows for every group.
+		// Never return this array.
+		if keepSamples {
 			fields = append(fields, "sorted_samples")
 		}
 		b.stage("SELECT " + strings.Join(fields, ",") + " FROM " + b.rel)
 		// Observed endpoints/outliers inherit the sample guard; check every
-		// interpolated quartile and the mean before exposing the summary.
-		resultError := "COALESCE(error,CASE WHEN EXISTS (SELECT 1 FROM unnest(ARRAY[min,max,mean] || quartiles) result WHERE " + b.unsafeMetricNumber("result") + ") THEN 'unsafe_integer'::text END)"
+		// interpolated percentile and the mean before exposing the summary.
+		checked := "ARRAY[min,max,mean] || quartiles"
+		if d.Kind == "quantiles" {
+			checked = "quartiles"
+		}
+		resultError := "COALESCE(error,CASE WHEN EXISTS (SELECT 1 FROM unnest(" + checked + ") result WHERE " + b.unsafeMetricNumber("result") + ") THEN 'unsafe_integer'::text END)"
 		fields = append(append([]string{}, groupCols...), "count", "samples", "null_count", resultError+" AS error", "min", "max", "mean", "quartiles")
-		if d.Whiskers == "tukey" {
+		if keepSamples {
 			fields = append(fields, "sorted_samples")
 		}
 		b.stage("SELECT " + strings.Join(fields, ",") + " FROM " + b.rel)
 	}
 	summary := b.rel
-	if d.Kind == "box" {
-		whiskers := d.Whiskers
-		if whiskers == "" {
-			whiskers = "minmax"
+	if d.Kind == "quantiles" {
+		k := len(probabilities) - 1
+		value := "CASE WHEN s.error IS NULL THEN s.quartiles[" + fmt.Sprint(k+1) + "] END"
+		payload := "CASE WHEN s.error IS NULL THEN jsonb_build_object('kind','quantiles','summary',CASE WHEN s.samples>0 THEN jsonb_build_object('n',s.samples,'probabilities',to_jsonb(ARRAY[" + strings.Join(probabilities[:k], ",") + "]::double precision[]),'values',to_jsonb(s.quartiles[1:" + fmt.Sprint(k) + "])) END) END"
+		fields := []string{}
+		for _, g := range groupCols {
+			fields = append(fields, "s."+g)
 		}
+		fields = append(fields, "s.count", "s.samples", "s.null_count", "s.error", value+" AS value", payload+" AS distribution")
+		b.stage("SELECT " + strings.Join(fields, ",") + " FROM " + summary + " s")
+	} else if d.Kind == "box" {
 		lo, hi := "s.min", "s.max"
 		outliers, count := "'[]'::jsonb", "0"
 		from := summary + " s"
+		if whiskers == "percentile" {
+			// Interpolated whiskers; samples beyond them are counted, not listed.
+			lo, hi = "s.quartiles[4]", "s.quartiles[5]"
+			from += " CROSS JOIN LATERAL (SELECT COUNT(*) FILTER (WHERE sample < s.quartiles[4] OR sample > s.quartiles[5]) AS outside FROM unnest(s.sorted_samples) sample) tails"
+			count = "tails.outside"
+		}
 		if whiskers == "tukey" {
 			lowFence := "s.quartiles[1]-1.5*(s.quartiles[3]-s.quartiles[1])"
 			highFence := "s.quartiles[3]+1.5*(s.quartiles[3]-s.quartiles[1])"
@@ -108,7 +190,11 @@ func (b *planBuilder) distribution(spec AggSpec, groups []ValueSQL, scope string
 			outliers = "(SELECT COALESCE(jsonb_agg(s.sorted_samples[(" + index + ")::integer] ORDER BY rank),'[]'::jsonb) FROM (SELECT " + rank + " AS rank FROM generate_series(1,LEAST(" + count + ",20)) i) ranks)"
 		}
 		value := "CASE WHEN s.error IS NULL THEN s.quartiles[2] END"
-		payload := "CASE WHEN s.error IS NULL THEN jsonb_build_object('kind','box','summary',CASE WHEN s.samples>0 THEN jsonb_build_object('n',s.samples,'min',s.min,'q1',s.quartiles[1],'median',s.quartiles[2],'q3',s.quartiles[3],'max',s.max,'mean',s.mean,'low'," + lo + ",'high'," + hi + ",'outliers'," + outliers + ",'outlierCount'," + count + ",'whiskers'," + b.param(whiskers, "text") + ",'method','exact-linear') END) END"
+		whiskerProbabilities := ""
+		if whiskers == "percentile" {
+			whiskerProbabilities = ",'whiskerProbabilities',to_jsonb(ARRAY[" + probabilities[3] + "," + probabilities[4] + "]::double precision[])"
+		}
+		payload := "CASE WHEN s.error IS NULL THEN jsonb_build_object('kind','box','summary',CASE WHEN s.samples>0 THEN jsonb_build_object('n',s.samples,'min',s.min,'q1',s.quartiles[1],'median',s.quartiles[2],'q3',s.quartiles[3],'max',s.max,'mean',s.mean,'low'," + lo + ",'high'," + hi + ",'outliers'," + outliers + ",'outlierCount'," + count + ",'whiskers'," + b.param(whiskers, "text") + whiskerProbabilities + ",'method','exact-linear') END) END"
 		fields := []string{}
 		for _, g := range groupCols {
 			fields = append(fields, "s."+g)

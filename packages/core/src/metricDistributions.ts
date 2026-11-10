@@ -20,10 +20,68 @@ export function percentile(sorted: number[], p: number): number | null {
   const value = Math.min(b, Math.max(a, raw));
   return value;
 }
+export type BoxWhiskers = "minmax" | "tukey" | "percentile";
+/** Percentile whiskers default to the 10th and 90th percentiles. */
+export const DEFAULT_WHISKER_PROBABILITIES: readonly [number, number] = [0.1, 0.9];
+/** Percentile whiskers [lo, hi] lie outside the box: 0 <= lo < 0.25 and 0.75 < hi <= 1. */
+export function validWhiskerProbabilities(value: unknown): value is [number, number] {
+  return (
+    Array.isArray(value) &&
+    value.length === 2 &&
+    typeof value[0] === "number" &&
+    typeof value[1] === "number" &&
+    value[0] >= 0 &&
+    value[0] < 0.25 &&
+    value[1] > 0.75 &&
+    value[1] <= 1
+  );
+}
+/** Quantile probabilities: 1–101 strictly increasing numbers in [0, 1]. */
+/** The most probabilities one quantile distribution may request. */
+export const MAX_QUANTILE_PROBABILITIES = 101;
+export function validQuantileProbabilities(value: unknown): value is number[] {
+  return (
+    Array.isArray(value) &&
+    value.length >= 1 &&
+    value.length <= MAX_QUANTILE_PROBABILITIES &&
+    value.every(
+      (p, i) =>
+        typeof p === "number" &&
+        p >= 0 &&
+        p <= 1 &&
+        (i === 0 || p > (value[i - 1] as number)),
+    )
+  );
+}
+/** The exact-linear percentile of each probability, or null without samples. */
+export function quantilesSummary(values: number[], probabilities: readonly number[]) {
+  return quantilesWithMedian(values, probabilities).summary;
+}
+/** quantilesSummary and the exact-linear median, from one sort. */
+export function quantilesWithMedian(values: number[], probabilities: readonly number[]) {
+  if (!validQuantileProbabilities(probabilities))
+    throw Error("Quantiles need 1–101 strictly increasing probabilities from 0 to 1.");
+  if (values.some((v) => !Number.isFinite(v)))
+    throw Error("Distribution inputs must be finite numbers.");
+  values.forEach(assertMetricNumber);
+  const sorted = [...values].sort((a, b) => a - b);
+  if (!sorted.length) return { summary: null, median: null };
+  return {
+    summary: {
+      n: sorted.length,
+      probabilities: [...probabilities],
+      values: probabilities.map((p) => percentile(sorted, p)!),
+    },
+    median: percentile(sorted, 0.5),
+  };
+}
 export function boxSummary(
   values: number[],
-  whiskers: "minmax" | "tukey" = "minmax",
+  whiskers: BoxWhiskers = "minmax",
+  whiskerProbabilities: readonly number[] = DEFAULT_WHISKER_PROBABILITIES,
 ) {
+  if (whiskers === "percentile" && !validWhiskerProbabilities(whiskerProbabilities))
+    throw Error("Percentile whiskers need [lo, hi] with 0 ≤ lo < 0.25 and 0.75 < hi ≤ 1.");
   if (values.some((v) => !Number.isFinite(v)))
     throw Error("Distribution inputs must be finite numbers.");
   values.forEach(assertMetricNumber);
@@ -37,18 +95,29 @@ export function boxSummary(
     q3 = percentile(sorted, 0.75)!;
   const lowFence = q1 - 1.5 * (q3 - q1),
     highFence = q3 + 1.5 * (q3 - q1);
-  const low = whiskers === "tukey" ? sorted.find((v) => v >= lowFence)! : min;
+  // Percentile whiskers are interpolated values, not observed samples; the
+  // samples beyond them are counted but not retained as outlier markers.
+  const low =
+    whiskers === "tukey"
+      ? sorted.find((v) => v >= lowFence)!
+      : whiskers === "percentile"
+        ? percentile(sorted, whiskerProbabilities[0]!)!
+        : min;
   const high =
     whiskers === "tukey"
       ? [...sorted].reverse().find((v) => v <= highFence)!
-      : max;
+      : whiskers === "percentile"
+        ? percentile(sorted, whiskerProbabilities[1]!)!
+        : max;
   const outside =
-    whiskers === "tukey" ? sorted.filter((v) => v < low || v > high) : [];
+    whiskers === "minmax" ? [] : sorted.filter((v) => v < low || v > high);
   // Bound the response while retaining both tails. Report the total separately.
   const outliers =
-    outside.length <= 20
-      ? outside
-      : [...outside.slice(0, 10), ...outside.slice(-10)];
+    whiskers === "percentile"
+      ? []
+      : outside.length <= 20
+        ? outside
+        : [...outside.slice(0, 10), ...outside.slice(-10)];
   const rawMean = sorted.reduce((sum, value) => sum + value / n, 0);
   // Check the numeric boundary before correcting insignificant range drift.
   assertMetricNumber(rawMean);
@@ -67,6 +136,9 @@ export function boxSummary(
     outliers,
     outlierCount: outside.length,
     whiskers,
+    ...(whiskers === "percentile"
+      ? { whiskerProbabilities: [whiskerProbabilities[0]!, whiskerProbabilities[1]!] }
+      : {}),
     method: "exact-linear" as const,
   };
 }

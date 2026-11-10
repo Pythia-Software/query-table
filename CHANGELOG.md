@@ -255,6 +255,79 @@
   `ignoreCase` argument, as in the browser, instead of comparing exactly.
 - Go server diagnostics name an unknown function `unsupported_function`
   instead of `arity`.
+### Added
+
+- Box whiskers at percentiles: `distribution.whiskers: "percentile"` with
+  `whiskerProbabilities: [lo, hi]` (`0 ≤ lo < 0.25`, `0.75 < hi ≤ 1`, default
+  `[0.1, 0.9]`). The whiskers are the exact-linear percentiles, echoed on the
+  summary as `whiskerProbabilities`; `outlierCount` counts the samples beyond
+  them and `outliers` is empty (the chart marks the minimum and maximum). The
+  box chart and its tooltip draw and label them, and the metric editor offers
+  them. Options of another distribution kind or whisker mode are ignored by
+  every engine, as before for `whiskers` on a histogram.
+- A `quantiles` distribution: `{ kind: "quantiles", input, probabilities }`
+  with 1–101 strictly increasing probabilities. Buckets carry
+  `{ kind: "quantiles", summary: { n, probabilities, values } | null }` and the
+  median as their value. `display.kind: "quantiles"` draws a cumulative curve
+  per group; the editor offers it as "Quantile curve" with 101 points by
+  default. Implemented locally, in DuckDB, Go SQLite (ranked samples) and Go
+  PostgreSQL. New capabilities `boxPercentileWhiskers` and
+  `quantileDistributions`; `toQueryRequestV3` refuses either for a server
+  without it. Query links keep the new options (`numberList` metric option).
+  SQLite sorts groups of up to 100,000 samples in memory
+  (`qt_v2_box_percentile`, `qt_v2_quantiles_samples`) and ranks larger ones;
+  it adds `qt_v2_quantile_ranks` and `qt_v2_quantiles_summary` to
+  `SQLiteV2Functions()` and those aggregates and `qt_v2_rank_samples` to
+  `SQLiteV2Aggregates()`.
+- DuckDB box buckets now report the median as their `value`, like the other
+  engines (it was null).
+
+- `PERCENTILE(expr, p)` in aggregate formulas and grouped formula summaries:
+  the exact-linear percentile of a group's non-null numeric samples, with `p`
+  a number literal from 0 to 1 (`PERCENTILE([latency], 0.9)`). Position
+  `(n-1)*p`, then `(1-f)*a+f*b` in IEEE double arithmetic, clamped to the two
+  samples, exactly like box quartiles; an empty population is null. Every
+  engine implements it: the local evaluator, DuckDB (from the sorted sample
+  list; `quantile_cont` interpolates in a different order), Go SQLite (sorted
+  in memory per group within a process-wide budget, ranked in SQL beyond it)
+  and Go PostgreSQL (sorted `array_agg`, not `percentile_cont`). Several
+  `PERCENTILE` terms over one input share one sort per group (and `MEDIAN`
+  with them locally and on SQLite). A field whose explicit aggregate
+  operations admit `median` admits PERCENTILE in every engine. Like MEDIAN it is refused in window totals and works per
+  occurrence. Servers advertise it with the new `metricPercentiles`
+  capability; `toQueryRequestV3` refuses a request that needs it from a server
+  without it. The formula editor lists it with the aggregate functions.
+
+### Changed
+
+- SQLite MEDIAN and box quartiles no longer fail above 100,000 samples per
+  group. Groups are still sorted in memory, at the same cost, within one
+  process-wide budget of 8,388,608 retained samples (64 MiB); a group that does
+  not fit overflows its in-memory aggregate and the same statement ranks it in
+  SQL, reading only the samples at the needed ranks (Tukey boxes count each
+  tail natively and read their endpoints and at most 20 outliers by rank).
+  Results, error precedence and validation are unchanged and identical on both
+  paths, and MEDIAN metrics still share cached and fused reductions. The box
+  mean is now the exact, order-independent sum divided by the count (it was a
+  Neumaier sum of the sorted samples, which can differ in the last bit).
+  SQLite's default `MaxSamplesPerGroup` is now 10,000,000, a CPU and
+  temporary-space bound for ungrouped requests (staged groups never reach it);
+  its count probe runs only when the counted population exceeds it. An
+  explicit `MaxSamplesPerGroup` is still enforced. PostgreSQL keeps its 100,000
+  default, now named `DefaultMaxSamplesPerGroup` (`SQLiteMaxMedianSamples` is
+  deprecated). See
+  [Ranked percentiles](docs/backend-sqlite.md#ranked-percentiles).
+- The direct in-memory distribution scan of ungrouped SQLite requests admits
+  metrics in request order while it retains at most 1,000,000 samples; the
+  other metrics use their compiled plans instead of failing.
+- `SQLiteV2Functions()` adds `qt_v2_quantile`, `qt_v2_midpoint`,
+  `qt_v2_box_fence` and `qt_v2_box_summary`, and `SQLiteV2Aggregates()` adds
+  `qt_v2_sample_median`, `qt_v2_box_minmax`, `qt_v2_box_tukey`, `qt_v2_exact_mean` and
+  `qt_v2_ranked_values`. These helpers are private to the compiler and may
+  change in any release: register them only through the descriptor lists, from
+  the same build on every connection (hosts that do need no change).
+  `qt_v2_median` and `qt_v2_box` stay registered but are no longer called by
+  compiled plans, and `SQLiteMaxBoxSamples` is deprecated.
 
 ## 1.0.4 — 2026-11-10
 

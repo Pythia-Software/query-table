@@ -19,6 +19,7 @@ import {
   evaluateMetricReductions,
   metricExpression,
   occurrenceDistribution,
+  distributionBucket,
   metricMinCount,
   metricMinCountKeeps,
   metricMinCountMeasure,
@@ -35,7 +36,6 @@ import {
   metricDateNext,
   metricDateTime,
 } from "./metricDates";
-import { boxSummary } from "./metricDistributions";
 import { assertMetricNumber } from "./metricPrecision";
 import { applyMetricInterval, metricRatioParts } from "./metricIntervals";
 import type { MetricDateGrouping, MetricValue } from "./metricTypes";
@@ -893,8 +893,8 @@ function combineOccurrences(
     for (const number of metricCycleSlots(cycle))
       for (const tail of tails.values()) slotOf([number, ...tail]);
   }
-  // Validation allows only a box over occurrences.
-  const box = occurrenceDistribution(c);
+  // Validation allows only a box or quantiles over occurrences.
+  const distribution = occurrenceDistribution(c);
   let buckets = [...slots.values()].map((slot): AggregationBucket => {
     const bucket: AggregationBucket = {
       keys: slot.keys,
@@ -904,10 +904,10 @@ function combineOccurrences(
     };
     if (slot.error) return { ...bucket, error: slot.error };
     try {
-      if (box) {
-        const summary = boxSummary(slot.values, c.distribution!.whiskers);
-        bucket.distribution = { kind: "box", summary };
-        bucket.value = summary?.median ?? null;
+      if (distribution) {
+        const summary = distributionBucket(c.distribution!, slot.values);
+        bucket.distribution = summary.distribution;
+        bucket.value = summary.value;
       } else if (slot.values.length) {
         const mean =
           slot.values.reduce((sum, value) => sum + value, 0) /

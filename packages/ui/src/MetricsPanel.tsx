@@ -274,6 +274,7 @@ export function MetricCard<Row>({
     "scatter",
     "box",
     "histogram",
+    "quantiles",
   ].includes(kind);
   const layout = clause.layout;
   const size = layout

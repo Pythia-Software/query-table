@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"os"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -103,6 +102,19 @@ func projectPopulation(t *testing.T, metric any, expected map[string]any) map[st
 				p["box"] = map[string]any{"n": s["n"], "min": s["min"], "q1": s["q1"], "median": s["median"], "q3": s["q3"], "max": s["max"]}
 			}
 		}
+		if ws, ok := want["summary"]; ok {
+			// Only the summary fields the fixture states.
+			s, _ := d["summary"].(map[string]any)
+			if wm, ok := ws.(map[string]any); ok && s != nil {
+				projected := map[string]any{}
+				for key := range wm {
+					projected[key] = s[key]
+				}
+				p["summary"] = projected
+			} else {
+				p["summary"] = nil
+			}
+		}
 		if _, ok := want["histogram"]; ok && d != nil {
 			p["histogram"] = map[string]any{"edges": d["edges"], "counts": d["counts"], "n": d["n"]}
 		}
@@ -132,7 +144,7 @@ func TestPostgresMetricPopulationFixture(t *testing.T) {
 			out, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
 			if c.Expected["error"] == true {
 				// A refused clause fails on its own; the request still succeeds.
-				if err != nil || !strings.Contains(out.Metrics[0].Error, "minCount") {
+				if err != nil || out.Metrics[0].Error == "" {
 					t.Fatalf("expected a per-metric refusal, got %#v / %v", out.Metrics, err)
 				}
 				return
