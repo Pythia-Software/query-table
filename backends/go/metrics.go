@@ -298,10 +298,14 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 			a := fmt.Sprintf("a%d", index)
 			z := a + "_error"
 			if b.sqlite && op == "median" {
-				// Ranked after the reduction: count the samples and keep the
-				// input error here; sqliteRankedLeaves supplies a and z.
-				reductions = append(reductions, "COUNT("+raw+") AS "+a+"_n", "MIN("+errSQL+") AS "+a+"_input")
-				ranked = append(ranked, sqliteRankedLeaf{alias: a, sample: raw, ranks: medianRanks(), midpoint: true})
+				// Sorted in memory per group, or ranked after the reduction
+				// for a group above sqliteInMemorySamples: keep the input
+				// error here; sqliteRankedLeaves supplies a and z. The sample
+				// count is read from the ranking, so each row evaluates its
+				// validated input once per reduction, as before.
+				leaf := sqliteRankedLeaf{alias: a, input: expressionKey(n.args[0]), sample: raw, ranks: medianRanks(), midpoint: true}
+				reductions = append(reductions, "qt_v2_sample_median("+raw+") AS "+a+"_memory", "MIN("+errSQL+") AS "+a+"_input")
+				ranked = append(ranked, leaf)
 			} else {
 				reductions = append(reductions, value+" AS "+a, errorExpr+" AS "+z)
 			}
@@ -363,11 +367,6 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 	reductionKeys["count"] = "count"
 	reductions = append(selectGroups, append(reductions, "COUNT(*) AS count")...)
 	population := b.rel
-	if len(ranked) > 0 {
-		// The reduction and every ranking read the validated population:
-		// store it once instead of repeating its guards per reader.
-		b.stages[len(b.stages)-1].Materialized = true
-	}
 	reductionFrom := " FROM " + b.rel + by
 	b.stage("SELECT " + strings.Join(reductions, ",") + reductionFrom)
 	reductionStage := len(b.stages) - 1

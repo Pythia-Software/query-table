@@ -3,9 +3,11 @@ package sqlitetests
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"math"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	qt "github.com/Pythia-Software/query-table/backends/go"
@@ -42,11 +44,13 @@ INSERT INTO big SELECT 'low'||i,-1000000-i,'all','low' FROM k UNION ALL SELECT '
 }
 
 // percentileSampleSize is the permutation size of the single-group test:
-// 250,000 samples, or just above the former 100,000-sample cap under the race
-// detector, which slows the pure-Go SQLite driver tenfold.
-func percentileSampleSize() int {
+// 250,000 samples. The race detector slows the pure-Go SQLite driver
+// tenfold, so under it the test uses 2,000 samples and lowers the in-memory
+// threshold below them, which still takes the overflow (ranked) path.
+func percentileSampleSize(t *testing.T) int {
 	if raceEnabled {
-		return 100000
+		t.Cleanup(qt.TestOnlySetSQLiteInMemorySamples(500))
+		return 2000
 	}
 	return 250000
 }
@@ -54,9 +58,9 @@ func percentileSampleSize() int {
 // One group far above the former 100,000-sample cap reduces exactly: MEDIAN,
 // min/max and Tukey boxes, with the default executor (ranked MEDIAN, direct
 // in-memory boxes) and grouped by a constant key in the staged executor
-// (ranked SQL throughout).
+// (ranked SQL throughout, since the group overflows the in-memory threshold).
 func TestPercentilesWithoutSampleCap(t *testing.T) {
-	size := percentileSampleSize()
+	size := percentileSampleSize(t)
 	db, d := percentilePopulation(t, size)
 	n := size + 30
 	// The sorted population: fifteen low outliers, 0..size-1, fifteen high.
@@ -94,16 +98,10 @@ func TestPercentilesWithoutSampleCap(t *testing.T) {
 	minmax.Low, minmax.High, minmax.Outliers, minmax.Whiskers = -1000015, 1000015, []float64{}, "minmax"
 	tukey := base
 	tukey.Low, tukey.High, tukey.Outliers, tukey.OutlierCount, tukey.Whiskers = 0, float64(size-1), append(low, high...), 30, "tukey"
-	runs := []struct {
+	for _, run := range []struct {
 		dataset  qt.QueryDatasetV3
 		grouping []string
-	}{{d, nil}, {qt.TestOnlyStageUngrouped(d), []string{"g"}}}
-	if raceEnabled {
-		// Staging the population is the slowest part under the race detector;
-		// TestPercentilesRankEachGroup covers the staged ranked plans.
-		runs = runs[:1]
-	}
-	for _, run := range runs {
+	}{{d, nil}, {qt.TestOnlyStageUngrouped(d), []string{"g"}}} {
 		q := metricsV3(nil, nil, 0, 0,
 			qt.AggSpec{ID: "median", Expression: "MEDIAN([n])", GroupBy: run.grouping},
 			qt.AggSpec{ID: "minmax", Op: "count", GroupBy: run.grouping, Distribution: &qt.MetricDistribution{Kind: "box", Input: "[n]"}},
@@ -157,5 +155,57 @@ func TestPercentilesRankEachGroup(t *testing.T) {
 	// Even values 0..size-2 and odd values 1..size-1, size/2 of each.
 	if !reflect.DeepEqual(medians, map[any]any{"even": float64(size/2 - 1), "odd": float64(size / 2), "low": -1000008.0, "high": 1000008.0}) {
 		t.Fatal(medians)
+	}
+}
+
+// Groups sorted in memory and groups ranked in SQL give identical results:
+// the same plans run with the default in-memory threshold and with a zero
+// threshold that ranks every group, for MEDIAN and both box whiskers, over
+// integral and fractional samples, nulls, invalid samples and empty groups.
+func TestPercentilesInMemoryAndRankedAgree(t *testing.T) {
+	// The race detector slows the pure-Go SQLite driver tenfold.
+	size := 3000
+	if raceEnabled {
+		size = 300
+	}
+	db, d := percentilePopulation(t, size)
+	metrics := []qt.AggSpec{}
+	// The last input is NULL for every permutation value: empty groups.
+	for i, input := range []string{"[n]", "[n] / 7", "[n] / ([n] - 5)", "IF([n] < -2000000, [n], NULL)"} {
+		for _, grouping := range [][]string{nil, {"parity"}} {
+			id := fmt.Sprintf("%d_%d", i, len(grouping))
+			metrics = append(metrics, percentileAgreementMetrics(id, input, grouping)...)
+		}
+	}
+	staged := qt.TestOnlyStageUngrouped(d)
+	run := func() string {
+		out := ""
+		for start := 0; start < len(metrics); start += 20 {
+			r, err := staged.Execute(context.Background(), db, metricsV3(nil, nil, 0, 0, metrics[start:min(start+20, len(metrics))]...), qt.PlanOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			out += mustJSON(t, r.Metrics)
+		}
+		return out
+	}
+	memory := run()
+	restore := qt.TestOnlySetSQLiteInMemorySamples(0)
+	ranked := run()
+	restore()
+	if memory != ranked {
+		t.Fatalf("in memory\n%s\nranked\n%s", memory, ranked)
+	}
+	if !strings.Contains(memory, `"error":"divide_by_zero"`) || !strings.Contains(memory, `"summary":null`) {
+		t.Fatal("fixture lost its error or empty groups", memory)
+	}
+}
+
+// percentileAgreementMetrics are the order-statistic metrics of one input.
+func percentileAgreementMetrics(id, input string, grouping []string) []qt.AggSpec {
+	return []qt.AggSpec{
+		{ID: "median_" + id, Expression: "MEDIAN(" + input + ")", GroupBy: grouping},
+		{ID: "minmax_" + id, Op: "count", GroupBy: grouping, Distribution: &qt.MetricDistribution{Kind: "box", Input: input}},
+		{ID: "tukey_" + id, Op: "count", GroupBy: grouping, Distribution: &qt.MetricDistribution{Kind: "box", Input: input, Whiskers: "tukey"}},
 	}
 }

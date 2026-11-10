@@ -25,9 +25,10 @@ type SQLiteAggregateDescriptor struct {
 	New   func() SQLiteAggregateFunction
 }
 
-// SQLiteMaxMedianSamples is PostgreSQL's default MaxSamplesPerGroup. SQLite
-// plans rank MEDIAN and box samples in SQL and have no per-group default. The
-// qt_v2_median aggregate, which compiled plans no longer call, still returns
+// SQLiteMaxMedianSamples is PostgreSQL's default MaxSamplesPerGroup and the
+// largest group SQLite plans sort in memory; larger SQLite groups are ranked
+// in SQL instead, so SQLite has no per-group default. The qt_v2_median
+// aggregate, which compiled plans no longer call, still returns
 // resource_limit above it rather than an approximate or truncated result.
 const SQLiteMaxMedianSamples = 100000
 

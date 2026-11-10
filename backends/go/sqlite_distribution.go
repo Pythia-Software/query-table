@@ -162,11 +162,11 @@ type sqliteHistogramEdges struct {
 }
 
 func sqliteDistributionAggregates() []SQLiteAggregateDescriptor {
-	return []SQLiteAggregateDescriptor{
+	return append([]SQLiteAggregateDescriptor{
 		{Name: "qt_v2_box", Arity: 2, New: func() SQLiteAggregateFunction { return &sqliteBoxAggregate{} }},
 		{Name: "qt_v2_histogram", Arity: 2, New: func() SQLiteAggregateFunction { return &sqliteHistogramAggregate{} }},
 		{Name: "qt_v2_ranked_values", Arity: 2, New: func() SQLiteAggregateFunction { return &sqliteRankedValuesAggregate{} }},
-	}
+	}, sqliteRankedAggregates()...)
 }
 
 // Step only validates and appends; the summary, including the mean, is
@@ -213,20 +213,66 @@ func sqlitePercentile(sorted []float64, p float64) (float64, string) {
 	return exactLinear(n, p, sorted[lower], sorted[min(lower+1, n-1)])
 }
 
-// distributionMean is the compensated (Neumaier) mean of finite samples. Each
-// sample is at most 1e100 in magnitude, so the running sum cannot overflow.
+// distributionMean is the correctly rounded sum of finite samples divided by
+// their count. The sum is exact and independent of order, so the in-memory
+// and ranked SQLite paths agree bit for bit. Each sample is at most 1e100 in
+// magnitude, so the sum cannot overflow.
 func distributionMean(samples []float64) float64 {
-	sum, compensation := 0.0, 0.0
+	var sum exactSum
 	for _, v := range samples {
-		t := sum + v
-		if math.Abs(sum) >= math.Abs(v) {
-			compensation += (sum - t) + v
-		} else {
-			compensation += (v - t) + sum
-		}
-		sum = t
+		sum.add(v)
 	}
-	return (sum + compensation) / float64(len(samples))
+	return sum.value() / float64(len(samples))
+}
+
+// exactSum accumulates doubles without rounding error (Shewchuk's
+// non-overlapping partials, as Python's math.fsum) and rounds once.
+type exactSum struct{ partials []float64 }
+
+func (s *exactSum) add(x float64) {
+	i := 0
+	for _, y := range s.partials {
+		if math.Abs(x) < math.Abs(y) {
+			x, y = y, x
+		}
+		hi := x + y
+		lo := y - (hi - x)
+		if lo != 0 {
+			s.partials[i] = lo
+			i++
+		}
+		x = hi
+	}
+	s.partials = append(s.partials[:i], x)
+}
+
+// value is the exact sum rounded to nearest, ties to even.
+func (s *exactSum) value() float64 {
+	n := len(s.partials)
+	if n == 0 {
+		return 0
+	}
+	n--
+	hi, lo := s.partials[n], 0.0
+	for n > 0 {
+		x := hi
+		y := s.partials[n-1]
+		n--
+		hi = x + y
+		lo = y - (hi - x)
+		if lo != 0 {
+			break
+		}
+	}
+	// Round half-way cases the way the exact sum requires.
+	if n > 0 && (lo < 0 && s.partials[n-1] < 0 || lo > 0 && s.partials[n-1] > 0) {
+		y := lo * 2
+		x := hi + y
+		if y == x-hi {
+			hi = x
+		}
+	}
+	return hi
 }
 func (a *sqliteBoxAggregate) Value() (driver.Value, error) {
 	if a.err != "" {
@@ -367,20 +413,31 @@ func (a *sqliteHistogramAggregate) Value() (driver.Value, error) {
 // as the population; every other stage has one row per group.
 func (b *planBuilder) sqliteBox(population string, groupCols, inventory []string, by, mode string) {
 	modeParam := b.param(mode, "text")
-	// SQLite AVG compensates its sum (Kahan-Babuska-Neumaier, SQLite 3.43+).
-	b.stage("SELECT " + strings.Join(append(inventory, "MIN(sample_error) AS input_error", "MIN(sample) AS min", "MAX(sample) AS max", "AVG(sample) AS mean"), ",") + " FROM " + population + by)
+	// A group that fits in memory is summarised by qt_v2_box_minmax or
+	// qt_v2_box_tukey in this one pass, exactly as the ranked stages below
+	// would. Only the sample crosses into Go per row.
+	b.stage("SELECT " + strings.Join(append(inventory, "MIN(sample_error) AS input_error", "qt_v2_box_"+mode+"(sample) AS memory"), ",") + " FROM " + population + by)
 	stats := b.rel
-	ranked := b.sqliteRankedStage(population, "sample", groupCols, groupCols, mode == "tukey")
+	// The ranked stages read only populations with an overflowing group; the
+	// ranking is stored because several stages read it.
+	gate := "EXISTS (SELECT 1 FROM " + stats + " WHERE memory IS '" + rankedOverflow + "')"
+	ranked := b.sqliteRankedStage(population, "sample", groupCols, groupCols, true, gate)
 	picks := []rankedSample{}
-	for _, p := range []float64{0.25, 0.5, 0.75} {
+	// The quartiles, then the extrema at ranks 1 and n.
+	for _, p := range []float64{0.25, 0.5, 0.75, 0, 1} {
 		picks = append(picks, b.quantileRanks(p))
 	}
 	picked := b.sqlitePickStage(ranked, stats, "samples", groupCols, picks)
-	b.stage("SELECT s.*,k.pick0_lo,k.pick0_hi,k.pick1_lo,k.pick1_hi,k.pick2_lo,k.pick2_hi FROM " + stats + " AS s LEFT JOIN " + picked + " AS k ON " + keysMatch("s", "k", groupCols))
+	// The mean is distributionMean: a correctly rounded sum, so any visitation
+	// order matches the in-memory aggregate.
+	b.stage("SELECT " + strings.Join(append(qualified("r", groupCols), "qt_v2_exact_mean(r.sample) AS mean"), ",") + " FROM " + ranked + " AS r" + groupedBy("r", groupCols))
+	means := b.rel
+	b.stage("SELECT s.*,k.pick0_lo,k.pick0_hi,k.pick1_lo,k.pick1_hi,k.pick2_lo,k.pick2_hi,k.pick3_lo AS min,k.pick4_lo AS max,m.mean FROM " + stats + " AS s LEFT JOIN " + picked + " AS k ON " + keysMatch("s", "k", groupCols) + " LEFT JOIN " + means + " AS m ON " + keysMatch("s", "m", groupCols))
 	quartiles := "pick0_lo,pick0_hi,pick1_lo,pick1_hi,pick2_lo,pick2_hi"
 	tukey := "NULL,NULL,0,NULL"
 	if mode == "tukey" {
-		b.stage("SELECT *,qt_v2_box_fence(samples,pick0_lo,pick0_hi,pick2_lo,pick2_hi,0) AS low_fence,qt_v2_box_fence(samples,pick0_lo,pick0_hi,pick2_lo,pick2_hi,1) AS high_fence FROM " + b.rel)
+		overflowed := "memory IS '" + rankedOverflow + "'"
+		b.stage("SELECT *,CASE WHEN " + overflowed + " THEN qt_v2_box_fence(samples,pick0_lo,pick0_hi,pick2_lo,pick2_hi,0) END AS low_fence,CASE WHEN " + overflowed + " THEN qt_v2_box_fence(samples,pick0_lo,pick0_hi,pick2_lo,pick2_hi,1) END AS high_fence FROM " + b.rel)
 		fenced := b.rel
 		// Only samples outside the fences reach the grouped tail count.
 		b.stage("SELECT " + strings.Join(append(qualified("r", groupCols), "COUNT(*) FILTER (WHERE r.sample<f.low_fence) AS low_n", "COUNT(*) FILTER (WHERE r.sample>f.high_fence) AS high_n"), ",") + " FROM " + ranked + " AS r CROSS JOIN " + fenced + " AS f ON " + keysMatch("r", "f", groupCols) + " WHERE r.sample<f.low_fence OR r.sample>f.high_fence" + groupedBy("r", groupCols))
@@ -399,7 +456,7 @@ func (b *planBuilder) sqliteBox(population string, groupCols, inventory []string
 		b.stage("SELECT g.*,CASE WHEN g.low_n+g.high_n<g.samples THEN e.low END AS low,CASE WHEN g.low_n+g.high_n<g.samples THEN e.high END AS high,e.outliers FROM " + counted + " AS g LEFT JOIN " + ends + " AS e ON " + keysMatch("g", "e", groupCols))
 		tukey = "low,high,low_n+high_n,outliers"
 	}
-	b.stage("SELECT " + strings.Join(append(append([]string{}, groupCols...), "count", "samples", "null_count", "input_error_count", "input_error", "qt_v2_box_summary("+modeParam+",samples,min,max,mean,"+quartiles+","+tukey+") AS payload"), ",") + " FROM " + b.rel)
+	b.stage("SELECT " + strings.Join(append(append([]string{}, groupCols...), "count", "samples", "null_count", "input_error_count", "input_error", "CASE WHEN memory IS '"+rankedOverflow+"' THEN qt_v2_box_summary("+modeParam+",samples,min,max,mean,"+quartiles+","+tukey+") ELSE memory END AS payload"), ",") + " FROM " + b.rel)
 }
 
 func groupedBy(alias string, groupCols []string) string {
