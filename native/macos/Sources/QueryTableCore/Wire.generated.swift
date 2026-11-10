@@ -361,10 +361,10 @@ public enum MetricMinCount: Codable, Equatable, Sendable {
   }
 }
 
-/// A confidence interval around a ratio metric, returned as lower and upper on every bucket. The metric must be a ratio of two additive aggregates, numerator over denominator (SUM, COUNT or COUNT_DISTINCT), optionally scaled by constants and with NULLIF(denominator, 0): for example COUNT_DISTINCT(IF([events]>0,[turn_id],NULL))/COUNT_DISTINCT([turn_id]) or SUM([events])/NULLIF(COUNT_DISTINCT([message_id])/1000,0). proportion: a share of units (0 <= numerator <= denominator), Wilson score interval. rate: a count over an exposure, the exact (Garwood) Poisson interval on the numerator divided by the exposure. Bounds use the exact numerator and denominator of each bucket and are in the metric's units, after its constant scale.
+/// A confidence interval around a ratio metric, returned as lower and upper on every bucket. The metric must be a ratio of two additive aggregates, numerator over denominator (SUM, COUNT or COUNT_DISTINCT), optionally scaled by constants and with NULLIF(denominator, 0): for example COUNT_DISTINCT(IF([events]>0,[turn_id],NULL))/COUNT_DISTINCT([turn_id]) or SUM([events])/NULLIF(COUNT_DISTINCT([message_id])/1000,0). proportion: a share of units (0 <= numerator <= denominator), Wilson score interval. rate: a count over an exposure, the exact (Garwood) Poisson interval on the numerator divided by the exposure. Bounds use the exact numerator and denominator of each bucket and are in the metric's units, after its constant scale. An interval is an annotation: it never changes a bucket's value, error, ranking or the result's other buckets. Parts outside the kind's domain (a negative or non-integer numerator; for a proportion, a non-integer denominator or a numerator above it) give the bucket intervalError interval_domain instead of bounds. Both methods assume independent units; clustered or over-dispersed counts make the intervals too narrow.
 public struct MetricInterval: Codable, Equatable, Sendable {
   public var kind: String
-  /// Confidence level; omitted is 0.95.
+  /// Confidence level, 0.5 to 0.9999; omitted is 0.95.
   public var level: Double?
   enum CodingKeys: String, CodingKey {
     case kind
@@ -1020,6 +1020,8 @@ public struct AggregationBucket: Codable, Equatable, Sendable {
   public var lower: Double?
   /// The interval's upper bound.
   public var upper: Double?
+  /// Why a bucket with a numeric value has no interval: interval_domain when its parts are outside the interval kind's domain. The value is unchanged.
+  public var intervalError: String?
   enum CodingKeys: String, CodingKey {
     case distribution
     case nullCount
@@ -1032,6 +1034,7 @@ public struct AggregationBucket: Codable, Equatable, Sendable {
     case yError
     case lower
     case upper
+    case intervalError
   }
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -1046,6 +1049,7 @@ public struct AggregationBucket: Codable, Equatable, Sendable {
     yError = try c.decodeIfPresent(String.self, forKey: .yError)
     lower = try c.decodeIfPresent(Double.self, forKey: .lower)
     upper = try c.decodeIfPresent(Double.self, forKey: .upper)
+    intervalError = try c.decodeIfPresent(String.self, forKey: .intervalError)
   }
   public func encode(to encoder: Encoder) throws {
     var c = encoder.container(keyedBy: CodingKeys.self)
@@ -1060,6 +1064,7 @@ public struct AggregationBucket: Codable, Equatable, Sendable {
     try c.encodeIfPresent(yError, forKey: .yError)
     try c.encodeIfPresent(lower, forKey: .lower)
     try c.encodeIfPresent(upper, forKey: .upper)
+    try c.encodeIfPresent(intervalError, forKey: .intervalError)
   }
 }
 

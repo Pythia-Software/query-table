@@ -389,20 +389,11 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 	v = b.metricNumber(v)
 	var intervalParts [2]ValueSQL
 	if spec.Interval != nil {
-		// The interval's exact parts, from this metric's own reductions. Parts
-		// outside the kind's domain make the value an error here, so that it
-		// ranks, limits and counts like any other error.
+		// The interval's exact parts, from this metric's own reductions.
 		if ratio, e = metricRatioParts(n); e != nil {
 			return SQLPlan{}, e
 		}
-		num, den := leaves[ratio.numerator], leaves[ratio.denominator]
-		intervalParts = [2]ValueSQL{num, den}
-		domain := num.Value + "<0 OR " + den.Value + "<0"
-		if spec.Interval.Kind == "proportion" {
-			domain += " OR " + num.Value + ">" + den.Value
-		}
-		bad := "(" + v.Value + " IS NOT NULL AND " + num.Error + " IS NULL AND " + den.Error + " IS NULL AND " + den.Value + "<>0 AND (" + domain + "))"
-		v = b.emitNative("CASE WHEN "+bad+" THEN NULL ELSE "+v.Value+" END", "COALESCE("+v.Error+",CASE WHEN "+bad+" THEN "+b.errorLiteral("interval_domain")+" END)", v.Type)
+		intervalParts = [2]ValueSQL{leaves[ratio.numerator], leaves[ratio.denominator]}
 	}
 	extraValues := make([]ValueSQL, len(extraNodes))
 	for i, node := range extraNodes {

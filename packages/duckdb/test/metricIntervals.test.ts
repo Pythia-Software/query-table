@@ -14,7 +14,7 @@ import { DuckDBBackend } from "../src/index";
 type Row = Record<string, unknown>;
 interface Case {
   name: string;
-  localOnly?: boolean;
+  planned?: boolean;
   metric: AggregationClause;
   expected: { error?: true; groupCount?: number; hiddenGroups?: number; buckets?: Record<string, unknown>[] };
 }
@@ -34,6 +34,7 @@ function project(bucket: AggregationBucket) {
     ...(bucket.error ? { error: true } : { value: near(bucket.value) }),
     ...(bucket.lower !== undefined ? { lower: near(bucket.lower) } : {}),
     ...(bucket.upper !== undefined ? { upper: near(bucket.upper) } : {}),
+    ...(bucket.intervalError ? { intervalError: true } : {}),
   };
 }
 
@@ -61,14 +62,14 @@ describe("shared metric interval fixture (DuckDB)", () => {
     // DuckDB fails a whole metric on a division by zero rather than one
     // bucket, with or without an interval.
     const divides = c.expected.buckets?.some((bucket) => "error" in bucket && (bucket.keys as unknown[])[0] === "orphan");
-    it.skipIf(c.localOnly || divides)(c.name, async () => {
+    it.skipIf(c.planned || divides)(c.name, async () => {
       // Send invalid intervals too, so the backend's own validation runs.
       const { interval, ...plain } = c.metric;
       const query = normalizeQueryState({ ...EMPTY_QUERY, limit: 100, aggregations: [plain] });
       const request = toQueryRequestV3(query, fixture.schema, backend.capabilities, undefined, { now: Date.parse(fixture.now), rows: false });
       const result = await backend.execute({ ...request, metrics: [{ ...request.metrics[0]!, ...(interval ? { interval } : {}) }] });
       const entry = result.metrics[0]!;
-      if (c.expected.error) return expect(entry.error).toBeTruthy();
+      if (c.expected.error) return expect(entry.errorCode, entry.error).toBe("metric_interval");
       expect(entry.error).toBeUndefined();
       expect(entry.groupCount).toBe(c.expected.groupCount);
       expect(entry.hiddenGroups).toBe(c.expected.hiddenGroups);

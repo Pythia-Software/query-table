@@ -27,6 +27,18 @@ import type { MetricInterval } from "./wire.generated";
 
 export type { MetricInterval } from "./wire.generated";
 export const DEFAULT_METRIC_INTERVAL_LEVEL = 0.95;
+/** The levels an interval accepts, inclusive. Wider levels make the quantile
+ * probabilities round to 0 or 1 in double precision. */
+export const METRIC_INTERVAL_LEVELS = { min: 0.5, max: 0.9999 } as const;
+/** A bucket's `intervalError` when its parts are outside the kind's domain. */
+export const METRIC_INTERVAL_DOMAIN = "interval_domain";
+
+/** A diagnostic with the metric_interval code, as servers report it. */
+const intervalError = (message: string, from?: number, to?: number) => {
+  const error = new FormulaError(message, from, to);
+  error.code = "metric_interval";
+  return error;
+};
 
 type Call = Extract<FormulaNode, { kind: "call" }>;
 /** The parts of a ratio metric: value = scale × numerator / denominator. */
@@ -51,11 +63,11 @@ export function metricRatioParts(ast: FormulaNode): MetricRatioParts {
     if (node.kind === "literal") {
       const value = node.value;
       if (typeof value !== "number" || !(value > 0) || !Number.isFinite(value))
-        throw new FormulaError(SHAPE, node.from, node.to);
+        throw intervalError(SHAPE, node.from, node.to);
       scale = up ? scale * value : scale / value;
       return;
     }
-    if (node.kind !== "call") throw new FormulaError(SHAPE, node.from, node.to);
+    if (node.kind !== "call") throw intervalError(SHAPE, node.from, node.to);
     const name = node.name.toUpperCase();
     if (ADDITIVE.includes(name)) {
       (up ? above : below).push(node);
@@ -75,11 +87,11 @@ export function metricRatioParts(ast: FormulaNode): MetricRatioParts {
       node.args[1]!.value === 0
     )
       return visit(node.args[0]!, up);
-    throw new FormulaError(SHAPE, node.from, node.to);
+    throw intervalError(SHAPE, node.from, node.to);
   };
   visit(ast, true);
   if (above.length !== 1 || below.length !== 1 || !Number.isFinite(scale) || !(scale > 0))
-    throw new FormulaError(SHAPE, ast.from, ast.to);
+    throw intervalError(SHAPE, ast.from, ast.to);
   return { numerator: above[0]!, denominator: below[0]!, scale };
 }
 
@@ -90,13 +102,19 @@ export function validateMetricIntervalOption(interval: MetricInterval): void {
     typeof interval !== "object" ||
     (interval.kind !== "proportion" && interval.kind !== "rate")
   )
-    throw new FormulaError('An interval kind is "proportion" or "rate".');
+    throw intervalError('An interval kind is "proportion" or "rate".');
   const level = interval.level;
   if (
     level !== undefined &&
-    !(typeof level === "number" && level > 0 && level < 1)
+    !(
+      typeof level === "number" &&
+      level >= METRIC_INTERVAL_LEVELS.min &&
+      level <= METRIC_INTERVAL_LEVELS.max
+    )
   )
-    throw new FormulaError("An interval level is between 0 and 1, such as 0.95.");
+    throw intervalError(
+      `An interval level is between ${METRIC_INTERVAL_LEVELS.min} and ${METRIC_INTERVAL_LEVELS.max}, such as 0.95.`,
+    );
 }
 
 /** Throws a FormulaError when a clause's interval cannot be computed: the
@@ -110,20 +128,20 @@ export function validateMetricInterval(
   if (c.interval === undefined) return;
   validateMetricIntervalOption(c.interval);
   if (!("aggregates" in plan) || c.display?.kind === "scatter")
-    throw new FormulaError(
+    throw intervalError(
       "Intervals apply to single-value metrics, not distributions or scatters.",
     );
   if (c.dateGrouping?.occurrence)
-    throw new FormulaError(
+    throw intervalError(
       "An occurrence mean has no interval: group by calendar intervals instead.",
     );
   if (c.window && (c.window.reduce ?? "total") !== "total")
-    throw new FormulaError(
+    throw intervalError(
       "A mean per interval has no interval; a window total pools the counts and has one.",
     );
   if (c.share !== undefined) {
     if (c.interval.kind !== "proportion")
-      throw new FormulaError(
+      throw intervalError(
         "A share is a proportion of its total: use a proportion interval.",
       );
     return; // validateMetricSeries requires a single SUM or COUNT.
@@ -133,10 +151,10 @@ export function validateMetricInterval(
 
 /** Set `lower` and `upper` on a bucket from its exact numerator and
  * denominator results. A bucket with an error or without a numeric value has
- * no interval; parts outside the kind's domain replace the value with an
- * error. */
+ * no interval. Parts outside the kind's domain set `intervalError` instead;
+ * an interval never changes the value. */
 export function applyMetricInterval(
-  bucket: { value: unknown; error?: string; lower?: number; upper?: number },
+  bucket: { value: unknown; error?: string; lower?: number; upper?: number; intervalError?: string },
   interval: MetricInterval,
   scale: number,
   numerator: FormulaResult | undefined,
@@ -161,8 +179,7 @@ export function applyMetricInterval(
   );
   if (!bounds) return;
   if ("error" in bounds) {
-    bucket.value = null;
-    bucket.error = bounds.error;
+    bucket.intervalError = bounds.error;
     return;
   }
   bucket.lower = bounds.lower;
@@ -171,12 +188,14 @@ export function applyMetricInterval(
 
 export type MetricIntervalBounds =
   | { lower: number; upper: number }
-  | { error: string };
+  | { error: typeof METRIC_INTERVAL_DOMAIN };
 
 /** The interval of scale × numerator / denominator, or undefined when there
- * is none (a zero, missing or non-finite part). Parts outside the kind's
- * domain return an error: a proportion needs 0 <= numerator <= denominator,
- * a rate a nonnegative count over a positive exposure. */
+ * is none (a zero, missing or non-finite part, or a level outside
+ * METRIC_INTERVAL_LEVELS). Parts outside the kind's domain return the
+ * interval_domain error: the numerator counts events or units, so it must be
+ * a nonnegative integer; a proportion's denominator is an integer at least as
+ * large; a rate's exposure is positive and may be fractional. */
 export function metricIntervalBounds(
   interval: MetricInterval,
   numerator: number,
@@ -189,13 +208,16 @@ export function metricIntervalBounds(
     denominator === 0
   )
     return undefined;
-  const alpha = 1 - (interval.level ?? DEFAULT_METRIC_INTERVAL_LEVEL);
+  const level = interval.level ?? DEFAULT_METRIC_INTERVAL_LEVEL;
+  if (!(level >= METRIC_INTERVAL_LEVELS.min && level <= METRIC_INTERVAL_LEVELS.max))
+    return undefined;
+  const alpha = 1 - level;
+  if (numerator < 0 || denominator < 0 || !Number.isInteger(numerator))
+    return { error: METRIC_INTERVAL_DOMAIN };
   let lower: number, upper: number;
   if (interval.kind === "proportion") {
-    if (numerator < 0 || denominator < 0 || numerator > denominator)
-      return {
-        error: `A proportion interval needs 0 ≤ numerator ≤ denominator; this group has ${numerator} of ${denominator}.`,
-      };
+    if (numerator > denominator || !Number.isInteger(denominator))
+      return { error: METRIC_INTERVAL_DOMAIN };
     // Wilson score bounds, each from the stable root of the quadratic: the
     // lower one is p² / (p + z²/2n + d) and the upper one mirrors it.
     const z = normalQuantile(alpha),
@@ -208,15 +230,12 @@ export function metricIntervalBounds(
     lower = p === 0 ? 0 : (p * p) / (p + shift + spread);
     upper = q === 0 ? 1 : 1 - (q * q) / (q + shift + spread);
   } else {
-    if (numerator < 0 || denominator < 0)
-      return {
-        error: `A rate interval needs a nonnegative count over a positive exposure; this group has ${numerator} over ${denominator}.`,
-      };
     lower = numerator === 0 ? 0 : gammaQuantile(alpha / 2, numerator);
     upper = gammaQuantile(1 - alpha / 2, numerator + 1);
     lower /= denominator;
     upper /= denominator;
   }
+  if (!Number.isFinite(lower) || !Number.isFinite(upper)) return undefined;
   return { lower: scale * lower, upper: scale * upper };
 }
 
@@ -341,9 +360,12 @@ export function gammaP(a: number, x: number): number {
   }
   return 1 - prefix * h;
 }
-/** x such that P(a, x) = p: the p quantile of a Gamma(a, 1) distribution. */
+/** x such that P(a, x) = p: the p quantile of a Gamma(a, 1) distribution.
+ * 0 at p <= 0, Infinity at p >= 1, NaN for a shape that is not positive. */
 export function gammaQuantile(p: number, a: number): number {
-  if (!(a > 0) || !(p > 0 && p < 1)) throw Error("Invalid gamma quantile.");
+  if (!(a > 0) || Number.isNaN(p)) return NaN;
+  if (p <= 0) return 0;
+  if (p >= 1) return Infinity;
   const a1 = a - 1,
     gln = logGamma(a);
   let x: number,

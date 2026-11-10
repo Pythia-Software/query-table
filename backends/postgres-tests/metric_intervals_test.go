@@ -15,10 +15,10 @@ import (
 // The shared fixture is executed by every engine; see
 // schema/fixtures/metric-intervals.json and the SQLite twin of this test.
 type intervalCase struct {
-	Name      string         `json:"name"`
-	LocalOnly bool           `json:"localOnly"`
-	Metric    qt.AggSpec     `json:"metric"`
-	Expected  map[string]any `json:"expected"`
+	Name     string         `json:"name"`
+	Planned  bool           `json:"planned"`
+	Metric   qt.AggSpec     `json:"metric"`
+	Expected map[string]any `json:"expected"`
 }
 type intervalFixture struct {
 	Now       string           `json:"now"`
@@ -70,6 +70,9 @@ func checkIntervalMetric(t *testing.T, metric qt.MetricResult, expected map[stri
 			}
 			continue
 		}
+		if (b.IntervalError != "") != (w["intervalError"] == true) || (b.IntervalError != "" && b.IntervalError != "interval_domain") {
+			t.Fatalf("%s: intervalError %q, want %v", label, b.IntervalError, w["intervalError"])
+		}
 		if b.Error != "" || !near(b.Value, w["value"]) {
 			t.Fatalf("%s: value %v (%s), want %v", label, b.Value, b.Error, w["value"])
 		}
@@ -118,7 +121,7 @@ func TestPostgresMetricIntervalFixture(t *testing.T) {
 		t.Fatal("metricIntervals is not advertised")
 	}
 	for _, c := range f.Cases {
-		if c.LocalOnly {
+		if c.Planned {
 			continue
 		}
 		t.Run(c.Name, func(t *testing.T) {

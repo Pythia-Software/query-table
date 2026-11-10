@@ -150,6 +150,26 @@ describe("local engine", () => {
     expect(metricPopulationError(share, { intervals: false })).toMatch(/metric intervals/);
     expect(metricPopulationError(share, { intervals: true })).toBeUndefined();
   });
+  it("never changes a metric's values, ranking, errors or Other", () => {
+    const strip = (r: ReturnType<typeof evaluateMetrics>) =>
+      r.metrics.map((m) => ({ ...m, buckets: m.buckets.map(({ lower: _l, upper: _u, intervalError: _e, ...b }) => b) }));
+    const ratios = [
+      // With groupLimit 2 of 3 groups, so Other must not appear with an interval.
+      "SUM([events])/COUNT()",
+      "100*SUM([events])/NULLIF(COUNT(),0)",
+      // Fractional numerators: no bounds, but the same values.
+      "SUM([events]*1.5)/COUNT()",
+    ];
+    for (const expression of ratios) {
+      const plain: AggregationClause = { id: "m", op: "count", expression, groupBy: ["bucket"], groupLimit: 2 };
+      for (const kind of ["proportion", "rate"] as const) {
+        const query = (c: AggregationClause) => ({ ...EMPTY_QUERY, aggregations: [c] });
+        const without = evaluateMetrics(rows, query(plain), schema),
+          withInterval = evaluateMetrics(rows, query({ ...plain, interval: { kind } }), schema);
+        expect(strip(withInterval), `${expression} ${kind}`).toEqual(strip(without));
+      }
+    }
+  });
   it("refuses a server without the capability", () => {
     const capabilities: QueryCapabilitiesV3 = { version: 3, groupedRows: true, calendarGrouping: true, computedSourceFilters: false, regex: false, maxRows: 100, maxGroups: 100, maxPopulation: 1000, profile: "p" };
     const query = { ...EMPTY_QUERY, aggregations: [share] };
@@ -162,7 +182,7 @@ describe("local engine", () => {
 
 interface FixtureCase {
   name: string;
-  localOnly?: boolean;
+  planned?: boolean;
   metric: AggregationClause;
   expected: { error?: true; groupCount?: number; hiddenGroups?: number; buckets?: Record<string, unknown>[]; other?: Record<string, unknown> };
 }
@@ -180,6 +200,7 @@ export function intervalBucket(bucket: AggregationBucket, tolerance: number) {
     ...(bucket.error ? { error: true } : { value: near(bucket.value) }),
     ...(bucket.lower !== undefined ? { lower: near(bucket.lower) } : {}),
     ...(bucket.upper !== undefined ? { upper: near(bucket.upper) } : {}),
+    ...(bucket.intervalError ? { intervalError: true } : {}),
   };
 }
 const asExpected = (bucket: Record<string, unknown>) => ("error" in bucket ? { ...bucket, error: true } : bucket);
@@ -188,7 +209,7 @@ describe("shared metric interval fixture (local engine)", () => {
   for (const c of fixture.cases)
     it(c.name, () => {
       const [entry] = evaluateMetrics(fixture.rows, { ...EMPTY_QUERY, aggregations: [c.metric] }, fixture.schema, { now: Date.parse(fixture.now) }).metrics;
-      if (c.expected.error) return expect(entry!.error, "metric error").toBeTruthy();
+      if (c.expected.error) return expect(entry!.errorCode, entry!.error).toBe("metric_interval");
       expect(entry!.error).toBeUndefined();
       expect(entry!.groupCount).toBe(c.expected.groupCount);
       expect(entry!.hiddenGroups).toBe(c.expected.hiddenGroups);

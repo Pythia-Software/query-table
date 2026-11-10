@@ -64,4 +64,40 @@ func TestMetricIntervalNumerics(t *testing.T) {
 	if _, _, ok, _ = metricIntervalBounds(&MetricInterval{Kind: "rate"}, 3, 0, 1); ok {
 		t.Fatal("a zero exposure has no interval")
 	}
+	// Counts are integers: a fractional numerator, or a proportion's
+	// fractional denominator, is outside the domain; an exposure may be
+	// fractional.
+	for _, c := range []struct {
+		kind string
+		n, d float64
+		want bool
+	}{{"rate", 2.5, 10, true}, {"proportion", 2, 10.5, true}, {"rate", 2, 10.5, false}, {"rate", -1, 10, true}} {
+		if _, _, _, domain = metricIntervalBounds(&MetricInterval{Kind: c.kind}, c.n, c.d, 1); domain != c.want {
+			t.Fatalf("%s %v/%v: domain %v", c.kind, c.n, c.d, domain)
+		}
+	}
+}
+
+// Levels whose quantile probabilities round to 0 or 1 are refused, and the
+// numerics never panic on request data.
+func TestMetricIntervalLevels(t *testing.T) {
+	for _, level := range []float64{1e-17, 0.4, 0.99999, 0.9999999999999999, 1} {
+		spec := AggSpec{ID: "m", Op: "count", Expression: "SUM([a])/COUNT()", Interval: &MetricInterval{Kind: "rate", Level: &level}}
+		if _, err := validateMetricInterval(spec); err == nil {
+			t.Fatalf("level %v accepted", level)
+		}
+		for _, kind := range []string{"rate", "proportion"} {
+			if _, _, ok, _ := metricIntervalBounds(&MetricInterval{Kind: kind, Level: &level}, 5, 6, 1); ok {
+				t.Fatalf("level %v gave bounds", level)
+			}
+		}
+	}
+	for _, level := range []float64{MinMetricIntervalLevel, MaxMetricIntervalLevel} {
+		if _, _, ok, _ := metricIntervalBounds(&MetricInterval{Kind: "rate", Level: &level}, 5, 6, 1); !ok {
+			t.Fatalf("level %v gave no bounds", level)
+		}
+	}
+	if gammaQuantile(0, 2) != 0 || !math.IsInf(gammaQuantile(1, 2), 1) || !math.IsNaN(gammaQuantile(0.5, 0)) {
+		t.Fatal("gamma quantile edges")
+	}
 }

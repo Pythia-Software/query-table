@@ -93,10 +93,10 @@ export interface MetricMinCountSum {
 /** Drop small groups before sorting, groupLimit and Other: a number counts rows; an object counts a field's distinct non-null values or sums a numeric field. Removed groups are reported as hiddenGroups. */
 export type MetricMinCount = number | MetricMinCountDistinct | MetricMinCountSum;
 
-/** A confidence interval around a ratio metric, returned as lower and upper on every bucket. The metric must be a ratio of two additive aggregates, numerator over denominator (SUM, COUNT or COUNT_DISTINCT), optionally scaled by constants and with NULLIF(denominator, 0): for example COUNT_DISTINCT(IF([events]>0,[turn_id],NULL))/COUNT_DISTINCT([turn_id]) or SUM([events])/NULLIF(COUNT_DISTINCT([message_id])/1000,0). proportion: a share of units (0 <= numerator <= denominator), Wilson score interval. rate: a count over an exposure, the exact (Garwood) Poisson interval on the numerator divided by the exposure. Bounds use the exact numerator and denominator of each bucket and are in the metric's units, after its constant scale. */
+/** A confidence interval around a ratio metric, returned as lower and upper on every bucket. The metric must be a ratio of two additive aggregates, numerator over denominator (SUM, COUNT or COUNT_DISTINCT), optionally scaled by constants and with NULLIF(denominator, 0): for example COUNT_DISTINCT(IF([events]>0,[turn_id],NULL))/COUNT_DISTINCT([turn_id]) or SUM([events])/NULLIF(COUNT_DISTINCT([message_id])/1000,0). proportion: a share of units (0 <= numerator <= denominator), Wilson score interval. rate: a count over an exposure, the exact (Garwood) Poisson interval on the numerator divided by the exposure. Bounds use the exact numerator and denominator of each bucket and are in the metric's units, after its constant scale. An interval is an annotation: it never changes a bucket's value, error, ranking or the result's other buckets. Parts outside the kind's domain (a negative or non-integer numerator; for a proportion, a non-integer denominator or a numerator above it) give the bucket intervalError interval_domain instead of bounds. Both methods assume independent units; clustered or over-dispersed counts make the intervals too narrow. */
 export interface MetricInterval {
   kind: "proportion" | "rate";
-  /** Confidence level; omitted is 0.95. */
+  /** Confidence level, 0.5 to 0.9999; omitted is 0.95. */
   level?: number;
 }
 
@@ -275,6 +275,8 @@ export interface MetricBucketV3 {
   lower?: number;
   /** The interval's upper bound. */
   upper?: number;
+  /** Why a bucket with a numeric value has no interval: interval_domain when its parts are outside the interval kind's domain. The value is unchanged. */
+  intervalError?: string;
 }
 
 /** One metric's result, in request order. */

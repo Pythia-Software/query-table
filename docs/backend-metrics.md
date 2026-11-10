@@ -147,18 +147,20 @@ from and written as either a number or `{"min":5,"distinct":"conversation_id"}`.
 asks for a confidence interval on every bucket. The compiler accepts it only on
 a scalar metric whose expression is a ratio of two SUM, COUNT or COUNT_DISTINCT
 aggregates, scaled by positive literals and optionally wrapped in
-`NULLIF(x, 0)`; anything else, an unknown kind or a level outside (0, 1) is the
-clause error `metric_interval`. The two parts are reductions the metric
+`NULLIF(x, 0)`; anything else, an unknown kind or a level outside 0.5–0.9999
+is the clause error `metric_interval`. The two parts are reductions the metric
 already computes, so the final stage only adds `interval_numerator`,
-`interval_denominator` and their error sidecars beside `value`, and the value
-becomes the `interval_domain` error when the parts leave the kind's domain
-(negative, or a proportion's numerator above its denominator). That happens in
-SQL, before ranking, `minCount` and `LIMIT`, so an invalid group sorts with the
-other errors. `readV2Metric` then sets `Lower`/`Upper` from the parts: the
-Wilson score interval for `proportion`, and the exact Poisson (Garwood)
-interval divided by the denominator for `rate`, both multiplied by the
-expression's constant scale. A bucket with an error, a NULL value or a zero
-denominator has no bounds.
+`interval_denominator` and their error sidecars beside `value`; the value,
+its error and the ranking are unchanged. `readV2Metric` then sets
+`Lower`/`Upper` from the parts: the Wilson score interval for `proportion`, and
+the exact Poisson (Garwood) interval divided by the denominator for `rate`,
+both multiplied by the expression's constant scale. A bucket with an error, a
+NULL value or a zero denominator has no bounds. Parts outside the kind's domain
+(a negative or non-integer numerator; for a proportion, a non-integer
+denominator or a numerator above it) set `IntervalError` to `interval_domain`
+instead. The quantile functions return 0, +Inf or NaN rather than panic, and
+such bounds are omitted. The row-streaming reducer refuses intervals, so they
+always run on a plan that returns both parts.
 
 The same applies to calendar metrics, the SQLite batch with its fused and
 reused reductions (results are reused only between metrics with the same

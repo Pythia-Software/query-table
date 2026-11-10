@@ -44,6 +44,7 @@ import {
   type QueryState,
   failedMetric,
   QueryError,
+  type ErrorCode,
 } from "@pythia-software/query-table-core";
 import {
   SQLBuilder,
@@ -690,7 +691,10 @@ export class DuckDBBackend {
       clause = { ...clause, display: { kind: clause.distribution.kind } };
     const issues = validateMetric(clause, schema);
     if (issues.length)
-      throw Error(issues.map((issue) => issue.message).join(" "));
+      throw new QueryError(
+        (issues[0]!.code ?? "invalid_metric") as ErrorCode,
+        issues.map((issue) => issue.message).join(" "),
+      );
     const builder = this.builder(schema, now),
       where = builder.where(query.where);
     const window =

@@ -6,6 +6,9 @@ export interface FormulaDiagnostic {
   message: string;
   from: number;
   to: number;
+  /** A specific error code (docs/errors.md), such as metric_interval;
+   * omitted is the caller's general code. */
+  code?: string;
 }
 export type FormulaNode =
   | { kind: "literal"; value: FormulaValue; from: number; to: number }
@@ -420,6 +423,8 @@ export const FORMULA_FUNCTIONS: FormulaFunction[] = [
 ];
 
 export class FormulaError extends Error {
+  /** A specific error code for the diagnostic; see FormulaDiagnostic.code. */
+  code?: string;
   constructor(
     message: string,
     public from = 0,

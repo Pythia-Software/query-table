@@ -107,7 +107,7 @@ export function toQueryRequestV3<Row>(query: QueryState, baseSchema: FieldSchema
       refusals.push({ code: "invalid_metric", message: `Metric ${projected.id} uses an unsupported operation: ${unsupportedOp}.`, metricId: projected.id });
     const dateGrouping = q.aggregations?.find(c => c.id === projected.id)?.dateGrouping;
     for (const issue of validateMetric({ ...clause, ...(dateGrouping ? { dateGrouping } : {}) } as AggregationClause, resultSchema))
-      refusals.push({ code: "invalid_metric", message: issue.message, metricId: projected.id });
+      refusals.push({ code: (issue.code ?? "invalid_metric") as ErrorCode, message: issue.message, metricId: projected.id });
     if (dateGrouping && !capabilities.calendarGrouping)
       refusals.push({ ...unsupported("calendarGrouping", "This server does not support calendar grouping."), metricId: projected.id });
     else if (isMetricCycle(dateGrouping?.interval) && !capabilities.calendarCycles)

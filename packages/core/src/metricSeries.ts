@@ -232,7 +232,7 @@ type Reduction =
   | { name: Merge; part: number }
   | { name: "AVG"; sum: number; count: number };
 type Prepared =
-  | { kind: "error"; clause: AggregationClause; error: string }
+  | { kind: "error"; clause: AggregationClause; error: string; code?: string }
   | { kind: "empty"; clause: AggregationClause }
   | { kind: "plain"; clause: AggregationClause; parts: [AggregationClause] }
   | {
@@ -298,12 +298,14 @@ export function planMetricSeries(
         kind: "error",
         clause: c,
         error: e instanceof Error ? e.message : String(e),
+        ...(e instanceof FormulaError && e.code ? { code: e.code } : {}),
       };
     }
   });
   function prepare(c: AggregationClause): Prepared {
     const issue = validateMetric(c, schema, options.resolveComputed)[0];
-    if (issue) return { kind: "error", clause: c, error: issue.message };
+    if (issue)
+      return { kind: "error", clause: c, error: issue.message, ...(issue.code ? { code: issue.code } : {}) };
     // Narrow to the intervals the query's bounds and the clock leave whole;
     // undefined when none remain.
     function whole(
@@ -523,7 +525,7 @@ export function planMetricSeries(
       return prepared.map((item): AggregationResultEntry => {
         const c = item.clause;
         if (item.kind === "error")
-          return { id: c.id, buckets: [], error: item.error, errorCode: "invalid_metric" };
+          return { id: c.id, buckets: [], error: item.error, errorCode: item.code ?? "invalid_metric" };
         if (item.kind === "empty") {
           const none: AggregationResultEntry = {
             id: c.id,

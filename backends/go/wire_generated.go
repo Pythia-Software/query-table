@@ -76,10 +76,15 @@ type MetricMinCountSum struct {
 // a count over an exposure, the exact (Garwood) Poisson interval on the
 // numerator divided by the exposure. Bounds use the exact numerator and
 // denominator of each bucket and are in the metric's units, after its constant
-// scale.
+// scale. An interval is an annotation: it never changes a bucket's value,
+// error, ranking or the result's other buckets. Parts outside the kind's domain
+// (a negative or non-integer numerator; for a proportion, a non-integer
+// denominator or a numerator above it) give the bucket intervalError
+// interval_domain instead of bounds. Both methods assume independent units;
+// clustered or over-dispersed counts make the intervals too narrow.
 type MetricInterval struct {
 	Kind string `json:"kind"`
-	// Confidence level; omitted is 0.95.
+	// Confidence level, 0.5 to 0.9999; omitted is 0.95.
 	Level *float64 `json:"level,omitempty"`
 }
 
@@ -266,6 +271,9 @@ type MetricBucket struct {
 	Lower *float64 `json:"lower,omitempty"`
 	// The interval's upper bound.
 	Upper *float64 `json:"upper,omitempty"`
+	// Why a bucket with a numeric value has no interval: interval_domain when its
+	// parts are outside the interval kind's domain. The value is unchanged.
+	IntervalError string `json:"intervalError,omitempty"`
 	// A measured minCount's value for calendar filtering; never serialized.
 	minMeasure      any
 	minMeasureError bool

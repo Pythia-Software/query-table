@@ -1,7 +1,6 @@
 package querytable
 
 import (
-	"fmt"
 	"math"
 	"strconv"
 	"strings"
@@ -20,14 +19,26 @@ import (
 //     the denominator.
 //
 // Bounds are scaled like the value. A bucket with an error or without a
-// numeric value has none. Parts outside the kind's domain replace the value
-// with the interval_domain error in SQL, before ranking, minCount and the
-// group limit, as the TypeScript engines do when they build each bucket.
+// numeric value has none. Parts outside the kind's domain (a negative or
+// non-integer numerator; for a proportion, a non-integer denominator or a
+// numerator above it) set IntervalError to interval_domain instead. An
+// interval never changes a bucket's value, error or rank.
 // schema/fixtures/metric-intervals.json holds the cases every engine
 // reproduces.
 
 // DefaultMetricIntervalLevel is the confidence level of an interval without one.
 const DefaultMetricIntervalLevel = 0.95
+
+// The levels an interval accepts, inclusive. Wider levels make the quantile
+// probabilities round to 0 or 1 in double precision.
+const (
+	MinMetricIntervalLevel = 0.5
+	MaxMetricIntervalLevel = 0.9999
+)
+
+// metricIntervalDomain is a bucket's IntervalError when its parts are outside
+// the interval kind's domain.
+const metricIntervalDomain = "interval_domain"
 
 // metricRatio is value = scale × numerator / denominator.
 type metricRatio struct {
@@ -92,8 +103,8 @@ func validateMetricInterval(spec AggSpec) (metricRatio, error) {
 	if interval.Kind != "proportion" && interval.Kind != "rate" {
 		return metricRatio{}, diagnostic(ErrorCodeMetricInterval, `interval kind must be "proportion" or "rate"`)
 	}
-	if interval.Level != nil && !(*interval.Level > 0 && *interval.Level < 1) {
-		return metricRatio{}, diagnostic(ErrorCodeMetricInterval, "interval level must be between 0 and 1")
+	if interval.Level != nil && !(*interval.Level >= MinMetricIntervalLevel && *interval.Level <= MaxMetricIntervalLevel) {
+		return metricRatio{}, diagnosticf(ErrorCodeMetricInterval, "interval level must be between %g and %g", MinMetricIntervalLevel, MaxMetricIntervalLevel)
 	}
 	if spec.Distribution != nil || spec.ExpressionY != "" || (spec.Display != nil && spec.Display.Kind == "scatter") {
 		return metricRatio{}, diagnostic(ErrorCodeMetricInterval, "intervals apply to single-value metrics, not distributions or scatters")
@@ -131,8 +142,11 @@ func applyMetricInterval(b *MetricBucket, interval *MetricInterval, scale float6
 	if !okN || !okD {
 		return
 	}
-	// The compiled plan already turned domain violations into errors.
-	if lower, upper, ok, domain := metricIntervalBounds(interval, n, d, scale); ok && !domain {
+	lower, upper, ok, domain := metricIntervalBounds(interval, n, d, scale)
+	switch {
+	case domain:
+		b.IntervalError = metricIntervalDomain
+	case ok:
 		b.Lower, b.Upper = &lower, &upper
 	}
 }
@@ -154,8 +168,9 @@ func intervalNumber(v any) (float64, bool) {
 }
 
 // metricIntervalBounds returns the interval of scale × numerator /
-// denominator. ok is false when there is none (a zero or non-finite part);
-// domain is true when the parts are outside the kind's domain.
+// denominator. ok is false when there is none (a zero or non-finite part, or
+// a level outside the accepted range); domain is true when the parts are
+// outside the kind's domain.
 func metricIntervalBounds(interval *MetricInterval, numerator, denominator, scale float64) (lower, upper float64, ok, domain bool) {
 	if math.IsNaN(numerator) || math.IsInf(numerator, 0) || math.IsNaN(denominator) || math.IsInf(denominator, 0) || denominator == 0 {
 		return 0, 0, false, false
@@ -164,9 +179,15 @@ func metricIntervalBounds(interval *MetricInterval, numerator, denominator, scal
 	if interval.Level != nil {
 		level = *interval.Level
 	}
+	if !(level >= MinMetricIntervalLevel && level <= MaxMetricIntervalLevel) {
+		return 0, 0, false, false
+	}
 	alpha := 1 - level
+	if numerator < 0 || denominator < 0 || numerator != math.Trunc(numerator) {
+		return 0, 0, false, true
+	}
 	if interval.Kind == "proportion" {
-		if numerator < 0 || denominator < 0 || numerator > denominator {
+		if numerator > denominator || denominator != math.Trunc(denominator) {
 			return 0, 0, false, true
 		}
 		// Wilson score bounds, each from the stable root of the quadratic.
@@ -183,15 +204,15 @@ func metricIntervalBounds(interval *MetricInterval, numerator, denominator, scal
 			upper = 1 - q*q/(q+shift+spread)
 		}
 	} else {
-		if numerator < 0 || denominator < 0 {
-			return 0, 0, false, true
-		}
 		if numerator != 0 {
 			lower = gammaQuantile(alpha/2, numerator)
 		}
 		upper = gammaQuantile(1-alpha/2, numerator+1)
 		lower /= denominator
 		upper /= denominator
+	}
+	if math.IsNaN(lower) || math.IsInf(lower, 0) || math.IsNaN(upper) || math.IsInf(upper, 0) {
+		return 0, 0, false, false
 	}
 	return scale * lower, scale * upper, true, false
 }
@@ -348,9 +369,17 @@ func gammaP(a, x float64) float64 {
 }
 
 // gammaQuantile is x such that P(a, x) = p: the p quantile of Gamma(a, 1).
+// It is 0 at p <= 0, +Inf at p >= 1 and NaN for a shape that is not
+// positive; it never panics on request data.
 func gammaQuantile(p, a float64) float64 {
-	if !(a > 0) || !(p > 0 && p < 1) {
-		panic(fmt.Sprintf("invalid gamma quantile p=%v a=%v", p, a))
+	if !(a > 0) || math.IsNaN(p) {
+		return math.NaN()
+	}
+	if p <= 0 {
+		return 0
+	}
+	if p >= 1 {
+		return math.Inf(1)
 	}
 	a1, gln := a-1, logGamma(a)
 	var x, scale float64

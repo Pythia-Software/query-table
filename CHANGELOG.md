@@ -10,10 +10,14 @@
   of a metric that is a ratio of two SUM, COUNT or COUNT_DISTINCT aggregates,
   such as `SUM([events])/NULLIF(COUNT_DISTINCT([message_id])/1000,0)`. Bounds
   come from each group's exact numerator and denominator and are scaled like
-  the value; other shapes are a clause diagnostic (`metric_interval`). Windows
-  pool the parts first, shares take a proportion interval of their total, and
-  the local engine pools an additive ratio's Other remainder. The local engine
-  computes intervals; DuckDB and the Go SQLite and PostgreSQL executors compute
+  the value. An interval never changes a value, ranking or Other remainder:
+  parts that are not counts (negative or fractional, or a proportion's
+  numerator above its denominator) set `intervalError: "interval_domain"`
+  instead of bounds. Other shapes, unknown kinds and levels outside 0.5–0.9999
+  are a clause error with the new `metric_interval` code in every engine.
+  Windows pool the parts first and shares take a proportion interval of their
+  total. Both methods assume independent units. The local engine computes
+  intervals; DuckDB and the Go SQLite and PostgreSQL executors compute
   the same bounds and advertise `queryCapabilities.metricIntervals`, and
   `toQueryRequestV3` refuses an interval a server does not advertise. Shared
   cases, including the Pharos evidence (6 of 128, 8 of 52 and 6 of 15 turns),

@@ -1,5 +1,5 @@
 {
-  "description": "Metric interval conformance (MetricSpec.interval). Every engine (local TypeScript, DuckDB, Go SQLite and Go PostgreSQL) executes each case and must return these buckets: keys, count, value, lower and upper within a relative tolerance of 1e-9, and error as a boolean. A bucket without lower and upper must have neither. Cases marked localOnly need client planning or the local engine's Other remainder. Reference bounds are independent: the Wilson closed form with scipy's normal quantile, and scipy's gamma quantiles for the exact Poisson (Garwood) interval. The short, medium and long bands are the Pharos prompt-length evidence: 6 of 128, 8 of 52 and 6 of 15 turns.",
+  "description": "Metric interval conformance (MetricSpec.interval). Every engine (local TypeScript, DuckDB, Go SQLite and Go PostgreSQL) executes each case and must return these buckets: keys, count, value, lower and upper within a relative tolerance of 1e-9, error and intervalError as booleans. A bucket without lower and upper must have neither. A case with error true is a clause error with the metric_interval code. Where a case states other, the result's Other remainder (MetricResult.other) must match it, and a case without one must have none. Cases marked planned are planned on the client (planMetricSeries) and their plain metrics run on the engine. Reference bounds are independent: the Wilson closed form with scipy's normal quantile, and scipy's gamma quantiles for the exact Poisson (Garwood) interval. The short, medium and long bands are the Pharos prompt-length evidence: 6 of 128, 8 of 52 and 6 of 15 turns.",
   "now": "2026-03-08T00:00:00.000Z",
   "tolerance": 1e-09,
   "schema": {
@@ -350,18 +350,35 @@
       }
     },
     {
-      "name": "a proportion whose numerator exceeds its denominator is an error",
+      "name": "a proportion whose numerator exceeds its denominator keeps its value, without an interval",
       "metric": {"op": "count", "id": "m", "expression": "SUM([events])/COUNT()", "groupBy": ["band"], "sort": [{"key": "group0", "dir": "asc"}], "interval": {"kind": "proportion"}},
       "expected": {
         "buckets": [
           {"keys": ["all"], "count": 4, "value": 1.0, "lower": 0.5101091635454027, "upper": 1.0},
+          {"keys": ["big"], "count": 2, "value": 135000.0, "intervalError": true},
           {"keys": ["long"], "count": 15, "value": 0.4, "lower": 0.1982449614134158, "upper": 0.6425316987937539},
           {"keys": ["medium"], "count": 52, "value": 0.15384615384615385, "lower": 0.08007685016780323, "upper": 0.27524085176410146},
           {"keys": ["none"], "count": 10, "value": 0.0, "lower": 0.0, "upper": 0.2775327998628892},
           {"keys": ["orphan"], "count": 2, "value": 0.0, "lower": 0.0, "upper": 0.6576197724933469},
           {"keys": ["short"], "count": 128, "value": 0.0625, "lower": 0.03200692569506118, "upper": 0.11848791104425867},
-          {"keys": ["silent"], "count": 3, "value": 0.0, "lower": 0.0, "upper": 0.5614970317550455},
-          {"keys": ["big"], "count": 2, "error": true}
+          {"keys": ["silent"], "count": 3, "value": 0.0, "lower": 0.0, "upper": 0.5614970317550455}
+        ],
+        "groupCount": 8
+      }
+    },
+    {
+      "name": "a fractional count keeps its value, without an interval",
+      "metric": {"op": "count", "id": "m", "expression": "SUM([events]+0.5)/NULLIF(COUNT(),0)", "groupBy": ["band"], "sort": [{"key": "group0", "dir": "asc"}], "interval": {"kind": "rate"}},
+      "expected": {
+        "buckets": [
+          {"keys": ["all"], "count": 4, "value": 1.5, "lower": 0.5504735633727128, "upper": 3.264868505629671},
+          {"keys": ["big"], "count": 2, "value": 135000.5, "lower": 134491.75921849243, "upper": 135510.68887718138},
+          {"keys": ["long"], "count": 15, "value": 0.9, "intervalError": true},
+          {"keys": ["medium"], "count": 52, "value": 0.6538461538461539, "lower": 0.45280746893408214, "upper": 0.9136844633692901},
+          {"keys": ["none"], "count": 10, "value": 0.5, "lower": 0.1623486390118421, "upper": 1.166833207932267},
+          {"keys": ["orphan"], "count": 2, "value": 0.5, "lower": 0.012658903992144949, "upper": 2.785821695469449},
+          {"keys": ["short"], "count": 128, "value": 0.5625, "lower": 0.4401216069545964, "upper": 0.7083756565988902},
+          {"keys": ["silent"], "count": 3, "value": 0.5, "intervalError": true}
         ],
         "groupCount": 8
       }
@@ -403,22 +420,8 @@
       }
     },
     {
-      "name": "Other pools an additive ratio's parts (local engine)",
-      "localOnly": true,
-      "metric": {"op": "count", "id": "m", "expression": "SUM([events])/NULLIF(SUM([messages])/1000,0)", "groupBy": ["band"], "sort": [{"key": "group0", "dir": "asc"}], "groupLimit": 3, "interval": {"kind": "rate"}},
-      "expected": {
-        "buckets": [
-          {"keys": ["all"], "count": 4, "value": 500.0, "lower": 136.23317170329062, "upper": 1280.1985844254618},
-          {"keys": ["big"], "count": 2, "value": 0.27, "lower": 0.26898252032296, "upper": 0.2710203758683911},
-          {"keys": ["long"], "count": 15, "value": 53.097345132743364, "lower": 19.485789853901338, "upper": 115.5705665709618}
-        ],
-        "groupCount": 8,
-        "other": {"keys": [], "count": 195, "value": 3.696857670979667, "lower": 2.113073579861721, "upper": 6.003465248974342}
-      }
-    },
-    {
       "name": "a share is a proportion of its total (planned on the client)",
-      "localOnly": true,
+      "planned": true,
       "metric": {"op": "count", "id": "m", "groupBy": ["band"], "share": "total", "sort": [{"key": "group0", "dir": "asc"}], "interval": {"kind": "proportion"}},
       "expected": {
         "buckets": [
@@ -444,6 +447,34 @@
     {
       "name": "an interval kind is proportion or rate",
       "metric": {"op": "count", "id": "m", "expression": "COUNT_DISTINCT(IF([events]>0,[turn],NULL))/NULLIF(COUNT_DISTINCT([turn]),0)", "groupBy": ["band"], "interval": {"kind": "wald"}},
+      "expected": {
+        "error": true
+      }
+    },
+    {
+      "name": "an interval level of 0.4 is refused",
+      "metric": {"op": "count", "id": "m", "expression": "COUNT_DISTINCT(IF([events]>0,[turn],NULL))/NULLIF(COUNT_DISTINCT([turn]),0)", "groupBy": ["band"], "interval": {"kind": "rate", "level": 0.4}},
+      "expected": {
+        "error": true
+      }
+    },
+    {
+      "name": "an interval level of 1e-17 is refused",
+      "metric": {"op": "count", "id": "m", "expression": "COUNT_DISTINCT(IF([events]>0,[turn],NULL))/NULLIF(COUNT_DISTINCT([turn]),0)", "groupBy": ["band"], "interval": {"kind": "rate", "level": 1e-17}},
+      "expected": {
+        "error": true
+      }
+    },
+    {
+      "name": "an interval level of 0.99999 is refused",
+      "metric": {"op": "count", "id": "m", "expression": "COUNT_DISTINCT(IF([events]>0,[turn],NULL))/NULLIF(COUNT_DISTINCT([turn]),0)", "groupBy": ["band"], "interval": {"kind": "rate", "level": 0.99999}},
+      "expected": {
+        "error": true
+      }
+    },
+    {
+      "name": "an interval level of 0.9999999999999999 is refused",
+      "metric": {"op": "count", "id": "m", "expression": "COUNT_DISTINCT(IF([events]>0,[turn],NULL))/NULLIF(COUNT_DISTINCT([turn]),0)", "groupBy": ["band"], "interval": {"kind": "rate", "level": 0.9999999999999999}},
       "expected": {
         "error": true
       }
