@@ -137,8 +137,13 @@ and grouping) only grows content-fitted columns, so a live table stays calm;
 any change to the query refits from scratch. Content fitting stops at 800px.
 No column is fitted below what its buttons and links need (links shorten to
 an ellipsis first); in screen mode, if those minimums exceed the screen, the
-table scrolls horizontally. Set `select.minWidth` on a field whose host renderer needs room
-the table cannot measure.
+table scrolls horizontally. A minimum counts only what cannot wrap: content a
+host renderer lets wrap (its computed `white-space` is `normal`, `pre-wrap`,
+`pre-line` or `break-spaces`, such as a linked title clamped to two lines)
+needs only its longest unbreakable word, so the column narrows and the link
+wraps. Nowrap host links, buttons and inputs keep their full width. Set
+`select.minWidth` on a field whose host renderer needs room the table cannot
+measure.
 
 Set `fit` on a default or initial query to opt in; a stored query without
 `fit` has no live sizing. The mode travels in the encoded `?q=` parameter

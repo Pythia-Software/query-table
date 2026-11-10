@@ -28,6 +28,26 @@ const renderers = {};
 const rowId = (row: Row) => row.id;
 let viewport: number;
 let container: HTMLDivElement;
+
+/**
+ * Lays a probe out at 10px per character. A `min-content` probe, like a
+ * browser, breaks lines only inside elements whose own `white-space` allows
+ * wrapping, where its widest word counts; other content stays on one line.
+ */
+function probeWidth(probe: HTMLElement): number {
+  if (probe.style.width !== "min-content") return (probe.textContent?.length ?? 0) * 10;
+  const visit = (node: Node, wraps: boolean): number => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent ?? "";
+      return 10 * (wraps ? Math.max(0, ...text.split(/\s+/).map((word) => word.length)) : text.length);
+    }
+    const own = (node as HTMLElement).style?.whiteSpace;
+    const wrap = own ? own !== "nowrap" && own !== "pre" : wraps;
+    const parts = Array.from(node.childNodes, (child) => visit(child, wrap));
+    return wrap ? Math.max(0, ...parts) : parts.reduce((a, b) => a + b, 0);
+  };
+  return visit(probe, false);
+}
 let root: Root;
 
 beforeEach(() => {
@@ -42,7 +62,7 @@ beforeEach(() => {
   const real = HTMLElement.prototype.getBoundingClientRect;
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
     if (this.getAttribute("aria-hidden") !== "true" || this.tagName !== "SPAN") return real.call(this);
-    return { width: (this.textContent?.length ?? 0) * 10 } as DOMRect;
+    return { width: probeWidth(this) } as DOMRect;
   });
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -337,5 +357,36 @@ describe("live fit to screen", () => {
 
     expect(state.query.fit).toBeUndefined();
     expect(state.query.select).toEqual([{ field: "a", width: displayed[0] }]);
+  });
+});
+
+describe("control minimums in screen fitting", () => {
+  const title = "a long linked conversation title that wraps over two lines";
+  const wrappingLink = (value: string) => createElement("span", { style: { whiteSpace: "normal" } }, createElement("a", { href: "/c/1" }, value));
+  /** Screen-fits a host-rendered A column next to plain B in a 300px table. */
+  function fitWith(render: (value: string) => unknown, minWidth?: number): number[] {
+    viewport = 302;
+    const [a, b] = schema.fields;
+    const fields = [{ ...a!, render: ({ value }: { value: unknown }) => render(String(value)), ...(minWidth ? { select: { minWidth } } : {}) }, b!];
+    act(() => root.render(createElement(DataTable<Row>, {
+      fields, rows: [{ id: 1, a: title, b: "short" }], loading: false, query: screen, onQueryChange: vi.fn(), renderers, rowId,
+    })));
+    return widths();
+  }
+
+  it("lets a host link that wraps shrink with its column instead of setting a one-line floor", () => {
+    const fitted = fitWith(wrappingLink);
+    expect(fitted.reduce((x, y) => x + y)).toBe(300);
+    expect(fitted[1]).toBeGreaterThanOrEqual(MIN);
+  });
+
+  it("keeps the full width of controls that cannot wrap", () => {
+    // A nowrap host link cannot shorten without host styling, so the table scrolls.
+    expect(fitWith((value) => createElement("a", { href: "/c/1" }, value))[0]).toBeGreaterThanOrEqual(title.length * 10);
+    expect(fitWith((value) => createElement("button", { type: "button" }, value))[0]).toBeGreaterThanOrEqual(title.length * 10);
+  });
+
+  it("still honours SelectConfig.minWidth for a wrapping link", () => {
+    expect(fitWith(wrappingLink, 260)[0]).toBe(260);
   });
 });

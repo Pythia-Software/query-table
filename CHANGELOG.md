@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Fixed
+
+- Screen fitting no longer treats a wrapping host link as an unshrinkable
+  one-line control. A column's control minimum now measures its cells at
+  their min-content width: content a host renderer lets wrap (for example
+  `<span style="white-space: normal"><a href>long title</a></span>`, clamped
+  to two lines) needs only its longest unbreakable word, so the column fits
+  and the title wraps as it did in 0.9.6. Since 0.9.7 such a column took its
+  longest title on one line as its floor, and the table scrolled
+  horizontally at every desktop width. Buttons, Detail modes, JSON previews,
+  nowrap links and `SelectConfig.minWidth` keep their minimums.
+
 ## 1.0.4 — 2026-11-10
 
 ### Changed

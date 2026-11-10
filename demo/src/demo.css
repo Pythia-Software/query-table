@@ -121,3 +121,6 @@ select {
 /* /chart-layout fixture */
 .qt-demo-chart-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); gap: 16px; }
 .qt-demo-chart-card { min-width: 0; border: 1px solid var(--qt-border, #d8dee4); border-radius: 8px; padding: 12px; height: 300px; display: flex; flex-direction: column; }
+
+/* /fit-controls fixture: a host link title clamped to two wrapping lines. */
+.qt-demo-wrapping-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; white-space: normal; overflow-wrap: anywhere; }
