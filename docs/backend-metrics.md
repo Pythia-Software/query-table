@@ -58,7 +58,7 @@ The profile is `qt-postgres-v1` (`ServerExpressionProfile`), which PostgreSQL da
 
 - JSON strings, finite numeric literals, booleans, NULL, escaped bracket references (`[a]]b]`), arithmetic `+ - * /`, comparisons, boolean AND/OR/NOT.
 - `IF`, `NULLIF`, `COALESCE`, `IS_NULL`, `ABS`, with strict scalar type checking.
-- Text and array functions `LENGTH`, `TRIM`, `LTRIM`, `RTRIM`, `CONTAINS`, `STARTS_WITH`, `ENDS_WITH` (two arguments), `SPLIT` and `ARRAY_LENGTH`; see [Text and array functions](#text-and-array-functions). The SQLite profile also runs `REGEX_TEST`, `REGEX_EXTRACT` and `REGEX_REPLACE`.
+- Text and array functions `LENGTH`, `LOWER`, `UPPER`, `TRIM`, `LTRIM`, `RTRIM`, `CONTAINS`, `STARTS_WITH`, `ENDS_WITH` (with optional `ignoreCase`), `SPLIT` and `ARRAY_LENGTH`; see [Text and array functions](#text-and-array-functions). The SQLite profile also runs `REGEX_TEST`, `REGEX_EXTRACT` and `REGEX_REPLACE`.
 - Metric reductions `COUNT()`, `COUNT(expr)`, `COUNT_DISTINCT`, `SUM`, `AVG`, `MIN`, `MAX`; the SQL planner additionally admits `MEDIAN` as exact continuous percentile reduction.
 - Regex functions (PostgreSQL), other array formulas and array group keys, other text functions, conversions, dates/functions, `%`, power, arbitrary SQL, and nested aggregates are rejected (`unsupported_function`, `unsupported_regex` or `unsupported_type`). Raw selected text-array fields are supported and mapped as `textarray`; this does not admit array fields into expressions or metric grouping. Regex predicates and sort extraction are also rejected for PostgreSQL (`Capabilities().RegexSourceFilters` is false).
 
@@ -78,13 +78,34 @@ Both server dialects compile these row functions wherever a row expression is al
 | --- | --- |
 | `LENGTH(text)` | Unicode code points (`Array.from(text).length`): an emoji with a skin-tone modifier is 2, `e` plus a combining accent is 2, CJK characters are 1 each. Embedded NUL counts. |
 | `TRIM`, `LTRIM`, `RTRIM` | Remove the ECMAScript white space and line terminator set, exactly what `String.prototype.trim` removes: tab, LF, VT, FF, CR, space, U+00A0, U+1680, U+2000–U+200A, U+2028, U+2029, U+202F, U+205F, U+3000 and U+FEFF. U+0085 and U+180E are kept. |
-| `CONTAINS`, `STARTS_WITH`, `ENDS_WITH` | Exact, case-sensitive code point comparison with no normalization; an empty search text matches. The optional `ignoreCase` argument is refused with `unsupported_function`: JavaScript's case mapping is context-sensitive and Unicode-version dependent, and neither database reproduces it. |
+| `LOWER(text)`, `UPPER(text)` | The engine's Unicode case mapping, which agrees with the browser on ASCII, Latin-1, basic Greek and Cyrillic letters and leaves CJK, emoji and other uncased text unchanged; see [Case mapping](#case-mapping) for the characters that differ. |
+| `CONTAINS`, `STARTS_WITH`, `ENDS_WITH` | Exact, case-sensitive code point comparison with no normalization; an empty search text matches. With `ignoreCase` true, both sides are lower-cased with `LOWER` first, as the browser does, so the same case-mapping differences apply; `FALSE` is exact and `NULL` gives NULL. |
 | `SPLIT(text, separator)` | The parts of `text.split(separator)`: non-overlapping separators left to right, empty parts kept, `""` gives one empty part, and an empty separator splits UTF-16 code units (`SPLIT("😀", "")` has 2). More than 10,000 parts is the per-row error `array_range` (the browser's "Array result is too large"). |
 | `ARRAY_LENGTH(array)` | The number of parts. A text array exists only as `ARRAY_LENGTH(SPLIT(...))`; any other use of one (a result, a branch of `IF`, `COUNT(SPLIT(...))`, `JOIN`, `ARRAY_GET`, a text-array field) is `unsupported_type`. |
 
 NULL arguments return NULL, and a missing text stays distinct from an empty one: `LENGTH("")` is 0, and `ARRAY_LENGTH(SPLIT(TRIM([text]), " "))` is 1 for an empty text but NULL for a missing one. A word count that treats empty text as no words is `IF(TRIM([text]) = "", 0, ARRAY_LENGTH(SPLIT(TRIM([text]), " ")))`. Argument errors propagate as for other strict operators.
 
 SQLite uses native `length`, `trim`/`ltrim`/`rtrim` with the explicit character set and `instr`; NUL-containing text, `SPLIT` counts and the regex functions use the registered `qt_v2_*` descriptors from `SQLiteV2Functions()`, which receive text as BLOBs so a driver cannot cut it at a NUL. PostgreSQL uses `char_length`, `btrim`/`ltrim`/`rtrim` with the same set, `strpos`, `right` and `replace`; the empty-separator count adds one for each supplementary code point.
+
+#### Case mapping
+
+`LOWER`, `UPPER` and `ignoreCase` are the one place where the server accepts drift from the browser in favor of the common case. The browser uses JavaScript's `toLowerCase`/`toUpperCase`: full Unicode case mapping with context rules, from the Unicode version of the browser's engine. The servers use:
+
+- **SQLite:** the registered `qt_v2_lower`/`qt_v2_upper` (Go's `strings.ToLower`/`ToUpper`, simple one-to-one Unicode mapping from the Go release's Unicode tables). SQLite's own `lower()`/`upper()` map only ASCII and are not used.
+- **PostgreSQL:** `lower()`/`upper()` under the database's **default collation** (`COLLATE "default"`, not the `C` collation formula text otherwise carries). With a libc provider the database's `LC_CTYPE` decides, one character at a time; with an ICU default collation ICU's full mapping applies. A database whose default collation is `C` or `POSIX` maps only ASCII letters, so `LOWER("É")` stays `É`: create the database with a UTF-8 locale or ICU to case-map non-ASCII text.
+- **DuckDB:** its `lower()`/`upper()`.
+
+Known differences from the browser (SQLite and a libc PostgreSQL; an ICU PostgreSQL follows JavaScript on the first two):
+
+| Input | Browser | SQLite (Go) |
+| --- | --- | --- |
+| `UPPER("straße")` | `STRASSE` (ß expands) | `STRAßE` |
+| `LOWER("ΟΔΟΣ")` | `οδος` (final sigma) | `οδοσ` |
+| `LOWER("İ")` (U+0130) | `i̇` (`i` plus U+0307, 2 code points) | `i` |
+| Other one-to-many mappings (`ŉ`, `ǰ`, ligatures such as `ﬁ`, Greek with ypogegrammeni) | expanded | unchanged or mapped one-to-one |
+| Letters added or changed in a newer Unicode version | the browser's version | the engine's version |
+
+Turkish and Lithuanian locale rules are not applied: the browser's `toLowerCase` is locale-independent, and `UPPER("ı")` is `I` in the browser and SQLite (a PostgreSQL database with a Turkish `LC_CTYPE` may differ). `CONTAINS([text], "i", TRUE)` therefore matches `İ` in SQLite but not in the browser. The shared fixture covers only the letters every engine maps alike (ASCII, Latin-1 accents, basic Greek and Cyrillic, CJK and emoji unchanged, empty and NULL text); `TestTextCaseMappingV3` in `backends/sqlite-tests` pins the SQLite results above.
 
 **Regex functions (SQLite only).** `REGEX_TEST`, `REGEX_EXTRACT` and `REGEX_REPLACE` follow the browser's JavaScript `RegExp` with the `u` flag. The pattern and flags must be text literals. The server translates a validated subset to Go RE2: `.` excludes `\n`, `\r`, U+2028 and U+2029 unless `s` is set, and `\s`/`\S` use the TRIM set above. Patterns whose meaning would differ are refused with `unsupported_regex` rather than approximated:
 

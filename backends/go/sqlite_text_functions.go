@@ -5,6 +5,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"regexp"
+	"strings"
 	"sync"
 	"unicode/utf8"
 )
@@ -91,6 +92,22 @@ func sqliteTextFunctions() []SQLiteScalarFunction {
 		return out, code, nil
 	}
 	return []SQLiteScalarFunction{
+		// Go's simple Unicode case mapping: closer to JavaScript than
+		// SQLite's ASCII-only lower()/upper(), but not its full mapping.
+		fn("qt_v2_lower", 1, func(a []driver.Value) (driver.Value, error) {
+			value, err := text(a[0])
+			if err != nil {
+				return nil, err
+			}
+			return strings.ToLower(value), nil
+		}),
+		fn("qt_v2_upper", 1, func(a []driver.Value) (driver.Value, error) {
+			value, err := text(a[0])
+			if err != nil {
+				return nil, err
+			}
+			return strings.ToUpper(value), nil
+		}),
 		fn("qt_v2_length", 1, func(a []driver.Value) (driver.Value, error) {
 			value, err := text(a[0])
 			if err != nil {

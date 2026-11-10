@@ -14,15 +14,24 @@
   `SPLIT` counts like `String.prototype.split` (an empty separator splits
   UTF-16 code units; more than 10,000 parts is the per-row error
   `array_range`), and missing text stays NULL rather than empty. A text array
-  is accepted only inside `ARRAY_LENGTH`; `ignoreCase` matching, `LOWER`/`UPPER`
-  and other text functions are refused (`unsupported_function`).
+  is accepted only inside `ARRAY_LENGTH`; other text functions are refused
+  (`unsupported_function`).
+- Both profiles also run `LOWER`, `UPPER` and the `ignoreCase` argument of
+  `CONTAINS`, `STARTS_WITH` and `ENDS_WITH` (both sides lower-cased). These
+  favor the common case over exact parity: SQLite uses Go's simple Unicode
+  case mapping and PostgreSQL uses `lower()`/`upper()` under the database's
+  default collation (a `C` default maps only ASCII), so a few characters differ
+  from JavaScript, such as `UPPER("ß")`, final sigma and `İ`. ASCII, Latin-1,
+  basic Greek and Cyrillic letters agree; see
+  [Case mapping](docs/backend-metrics.md#case-mapping).
 - The SQLite profile runs `REGEX_TEST`, `REGEX_EXTRACT` and `REGEX_REPLACE`
   with literal JavaScript patterns, translated to RE2 only when the meaning is
   identical; other patterns are refused with `unsupported_regex`. PostgreSQL
   refuses formula regex. `RegexAggregateExpressions` stays false.
 - **SQLite hosts must register the complete current `SQLiteV2Functions()`
-  list**, which adds `qt_v2_length`, `qt_v2_split_count`, `qt_v2_regex_test`,
-  `qt_v2_regex_extract`, `qt_v2_regex_replace` and `qt_v2_regex_replace_error`.
+  list**, which adds `qt_v2_lower`, `qt_v2_upper`, `qt_v2_length`,
+  `qt_v2_split_count`, `qt_v2_regex_test`, `qt_v2_regex_extract`,
+  `qt_v2_regex_replace` and `qt_v2_regex_replace_error`.
 - Shared fixtures `schema/fixtures/text-functions.json` (local engine, DuckDB,
   Go SQLite, Go PostgreSQL) and `schema/fixtures/formula-regex.json` (browser
   regex results against the server translation). See
@@ -36,6 +45,8 @@
   with a supplementary character is an error rather than a different count,
   except in `ARRAY_LENGTH`, which counts UTF-16 code units). `SPLIT` results
   above 10,000 elements are an error, as in the browser.
+- DuckDB `CONTAINS`, `STARTS_WITH` and `ENDS_WITH` return NULL for a NULL
+  `ignoreCase` argument, as in the browser, instead of comparing exactly.
 - Go server diagnostics name an unknown function `unsupported_function`
   instead of `arity`.
 

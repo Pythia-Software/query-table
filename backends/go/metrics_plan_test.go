@@ -60,10 +60,10 @@ func TestExpressionSecurityAndBudgets(t *testing.T) {
 	}
 }
 
-// Text functions outside the server profile, such as URL_ENCODE and
-// case-insensitive matching, are reported instead of guessed as SQL.
+// Text functions outside the server profile, such as URL_ENCODE, and
+// ill-typed calls are reported instead of guessed as SQL.
 func TestTextFunctionsAreOutsideServerProfile(t *testing.T) {
-	for _, source := range []string{"URL_ENCODE([g])", "LOWER([g])", `CONTAINS([g], "a", TRUE)`, `REGEX_TEST([g], "a")`, `JOIN(SPLIT([g], " "), ",")`, `SPLIT([g], " ")`, `IF(TRUE, SPLIT([g], " "), SPLIT([g], ","))`} {
+	for _, source := range []string{"URL_ENCODE([g])", "LEFT([g], 1)", `CONTAINS([g], "a", 1)`, `REGEX_TEST([g], "a")`, `JOIN(SPLIT([g], " "), ",")`, `SPLIT([g], " ")`, `IF(TRUE, SPLIT([g], " "), SPLIT([g], ","))`} {
 		_, e := compileTestRowExpression(context.Background(), source, metricSchema(), metricOptions())
 		var d *PlanDiagnostic
 		if !errors.As(e, &d) {

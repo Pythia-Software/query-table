@@ -281,8 +281,11 @@ export class SQLBuilder {
       return `CASE WHEN ${vs.map((v) => `${v} IS NULL`).join(" OR ")} THEN NULL ELSE ${name}(${vs.join(", ")}) END`;
     if (name === "CONCAT_WS")
       return `CASE WHEN ${a} IS NULL THEN NULL ELSE concat_ws(${vs.join(", ")}) END`;
-    if (["CONTAINS", "STARTS_WITH", "ENDS_WITH"].includes(name))
-      return `${name.toLowerCase()}(CASE WHEN ${c ?? "FALSE"} THEN lower(${a}) ELSE ${a} END, CASE WHEN ${c ?? "FALSE"} THEN lower(${b}) ELSE ${b} END)`;
+    if (["CONTAINS", "STARTS_WITH", "ENDS_WITH"].includes(name)) {
+      const match = `${name.toLowerCase()}(CASE WHEN ${c ?? "FALSE"} THEN lower(${a}) ELSE ${a} END, CASE WHEN ${c ?? "FALSE"} THEN lower(${b}) ELSE ${b} END)`;
+      // As in the browser, a NULL ignoreCase flag gives NULL.
+      return c === undefined ? match : `(CASE WHEN ${c} IS NULL THEN NULL ELSE ${match} END)`;
+    }
     if (name === "TO_NUMBER") return safeNumber(`CAST(${a} AS DOUBLE)`);
     if (name === "TO_TEXT") return `CAST(${a} AS VARCHAR)`;
     if (name === "URL_ENCODE") return `url_encode(${a})`;

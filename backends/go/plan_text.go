@@ -13,6 +13,10 @@ import (
 //     terminator set (jsWhitespace), not the engine's own notion of space.
 //   - CONTAINS, STARTS_WITH and ENDS_WITH are exact, case-sensitive substring
 //     tests; an empty search text matches.
+//
+// LOWER, UPPER and the ignoreCase argument are the exception: they use each
+// engine's case mapping and differ from JavaScript on a few characters
+// (caseMapped).
 //   - SPLIT(text, separator) has the count of text.split(separator): an
 //     empty separator splits UTF-16 code units, an empty text gives one
 //     element. More than 10,000 elements is the array_range error.
@@ -39,11 +43,13 @@ func (b *planBuilder) text(v ValueSQL) string {
 // textOperation returns the value SQL, error SQL and type of a text function.
 // e is the COALESCE of the argument errors.
 func (b *planBuilder) textOperation(op string, a []ValueSQL, e string) (string, string, string, error) {
-	want := "text"
-	if op == "ARRAY_LENGTH" {
-		want = "textarray"
-	}
-	for _, x := range a {
+	for i, x := range a {
+		want := "text"
+		if op == "ARRAY_LENGTH" {
+			want = "textarray"
+		} else if i == 2 {
+			want = "bool" // ignoreCase
+		}
 		if err := requireType(x, want); err != nil {
 			return "", "", "", err
 		}
@@ -61,30 +67,23 @@ func (b *planBuilder) textOperation(op string, a []ValueSQL, e string) (string, 
 			return "CASE WHEN instr(CAST(" + x + " AS BLOB),x'00')>0 THEN qt_v2_length(CAST(" + x + " AS BLOB)) ELSE length(" + x + ") END", e, "number", nil
 		}
 		return "(char_length(" + x + "))::double precision", e, "number", nil
+	case "LOWER", "UPPER":
+		return b.caseMapped(op, x), e, "text", nil
 	case "TRIM", "LTRIM", "RTRIM":
 		fn := strings.ToLower(op)
 		if op == "TRIM" && !b.sqlite {
 			fn = "btrim"
 		}
 		return fn + "(" + x + "," + b.param(jsWhitespace, "text") + ")" + b.collation(), e, "text", nil
-	case "CONTAINS":
-		if b.sqlite {
-			return "(instr(" + x + "," + y + ")>0)", e, "bool", nil
+	case "CONTAINS", "STARTS_WITH", "ENDS_WITH":
+		exact := b.textMatch(op, x, y)
+		if len(a) < 3 {
+			return exact, e, "bool", nil
 		}
-		return "(strpos(" + x + "," + y + ")>0)", e, "bool", nil
-	case "STARTS_WITH":
-		// The first occurrence is at the start exactly when text starts with it.
-		if b.sqlite {
-			return "(instr(" + x + "," + y + ")=1)", e, "bool", nil
-		}
-		return "(strpos(" + x + "," + y + ")=1)", e, "bool", nil
-	case "ENDS_WITH":
-		if b.sqlite {
-			// Byte suffixes of valid UTF-8 are code point suffixes.
-			bx, by := "CAST("+x+" AS BLOB)", "CAST("+y+" AS BLOB)"
-			return "CASE WHEN " + x + " IS NULL OR " + y + " IS NULL THEN NULL ELSE (length(" + by + ")<=length(" + bx + ") AND substr(" + bx + ",length(" + bx + ")-length(" + by + ")+1)=" + by + ") END", e, "bool", nil
-		}
-		return "(right(" + x + ",char_length(" + y + "))=" + y + ` COLLATE "C")`, e, "bool", nil
+		// ignoreCase lower-cases both sides, as the browser does; a NULL flag
+		// gives NULL.
+		folded := b.textMatch(op, b.caseMapped("LOWER", x), b.caseMapped("LOWER", y))
+		return "CASE WHEN " + a[2].Value + " IS NULL THEN NULL WHEN " + a[2].Value + " THEN " + folded + " ELSE " + exact + " END", e, "bool", nil
 	case "SPLIT":
 		var count ValueSQL
 		if b.sqlite {
@@ -101,6 +100,44 @@ func (b *planBuilder) textOperation(op string, a []ValueSQL, e string) (string, 
 		return a[0].Value, e, "number", nil
 	}
 	return "", "", "", diagnostic(ErrorCodeUnsupportedFunction, "function/operator "+op+" is outside the server profile")
+}
+
+// textMatch is an exact, case-sensitive CONTAINS, STARTS_WITH or ENDS_WITH.
+// An empty search text matches.
+func (b *planBuilder) textMatch(op, x, y string) string {
+	switch op {
+	case "CONTAINS":
+		if b.sqlite {
+			return "(instr(" + x + "," + y + ")>0)"
+		}
+		return "(strpos(" + x + "," + y + ")>0)"
+	case "STARTS_WITH":
+		// The first occurrence is at the start exactly when text starts with it.
+		if b.sqlite {
+			return "(instr(" + x + "," + y + ")=1)"
+		}
+		return "(strpos(" + x + "," + y + ")=1)"
+	}
+	if b.sqlite {
+		// Byte suffixes of valid UTF-8 are code point suffixes.
+		bx, by := "CAST("+x+" AS BLOB)", "CAST("+y+" AS BLOB)"
+		return "CASE WHEN " + x + " IS NULL OR " + y + " IS NULL THEN NULL ELSE (length(" + by + ")<=length(" + bx + ") AND substr(" + bx + ",length(" + bx + ")-length(" + by + ")+1)=" + by + ") END"
+	}
+	return "(right(" + x + ",char_length(" + y + "))=" + y + ` COLLATE "C")`
+}
+
+// caseMapped is LOWER or UPPER of text SQL. The browser applies JavaScript's
+// full, context-sensitive Unicode case mapping; neither engine does, so a few
+// characters differ (see docs/backend-metrics.md). SQLite calls Go's simple
+// Unicode case mapping (strings.ToLower/ToUpper). PostgreSQL uses
+// lower()/upper() under the database's default collation: its LC_CTYPE (or
+// ICU locale) maps non-ASCII letters, and a C or POSIX default maps only ASCII.
+func (b *planBuilder) caseMapped(op, x string) string {
+	fn := strings.ToLower(op)
+	if b.sqlite {
+		return b.emit("qt_v2_"+fn+"("+sqliteBytes(x)+")", b.nullError(), "text").Value + b.collation()
+	}
+	return fn + "((" + x + `) COLLATE "default")` + b.collation()
 }
 
 // sqliteBytes passes text to a registered function as a BLOB: some drivers

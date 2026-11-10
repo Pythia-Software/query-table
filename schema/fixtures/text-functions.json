@@ -117,6 +117,12 @@
       "conversation_id": "c4",
       "role": "assistant",
       "text": "\u180e x \u180e"
+    },
+    {
+      "id": "m14",
+      "conversation_id": "c5",
+      "role": "user",
+      "text": "\u0391\u03bb\u03c6\u03b1 \u0392\u03ae\u03c4\u03b1 \u041f\u0440\u0438\u0432\u0435\u0442 \u041c\u0438\u0440 \u00dcn\u00efc\u00f6d\u00e9 Caf\u00e9 \u00ff"
     }
   ],
   "cases": [
@@ -138,7 +144,7 @@
         ]
       },
       "expected": {
-        "groupCount": 13,
+        "groupCount": 14,
         "buckets": [
           { "keys": ["m01"], "count": 1, "value": 12 },
           { "keys": ["m02"], "count": 1, "value": 14 },
@@ -152,7 +158,8 @@
           { "keys": ["m10"], "count": 1, "value": null },
           { "keys": ["m11"], "count": 1, "value": 4 },
           { "keys": ["m12"], "count": 1, "value": 5 },
-          { "keys": ["m13"], "count": 1, "value": 5 }
+          { "keys": ["m13"], "count": 1, "value": 5 },
+          { "keys": ["m14"], "count": 1, "value": 35 }
         ]
       }
     },
@@ -174,7 +181,7 @@
         ]
       },
       "expected": {
-        "groupCount": 13,
+        "groupCount": 14,
         "buckets": [
           { "keys": ["m01"], "count": 1, "value": "Hello  world" },
           { "keys": ["m02"], "count": 1, "value": "h\u00e9llo\tw\u00f6rld" },
@@ -188,7 +195,8 @@
           { "keys": ["m10"], "count": 1, "value": null },
           { "keys": ["m11"], "count": 1, "value": "solo" },
           { "keys": ["m12"], "count": 1, "value": "bom\u0085" },
-          { "keys": ["m13"], "count": 1, "value": "\u180e x \u180e" }
+          { "keys": ["m13"], "count": 1, "value": "\u180e x \u180e" },
+          { "keys": ["m14"], "count": 1, "value": "\u0391\u03bb\u03c6\u03b1 \u0392\u03ae\u03c4\u03b1 \u041f\u0440\u0438\u0432\u0435\u0442 \u041c\u0438\u0440 \u00dcn\u00efc\u00f6d\u00e9 Caf\u00e9 \u00ff" }
         ]
       }
     },
@@ -210,7 +218,7 @@
         ]
       },
       "expected": {
-        "groupCount": 13,
+        "groupCount": 14,
         "buckets": [
           { "keys": ["m01"], "count": 1, "value": "Hello  world" },
           { "keys": ["m02"], "count": 1, "value": "h\u00e9llo\tw\u00f6rld\n" },
@@ -224,7 +232,8 @@
           { "keys": ["m10"], "count": 1, "value": null },
           { "keys": ["m11"], "count": 1, "value": "solo" },
           { "keys": ["m12"], "count": 1, "value": "bom\u0085" },
-          { "keys": ["m13"], "count": 1, "value": "\u180e x \u180e" }
+          { "keys": ["m13"], "count": 1, "value": "\u180e x \u180e" },
+          { "keys": ["m14"], "count": 1, "value": "\u0391\u03bb\u03c6\u03b1 \u0392\u03ae\u03c4\u03b1 \u041f\u0440\u0438\u0432\u0435\u0442 \u041c\u0438\u0440 \u00dcn\u00efc\u00f6d\u00e9 Caf\u00e9 \u00ff" }
         ]
       }
     },
@@ -246,7 +255,7 @@
         ]
       },
       "expected": {
-        "groupCount": 13,
+        "groupCount": 14,
         "buckets": [
           { "keys": ["m01"], "count": 1, "value": "Hello  world" },
           { "keys": ["m02"], "count": 1, "value": "  h\u00e9llo\tw\u00f6rld" },
@@ -260,7 +269,8 @@
           { "keys": ["m10"], "count": 1, "value": null },
           { "keys": ["m11"], "count": 1, "value": "solo" },
           { "keys": ["m12"], "count": 1, "value": "\ufeffbom\u0085" },
-          { "keys": ["m13"], "count": 1, "value": "\u180e x \u180e" }
+          { "keys": ["m13"], "count": 1, "value": "\u180e x \u180e" },
+          { "keys": ["m14"], "count": 1, "value": "\u0391\u03bb\u03c6\u03b1 \u0392\u03ae\u03c4\u03b1 \u041f\u0440\u0438\u0432\u0435\u0442 \u041c\u0438\u0440 \u00dcn\u00efc\u00f6d\u00e9 Caf\u00e9 \u00ff" }
         ]
       }
     },
@@ -282,7 +292,7 @@
         ]
       },
       "expected": {
-        "groupCount": 13,
+        "groupCount": 14,
         "buckets": [
           { "keys": ["m01"], "count": 1, "value": 1 },
           { "keys": ["m02"], "count": 1, "value": 1 },
@@ -296,7 +306,8 @@
           { "keys": ["m10"], "count": 1, "value": null },
           { "keys": ["m11"], "count": 1, "value": 1 },
           { "keys": ["m12"], "count": 1, "value": 1 },
-          { "keys": ["m13"], "count": 1, "value": 1 }
+          { "keys": ["m13"], "count": 1, "value": 1 },
+          { "keys": ["m14"], "count": 1, "value": 1 }
         ]
       }
     },
@@ -318,7 +329,7 @@
         ]
       },
       "expected": {
-        "groupCount": 13,
+        "groupCount": 14,
         "buckets": [
           { "keys": ["m01"], "count": 1, "value": 12 },
           { "keys": ["m02"], "count": 1, "value": 14 },
@@ -332,7 +343,8 @@
           { "keys": ["m10"], "count": 1, "value": null },
           { "keys": ["m11"], "count": 1, "value": 4 },
           { "keys": ["m12"], "count": 1, "value": 5 },
-          { "keys": ["m13"], "count": 1, "value": 5 }
+          { "keys": ["m13"], "count": 1, "value": 5 },
+          { "keys": ["m14"], "count": 1, "value": 35 }
         ]
       }
     },
@@ -354,7 +366,7 @@
         ]
       },
       "expected": {
-        "groupCount": 13,
+        "groupCount": 14,
         "buckets": [
           { "keys": ["m01"], "count": 1, "value": 3 },
           { "keys": ["m02"], "count": 1, "value": 1 },
@@ -368,7 +380,8 @@
           { "keys": ["m10"], "count": 1, "value": null },
           { "keys": ["m11"], "count": 1, "value": 1 },
           { "keys": ["m12"], "count": 1, "value": 1 },
-          { "keys": ["m13"], "count": 1, "value": 3 }
+          { "keys": ["m13"], "count": 1, "value": 3 },
+          { "keys": ["m14"], "count": 1, "value": 7 }
         ]
       }
     },
@@ -390,12 +403,13 @@
         ]
       },
       "expected": {
-        "groupCount": 5,
+        "groupCount": 6,
         "buckets": [
           { "keys": ["c1"], "count": 3, "value": 31 },
           { "keys": ["c2"], "count": 4, "value": 26 },
           { "keys": ["c3"], "count": 3, "value": 19 },
           { "keys": ["c4"], "count": 2, "value": 5 },
+          { "keys": ["c5"], "count": 1, "value": 35 },
           { "keys": [null], "count": 1, "value": 4 }
         ]
       }
@@ -418,12 +432,13 @@
         ]
       },
       "expected": {
-        "groupCount": 5,
+        "groupCount": 6,
         "buckets": [
           { "keys": ["c1"], "count": 3, "value": 5 },
           { "keys": ["c2"], "count": 4, "value": 5 },
           { "keys": ["c3"], "count": 3, "value": 2 },
           { "keys": ["c4"], "count": 2, "value": 3 },
+          { "keys": ["c5"], "count": 1, "value": 7 },
           { "keys": [null], "count": 1, "value": 1 }
         ]
       }
@@ -446,12 +461,13 @@
         ]
       },
       "expected": {
-        "groupCount": 5,
+        "groupCount": 6,
         "buckets": [
           { "keys": ["c1"], "count": 3, "value": 10.333333333333334 },
           { "keys": ["c2"], "count": 4, "value": 6.5 },
           { "keys": ["c3"], "count": 3, "value": 9.5 },
           { "keys": ["c4"], "count": 2, "value": 5 },
+          { "keys": ["c5"], "count": 1, "value": 35 },
           { "keys": [null], "count": 1, "value": 4 }
         ]
       }
@@ -481,12 +497,13 @@
         ]
       },
       "expected": {
-        "groupCount": 5,
+        "groupCount": 6,
         "buckets": [
           { "keys": ["c1"], "count": 2, "value": 17 },
           { "keys": ["c2"], "count": 2, "value": 10 },
           { "keys": ["c3"], "count": 1, "value": null },
           { "keys": ["c4"], "count": 1, "value": null },
+          { "keys": ["c5"], "count": 1, "value": 35 },
           { "keys": [null], "count": 1, "value": 4 }
         ]
       }
@@ -513,12 +530,13 @@
         }
       },
       "expected": {
-        "groupCount": 5,
+        "groupCount": 6,
         "buckets": [
           { "keys": ["c1"], "count": 3, "value": 31, "y": 5 },
           { "keys": ["c2"], "count": 4, "value": 26, "y": 6 },
           { "keys": ["c3"], "count": 3, "value": 19, "y": 2 },
           { "keys": ["c4"], "count": 2, "value": 5, "y": 3 },
+          { "keys": ["c5"], "count": 1, "value": 35, "y": 7 },
           { "keys": [null], "count": 1, "value": 4, "y": 1 }
         ]
       }
@@ -541,7 +559,7 @@
         ]
       },
       "expected": {
-        "groupCount": 13,
+        "groupCount": 14,
         "buckets": [
           { "keys": ["m01"], "count": 1, "value": 0 },
           { "keys": ["m02"], "count": 1, "value": 1 },
@@ -555,7 +573,8 @@
           { "keys": ["m10"], "count": 1, "value": 0 },
           { "keys": ["m11"], "count": 1, "value": 0 },
           { "keys": ["m12"], "count": 1, "value": 0 },
-          { "keys": ["m13"], "count": 1, "value": 0 }
+          { "keys": ["m13"], "count": 1, "value": 0 },
+          { "keys": ["m14"], "count": 1, "value": 1 }
         ]
       }
     },
@@ -577,12 +596,13 @@
         ]
       },
       "expected": {
-        "groupCount": 5,
+        "groupCount": 6,
         "buckets": [
           { "keys": ["c1"], "count": 3, "value": 3 },
           { "keys": ["c2"], "count": 4, "value": 4 },
           { "keys": ["c3"], "count": 3, "value": 2 },
           { "keys": ["c4"], "count": 2, "value": 1 },
+          { "keys": ["c5"], "count": 1, "value": 1 },
           { "keys": [null], "count": 1, "value": 1 }
         ]
       }
@@ -605,7 +625,7 @@
         ]
       },
       "expected": {
-        "groupCount": 13,
+        "groupCount": 14,
         "buckets": [
           { "keys": ["m01"], "count": 1, "value": 0 },
           { "keys": ["m02"], "count": 1, "value": 1 },
@@ -619,7 +639,8 @@
           { "keys": ["m10"], "count": 1, "value": 0 },
           { "keys": ["m11"], "count": 1, "value": 100 },
           { "keys": ["m12"], "count": 1, "value": 0 },
-          { "keys": ["m13"], "count": 1, "value": 0 }
+          { "keys": ["m13"], "count": 1, "value": 0 },
+          { "keys": ["m14"], "count": 1, "value": 0 }
         ]
       }
     },
@@ -641,13 +662,154 @@
         ]
       },
       "expected": {
-        "groupCount": 5,
+        "groupCount": 6,
         "buckets": [
           { "keys": ["c1"], "count": 3, "value": 5 },
           { "keys": ["c2"], "count": 4, "value": 10 },
           { "keys": ["c3"], "count": 3, "value": 13 },
           { "keys": ["c4"], "count": 2, "value": 5 },
+          { "keys": ["c5"], "count": 1, "value": 35 },
           { "keys": [null], "count": 1, "value": 4 }
+        ]
+      }
+    },
+    {
+      "name": "LOWER maps ASCII, Latin-1, Greek and Cyrillic letters; CJK and emoji are unchanged",
+      "metric": {
+        "id": "m",
+        "op": "count",
+        "expression": "MAX(LOWER([text]))",
+        "groupBy": [
+          "id"
+        ],
+        "sort": [
+          {
+            "key": "group0",
+            "dir": "asc",
+            "nulls": "last"
+          }
+        ]
+      },
+      "expected": {
+        "groupCount": 14,
+        "buckets": [
+          { "keys": ["m01"], "count": 1, "value": "hello  world" },
+          { "keys": ["m02"], "count": 1, "value": "  h\u00e9llo\tw\u00f6rld\n" },
+          { "keys": ["m03"], "count": 1, "value": "e\u0301te\u0301" },
+          { "keys": ["m04"], "count": 1, "value": "\ud83d\ude00 emoji \ud83d\udc4d\ud83c\udffd" },
+          { "keys": ["m05"], "count": 1, "value": "\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c8\u3000\u3067\u3059" },
+          { "keys": ["m06"], "count": 1, "value": "" },
+          { "keys": ["m07"], "count": 1, "value": null },
+          { "keys": ["m08"], "count": 1, "value": "\u00a0 nbsp\u2028line\u3000 " },
+          { "keys": ["m09"], "count": 1, "value": "a,b,,c" },
+          { "keys": ["m10"], "count": 1, "value": null },
+          { "keys": ["m11"], "count": 1, "value": "solo" },
+          { "keys": ["m12"], "count": 1, "value": "\ufeffbom\u0085" },
+          { "keys": ["m13"], "count": 1, "value": "\u180e x \u180e" },
+          { "keys": ["m14"], "count": 1, "value": "\u03b1\u03bb\u03c6\u03b1 \u03b2\u03ae\u03c4\u03b1 \u043f\u0440\u0438\u0432\u0435\u0442 \u043c\u0438\u0440 \u00fcn\u00efc\u00f6d\u00e9 caf\u00e9 \u00ff" }
+        ]
+      }
+    },
+    {
+      "name": "UPPER maps ASCII, Latin-1, Greek and Cyrillic letters; CJK and emoji are unchanged",
+      "metric": {
+        "id": "m",
+        "op": "count",
+        "expression": "MAX(UPPER([text]))",
+        "groupBy": [
+          "id"
+        ],
+        "sort": [
+          {
+            "key": "group0",
+            "dir": "asc",
+            "nulls": "last"
+          }
+        ]
+      },
+      "expected": {
+        "groupCount": 14,
+        "buckets": [
+          { "keys": ["m01"], "count": 1, "value": "HELLO  WORLD" },
+          { "keys": ["m02"], "count": 1, "value": "  H\u00c9LLO\tW\u00d6RLD\n" },
+          { "keys": ["m03"], "count": 1, "value": "E\u0301TE\u0301" },
+          { "keys": ["m04"], "count": 1, "value": "\ud83d\ude00 EMOJI \ud83d\udc4d\ud83c\udffd" },
+          { "keys": ["m05"], "count": 1, "value": "\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c8\u3000\u3067\u3059" },
+          { "keys": ["m06"], "count": 1, "value": "" },
+          { "keys": ["m07"], "count": 1, "value": null },
+          { "keys": ["m08"], "count": 1, "value": "\u00a0 NBSP\u2028LINE\u3000 " },
+          { "keys": ["m09"], "count": 1, "value": "A,B,,C" },
+          { "keys": ["m10"], "count": 1, "value": null },
+          { "keys": ["m11"], "count": 1, "value": "SOLO" },
+          { "keys": ["m12"], "count": 1, "value": "\ufeffBOM\u0085" },
+          { "keys": ["m13"], "count": 1, "value": "\u180e X \u180e" },
+          { "keys": ["m14"], "count": 1, "value": "\u0391\u039b\u03a6\u0391 \u0392\u0389\u03a4\u0391 \u041f\u0420\u0418\u0412\u0415\u0422 \u041c\u0418\u0420 \u00dcN\u00cfC\u00d6D\u00c9 CAF\u00c9 \u0178" }
+        ]
+      }
+    },
+    {
+      "name": "ignoreCase compares lower-cased text",
+      "metric": {
+        "id": "m",
+        "op": "count",
+        "expression": "SUM(IF(CONTAINS([text], \"H\u00c9LLO\", TRUE), 1, 0) + IF(STARTS_WITH([text], \"hello\", TRUE), 10, 0) + IF(ENDS_WITH([text], \"CAF\u00c9 \u0178\", TRUE), 100, 0) + IF(CONTAINS([text], \"\u043f\u0440\u0438\u0432\u0435\u0442\", TRUE), 1000, 0))",
+        "groupBy": [
+          "id"
+        ],
+        "sort": [
+          {
+            "key": "group0",
+            "dir": "asc",
+            "nulls": "last"
+          }
+        ]
+      },
+      "expected": {
+        "groupCount": 14,
+        "buckets": [
+          { "keys": ["m01"], "count": 1, "value": 10 },
+          { "keys": ["m02"], "count": 1, "value": 1 },
+          { "keys": ["m03"], "count": 1, "value": 0 },
+          { "keys": ["m04"], "count": 1, "value": 0 },
+          { "keys": ["m05"], "count": 1, "value": 0 },
+          { "keys": ["m06"], "count": 1, "value": 0 },
+          { "keys": ["m07"], "count": 1, "value": 0 },
+          { "keys": ["m08"], "count": 1, "value": 0 },
+          { "keys": ["m09"], "count": 1, "value": 0 },
+          { "keys": ["m10"], "count": 1, "value": 0 },
+          { "keys": ["m11"], "count": 1, "value": 0 },
+          { "keys": ["m12"], "count": 1, "value": 0 },
+          { "keys": ["m13"], "count": 1, "value": 0 },
+          { "keys": ["m14"], "count": 1, "value": 1100 }
+        ]
+      }
+    },
+    {
+      "name": "ignoreCase FALSE is exact and NULL gives NULL",
+      "metric": {
+        "id": "m",
+        "op": "count",
+        "expression": "SUM(IF(CONTAINS([text], \"hello\", FALSE), 1, 0) + IF(IS_NULL(STARTS_WITH([text], \"h\", NULL)), 10, 0))",
+        "groupBy": [
+          "conversation_id"
+        ],
+        "sort": [
+          {
+            "key": "group0",
+            "dir": "asc",
+            "nulls": "last"
+          }
+        ]
+      },
+      "expected": {
+        "groupCount": 6,
+        "buckets": [
+          { "keys": ["c1"], "count": 3, "value": 30 },
+          { "keys": ["c2"], "count": 4, "value": 40 },
+          { "keys": ["c3"], "count": 3, "value": 30 },
+          { "keys": ["c4"], "count": 2, "value": 20 },
+          { "keys": ["c5"], "count": 1, "value": 10 },
+          { "keys": [null], "count": 1, "value": 10 }
         ]
       }
     },
@@ -680,12 +842,13 @@
         "scope": "shownRows"
       },
       "expected": {
-        "groupCount": 5,
+        "groupCount": 6,
         "buckets": [
           { "keys": ["c1"], "count": 3, "value": 5 },
           { "keys": ["c2"], "count": 4, "value": 7 },
           { "keys": ["c3"], "count": 3, "value": 3 },
           { "keys": ["c4"], "count": 2, "value": 3 },
+          { "keys": ["c5"], "count": 1, "value": 7 },
           { "keys": [null], "count": 1, "value": 1 }
         ]
       }
@@ -719,7 +882,7 @@
         "scope": "shownRows"
       },
       "expected": {
-        "groupCount": 13,
+        "groupCount": 14,
         "buckets": [
           { "keys": ["m01"], "count": 1, "value": "Hell[o$o]  w[o$o]rld" },
           { "keys": ["m02"], "count": 1, "value": "  h\u00e9ll[o$o]\tw\u00f6rld\n" },
@@ -733,7 +896,8 @@
           { "keys": ["m10"], "count": 1, "value": null },
           { "keys": ["m11"], "count": 1, "value": "s[o$o]l[o$o]" },
           { "keys": ["m12"], "count": 1, "value": "\ufeffb[o$o]m\u0085" },
-          { "keys": ["m13"], "count": 1, "value": "\u180e [x$x] \u180e" }
+          { "keys": ["m13"], "count": 1, "value": "\u180e [x$x] \u180e" },
+          { "keys": ["m14"], "count": 1, "value": "\u0391\u03bb\u03c6\u03b1 \u0392\u03ae\u03c4\u03b1 \u041f\u0440\u0438\u0432\u0435\u0442 \u041c\u0438\u0440 \u00dcn\u00efc\u00f6d\u00e9 Caf\u00e9 \u00ff" }
         ]
       }
     },
@@ -766,12 +930,13 @@
         "scope": "shownRows"
       },
       "expected": {
-        "groupCount": 5,
+        "groupCount": 6,
         "buckets": [
           { "keys": ["c1"], "count": 3, "value": 21 },
           { "keys": ["c2"], "count": 4, "value": 0 },
           { "keys": ["c3"], "count": 3, "value": 0 },
           { "keys": ["c4"], "count": 2, "value": 0 },
+          { "keys": ["c5"], "count": 1, "value": 0 },
           { "keys": [null], "count": 1, "value": 0 }
         ]
       }
@@ -805,7 +970,7 @@
         "scope": "shownRows"
       },
       "expected": {
-        "groupCount": 13,
+        "groupCount": 14,
         "buckets": [
           { "keys": ["m01"], "count": 1, "value": "world" },
           { "keys": ["m02"], "count": 1, "value": "w" },
@@ -819,7 +984,8 @@
           { "keys": ["m10"], "count": 1, "value": null },
           { "keys": ["m11"], "count": 1, "value": null },
           { "keys": ["m12"], "count": 1, "value": null },
-          { "keys": ["m13"], "count": 1, "value": null }
+          { "keys": ["m13"], "count": 1, "value": null },
+          { "keys": ["m14"], "count": 1, "value": null }
         ]
       }
     },
@@ -852,7 +1018,7 @@
         "scope": "shownRows"
       },
       "expected": {
-        "groupCount": 13,
+        "groupCount": 14,
         "buckets": [
           { "keys": ["m01"], "count": 1, "value": 0 },
           { "keys": ["m02"], "count": 1, "value": 0 },
@@ -866,7 +1032,8 @@
           { "keys": ["m10"], "count": 1, "value": 0 },
           { "keys": ["m11"], "count": 1, "value": 0 },
           { "keys": ["m12"], "count": 1, "value": 0 },
-          { "keys": ["m13"], "count": 1, "value": 0 }
+          { "keys": ["m13"], "count": 1, "value": 0 },
+          { "keys": ["m14"], "count": 1, "value": 0 }
         ]
       }
     }
@@ -931,6 +1098,12 @@
         "characters": 5,
         "words": 3,
         "messages": 2
+      },
+      {
+        "conversation_id": "c5",
+        "characters": 35,
+        "words": 7,
+        "messages": 1
       },
       {
         "conversation_id": null,

@@ -264,9 +264,9 @@ func TestTextFunctionRefusalsV3(t *testing.T) {
 		`SUM(IF(REGEX_TEST([text], "a{"), 1, 0))`:                             qt.ErrorCodeUnsupportedRegex,
 		`SUM(IF(REGEX_TEST([text], "a", "g"), 1, 0))`:                         qt.ErrorCodeUnsupportedRegex,
 		`SUM(IF(REGEX_TEST([text], [role]), 1, 0))`:                           qt.ErrorCodeUnsupportedRegex,
-		`IF(REGEX_TEST(MAX([text]), "a"), 1, 0)`:                         qt.ErrorCodeAggregateContext,
-		`SUM(IF(CONTAINS([text], "a", TRUE), 1, 0))`:                          qt.ErrorCodeUnsupportedFunction,
-		`SUM(LENGTH(LOWER([text])))`:                                          qt.ErrorCodeUnsupportedFunction,
+		`IF(REGEX_TEST(MAX([text]), "a"), 1, 0)`:                              qt.ErrorCodeAggregateContext,
+		`SUM(IF(CONTAINS([text], "a", 1), 1, 0))`:                             qt.ErrorCodeTypeError,
+		`SUM(LENGTH(LEFT([text], 1)))`:                                        qt.ErrorCodeUnsupportedFunction,
 		`COUNT(SPLIT([text], " "))`:                                           qt.ErrorCodeUnsupportedType,
 		`SUM(ARRAY_LENGTH(IF(TRUE, SPLIT([text], " "), SPLIT([text], ","))))`: qt.ErrorCodeUnsupportedType,
 		`SUM(ARRAY_LENGTH([text]))`:                                           qt.ErrorCodeTypeError,
@@ -279,6 +279,45 @@ func TestTextFunctionRefusalsV3(t *testing.T) {
 		}
 		if out.Metrics[0].ErrorCode != code {
 			t.Errorf("%s: got %q (%s), want %q", expression, out.Metrics[0].ErrorCode, out.Metrics[0].Error, code)
+		}
+	}
+}
+
+// LOWER, UPPER and ignoreCase use Go's simple Unicode case mapping, not
+// JavaScript's full, context-sensitive one. These are the documented
+// differences (docs/backend-metrics.md); the shared fixture keeps to letters
+// every engine maps alike.
+func TestTextCaseMappingV3(t *testing.T) {
+	db, _, now := setupTextFunctions(t)
+	if _, err := db.Exec("DELETE FROM messages"); err != nil {
+		t.Fatal(err)
+	}
+	rows := map[string]string{"sharp": "straße", "sigma": "ΟΔΟΣ", "dotted": "İ", "dotless": "ı", "nul": "a\x00B"}
+	for id, text := range rows {
+		if _, err := db.Exec("INSERT INTO messages VALUES(?,?,?,?)", id, "c", "user", text); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d := qt.QueryDatasetV3{Schema: textFunctionSchema(), SourceSQL: "SELECT * FROM messages", Dialect: "sqlite", Scope: "one", Dataset: "messages"}
+	for expression, want := range map[string]map[string]any{
+		// JavaScript: "STRASSE", "ΟΔΟΣ", "İ", "I".
+		"MAX(UPPER([text]))": {"sharp": "STRAßE", "sigma": "ΟΔΟΣ", "dotted": "İ", "dotless": "I", "nul": "A\x00B"},
+		// JavaScript: "straße", "οδος" (final sigma), "i̇" (i and U+0307), "ı".
+		"MAX(LOWER([text]))": {"sharp": "straße", "sigma": "οδοσ", "dotted": "i", "dotless": "ı", "nul": "a\x00b"},
+		// JavaScript: false for "dotted", whose lower case ends with U+0307.
+		`SUM(IF(ENDS_WITH([text], "i", TRUE), 1, 0))`: {"sharp": 0.0, "sigma": 0.0, "dotted": 1.0, "dotless": 0.0, "nul": 0.0},
+	} {
+		c := textFunctionCase{Metric: qt.AggSpec{ID: "m", Op: "count", Expression: expression, GroupBy: []string{"id"}}}
+		out, err := d.Execute(context.Background(), db, textFunctionRequest(c, qt.SQLiteExpressionProfile, now), qt.PlanOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]any{}
+		for _, b := range out.Metrics[0].Buckets {
+			got[b.Keys[0].(string)] = b.Value
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s:\ngot  %q\nwant %q (%s)", expression, got, want, out.Metrics[0].Error)
 		}
 	}
 }

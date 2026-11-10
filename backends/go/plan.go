@@ -590,7 +590,7 @@ var serverOperations = map[string]bool{
 	"IF": true, "COALESCE": true, "NULLIF": true, "IS_NULL": true, "AND": true, "OR": true, "unaryNOT": true,
 	"=": true, "!=": true, "<>": true, "<": true, ">": true, "<=": true, ">=": true,
 	"+": true, "-": true, "*": true, "/": true, "unary+": true, "unary-": true, "ABS": true,
-	"LENGTH": true, "TRIM": true, "LTRIM": true, "RTRIM": true, "CONTAINS": true, "STARTS_WITH": true, "ENDS_WITH": true,
+	"LENGTH": true, "LOWER": true, "UPPER": true, "TRIM": true, "LTRIM": true, "RTRIM": true, "CONTAINS": true, "STARTS_WITH": true, "ENDS_WITH": true,
 	"SPLIT": true, "ARRAY_LENGTH": true,
 }
 
@@ -610,11 +610,12 @@ func (b *planBuilder) operation(op string, a []ValueSQL) (ValueSQL, error) {
 	switch op {
 	case "IF":
 		arity = 3
-	case "ABS", "IS_NULL", "unary+", "unary-", "unaryNOT", "LENGTH", "TRIM", "LTRIM", "RTRIM", "ARRAY_LENGTH":
+	case "ABS", "IS_NULL", "unary+", "unary-", "unaryNOT", "LENGTH", "LOWER", "UPPER", "TRIM", "LTRIM", "RTRIM", "ARRAY_LENGTH":
 		arity = 1
 	case "CONTAINS", "STARTS_WITH", "ENDS_WITH":
+		// The optional third argument is ignoreCase.
 		if len(a) == 3 {
-			return ValueSQL{}, diagnostic(ErrorCodeUnsupportedFunction, op+" with ignoreCase is outside the server profile (case mapping differs by engine and Unicode version)")
+			arity = 3
 		}
 	case "COALESCE":
 		arity = len(a)
@@ -737,7 +738,7 @@ func (b *planBuilder) operation(op string, a []ValueSQL) (ValueSQL, error) {
 		default:
 			v = l + " " + op + " (" + a[1].Value + ")::text::numeric"
 		}
-	case "LENGTH", "TRIM", "LTRIM", "RTRIM", "CONTAINS", "STARTS_WITH", "ENDS_WITH", "SPLIT", "ARRAY_LENGTH":
+	case "LENGTH", "LOWER", "UPPER", "TRIM", "LTRIM", "RTRIM", "CONTAINS", "STARTS_WITH", "ENDS_WITH", "SPLIT", "ARRAY_LENGTH":
 		var err error
 		if v, e, t, err = b.textOperation(op, a, e); err != nil {
 			return ValueSQL{}, err
