@@ -91,10 +91,12 @@ carries rounded seconds into minutes/hours. Custom date patterns accept
 in [metric formatting](metrics.md); custom durations use `{h}`, `{mm}`, `{ss}`,
 `{ms}`, etc. Invalid values or format settings remain readable with an explanatory
 tooltip. Null and empty values show an em dash; zero and false are preserved.
-Hover help never repeats visible text: a formatted value offers its raw value
-only when formatting hides it (rounding, units, percentages, not digit
-grouping alone), a chip its raw key only when relabelled, and `truncate` or
-`lines` text its full value only while clipped.
+Hover help avoids repeating visible text: a formatted value offers its raw
+value only when formatting hides it (rounding, units, percentages; not the
+display locale's digit grouping or trailing zeros), a chip its raw key only
+when relabelled, and `truncate` or `lines` text its full value only while
+clipped. The clipped-text title is set on hover, so static or server-rendered
+markup has no `title` attribute.
 
 ## JSON inspector
 

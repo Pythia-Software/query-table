@@ -42,8 +42,9 @@ export function renderCellDisplay({ value, field, presentation }: CellContext, d
   }
   const format = display.kind === "number" && display.decimals === undefined ? undefined
     : display.kind === "percent" ? { ...display, decimals: display.decimals ?? 2 } : display;
-  const result = formatMetricOutput(numeric, format, "locale" in display ? display.locale ?? "en-US" : "en-US");
+  const locale = "locale" in display ? display.locale ?? "en-US" : "en-US";
+  const result = formatMetricOutput(numeric, format, locale);
   if (result.error) return <span className="qt-cell-format-error" title={result.error}>{cellValueText(value)}</span>;
   // The raw value is hover help only when formatting hides it (rounding, units).
-  return <span title={numberTitle(cellValueText(value), result.text)}>{result.text}</span>;
+  return <span title={numberTitle(cellValueText(value), result.text, locale)}>{result.text}</span>;
 }

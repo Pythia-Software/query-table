@@ -15,7 +15,7 @@ import type {
   QueryTableApi,
 } from "@pythia-software/query-table-react";
 import { Icon } from "../Icon";
-import { distinctTitle } from "../hoverTitle";
+import { ClippedText } from "../hoverTitle";
 import { PickerAnchor } from "../PickerAnchor";
 import { FieldPicker } from "../FieldPicker";
 import { QueryFilterRow, type SelectPresentation } from "../QueryBuilder";
@@ -257,9 +257,7 @@ export function useGroupingPresentation<Row>(
             return (
               <span className="qt-column-label" data-column-role={role?.kind}>
                 <ColumnRoleBadge role={role} />
-                <span className="qt-chip-field" title={distinctTitle(label, shown)}>
-                  {shown}
-                </span>
+                <ClippedText className="qt-chip-field" text={shown} title={label} />
               </span>
             );
           }

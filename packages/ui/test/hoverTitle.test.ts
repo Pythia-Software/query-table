@@ -59,6 +59,15 @@ describe("hover help decisions", () => {
     expect(numberTitle("0.125", "12.50%")).toBe("0.125");
     expect(numberTitle("61.25", "00:01:01.250")).toBe("61.25");
   });
+  it("reads grouping, decimal marks and trailing zeros in the cell's locale", () => {
+    expect(numberTitle("1234567", "1.234.567", "de-DE")).toBeUndefined();
+    expect(numberTitle("1234.5", "1.234,5", "de-DE")).toBeUndefined();
+    expect(numberTitle("1234567", "1\u202f234\u202f567", "fr-FR")).toBeUndefined();
+    expect(numberTitle("-3", "\u22123", "sv-SE")).toBeUndefined();
+    expect(numberTitle("42", "42.00", "en-US")).toBeUndefined();
+    expect(numberTitle("3.14159", "3,14", "de-DE")).toBe("3.14159");
+    expect(numberTitle("1234.5", "1.234", "de-DE")).toBe("1234.5");
+  });
 });
 
 describe("cell hover help", () => {
@@ -67,6 +76,8 @@ describe("cell hover help", () => {
     expect(markup(1234567, { kind: "number", decimals: 0 })).toBe("<div><span>1,234,567</span></div>");
     expect(markup(3.14159, { kind: "number", decimals: 2 })).toContain('title="3.14159">3.14');
     expect(markup(0.125, { kind: "percent" })).toContain('title="0.125">12.50%');
+    expect(markup(42, { kind: "number", decimals: 2 })).toBe("<div><span>42.00</span></div>");
+    expect(markup(1234567, { kind: "number", decimals: 0, locale: "de-DE" })).toBe("<div><span>1.234.567</span></div>");
   });
   it("titles renamed chips with their raw key only", () => {
     const display: CellDisplay = { kind: "chip", labels: { ok: "Ready" } };
@@ -93,6 +104,14 @@ describe("cell hover help", () => {
     hover(span, true);
     expect(span.title).toBe("long text");
   });
+  it("drops a hover title once the text it described changes", () => {
+    act(() => root.render(createElement(ClippedText, { text: "first value" })));
+    const span = container.querySelector<HTMLElement>("span")!;
+    hover(span, true);
+    expect(span.title).toBe("first value");
+    act(() => root.render(createElement(ClippedText, { text: "second" })));
+    expect(span.hasAttribute("title")).toBe(false);
+  });
   it("always offers a different full label", () => {
     act(() => root.render(createElement(ClippedText, { text: "Mon", title: "Monday, 3 November 2026" })));
     const span = container.querySelector<HTMLElement>("span")!;
@@ -100,9 +119,15 @@ describe("cell hover help", () => {
     hover(span, false);
     expect(span.title).toBe("Monday, 3 November 2026");
   });
-  it("keeps JSON parse errors but not the visible preview", () => {
+  it("keeps JSON parse errors, and offers a valid preview only while clipped", () => {
     act(() => root.render(createElement(JsonCell, { value: '{"id":42}', display: { kind: "json" } })));
-    expect(container.querySelector(".qt-json-preview-text")!.hasAttribute("title")).toBe(false);
+    const preview = container.querySelector<HTMLElement>(".qt-json-preview-text")!;
+    expect(preview.tagName).toBe("CODE");
+    expect(preview.hasAttribute("title")).toBe(false);
+    hover(preview, true);
+    expect(preview.title).toBe(preview.textContent);
+    hover(preview, false);
+    expect(preview.hasAttribute("title")).toBe(false);
     act(() => root.render(createElement(JsonCell, { value: "{not json", display: { kind: "json" } })));
     expect(container.querySelector<HTMLElement>(".qt-json-preview-text")!.title).toMatch(/\S/);
   });

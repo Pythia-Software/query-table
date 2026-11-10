@@ -1,4 +1,4 @@
-import { decodeQuery } from "@pythia-software/query-table-core";
+import { decodeQuery, encodeQuery } from "@pythia-software/query-table-core";
 // Run against the local /grouping demo. Uses isolated browser storage.
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
@@ -430,6 +430,29 @@ try {
   );
   assert.ok(v2.every((item) => item.query.grouping && !item.view));
   await migration.close();
+  // A grouped column label that is cut off offers its full text on hover.
+  const longLabel = "Median duration of the busiest workers' runs across every queue this week";
+  const labels = await browser.newPage({ viewport: { width: 1440, height: 1050 } });
+  await labels.goto(url);
+  await labels.getByRole("navigation", { name: "Saved views" }).getByRole("button", { name: "Busy workers", exact: true }).click();
+  await labels.waitForURL(/[?&]q=/);
+  const busy = decodeQuery(new URL(labels.url()).searchParams.get("q"));
+  const withLongLabel = {
+    ...busy,
+    grouping: { ...busy.grouping, summaries: [...busy.grouping.summaries, { id: "long_label", op: "formula", expression: "MEDIAN([duration])", label: longLabel }] },
+    select: [...busy.select, { field: "long_label" }],
+  };
+  await labels.goto(`${url}?q=${encodeQuery(withLongLabel)}`);
+  const longChip = labels.locator(".qt-qb-row--select .qt-column-label .qt-chip-field").filter({ hasText: /^Median duration of/ });
+  await longChip.waitFor();
+  assert.ok(await longChip.evaluate((node) => node.scrollWidth > node.clientWidth), "The long grouped label is cut off");
+  assert.equal(await longChip.getAttribute("title"), null);
+  await longChip.hover();
+  assert.equal(await longChip.getAttribute("title"), longLabel);
+  const shortChip = labels.locator(".qt-qb-row--select .qt-column-label .qt-chip-field").first();
+  await shortChip.hover();
+  assert.ok(await shortChip.evaluate((node) => node.scrollWidth <= node.clientWidth && node.getAttribute("title") !== node.textContent), "A fitting label has no repeated tooltip");
+  await labels.close();
   assert.deepEqual(errors, []);
   console.log(
     "Representative browser checks passed: shared ordering, priorities, cancellation, invalidation, undo/redo, saved views, GROUP BY setup, column drafts, and mobile.",

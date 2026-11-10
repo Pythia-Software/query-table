@@ -3,6 +3,7 @@ import { jsonInspectionScopeKey, type JsonCellDisplay, type JsonInspectionState,
 import { ModalSurface } from "./AdaptiveOverlay";
 import { boundedJsonOption, inspectJsonValue, searchJsonEntries, JSON_MAX_CHARACTERS, JSON_MAX_ENTRIES, type JsonEntry, type JsonInspection } from "./jsonValue";
 import { Icon } from "./Icon";
+import { ClippedText } from "./hoverTitle";
 import { jsonBucketId, jsonLines, jsonSearchMatches, JSON_ARRAY_BUCKET_SIZE, type JsonSearchMatch } from "./jsonTree";
 
 export interface JsonInspectionResolution {
@@ -61,7 +62,7 @@ export function JsonCell(props: JsonCellProps): ReactNode {
       onClick={(event) => { event.stopPropagation(); openInspector(false); }} onDoubleClick={(event) => event.stopPropagation()}>
       <span className="qt-json-badge">{inspection.error ? "JSON?" : "JSON"}</span>
     </button>
-    <code className="qt-json-preview-text" title={inspection.error}>{inspection.preview}</code>
+    <ClippedText as="code" className="qt-json-preview-text" text={inspection.preview} title={inspection.error ?? inspection.preview} />
     {state.open && <JsonViewerModal {...props} preserveFocus={preserveFocus.current} inspectionState={state} onInspectionStateChange={change} onClose={() => change({ ...state, open: false })} />}
   </div>;
 }

@@ -9,16 +9,23 @@
   and property editor arrows say "Move up" and "Move down"; picker back arrows
   say "Back to fields" and "Back to columns"; reorder handles say "Reorder";
   and the metric actions menu says "Metric actions". Accessible names, state and
-  keyboard behaviour are unchanged; close buttons keep no tooltip.
+  keyboard behaviour are unchanged; screen readers may announce the tooltip as
+  the button's description. Close buttons keep no tooltip.
 - Tooltips no longer repeat visible text. Number and other formatted cells
-  offer the raw value only when formatting hides it (not for digit grouping
-  alone); chips offer their raw key only when relabelled; `truncate` and
-  `lines` text, compact metric axis labels, compact legend labels and list-bar
-  labels offer their full text only while clipped (or when the full label
-  differs); valid JSON previews and grouped column labels drop their duplicate
-  titles. JSON parse errors and other explanations remain.
+  offer the raw value only when formatting hides it: not for the cell locale's
+  digit grouping or trailing zeros (`1.234.567`, `42.00`). Chips offer their
+  raw key only when relabelled. `truncate` and `lines` text, valid JSON
+  previews, grouped column labels, compact metric axis labels, compact legend
+  labels and list-bar labels offer their full text only while clipped, or
+  always when the full label differs from the visible one. JSON parse errors
+  and other explanations remain.
+- As a result, the public `truncate` renderer and `truncate`/`lines` cell
+  displays no longer render a `title` attribute up front: it is set on hover
+  while the text is clipped, so static and server-rendered markup carries none.
+  Hosts whose tests or scrapers find cells by `title` need another selector.
 - Unavailable field picker items (`.qt-picker-item--disabled`) use the default
-  arrow cursor instead of `not-allowed`; they stay disabled and dimmed.
+  arrow cursor instead of `not-allowed` and no longer highlight on hover; they
+  stay disabled and dimmed.
 
 ## 1.0.4 — 2026-11-10
 
