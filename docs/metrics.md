@@ -557,6 +557,31 @@ grouping explicitly. An unsupported server operation never triggers a population
 download. Settings are
 serialized with the query and participate in metric computation identity.
 
+### Drawing intervals
+
+When buckets carry `lower` and `upper` (a metric with `interval`), vertical and
+horizontal bars draw an error-bar whisker with end caps on each bar that has
+finite bounds. Bars never stack (a bucket with several keys is one bar), so
+every bounded bar gets its own whisker. Line charts shade a low-opacity band in
+the series colour beneath the line, breaking it wherever a point has no bounds;
+a bounded point between gaps is drawn as a whisker. The value axis extends to
+the drawn bounds, so nothing is clipped by inferred extents. Explicit axis
+bounds still clip: a whisker cut by the axis, or a nonpositive lower bound on a
+logarithmic axis, runs to the plot edge without a cap and is never shifted.
+
+Hover text, tooltips and each mark's accessible label add the interval on its
+own line, for example `95% interval 2.2%–9.8%`: the level as a percent, and the
+bounds in the metric's value format. Lists, tables and single values show it as
+a title on the value. Compact axis labels and legends never include it.
+`display.showIntervals: false` hides whiskers and bands; the hover text remains.
+
+In the metrics editor, **Interval** (after Window & share) sets
+`interval.kind` to None, Proportion (Wilson) or Rate (Poisson), and a 90%, 95%
+or 99% level; 95% is stored by omitting `level`. Bar and line displays add
+**Show interval whiskers and bands**, bound to `display.showIntervals`. Turning
+the interval off, or choosing a box, histogram or scatter display, removes the
+interval and its display setting. Metrics that cannot have an interval report
+`validateMetric`'s message like any other definition issue.
 
 ### Windows, running values and shares
 

@@ -35,6 +35,15 @@
   cases, including the Pharos evidence (6 of 128, 8 of 52 and 6 of 15 turns),
   are in `schema/fixtures/metric-intervals.json`. See
   [Intervals for rates and shares](docs/metrics.md#intervals-for-rates-and-shares).
+- Metric charts draw intervals: an error-bar whisker on each vertical or
+  horizontal bar with `lower`/`upper` bounds and a shaded band beneath each
+  line series, breaking where a point has none. Value axes include the bounds;
+  explicit and logarithmic axes clamp them without shifting. Tooltips, mark
+  labels and list/table/value titles add `95% interval 2.2%–9.8%` in the
+  metric's value format. `display.showIntervals: false` hides whiskers and
+  bands. See [Drawing intervals](docs/metrics.md#drawing-intervals).
+- The metrics editor's **Interval** settings choose None, Proportion (Wilson)
+  or Rate (Poisson) with a 90/95/99% level, and toggle whiskers and bands.
 
 ## 1.0.4 — 2026-11-10
 

@@ -12,6 +12,7 @@ import {
   type InputHTMLAttributes,
 } from "react";
 import {
+  DEFAULT_METRIC_INTERVAL_LEVEL,
   MAX_AGGREGATIONS,
   MAX_METRIC_WINDOW_PERIODS,
   METRIC_FUNCTIONS,
@@ -33,6 +34,7 @@ import {
   type MetricLayout,
   type MetricValueFormat,
   type MetricDateGrouping,
+  type MetricInterval,
   type MetricShare,
   type MetricWindow,
   type WhereTerm,
@@ -554,13 +556,17 @@ export function MetricsEditor<Row>({
     // Distributions and scatters have no window or share, and hide their
     // settings, so leaving them set would strand an invalid metric.
     const single = !["box", "histogram", "scatter"].includes(kind);
-    const display =
+    let display =
       (!single && shareDisplay(selected.share, undefined).display) || chosen;
+    // They have no interval either; it leaves with its display setting.
+    if (!single) display = withoutIntervalDisplay(display);
     const next: {
       [K in keyof AggregationClause]?: AggregationClause[K] | undefined;
     } = {
       display: { ...display, kind },
-      ...(single ? {} : { window: undefined, share: undefined }),
+      ...(single
+        ? {}
+        : { window: undefined, share: undefined, interval: undefined }),
     };
     setFormatTarget(kind === "scatter" || kind === "histogram" ? "x" : "value");
     if (selected.sort)
@@ -1990,6 +1996,28 @@ export function MetricsEditor<Row>({
                       }
                     />
                   )}
+                {(!["box", "histogram", "scatter"].includes(chosen.kind) ||
+                  selected.interval) && (
+                  <MetricIntervalSettings
+                    interval={selected.interval}
+                    display={chosen}
+                    settings={settingsState("Interval")}
+                    onChange={(interval) =>
+                      patch(selected.id, {
+                        interval,
+                        // Turning the interval off drops its display setting.
+                        ...(interval ? {} : { display: withoutIntervalDisplay(chosen) }),
+                      })
+                    }
+                    onDisplayChange={(show) =>
+                      patch(selected.id, {
+                        display: show
+                          ? withoutIntervalDisplay(chosen)
+                          : { ...chosen, showIntervals: false },
+                      })
+                    }
+                  />
+                )}
                 <Settings
                   title="Ordering & limits"
                   {...settingsState("Ordering & limits")}
@@ -3271,6 +3299,107 @@ function MetricSeriesSettings({
           groups past the group limit.
         </p>
       )}
+    </Settings>
+  );
+}
+const INTERVAL_LEVELS = [0.9, 0.95, 0.99];
+const levelText = (level: number) =>
+  `${Number((level * 100).toPrecision(6))}%`;
+/** A display without the interval toggle, which defaults to drawn. */
+function withoutIntervalDisplay(display: MetricDisplay): MetricDisplay {
+  const { showIntervals: _showIntervals, ...rest } = display;
+  return rest;
+}
+/** A confidence interval on each value: Wilson for a proportion, exact
+ * Poisson for a rate. validateMetric reports metrics that cannot have one. */
+function MetricIntervalSettings({
+  interval,
+  display,
+  settings,
+  onChange,
+  onDisplayChange,
+}: {
+  interval: MetricInterval | undefined;
+  display: MetricDisplay;
+  settings: { open: boolean; onOpenChange: (open: boolean) => void };
+  onChange: (interval: MetricInterval | undefined) => void;
+  onDisplayChange: (show: boolean) => void;
+}) {
+  const level = interval?.level ?? DEFAULT_METRIC_INTERVAL_LEVEL;
+  // The default level is left implicit, so saved metrics stay minimal.
+  const withLevel = (kind: MetricInterval["kind"], next: number): MetricInterval =>
+    next === DEFAULT_METRIC_INTERVAL_LEVEL ? { kind } : { kind, level: next };
+  const levels = INTERVAL_LEVELS.includes(level)
+    ? INTERVAL_LEVELS
+    : [...INTERVAL_LEVELS, level].sort((a, b) => a - b);
+  const drawn = ["bar-vertical", "bar-horizontal", "line"].includes(display.kind);
+  return (
+    <Settings
+      title="Interval"
+      {...settings}
+      summary={
+        interval
+          ? `${levelText(level)} ${interval.kind === "rate" ? "rate (Poisson)" : "proportion (Wilson)"}`
+          : "None"
+      }
+    >
+      <label>
+        Interval
+        <select
+          aria-label="Interval"
+          value={interval?.kind ?? "none"}
+          onChange={(e) =>
+            onChange(
+              e.target.value === "none"
+                ? undefined
+                : withLevel(e.target.value as MetricInterval["kind"], level),
+            )
+          }
+        >
+          <option value="none">None</option>
+          <option value="proportion">Proportion (Wilson)</option>
+          <option value="rate">Rate (Poisson)</option>
+        </select>
+      </label>
+      {interval && (
+        <>
+          <label>
+            Confidence
+            <select
+              aria-label="Interval level"
+              value={String(level)}
+              onChange={(e) => onChange(withLevel(interval.kind, Number(e.target.value)))}
+            >
+              {levels.map((l) => (
+                <option key={l} value={String(l)}>
+                  {levelText(l)}
+                </option>
+              ))}
+            </select>
+          </label>
+          {drawn && (
+            <label className="qt-metric-date-toggle">
+              <input
+                type="checkbox"
+                aria-label="Show interval whiskers and bands"
+                checked={display.showIntervals !== false}
+                onChange={(e) => onDisplayChange(e.target.checked)}
+              />
+              Show interval whiskers and bands
+            </label>
+          )}
+        </>
+      )}
+      <p className="qt-metric-help">
+        {interval?.kind === "rate"
+          ? "An exact Poisson interval for a count per exposure, such as SUM([events]) / COUNT([id])."
+          : interval
+            ? "A Wilson interval for a share of units, such as COUNT_DISTINCT(IF(...)) / COUNT_DISTINCT(...)."
+            : "Bounds each value with a confidence interval."}{" "}
+        The metric must be one SUM, COUNT or COUNT_DISTINCT divided by
+        another, or a share.
+        {interval ? " Hover a value for its interval." : ""}
+      </p>
     </Settings>
   );
 }

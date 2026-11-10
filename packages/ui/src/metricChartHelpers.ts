@@ -7,6 +7,7 @@ import type {
 } from "./metricTypes";
 import { metricTimestamp, formatMetricOutput } from "./metricFormat";
 import { metricTupleKey } from "./metricColors";
+import { DEFAULT_METRIC_INTERVAL_LEVEL } from "@pythia-software/query-table-core";
 /** A cyclic slot's label: "09:00" for an hour of the day and the locale's
  * weekday ("Mon", or "Monday" in detail) for an ISO day of the week. */
 export function metricCycleLabel(
@@ -317,6 +318,115 @@ export function metricScale(
     baseline: log ? min : Math.max(min, Math.min(max, 0)),
     omitted: values.length - valid.length,
   };
+}
+
+/** A bucket's confidence interval (`clause.interval`), when it has finite,
+ * ordered bounds and no error. */
+export function metricBucketInterval(
+  b: MetricBucket,
+): { lower: number; upper: number } | undefined {
+  const { lower, upper } = b;
+  return !b.error && finiteMetricNumber(lower) && finiteMetricNumber(upper) && lower <= upper
+    ? { lower, upper }
+    : undefined;
+}
+
+/** The interval a chart draws as a whisker or band: none when the display
+ * turns intervals off. Hover text names the interval either way. */
+export function metricDrawnInterval(
+  clause: RenderingClause,
+  b: MetricBucket,
+): { lower: number; upper: number } | undefined {
+  return clause.display?.showIntervals === false ? undefined : metricBucketInterval(b);
+}
+
+/** The values a bar or line value axis spans: each drawable value and its
+ * drawn bounds, so whiskers and bands are never clipped by inferred extents.
+ * A log axis takes only positive bounds; a nonpositive bound is clamped to
+ * the axis when drawn (see metricIntervalSpan), never counted as an omitted
+ * value or shifted. */
+export function metricValueAxisValues(
+  clause: RenderingClause,
+  buckets: readonly MetricBucket[],
+  log = false,
+): number[] {
+  const out: number[] = [];
+  for (const b of buckets) {
+    if (b.error || !finiteMetricNumber(b.value)) continue;
+    out.push(b.value);
+    const interval = metricDrawnInterval(clause, b);
+    if (!interval || (log && b.value <= 0)) continue;
+    for (const bound of [interval.lower, interval.upper])
+      if (!log || bound > 0) out.push(bound);
+  }
+  return out;
+}
+
+/** The part of an interval inside an axis domain `[min, max]`, in data units.
+ * An end clamped to the domain (an explicit axis bound, or a nonpositive lower
+ * bound on a log axis) has no cap, so an open end reads as "continues beyond".
+ * Undefined when nothing of the interval is inside the domain. */
+export function metricIntervalSpan(
+  interval: { lower: number; upper: number },
+  min: number,
+  max: number,
+): { low: number; high: number; lowCap: boolean; highCap: boolean } | undefined {
+  if (!(interval.upper >= min) || !(interval.lower <= max) || !(min < max)) return undefined;
+  return {
+    low: Math.max(min, interval.lower),
+    high: Math.min(max, interval.upper),
+    lowCap: interval.lower >= min,
+    highCap: interval.upper <= max,
+  };
+}
+
+/** Hover and accessible text for a bucket's interval, e.g.
+ * "95% interval 2.2%–9.8%": the clause's level as a percent and the bounds in
+ * the metric's own value format. Undefined when the bucket has no bounds. */
+export function metricIntervalText(
+  clause: RenderingClause,
+  b: MetricBucket,
+  format: (value: number) => string,
+  locale?: string,
+): string | undefined {
+  const interval = metricBucketInterval(b);
+  if (!interval) return undefined;
+  return `${metricIntervalLevelText(clause, locale)} interval ${format(interval.lower)}–${format(interval.upper)}`;
+}
+
+/** A clause's interval level as a percent, "95%" by default. */
+export function metricIntervalLevelText(clause: RenderingClause, locale?: string): string {
+  return new Intl.NumberFormat(locale, {
+    style: "percent",
+    maximumFractionDigits: 2,
+  }).format(clause.interval?.level ?? DEFAULT_METRIC_INTERVAL_LEVEL);
+}
+
+/** A line series' interval band as one SVG path: an area over each run of
+ * consecutive points with bounds, broken where a point has none. A run of one
+ * point has no area and is returned in `singles`, to draw as a whisker. */
+export function metricBandPath<P extends { x: number; high: number; low: number }>(
+  points: ReadonlyArray<P | null>,
+): { d: string; singles: P[] } {
+  let d = "";
+  const singles: P[] = [];
+  let run: P[] = [];
+  const close = () => {
+    if (run.length === 1) singles.push(run[0]!);
+    else if (run.length > 1)
+      d += `M${run.map((p) => `${p.x},${p.high}`).join(" L")} L${run
+        .slice()
+        .reverse()
+        .map((p) => `${p.x},${p.low}`)
+        .join(" L")} Z `;
+    run = [];
+  };
+  for (const point of points) {
+    if (point) run.push(point);
+    else close();
+  }
+  close();
+  return { d: d.trim(), singles };
 }
 
 /** Interpolated quartiles can exceed observed Tukey inliers in sparse samples.

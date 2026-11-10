@@ -58,6 +58,29 @@ for (const [engineName, engine] of [["Chromium", chromium], ["WebKit", webkit]])
       await page.keyboard.press("Enter");
       assert.equal(await page.locator("[data-inspected]").textContent(), "Inspected 2026-10-02 / Bash", `${where}: keyboard`);
 
+      // Request 5: interval whiskers and bands fit the plot; hover names the interval.
+      const intervals = await page.locator("[data-chart^=interval] svg").evaluateAll(svgs => svgs.map(svg => {
+        // In SVG user units: the clip rectangle is the plot area.
+        const plot = svg.querySelector("clipPath rect").getBBox();
+        const inside = g => {
+          const box = g.getBBox();
+          return box.y >= plot.y - 0.5 && box.y + box.height <= plot.y + plot.height + 0.5
+            && box.x >= plot.x - 6 && box.x + box.width <= plot.x + plot.width + 6;
+        };
+        return {
+          chart: svg.closest("[data-chart]").dataset.chart,
+          whiskers: [...svg.querySelectorAll(".qt-metric-interval")].map(inside),
+          bands: [...svg.querySelectorAll(".qt-metric-interval-band")].map(inside),
+        };
+      }));
+      assert.deepEqual(intervals.map(c => [c.chart, c.whiskers.length, c.bands.length]),
+        [["interval-bars", 3, 0], ["interval-bars-compact", 3, 0], ["interval-line", 0, 2]], `${where}: whiskers on bounded bars, one band per series`);
+      for (const c of intervals) assert.ok([...c.whiskers, ...c.bands].every(Boolean), `${where}: ${c.chart} intervals stay inside the plot`);
+      const bounded = page.locator("[data-chart=interval-bars] .qt-metric-mark").nth(2);
+      await bounded.scrollIntoViewIfNeeded();
+      await bounded.hover();
+      await page.locator("[data-chart=interval-bars]").getByRole("tooltip").filter({ hasText: "95% interval 19.8%–64.3%" }).waitFor();
+
       assert.deepEqual(errors, [], `${where}: no page errors`);
       await page.screenshot({ path: new URL(`${engineName.toLowerCase()}-${width}.png`, screenshots).pathname, fullPage: true });
       await page.close();

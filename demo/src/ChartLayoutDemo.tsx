@@ -35,6 +35,24 @@ const series: MetricBucket[] = [
   ...days.map((day, i) => ({ keys: [day, "Bash"], value: [0, 120, 0][i]!, count: 1 })),
 ];
 const line: RenderingClause = { id: "line", op: "sum", field: "calls", groupBy: ["day", "tool"], label: "Calls by day and tool", display: { kind: "line" } };
+// Wilson intervals around a share of turns, as the local engine returns them.
+// The widest upper bound sets the axis; "short" has no bounds.
+const percent = { kind: "percent" as const, decimals: 1 };
+const shares: RenderingClause = {
+  id: "interval-bars", op: "count", expression: "SUM([calls])/NULLIF(COUNT(),0)", groupBy: ["repository"],
+  label: "Share with an interval", interval: { kind: "proportion" }, display: { kind: "bar-vertical", format: percent },
+};
+const shareBuckets: MetricBucket[] = [
+  { keys: [repositories[0]!], value: 0.047, count: 128, lower: 0.022, upper: 0.098 },
+  { keys: [repositories[1]!], value: 0.154, count: 52, lower: 0.08, upper: 0.275 },
+  { keys: [repositories[2]!], value: 0.4, count: 15, lower: 0.198, upper: 0.643 },
+  { keys: [repositories[3]!], value: 0.2, count: 3 },
+];
+const intervalLine: RenderingClause = { ...shares, id: "interval-line", groupBy: ["day", "tool"], label: "Daily share with an interval", display: { kind: "line", format: percent } };
+const intervalSeries: MetricBucket[] = [
+  ...days.map((day, i) => ({ keys: [day, "Read"], value: [0.1, 0.2, 0.15][i]!, count: 40, lower: [0.04, 0.1, 0.07][i]!, upper: [0.22, 0.34, 0.28][i]! })),
+  ...days.map((day, i) => ({ keys: [day, "Bash"], value: [0.5, 0.6, 0.55][i]!, count: 12, ...(i === 1 ? {} : { lower: [0.25, 0, 0.3][i]!, upper: [0.75, 0, 0.78][i]! }) })),
+];
 
 /** Synthetic chart layouts for the browser checks in demo/chart-layout-test.mjs. */
 export function ChartLayoutDemo() {
@@ -58,6 +76,9 @@ export function ChartLayoutDemo() {
         {card(columns, labelled)}
         {card(pie, pairs)}
         {card(line, series)}
+        {card(shares, shareBuckets)}
+        {card({ ...shares, display: { ...shares.display!, kind: "bar-horizontal" } }, shareBuckets, true)}
+        {card(intervalLine, intervalSeries)}
       </div>
     </main>
   );
