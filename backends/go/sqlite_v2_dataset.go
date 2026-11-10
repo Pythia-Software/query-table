@@ -265,6 +265,8 @@ func (d sqliteV2Dataset) readV2Metric(ctx context.Context, tx *sql.Tx, p metricS
 			return out, err
 		}
 	}
+	shape := metricOtherShape(spec)
+	var otherRow map[string]any
 	rows, e := tx.QueryContext(ctx, p.SQL, p.Args...)
 	if e != nil {
 		return out, e
@@ -366,12 +368,25 @@ func (d sqliteV2Dataset) readV2Metric(ctx context.Context, tx *sql.Tx, p metricS
 			b.Y = &yv
 			b.YError = sqliteErrorCode(v["y_error"])
 		}
-		if spec.Interval != nil && v["interval_numerator_error"] == nil && v["interval_denominator_error"] == nil {
-			applyMetricInterval(&b, spec.Interval, ratio.scale, v["interval_numerator"], v["interval_denominator"])
+		if _, ok := v["ratio_numerator"]; ok {
+			b.ratioParts = [2]any{v["ratio_numerator"], v["ratio_denominator"]}
+			b.ratioPartError = v["ratio_numerator_error"] != nil || v["ratio_denominator_error"] != nil
+		}
+		if spec.Interval != nil && !b.ratioPartError {
+			applyMetricInterval(&b, spec.Interval, ratio.scale, b.ratioParts[0], b.ratioParts[1])
+		}
+		if _, ok := v["other_groups"]; ok && otherRow == nil {
+			otherRow = v
 		}
 		out.Buckets = append(out.Buckets, b)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	if otherRow != nil {
+		out.Other = shape.remainder(spec, otherSumsFromRow(otherRow, len(shape.columns())))
+	}
+	return out, nil
 }
 func (d sqliteV2Dataset) computedCapability(name, typ string) ComputedFieldCapability {
 	if typ == "null" {
@@ -456,6 +471,15 @@ func cloneSQLiteMetric(m MetricResult) MetricResult {
 			}
 			b.Distribution = &c
 		}
+	}
+	if m.Other != nil {
+		other := *m.Other
+		other.Keys = append([]any{}, other.Keys...)
+		if other.Lower != nil {
+			lower, upper := *other.Lower, *other.Upper
+			other.Lower, other.Upper = &lower, &upper
+		}
+		m.Other = &other
 	}
 	return m
 }

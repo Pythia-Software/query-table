@@ -311,7 +311,7 @@
     },
     "MetricBucket": {
       "x-ts-name": "MetricBucketV3", "x-swift-name": "AggregationBucket", "x-swift-init": false,
-      "x-go-extra": ["// A measured minCount's value for calendar filtering; never serialized.", "minMeasure any", "minMeasureError bool"],
+      "x-go-extra": ["// A measured minCount's value for calendar filtering; never serialized.", "minMeasure any", "minMeasureError bool", "// A ratio's numerator and denominator, for the Other remainder of calendar metrics; never serialized.", "ratioParts [2]any", "ratioPartError bool"],
       "description": "One group of a metric result. `keys` has one entry per groupBy field ([] for a grand total); a null key is the NULL bucket.",
       "type": "object", "required": ["keys", "value", "count"],
       "properties": {
@@ -343,7 +343,7 @@
         "error": { "type": "string", "description": "The metric could not be computed; siblings are unaffected." },
         "errorCode": { "$ref": "#/$defs/ErrorCode", "x-ts-type": "ErrorCode | (string & {})", "description": "The machine-readable code of error; present with it. A newer server may send a code this client does not know." },
         "hiddenGroups": { "type": "integer", "x-go-repr": "*int64", "description": "Groups removed by minCount; present whenever it is set." },
-        "other": { "$ref": "#/$defs/MetricBucket", "x-go-repr": "*MetricBucket", "description": "The exact omitted additive quantity beyond groupLimit, when an executor computes it." }
+        "other": { "$ref": "#/$defs/MetricBucket", "x-go-repr": "*MetricBucket", "description": "The exact remainder of the groups beyond groupLimit (hidden groups excluded): the sum of a single SUM or COUNT, or a ratio of SUM or COUNT parts evaluated on the pooled parts, with its interval. Absent when the executor does not compute one: clients key off its presence." }
       }
     },
     "FieldType": { "type": "string", "enum": ["text", "number", "enum", "datetime", "bool", "textarray"] },

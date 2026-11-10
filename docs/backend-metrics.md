@@ -134,8 +134,7 @@ executor emits no bucket. `groupCount` counts only kept groups, while kept plus
 hidden groups are checked against `MaxGroups`. Calendar metrics in
 `QueryDatasetV3` apply `MinCount` in Go after empty buckets are filled; filled
 buckets (count 0) are never hidden or counted, and hidden observed buckets are
-not refilled. Hidden groups are not part of any additive Other remainder an
-adapter derives.
+not refilled. Hidden groups are never part of the Other remainder.
 
 `QueryDatasetV3` (both dialects) implements both controls and sets `hiddenGroups` on the metric result; `QueryCapabilitiesV3` advertises `metricFilters`/`metricMinCount`/`metricMinCountMeasures`. The frontend refuses those clauses individually when a host does not advertise them.
 `AggSpec.MinCount` is a `MetricMinCount` (`Min`, plus `Distinct` or `Sum`), read
@@ -169,6 +168,26 @@ true for both dialects. The numerics (`metric_interval.go`) port those of
 `packages/core/src/metricIntervals.ts`, and `schema/fixtures/metric-intervals.json`
 is executed by the SQLite and PostgreSQL integration suites as well as by the
 TypeScript engines.
+
+## Other remainders
+
+`MetricResult.Other` is the exact remainder of the groups `GroupLimit` omits
+for a single SUM or COUNT, or for a ratio of SUM or COUNT parts (the shapes
+`AggSpec.Interval` accepts, without COUNT_DISTINCT); see
+[Other remainders](metrics.md#other-remainders). The compiled plan ranks the
+kept groups (after `MinCount`) with `ROW_NUMBER()` in the result order and adds
+window aggregates over the groups ranked beyond the limit, so every returned
+row carries `other_groups`, `other_count`, `other_errors` and, for each pooled
+column (`value`, or the ratio's `ratio_numerator` and `ratio_denominator`), its
+sum, its non-NULL values and its errors. No additional statement runs and the
+`LIMIT` still bounds the rows read. `readV2Metric` builds the bucket: the
+summed value, or the metric's expression evaluated in Go on the pooled parts
+(its multiplications, divisions, literals and NULLIFs in order, with NULL
+propagation and `divide_by_zero` as in SQL), with interval bounds when the
+metric has `Interval`. PostgreSQL computes per-group values in `numeric`, so a
+remainder evaluated in double precision can differ from a group with the same
+parts in the last bits. Calendar metrics rank and limit in Go and pool their omitted
+buckets there; an empty fill-in adds 0.
 
 ## Required service behavior and limits
 

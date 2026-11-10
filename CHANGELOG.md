@@ -137,6 +137,18 @@
   milliseconds. They use the card's decimals unless the metric sets a format.
 ### Added
 
+- Other remainders in every engine, and for ratios. When `groupLimit` omits
+  groups, DuckDB and the Go SQLite and PostgreSQL executors now return
+  `other` like the local engine: the sum of a single SUM or COUNT, and for a
+  ratio of SUM or COUNT parts (such as `SUM([failures])/NULLIF(SUM([calls]),0)`)
+  the formula evaluated on the parts pooled over the omitted groups, with
+  interval bounds when the metric has `interval`. Groups hidden by `minCount`
+  are never part of it; distinct counts and averages still have none.
+  Clients key off whether `other` is present. Go pools the omitted
+  groups with window aggregates in the same statement, and DuckDB reports
+  limited results as `coverage: "exact"` like the other engines. The local
+  engine's remainder is `metricOtherRemainder`. See
+  [Other remainders](docs/metrics.md#other-remainders).
 - Confidence intervals for ratio metrics. `interval: { kind: "proportion" }`
   (Wilson score) or `{ kind: "rate" }` (exact Garwood Poisson), with an
   optional `level` (default 0.95), returns `lower` and `upper` on every bucket

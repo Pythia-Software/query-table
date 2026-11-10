@@ -151,6 +151,7 @@ export {
   compareMetricValues,
   sortMetricBuckets,
   evaluateMetrics,
+  metricOtherRemainder,
 } from "./metrics";
 export type { MetricPlan, MetricReductionOptions, MetricPopulationSupport, MetricEvaluationOptions } from "./metrics";
 export * from "./metricDistributions";

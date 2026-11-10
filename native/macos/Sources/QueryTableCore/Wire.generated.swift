@@ -1100,7 +1100,7 @@ public struct AggregationResultEntry: Codable, Equatable, Sendable {
   public var errorCode: ErrorCode?
   /// Groups removed by minCount; present whenever it is set.
   public var hiddenGroups: Int?
-  /// The exact omitted additive quantity beyond groupLimit, when an executor computes it.
+  /// The exact remainder of the groups beyond groupLimit (hidden groups excluded): the sum of a single SUM or COUNT, or a ratio of SUM or COUNT parts evaluated on the pooled parts, with its interval. Absent when the executor does not compute one: clients key off its presence.
   public var other: AggregationBucket?
   enum CodingKeys: String, CodingKey {
     case id

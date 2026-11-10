@@ -151,8 +151,9 @@ describe("local engine", () => {
     expect(metricPopulationError(share, { intervals: true })).toBeUndefined();
   });
   it("never changes a metric's values, ranking, errors or Other", () => {
+    const bare = ({ lower: _l, upper: _u, intervalError: _e, ...b }: AggregationBucket) => b;
     const strip = (r: ReturnType<typeof evaluateMetrics>) =>
-      r.metrics.map((m) => ({ ...m, buckets: m.buckets.map(({ lower: _l, upper: _u, intervalError: _e, ...b }) => b) }));
+      r.metrics.map((m) => ({ ...m, buckets: m.buckets.map(bare), ...(m.other ? { other: bare(m.other) } : {}) }));
     const ratios = [
       // With groupLimit 2 of 3 groups, so Other must not appear with an interval.
       "SUM([events])/COUNT()",

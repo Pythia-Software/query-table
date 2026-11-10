@@ -2,6 +2,7 @@ package postgrestests
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -57,35 +58,48 @@ func checkIntervalMetric(t *testing.T, metric qt.MetricResult, expected map[stri
 		return ok && math.Abs(g-w) <= tolerance*math.Max(1, math.Abs(w))
 	}
 	for i, item := range want {
-		w, b := item.(map[string]any), metric.Buckets[i]
-		keys, _ := json.Marshal(b.Keys)
-		wantKeys, _ := json.Marshal(w["keys"])
-		label := fmt.Sprintf("bucket %d %s", i, keys)
-		if string(keys) != string(wantKeys) || float64(b.Count) != w["count"] {
-			t.Fatalf("%s: count %d, want %v %v", label, b.Count, w["keys"], w["count"])
+		checkIntervalBucket(t, fmt.Sprint("bucket ", i), metric.Buckets[i], item.(map[string]any), near)
+	}
+	if want, ok := expected["other"].(map[string]any); ok {
+		if metric.Other == nil {
+			t.Fatalf("no Other remainder, want %v", want)
 		}
-		if w["error"] == true {
-			if b.Error == "" || b.Lower != nil || b.Upper != nil {
-				t.Fatalf("%s: want an error without bounds, got %#v", label, b)
-			}
-			continue
-		}
-		if (b.IntervalError != "") != (w["intervalError"] == true) || (b.IntervalError != "" && b.IntervalError != "interval_domain") {
-			t.Fatalf("%s: intervalError %q, want %v", label, b.IntervalError, w["intervalError"])
-		}
-		if b.Error != "" || !near(b.Value, w["value"]) {
-			t.Fatalf("%s: value %v (%s), want %v", label, b.Value, b.Error, w["value"])
-		}
-		if _, has := w["lower"]; has != (b.Lower != nil) || has != (b.Upper != nil) {
-			t.Fatalf("%s: bounds %v %v, want %v %v", label, b.Lower, b.Upper, w["lower"], w["upper"])
-		}
-		if b.Lower != nil && (!near(*b.Lower, w["lower"]) || !near(*b.Upper, w["upper"])) {
-			t.Fatalf("%s: bounds %v–%v, want %v–%v", label, *b.Lower, *b.Upper, w["lower"], w["upper"])
-		}
+		checkIntervalBucket(t, "other", *metric.Other, want, near)
+	} else if metric.Other != nil {
+		t.Fatalf("unexpected Other remainder %#v", *metric.Other)
 	}
 }
 
-func TestPostgresMetricIntervalFixture(t *testing.T) {
+func checkIntervalBucket(t *testing.T, name string, b qt.MetricBucket, w map[string]any, near func(any, any) bool) {
+	t.Helper()
+	keys, _ := json.Marshal(b.Keys)
+	wantKeys, _ := json.Marshal(w["keys"])
+	label := fmt.Sprintf("%s %s", name, keys)
+	if string(keys) != string(wantKeys) || float64(b.Count) != w["count"] {
+		t.Fatalf("%s: count %d, want %v %v", label, b.Count, w["keys"], w["count"])
+	}
+	if w["error"] == true {
+		if b.Error == "" || b.Lower != nil || b.Upper != nil {
+			t.Fatalf("%s: want an error without bounds, got %#v", label, b)
+		}
+		return
+	}
+	if (b.IntervalError != "") != (w["intervalError"] == true) || (b.IntervalError != "" && b.IntervalError != "interval_domain") {
+		t.Fatalf("%s: intervalError %q, want %v", label, b.IntervalError, w["intervalError"])
+	}
+	if b.Error != "" || !near(b.Value, w["value"]) {
+		t.Fatalf("%s: value %v (%s), want %v", label, b.Value, b.Error, w["value"])
+	}
+	if _, has := w["lower"]; has != (b.Lower != nil) || has != (b.Upper != nil) {
+		t.Fatalf("%s: bounds %v %v, want %v %v", label, b.Lower, b.Upper, w["lower"], w["upper"])
+	}
+	if b.Lower != nil && (!near(*b.Lower, w["lower"]) || !near(*b.Upper, w["upper"])) {
+		t.Fatalf("%s: bounds %v–%v, want %v–%v", label, *b.Lower, *b.Upper, w["lower"], w["upper"])
+	}
+}
+
+func setupIntervals(t *testing.T) (*sql.DB, qt.QueryDatasetV3, intervalFixture, time.Time) {
+	t.Helper()
 	db, d := fixture(t)
 	data, err := os.ReadFile("../../schema/fixtures/metric-intervals.json")
 	if err != nil {
@@ -117,6 +131,11 @@ func TestPostgresMetricIntervalFixture(t *testing.T) {
 		"messages": {Name: "messages", Kind: qt.FieldNumber, Expr: "r.messages", ExpressionNumeric: true, Sortable: true, ServerFilter: true},
 		"at":       {Name: "at", Kind: qt.FieldDatetime, Expr: "r.at", Sortable: true, ServerFilter: true, Groupable: &yes},
 	}}
+	return db, d, f, now
+}
+
+func TestPostgresMetricIntervalFixture(t *testing.T) {
+	db, d, f, now := setupIntervals(t)
 	if !d.Capabilities().MetricIntervals {
 		t.Fatal("metricIntervals is not advertised")
 	}
@@ -133,5 +152,43 @@ func TestPostgresMetricIntervalFixture(t *testing.T) {
 			}
 			checkIntervalMetric(t, out.Metrics[0], c.Expected, f.Tolerance)
 		})
+	}
+}
+
+// TestMetricIntervalRequests executes the requests
+// metric-intervals-parity.test.ts builds with the TypeScript client
+// (QT_METRIC_REQUESTS, a JSON array) over the fixture, and writes their
+// results to QT_METRIC_RESULTS.
+func TestMetricIntervalRequests(t *testing.T) {
+	in, out := os.Getenv("QT_METRIC_REQUESTS"), os.Getenv("QT_METRIC_RESULTS")
+	if in == "" || out == "" {
+		t.Skip("run by metric-intervals-parity.test.ts")
+	}
+	db, d, _, _ := setupIntervals(t)
+	data, err := os.ReadFile(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var requests []json.RawMessage
+	if err = json.Unmarshal(data, &requests); err != nil {
+		t.Fatal(err)
+	}
+	results := []qt.QueryResultV3{}
+	for _, raw := range requests {
+		q, err := qt.DecodeQueryRequestV3(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		results = append(results, result)
+	}
+	if data, err = json.Marshal(results); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(out, data, 0o600); err != nil {
+		t.Fatal(err)
 	}
 }

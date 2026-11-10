@@ -4,7 +4,9 @@ import { DuckDBInstance, type DuckDBConnection as NativeConnection } from "@duck
 import {
   EMPTY_QUERY,
   normalizeQueryState,
+  planMetricSeries,
   toQueryRequestV3,
+  type AggregationResultEntry,
   type AggregationBucket,
   type AggregationClause,
   type FieldSchema,
@@ -16,7 +18,7 @@ interface Case {
   name: string;
   planned?: boolean;
   metric: AggregationClause;
-  expected: { error?: true; groupCount?: number; hiddenGroups?: number; buckets?: Record<string, unknown>[] };
+  expected: { error?: true; groupCount?: number; hiddenGroups?: number; buckets?: Record<string, unknown>[]; other?: Record<string, unknown> };
 }
 const fixture = JSON.parse(
   readFileSync(new URL("../../../schema/fixtures/metric-intervals.json", import.meta.url), "utf8"),
@@ -61,19 +63,37 @@ describe("shared metric interval fixture (DuckDB)", () => {
   for (const c of fixture.cases) {
     // DuckDB fails a whole metric on a division by zero rather than one
     // bucket, with or without an interval.
-    const divides = c.expected.buckets?.some((bucket) => "error" in bucket && (bucket.keys as unknown[])[0] === "orphan");
-    it.skipIf(c.planned || divides)(c.name, async () => {
-      // Send invalid intervals too, so the backend's own validation runs.
-      const { interval, ...plain } = c.metric;
-      const query = normalizeQueryState({ ...EMPTY_QUERY, limit: 100, aggregations: [plain] });
-      const request = toQueryRequestV3(query, fixture.schema, backend.capabilities, undefined, { now: Date.parse(fixture.now), rows: false });
-      const result = await backend.execute({ ...request, metrics: [{ ...request.metrics[0]!, ...(interval ? { interval } : {}) }] });
-      const entry = result.metrics[0]!;
+    const divides = [...(c.expected.buckets ?? []), ...(c.expected.other ? [c.expected.other] : [])].some((bucket) => "error" in bucket);
+    it.skipIf(divides)(c.name, async () => {
+      const now = Date.parse(fixture.now);
+      const run = async (query: typeof planned) => {
+        const request = toQueryRequestV3(query, fixture.schema, backend.capabilities, undefined, { now, rows: false });
+        return (await backend.execute(request)).metrics;
+      };
+      // A planned case runs its plain metrics here and combines them on the
+      // client, as executeMetrics does.
+      const planned = normalizeQueryState({ ...EMPTY_QUERY, limit: 100, aggregations: [c.metric] });
+      const series = planMetricSeries(planned, fixture.schema, { now });
+      let entry: AggregationResultEntry;
+      if (series) {
+        const metrics: AggregationResultEntry[] = [];
+        for (const query of series.queries) metrics.push(...(await run(query)));
+        entry = series.combine(metrics)[0]!;
+      } else {
+        // Send invalid intervals too, so the backend's own validation runs.
+        const { interval, ...plain } = c.metric;
+        const query = normalizeQueryState({ ...EMPTY_QUERY, limit: 100, aggregations: [plain] });
+        const request = toQueryRequestV3(query, fixture.schema, backend.capabilities, undefined, { now, rows: false });
+        const result = await backend.execute({ ...request, metrics: [{ ...request.metrics[0]!, ...(interval ? { interval } : {}) }] });
+        entry = result.metrics[0]!;
+      }
       if (c.expected.error) return expect(entry.errorCode, entry.error).toBe("metric_interval");
       expect(entry.error).toBeUndefined();
       expect(entry.groupCount).toBe(c.expected.groupCount);
       expect(entry.hiddenGroups).toBe(c.expected.hiddenGroups);
       expect(c.expected.buckets!.map((bucket) => ("error" in bucket ? { ...bucket, error: true } : bucket))).toEqual(entry.buckets.map(project));
+      if (c.expected.other) expect(c.expected.other).toEqual(project(entry.other!));
+      else expect(entry.other).toBeUndefined();
     });
   }
 });

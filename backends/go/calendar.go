@@ -626,6 +626,8 @@ func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggS
 	sortCalendarBuckets(result.Buckets, spec)
 	result.GroupCount = int64(len(result.Buckets))
 	if spec.GroupLimit > 0 && len(result.Buckets) > spec.GroupLimit {
+		shape := metricOtherShape(spec)
+		result.Other = shape.remainder(spec, otherSumsFromBuckets(result.Buckets[spec.GroupLimit:], len(shape.columns())))
 		result.Buckets = result.Buckets[:spec.GroupLimit]
 	}
 	return result, nil

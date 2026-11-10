@@ -289,6 +289,9 @@ type MetricBucket struct {
 	// A measured minCount's value for calendar filtering; never serialized.
 	minMeasure      any
 	minMeasureError bool
+	// A ratio's numerator and denominator, for the Other remainder of calendar metrics; never serialized.
+	ratioParts     [2]any
+	ratioPartError bool
 }
 
 // MetricResult: One metric's result, in request order.
@@ -307,8 +310,10 @@ type MetricResult struct {
 	ErrorCode ErrorCode `json:"errorCode,omitempty"`
 	// Groups removed by minCount; present whenever it is set.
 	HiddenGroups *int64 `json:"hiddenGroups,omitempty"`
-	// The exact omitted additive quantity beyond groupLimit, when an executor
-	// computes it.
+	// The exact remainder of the groups beyond groupLimit (hidden groups
+	// excluded): the sum of a single SUM or COUNT, or a ratio of SUM or COUNT
+	// parts evaluated on the pooled parts, with its interval. Absent when the
+	// executor does not compute one: clients key off its presence.
 	Other *MetricBucket `json:"other,omitempty"`
 }
 

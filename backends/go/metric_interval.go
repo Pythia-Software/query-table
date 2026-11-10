@@ -10,9 +10,10 @@ import (
 //
 // The metric must be a ratio of two additive aggregates, numerator over
 // denominator (SUM, COUNT or COUNT_DISTINCT), multiplied or divided only by
-// positive constants, with NULLIF(x, 0) allowed around either part. The
-// compiler returns both reductions beside the value (interval_numerator and
-// interval_denominator), and readV2Metric derives the bounds from them:
+// positive constants, with NULLIF(x, 0) allowed around either part or the
+// whole ratio. The compiler returns both reductions beside the value
+// (ratio_numerator and ratio_denominator), and readV2Metric derives the
+// bounds from them:
 //
 //   - proportion: the Wilson score interval, for 0 <= numerator <= denominator;
 //   - rate: the exact (Garwood) Poisson interval on the numerator, divided by
@@ -44,6 +45,8 @@ const metricIntervalDomain = "interval_domain"
 type metricRatio struct {
 	numerator, denominator *exprNode
 	scale                  float64
+	// root is the whole expression, for evaluating it on pooled parts.
+	root *exprNode
 }
 
 const metricIntervalShape = "an interval needs a ratio of two aggregates (SUM, COUNT or COUNT_DISTINCT), multiplied or divided only by positive constants"
@@ -94,7 +97,64 @@ func metricRatioParts(n *exprNode) (metricRatio, error) {
 	if len(above) != 1 || len(below) != 1 || math.IsInf(scale, 0) || !(scale > 0) {
 		return metricRatio{}, diagnostic(ErrorCodeMetricInterval, metricIntervalShape)
 	}
-	return metricRatio{numerator: above[0], denominator: below[0], scale: scale}, nil
+	return metricRatio{numerator: above[0], denominator: below[0], scale: scale, root: n}, nil
+}
+
+// additive reports whether both parts are SUM or COUNT, which add across
+// groups (COUNT_DISTINCT does not).
+func (r metricRatio) additive() bool {
+	sum := func(n *exprNode) bool { op := strings.ToUpper(n.op); return op == "SUM" || op == "COUNT" }
+	return sum(r.numerator) && sum(r.denominator)
+}
+
+// value evaluates the metric's expression on values of its two parts, with
+// the expression's own semantics for the operations a ratio may use: a NULL
+// operand gives NULL, a zero divisor (of a non-NULL dividend) the
+// divide_by_zero error, NULLIF(x, 0) NULL for a zero x, and literals and
+// arithmetic in the expression's order. A nil part is NULL.
+func (r metricRatio) value(numerator, denominator *float64) (any, string) {
+	var eval func(*exprNode) (*float64, string)
+	eval = func(n *exprNode) (*float64, string) {
+		switch op := strings.ToUpper(n.op); {
+		case n == r.numerator:
+			return numerator, ""
+		case n == r.denominator:
+			return denominator, ""
+		case op == "LITERAL":
+			v := n.value.(float64)
+			return &v, ""
+		case op == "UNARY+":
+			return eval(n.args[0])
+		case op == "NULLIF":
+			x, err := eval(n.args[0])
+			if err != "" || x == nil || *x == 0 {
+				return nil, err
+			}
+			return x, ""
+		}
+		a, err := eval(n.args[0])
+		if err != "" {
+			return nil, err
+		}
+		b, err := eval(n.args[1])
+		if err != "" || a == nil || b == nil {
+			return nil, err
+		}
+		if n.op == "*" {
+			v := *a * *b
+			return &v, ""
+		}
+		if *b == 0 {
+			return nil, "divide_by_zero"
+		}
+		v := *a / *b
+		return &v, ""
+	}
+	v, err := eval(r.root)
+	if err != "" || v == nil {
+		return nil, err
+	}
+	return *v, ""
 }
 
 // validateMetricInterval checks an interval's options and the metric's shape.
