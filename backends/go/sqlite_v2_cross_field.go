@@ -112,7 +112,7 @@ func (c *sqliteReductionCache) crossFieldPlan(ctx context.Context, tx *sql.Tx, p
 				candidates = append(candidates, f.integer.SQL)
 			}
 			if direct {
-				candidates = []string{f.integer.NonnegativeSQL, f.integer.SQL}
+				candidates = f.integer.attempts()
 			}
 			for _, candidate := range candidates {
 				if direct {

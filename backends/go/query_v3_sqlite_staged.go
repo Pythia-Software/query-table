@@ -90,7 +90,7 @@ func (d QueryDatasetV3) sqliteStagedGroups(ctx context.Context, tx *sql.Tx, spec
 			numeric = append(numeric, field.Expr)
 		}
 	}
-	candidates := []string{integer.NonnegativeSQL, integer.SQL}
+	candidates := integer.attempts()
 	if len(numeric) > 0 {
 		rows, err := tx.QueryContext(ctx, "SELECT "+strings.Join(numeric, ",")+" FROM ("+o.SourceSQL+") AS r LIMIT 64", o.SourceArgs...)
 		if err != nil {
