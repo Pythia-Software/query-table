@@ -5,14 +5,18 @@
 ### Fixed
 
 - Screen fitting no longer treats a wrapping host link as an unshrinkable
-  one-line control. A column's control minimum now measures its cells at
-  their min-content width: content a host renderer lets wrap (for example
-  `<span style="white-space: normal"><a href>long title</a></span>`, clamped
-  to two lines) needs only its longest unbreakable word, so the column fits
-  and the title wraps as it did in 0.9.6. Since 0.9.7 such a column took its
-  longest title on one line as its floor, and the table scrolled
-  horizontally at every desktop width. Buttons, Detail modes, JSON previews,
-  nowrap links and `SelectConfig.minWidth` keep their minimums.
+  one-line control. Control cells are now floored at their min-content width,
+  laid out with the cell's own CSS (including `classNames.cell`): content a
+  host renderer lets wrap, such as
+  `<span style="white-space: normal"><a href>long title</a></span>` clamped to
+  two lines, needs only its longest unbreakable word, so the column fits and
+  the title wraps as it did in 0.9.6. Since 0.9.7 such a column took its
+  longest title on one line as its floor, and the table scrolled horizontally
+  at every desktop width. Host buttons inside a wrapping wrapper or a
+  `flex-wrap` bar may now wrap or stack as well. The library's Detail buttons,
+  JSON previews and links, nowrap host controls and `SelectConfig.minWidth`
+  keep their minimums. A wrapping link whose label is one unbreakable token
+  (a URL or path) still floors at the whole token.
 
 ## 1.0.4 — 2026-11-10
 

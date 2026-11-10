@@ -1355,14 +1355,15 @@ const SHRINKABLE_SELECTOR = "a.qt-link, .qt-json-preview-text";
 /** Shortest a link label is cut to before its column stops narrowing. */
 const SHRINKABLE_LINK_PX = 96;
 /**
- * Probe for the narrowest a control-holding cell can get without clipping.
- * Cell content is measured on one line (`nowrap`), but at its min-content
- * width: content whose own `white-space` allows wrapping (a host link title
- * clamped to two lines, for instance) counts only its longest unbreakable
- * run, so it wraps rather than setting a one-line floor. Buttons, inputs and
- * nowrap links are unbreakable, so they keep their full width.
+ * Probe for the narrowest a control-holding cell can get without clipping:
+ * the cell content's min-content width, laid out with the cell's own CSS (it
+ * inherits the cell's `white-space`, `nowrap` under the default theme). Content
+ * stays on one line unless its CSS lets it wrap: a host link title with
+ * `white-space: normal` counts only its longest unbreakable run, and a host
+ * button in a wrapping wrapper or a `flex-wrap` bar may wrap or stack too. The
+ * library's Detail buttons, JSON previews and `a.qt-link` never wrap.
  */
-const CONTROL_PROBE_STYLE = "position:absolute;left:0;top:0;width:min-content;white-space:nowrap;visibility:hidden;pointer-events:none;";
+const CONTROL_PROBE_STYLE = "position:absolute;left:0;top:0;width:min-content;visibility:hidden;pointer-events:none;";
 
 /** Widest control content (plus padding) among cells that hold controls; 0 when none do. */
 function measureControlWidth(cells: HTMLElement[]): number {

@@ -137,13 +137,17 @@ and grouping) only grows content-fitted columns, so a live table stays calm;
 any change to the query refits from scratch. Content fitting stops at 800px.
 No column is fitted below what its buttons and links need (links shorten to
 an ellipsis first); in screen mode, if those minimums exceed the screen, the
-table scrolls horizontally. A minimum counts only what cannot wrap: content a
-host renderer lets wrap (its computed `white-space` is `normal`, `pre-wrap`,
-`pre-line` or `break-spaces`, such as a linked title clamped to two lines)
-needs only its longest unbreakable word, so the column narrows and the link
-wraps. Nowrap host links, buttons and inputs keep their full width. Set
-`select.minWidth` on a field whose host renderer needs room the table cannot
-measure.
+table scrolls horizontally. A column's floor is the min-content width of its
+control cells, laid out with the cell's own CSS: one line, unless your
+renderer's CSS (or `classNames.cell`) lets it wrap. A linked title with
+`white-space: normal`, for example, needs only its longest unbreakable word
+(a single character with `overflow-wrap: anywhere`), so the column narrows and
+the link wraps. A host button in a wrapping wrapper or a `flex-wrap` bar may
+likewise wrap its label or stack. A wrapping link whose label is one
+unbreakable token, such as a URL or path, still needs the whole token. The
+library's Detail buttons, JSON previews and links do not wrap under the default theme, so they keep
+their full minimums. Set `select.minWidth` on a field whose host renderer
+needs room the table cannot measure.
 
 Set `fit` on a default or initial query to opt in; a stored query without
 `fit` has no live sizing. The mode travels in the encoded `?q=` parameter
