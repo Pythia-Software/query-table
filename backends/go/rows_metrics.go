@@ -117,7 +117,9 @@ func newRowMetrics(ctx context.Context, q metricRequest, s Schema, o PlanOptions
 // rowMetricShape reads one compiled metric's operation and bindings.
 func rowMetricShape(spec AggSpec, s Schema, bound func(string, FieldSpec) bool) (rowMetricSpec, error) {
 	m := rowMetricSpec{spec: spec, reduction: -1, threshold: -1}
-	if spec.Scope == "shownRows" || spec.DateGrouping != nil || spec.ExpressionY != "" {
+	// Intervals need a ratio's parts, which this single-aggregate reducer
+	// does not return; refuse them explicitly rather than drop the bounds.
+	if spec.Scope == "shownRows" || spec.DateGrouping != nil || spec.ExpressionY != "" || spec.Interval != nil {
 		return m, fmt.Errorf("%w: metric %s shape", errRowsUnsupported, spec.ID)
 	}
 	expression := metricExpression(spec)

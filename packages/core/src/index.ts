@@ -156,6 +156,7 @@ export type { MetricPlan, MetricReductionOptions, MetricPopulationSupport, Metri
 export * from "./metricDistributions";
 export * from "./metricDates";
 export * from "./metricSeries";
+export * from "./metricIntervals";
 export * from "./properties";
 export * from "./propertyStorage";
 export * from "./grouping";

@@ -119,6 +119,13 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 	if spec.Display != nil && spec.Display.Kind == "scatter" && spec.ExpressionY == "" {
 		return SQLPlan{}, diagnostic(ErrorCodePairedExpressionRequired, "scatter requires both X and Y aggregate expressions")
 	}
+	var ratio metricRatio
+	if spec.Interval != nil {
+		var err error
+		if ratio, err = validateMetricInterval(spec); err != nil {
+			return SQLPlan{}, err
+		}
+	}
 	b, e := newPlanDialect(ctx, s, o, sqlite)
 	if e != nil {
 		return SQLPlan{}, e
@@ -380,6 +387,14 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 		return SQLPlan{}, e
 	}
 	v = b.metricNumber(v)
+	var intervalParts [2]ValueSQL
+	if spec.Interval != nil {
+		// The interval's exact parts, from this metric's own reductions.
+		if ratio, e = metricRatioParts(n); e != nil {
+			return SQLPlan{}, e
+		}
+		intervalParts = [2]ValueSQL{leaves[ratio.numerator], leaves[ratio.denominator]}
+	}
 	extraValues := make([]ValueSQL, len(extraNodes))
 	for i, node := range extraNodes {
 		if extraValues[i], e = lower(node); e != nil {
@@ -426,6 +441,11 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 	if minNode != nil {
 		leaf := leaves[minNode]
 		fields = append(fields, leaf.Value+" AS min_measure", leaf.Error+" AS min_measure_error")
+	}
+	if spec.Interval != nil {
+		num, den := intervalParts[0], intervalParts[1]
+		fields = append(fields, num.Value+" AS interval_numerator", num.Error+" AS interval_numerator_error",
+			den.Value+" AS interval_denominator", den.Error+" AS interval_denominator_error")
 	}
 	b.stage("SELECT " + strings.Join(fields, ",") + " FROM " + b.rel)
 	order, e := metricOrder(spec, len(groups), y != nil, false)

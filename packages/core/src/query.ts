@@ -1,6 +1,7 @@
 import { parseJsonInspections, type ScopedJsonInspectionState } from "./jsonInspection";
 import { normalizePropertyView, type PropertyViewState } from "./properties";
 import type { MetricDisplay, MetricLayout, MetricDistribution, MetricSort, MetricScope, MetricDateGrouping, MetricWindow, MetricShare, MetricMinCountOf } from "./metricTypes";
+import type { MetricInterval } from "./wire.generated";
 import { normalizeMetricOptions } from "./metricNormalize";
 import type { GroupingState, SummaryColumn, RepresentativeOrder, LinkSpec, LinkDestination } from "./grouping";
 import { GROUP_KEY_INTERVALS, groupKeyFields, type CalendarGroupKey, type GroupKey } from "./groupKeys";
@@ -193,6 +194,11 @@ export interface AggregationClause {
   window?: MetricWindow;
   /** Express each bucket as a fraction of a total of the same measure. */
   share?: MetricShare;
+  /** A confidence interval on every bucket (`lower`/`upper`): a Wilson
+   *  interval for a proportion, an exact Poisson interval for a rate. The
+   *  metric must be a ratio of two SUM, COUNT or COUNT_DISTINCT aggregates,
+   *  scaled only by positive constants, or a share. See docs/metrics.md. */
+  interval?: MetricInterval;
 }
 
 /** Detail affordances are presentation state, never backend SELECT fields. */

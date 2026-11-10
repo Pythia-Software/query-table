@@ -70,6 +70,28 @@ type MetricMinCountSum struct {
 	Sum string `json:"sum"`
 }
 
+// MetricInterval: A confidence interval around a ratio metric, returned as
+// lower and upper on every bucket. The metric must be a ratio of two additive
+// aggregates, numerator over denominator (SUM, COUNT or COUNT_DISTINCT),
+// optionally scaled by constants and with NULLIF(denominator, 0): for example
+// COUNT_DISTINCT(IF([events]>0,[turn_id],NULL))/COUNT_DISTINCT([turn_id]) or
+// SUM([events])/NULLIF(COUNT_DISTINCT([message_id])/1000,0). proportion: a
+// share of units (0 <= numerator <= denominator), Wilson score interval. rate:
+// a count over an exposure, the exact (Garwood) Poisson interval on the
+// numerator divided by the exposure. Bounds use the exact numerator and
+// denominator of each bucket and are in the metric's units, after its constant
+// scale. An interval is an annotation: it never changes a bucket's value,
+// error, ranking or the result's other buckets. Parts outside the kind's domain
+// (a negative or non-integer numerator; for a proportion, a non-integer
+// denominator or a numerator above it) give the bucket intervalError
+// interval_domain instead of bounds. Both methods assume independent units;
+// clustered or over-dispersed counts make the intervals too narrow.
+type MetricInterval struct {
+	Kind string `json:"kind"`
+	// Confidence level, 0.5 to 0.9999; omitted is 0.95.
+	Level *float64 `json:"level,omitempty"`
+}
+
 // AggSpec: One metric as sent: an AggregationClause without its presentation
 // (label, layout, display other than scatter, window, share).
 type AggSpec struct {
@@ -92,6 +114,9 @@ type AggSpec struct {
 	// The metric's own predicate, ANDed with the table WHERE.
 	Where    []WhereTerm    `json:"where,omitempty"`
 	MinCount MetricMinCount `json:"minCount,omitzero"`
+	// Return lower and upper bounds on every bucket; see MetricInterval. Servers
+	// advertise it as metricIntervals.
+	Interval *MetricInterval `json:"interval,omitempty"`
 }
 
 // CalendarGroupKey: A grouping key that buckets a datetime field by calendar
@@ -155,9 +180,12 @@ type QueryCapabilitiesV3 struct {
 	MetricMinCount bool `json:"metricMinCount"`
 	// Also executes an object minCount.
 	MetricMinCountMeasures bool `json:"metricMinCountMeasures"`
-	Version                int  `json:"version"`
-	GroupedRows            bool `json:"groupedRows"`
-	CalendarGrouping       bool `json:"calendarGrouping"`
+	// Executes MetricSpec.interval (proportion and rate) and returns lower and
+	// upper bounds.
+	MetricIntervals  bool `json:"metricIntervals"`
+	Version          int  `json:"version"`
+	GroupedRows      bool `json:"groupedRows"`
+	CalendarGrouping bool `json:"calendarGrouping"`
 	// Executes the hourOfDay and dayOfWeek intervals.
 	CalendarCycles bool `json:"calendarCycles"`
 	// Executes calendar grouping keys.
@@ -250,6 +278,14 @@ type MetricBucket struct {
 	// The scatter y value.
 	Y      *any   `json:"y,omitempty"`
 	YError string `json:"yError,omitempty"`
+	// The interval's lower bound (MetricSpec.interval), in the value's units.
+	// Present only with upper, when the value is a number.
+	Lower *float64 `json:"lower,omitempty"`
+	// The interval's upper bound.
+	Upper *float64 `json:"upper,omitempty"`
+	// Why a bucket with a numeric value has no interval: interval_domain when its
+	// parts are outside the interval kind's domain. The value is unchanged.
+	IntervalError string `json:"intervalError,omitempty"`
 	// A measured minCount's value for calendar filtering; never serialized.
 	minMeasure      any
 	minMeasureError bool
@@ -514,6 +550,9 @@ const (
 	ErrorCodeMinCountField ErrorCode = "min_count_field"
 	// minCount cannot be combined with a distribution.
 	ErrorCodeMinCountDistribution ErrorCode = "min_count_distribution"
+	// An interval needs a single-value ratio of two additive aggregates (SUM,
+	// COUNT or COUNT_DISTINCT), scaled by positive constants.
+	ErrorCodeMetricInterval ErrorCode = "metric_interval"
 	// The field cannot be a group key (for a computed field: not in the host's
 	// grouping allowlist).
 	ErrorCodeGroupDisabled ErrorCode = "group_disabled"
@@ -668,6 +707,7 @@ func ErrorCodes() []ErrorCode {
 		ErrorCodeMinCountGrouping,
 		ErrorCodeMinCountField,
 		ErrorCodeMinCountDistribution,
+		ErrorCodeMetricInterval,
 		ErrorCodeGroupDisabled,
 		ErrorCodeGrouping,
 		ErrorCodeRepresentative,

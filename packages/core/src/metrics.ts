@@ -1,5 +1,5 @@
 import type { ComputedExecution } from "./computed";
-import { QueryError, failedMetric } from "./errors";
+import { QueryError, failedMetric, type ErrorCode } from "./errors";
 import { isComputedField } from "./computed";
 import {
   compileFormula,
@@ -35,6 +35,11 @@ import {
 } from "./query";
 import { opsForField } from "./ops";
 import { hasMetricSeries, planMetricSeries, validateMetricSeries } from "./metricSeries";
+import {
+  applyMetricInterval,
+  metricRatioParts,
+  validateMetricInterval,
+} from "./metricIntervals";
 import { applyQuery } from "./apply";
 import { prepareGrouping, withoutGrouping, type GroupedRow } from "./grouping";
 import { computedInputAllowed } from "./apply";
@@ -526,6 +531,7 @@ export function validateMetric(
     if (c.scope !== "shownRows" && compiled.some(hasRegex))
       throw new FormulaError("Regex is unavailable for all-matching metrics.");
     validateMetricSeries(c, compiled[0]!);
+    validateMetricInterval(c, compiled[0]!);
     return [];
   } catch (e) {
     return [
@@ -533,6 +539,7 @@ export function validateMetric(
         message: e instanceof Error ? e.message : String(e),
         from: e instanceof FormulaError ? e.from : 0,
         to: e instanceof FormulaError ? e.to : 1,
+        ...(e instanceof FormulaError && e.code ? { code: e.code } : {}),
       },
     ];
   }
@@ -698,11 +705,13 @@ export interface MetricPopulationSupport {
   minCount?: boolean | undefined;
   /** A `minCount` object: distinct values or a sum of a field. */
   minCountMeasures?: boolean | undefined;
+  /** `interval`: lower and upper bounds on each bucket. */
+  intervals?: boolean | undefined;
 }
 /** A clause the executor cannot run exactly gets its own error; it is never
  * sent with `where`/`minCount` silently dropped. */
 export function metricPopulationError(
-  clause: Pick<AggregationClause, "where" | "minCount">,
+  clause: Pick<AggregationClause, "where" | "minCount" | "interval">,
   support: MetricPopulationSupport,
 ): string | undefined {
   if (clause.where?.length && !support.filters)
@@ -711,6 +720,8 @@ export function metricPopulationError(
     return "This server does not support a minimum rows per group.";
   if (metricMinCountMeasure(clause) && !support.minCountMeasures)
     return "This server does not support a minimum of distinct values or a sum per group.";
+  if (clause.interval !== undefined && !support.intervals)
+    return "This server does not support metric intervals.";
   return undefined;
 }
 export function metricDependencies(
@@ -756,6 +767,7 @@ export function metricComputationKey(
         minCount: c.minCount,
         window: c.window,
         share: c.share,
+        interval: c.interval,
         distribution: distributionActive(c) ? c.distribution : undefined,
       }))
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
@@ -1258,7 +1270,7 @@ export function evaluateMetrics<Row>(
           throw new QueryError("resource_limit", "At most 20 metrics are allowed.");
         const diagnostics = validateMetric(c, schema, options.resolveComputed);
         if (diagnostics.length)
-          throw new QueryError("invalid_metric", diagnostics.map((d) => d.message).join(" "), { metricId: c.id });
+          throw new QueryError((diagnostics[0]!.code ?? "invalid_metric") as ErrorCode, diagnostics.map((d) => d.message).join(" "), { metricId: c.id });
         const ps = metricPlans(c, schema, options.resolveComputed);
         if (ps.some(hasRegex) && !options.evaluateInput)
           throw Error(
@@ -1541,8 +1553,8 @@ export function evaluateMetrics<Row>(
           p: FormulaPlan,
           rs: Row[],
           inputErrors: Set<number>,
+          cache = new Map<FormulaNode, FormulaResult>(),
         ): FormulaResult => {
-          const cache = new Map<FormulaNode, FormulaResult>();
           return checkedMetricResult(
             formulaRuntime(p.ast, {}, (node) => {
               if (!aggregates.has(node.name)) return undefined;
@@ -1572,6 +1584,11 @@ export function evaluateMetrics<Row>(
           );
         };
         const populations = new Map<AggregationBucket, number[]>();
+        // An interval reads the exact numerator and denominator reductions.
+        const ratio =
+          c.interval && !distributionActive(c)
+            ? metricRatioParts(ps[0]!.ast)
+            : undefined;
         // An object minCount measures each group with its own aggregate, with
         // the same semantics as that aggregate in a metric expression.
         const minPlan = metricMinCountPlan(c, schema, options.resolveComputed);
@@ -1608,10 +1625,21 @@ export function evaluateMetrics<Row>(
               if (ps[1]) bucket.y = empty(ps[1]);
               return bucket;
             }
-            const inputErrors = new Set<number>();
-            const x = reduce(ps[0]!, g.rows, inputErrors);
+            const inputErrors = new Set<number>(),
+              reductions = new Map<FormulaNode, FormulaResult>();
+            const x = reduce(ps[0]!, g.rows, inputErrors, reductions);
             bucket.value = scalar(x.value);
             if (x.error) bucket.error = x.error;
+            // A part the value's evaluation skipped leaves the value without
+            // a number, and so without an interval.
+            if (ratio)
+              applyMetricInterval(
+                bucket,
+                c.interval!,
+                ratio.scale,
+                reductions.get(ratio.numerator),
+                reductions.get(ratio.denominator),
+              );
             if (ps[1]) {
               const y = reduce(ps[1], g.rows, inputErrors);
               bucket.y = scalar(y.value);
@@ -1669,6 +1697,7 @@ export function evaluateMetrics<Row>(
           const omitted = buckets.slice(c.groupLimit),
             ast = ps[0]!.ast;
           if (
+
             !distributionActive(c) &&
             ast.kind === "call" &&
             ["SUM", "COUNT"].includes(ast.name) &&

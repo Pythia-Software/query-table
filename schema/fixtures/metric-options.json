@@ -28,6 +28,13 @@
       "include"
     ]
   },
+  "interval": {
+    "kind": [
+      "proportion",
+      "rate"
+    ],
+    "level": "number"
+  },
   "dateGrouping": {
     "field": "string",
     "interval": [
@@ -89,7 +96,8 @@
     "colorBy": "string",
     "maxGroups": "positiveInteger",
     "showOther": "boolean",
-    "boxMean": "boolean"
+    "boxMean": "boolean",
+    "showIntervals": "boolean"
   },
   "scale": {
     "mode": [

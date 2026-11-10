@@ -141,6 +141,35 @@ adapter derives.
 `AggSpec.MinCount` is a `MetricMinCount` (`Min`, plus `Distinct` or `Sum`), read
 from and written as either a number or `{"min":5,"distinct":"conversation_id"}`.
 
+## Metric intervals
+
+`AggSpec.Interval` (`interval` on the wire: `{"kind":"proportion"|"rate","level":0.95}`)
+asks for a confidence interval on every bucket. The compiler accepts it only on
+a scalar metric whose expression is a ratio of two SUM, COUNT or COUNT_DISTINCT
+aggregates, scaled by positive literals and optionally wrapped in
+`NULLIF(x, 0)`; anything else, an unknown kind or a level outside 0.5–0.9999
+is the clause error `metric_interval`. The two parts are reductions the metric
+already computes, so the final stage only adds `interval_numerator`,
+`interval_denominator` and their error sidecars beside `value`; the value,
+its error and the ranking are unchanged. `readV2Metric` then sets
+`Lower`/`Upper` from the parts: the Wilson score interval for `proportion`, and
+the exact Poisson (Garwood) interval divided by the denominator for `rate`,
+both multiplied by the expression's constant scale. A bucket with an error, a
+NULL value or a zero denominator has no bounds. Parts outside the kind's domain
+(a negative or non-integer numerator; for a proportion, a non-integer
+denominator or a numerator above it) set `IntervalError` to `interval_domain`
+instead. The quantile functions return 0, +Inf or NaN rather than panic, and
+such bounds are omitted. The row-streaming reducer refuses intervals, so they
+always run on a plan that returns both parts.
+
+The same applies to calendar metrics, the SQLite batch with its fused and
+reused reductions (results are reused only between metrics with the same
+interval), and the staged executor. `QueryCapabilitiesV3.MetricIntervals` is
+true for both dialects. The numerics (`metric_interval.go`) port those of
+`packages/core/src/metricIntervals.ts`, and `schema/fixtures/metric-intervals.json`
+is executed by the SQLite and PostgreSQL integration suites as well as by the
+TypeScript engines.
+
 ## Required service behavior and limits
 
 A metric's stages are one statement and see one PostgreSQL statement snapshot; the row page, count and every metric of a request run in the execution's REPEATABLE READ transaction. Catalogue consistency and data consistency are distinct. A nonempty requested `snapshot` requires `PlanOptions.ValidateSnapshot`, whose callback must verify access/expiry and bind the active transaction to that snapshot; only `ExecuteIn` can use a genuinely retained host transaction. A nonempty `planToken` requires `PlanOptions.ValidatePlanToken`, which must verify actor, dataset, profile, snapshot and expiry. Both are rejected when no host validation is provided. The result's `execution` echoes the resolved revisions and plan identity; bind any reusable plan token to actor/dataset/schema/profile/snapshot and expiry. A fingerprint is not an authorization token. Refresh/retry once on `definition_changed`, then surface persistent churn.

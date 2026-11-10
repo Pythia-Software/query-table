@@ -502,6 +502,10 @@ var (
 		enumOption("reduce", "total", "mean"),
 		enumOption("partial", "omit", "include"),
 	}
+	metricIntervalOptions = []optionSpec{
+		enumOption("kind", "proportion", "rate"),
+		{key: "level", kind: optionNumber},
+	}
 	metricDateOptions = []optionSpec{
 		{key: "field", kind: optionString},
 		enumOption("interval", "hour", "day", "week", "month", "year", "hourOfDay", "dayOfWeek"),
@@ -528,6 +532,7 @@ var (
 		{key: "maxGroups", kind: optionPositiveInteger},
 		{key: "showOther", kind: optionBoolean},
 		{key: "boxMean", kind: optionBoolean},
+		{key: "showIntervals", kind: optionBoolean},
 	}
 	metricScaleOptions = []optionSpec{
 		enumOption("mode", "linear", "log"),
@@ -633,6 +638,17 @@ func normalizeLinkMetricOptions(raw *jsValue) *jsValue {
 			out.set("window", w)
 		} else {
 			m.diagnostics = append(m.diagnostics, "Invalid metric window.")
+		}
+	}
+	if interval := raw.get("interval"); interval != nil {
+		if interval.isRecord() {
+			i := m.copy(interval, metricIntervalOptions)
+			if !i.get("kind").truthy() {
+				m.diagnostics = append(m.diagnostics, "Invalid metric interval.")
+			}
+			out.set("interval", i)
+		} else {
+			m.diagnostics = append(m.diagnostics, "Invalid metric interval.")
 		}
 	}
 	if dateGrouping := raw.get("dateGrouping"); dateGrouping != nil {

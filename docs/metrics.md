@@ -174,6 +174,98 @@ rows)", or "(fewer than 5 distinct Conversation values)" and "(fewer than 10
 total Calls)". `metricMinCount`, `metricMinCountMeasure` and
 `metricMinCountText` read either form.
 
+## Intervals for rates and shares
+
+A ratio metric can carry a confidence interval, so a bar of 15 turns at 40% and
+a bar of 128 turns at 4.7% no longer look equally certain:
+
+```ts
+// Share of turns with an event, with a Wilson 95% interval per group.
+const turnsWithEvent: AggregationClause = {
+  id: "turn-share", op: "count", groupBy: ["prompt_length"],
+  expression: "COUNT_DISTINCT(IF([events]>0,[turn_id],NULL)) / NULLIF(COUNT_DISTINCT([turn_id]), 0)",
+  interval: { kind: "proportion" },
+  display: { kind: "bar-horizontal", format: { kind: "percent", decimals: 1 } },
+};
+// Events per 1,000 messages read, with an exact Poisson 90% interval.
+const eventRate: AggregationClause = {
+  id: "per-thousand", op: "count", groupBy: ["model"],
+  expression: "SUM([events]) / NULLIF(COUNT_DISTINCT([message_id]) / 1000, 0)",
+  interval: { kind: "rate", level: 0.9 },
+};
+```
+
+Every bucket with a numeric value then has `lower` and `upper`, in the value's
+own units: after any constant scaling such as `/1000` or `100*`. `level` is
+0.5 to 0.9999 and defaults to 0.95; levels outside that range would round the
+quantile probabilities to 0 or 1.
+
+An interval is an annotation: turning it on never changes a bucket's value,
+error, ranking, `minCount`, `groupLimit` or Other remainder.
+
+- **The metric must be a ratio.** The expression is one SUM, COUNT or
+  COUNT_DISTINCT (the numerator) over another (the denominator), multiplied or
+  divided only by positive number literals, with `NULLIF(x, 0)` allowed around
+  either part and parentheses anywhere: `A/B`, `A/NULLIF(B,0)`,
+  `100*A/B`, `A/(B/1000)` and `A/NULLIF(B/1000,0)` all qualify. Any other shape
+  (an AVG, a difference, a third aggregate, a negative or zero constant, a
+  plain `op`/`field` metric), an unknown kind or a level out of range is a
+  clause error with the `metric_interval` code in every engine. Write a mean of
+  a 0/1 flag as
+  `SUM([flag]) / COUNT([flag])` to give it an interval.
+- **`proportion`** is a share of units that have a property: the numerator
+  counts some of the units the denominator counts (0 ≤ numerator ≤
+  denominator). The interval is the Wilson score interval for numerator
+  successes in denominator trials. It is 0 at the bottom when the numerator is
+  0 and 1 at the top when every unit counts.
+- **`rate`** is a count over an exposure. The interval is the exact (Garwood)
+  Poisson interval for the numerator count, divided by the denominator: the
+  gamma quantiles at (1 − level)/2 with shape numerator and at (1 + level)/2 with
+  shape numerator + 1. A zero count has a lower bound of 0.
+- **Exact parts.** Bounds come from the exact numerator and denominator each
+  engine already reduces for the value, never from the rounded value. A group
+  with an error, or without a value (a zero denominator under `NULLIF`, an
+  empty calendar interval), has no interval; an error always takes precedence.
+  A zero denominator without `NULLIF` is the usual division error.
+- **Counts only.** The numerator counts events or units, so it must be a
+  nonnegative integer; a proportion's denominator must be an integer at least
+  as large, while a rate's exposure may be fractional. A group whose parts are
+  outside this domain keeps its value and gets `intervalError:
+  "interval_domain"` instead of bounds, so a wrong kind is visible without
+  changing the chart. This rejects the common misuse, a SUM of amounts such as
+  revenue or durations, but the engine cannot know units: `proportion` on a
+  share is meaningful only when the SUM counts units.
+- **Totals.** A grand total (`groupBy: []`) is one bucket like any other.
+  Groups hidden by `minCount` have no bucket.
+- **Windows and shares.** A window total pools each part over the window
+  before the interval is computed, so a 7-day point's interval covers its 7
+  days of counts; a mean per interval has no interval. A share
+  (`share: "total"` or `"group0"`) is a proportion of its total: use
+  `kind: "proportion"`, and the interval is computed from the bucket's sum or
+  count and the total it is divided by. These are planned on the client from
+  plain metrics like the window or share itself, so the server needs no
+  interval support for them. Occurrence means, distributions and scatters
+  refuse an interval.
+
+**What the intervals assume.** Both methods treat the counted units as
+independent: Bernoulli trials for Wilson, Poisson events for Garwood. They
+describe sampling noise under that assumption only. Clustered or over-dispersed
+data makes them too narrow: events that cluster within a message (a rate of
+`SUM([events]) / COUNT_DISTINCT([message_id])`), or turns that cluster within
+sessions or users (a share of turns). `kind` names the quantity and picks the
+method today; a later optional `method` (Jeffreys, Clopper–Pearson, an
+over-dispersed rate) can be added without changing these defaults.
+
+Executors advertise support as `queryCapabilities.metricIntervals`. The local
+engine, DuckDB, and the Go SQLite and PostgreSQL executors (`QueryDatasetV3`)
+all compute intervals and return the same bounds; the shared cases are in
+`schema/fixtures/metric-intervals.json`. `toQueryRequestV3` refuses a clause
+with an interval when a server does not advertise it, and the metric executor
+gives that clause its own error, so a host on an older server sees an
+explicit "does not support metric intervals" rather than bars without them.
+`metricRatioParts`, `metricIntervalBounds` and `applyMetricInterval` are
+exported for hosts that compute their own buckets.
+
 ## Population scope
 
 - `allMatching` (default): all rows matching the query filters, excluding the table limit/offset.

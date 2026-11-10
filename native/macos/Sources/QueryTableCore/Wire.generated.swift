@@ -367,6 +367,31 @@ public enum MetricMinCount: Codable, Equatable, Sendable {
   }
 }
 
+/// A confidence interval around a ratio metric, returned as lower and upper on every bucket. The metric must be a ratio of two additive aggregates, numerator over denominator (SUM, COUNT or COUNT_DISTINCT), optionally scaled by constants and with NULLIF(denominator, 0): for example COUNT_DISTINCT(IF([events]>0,[turn_id],NULL))/COUNT_DISTINCT([turn_id]) or SUM([events])/NULLIF(COUNT_DISTINCT([message_id])/1000,0). proportion: a share of units (0 <= numerator <= denominator), Wilson score interval. rate: a count over an exposure, the exact (Garwood) Poisson interval on the numerator divided by the exposure. Bounds use the exact numerator and denominator of each bucket and are in the metric's units, after its constant scale. An interval is an annotation: it never changes a bucket's value, error, ranking or the result's other buckets. Parts outside the kind's domain (a negative or non-integer numerator; for a proportion, a non-integer denominator or a numerator above it) give the bucket intervalError interval_domain instead of bounds. Both methods assume independent units; clustered or over-dispersed counts make the intervals too narrow.
+public struct MetricInterval: Codable, Equatable, Sendable {
+  public var kind: String
+  /// Confidence level, 0.5 to 0.9999; omitted is 0.95.
+  public var level: Double?
+  enum CodingKeys: String, CodingKey {
+    case kind
+    case level
+  }
+  public init(kind: String, level: Double? = nil) {
+    self.kind = kind
+    self.level = level
+  }
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    kind = try c.decode(String.self, forKey: .kind)
+    level = try c.decodeIfPresent(Double.self, forKey: .level)
+  }
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: CodingKeys.self)
+    try c.encode(kind, forKey: .kind)
+    try c.encodeIfPresent(level, forKey: .level)
+  }
+}
+
 /// One metric as sent: an AggregationClause without its presentation (label, layout, display other than scatter, window, share).
 public struct MetricSpecV3: Codable, Equatable, Sendable {
   public var dateGrouping: MetricDateGrouping?
@@ -388,6 +413,8 @@ public struct MetricSpecV3: Codable, Equatable, Sendable {
   /// The metric's own predicate, ANDed with the table WHERE.
   public var whereTerms: [WhereTerm]?
   public var minCount: MetricMinCount?
+  /// Return lower and upper bounds on every bucket; see MetricInterval. Servers advertise it as metricIntervals.
+  public var interval: MetricInterval?
   enum CodingKeys: String, CodingKey {
     case dateGrouping
     case display
@@ -403,8 +430,9 @@ public struct MetricSpecV3: Codable, Equatable, Sendable {
     case groupBy
     case whereTerms = "where"
     case minCount
+    case interval
   }
-  public init(dateGrouping: MetricDateGrouping? = nil, display: MetricDisplayHint? = nil, expression: String? = nil, expressionY: String? = nil, scope: String? = nil, sort: [MetricSort]? = nil, groupLimit: Int? = nil, distribution: MetricDistribution? = nil, id: String, op: String, field: String? = nil, groupBy: [String] = [], whereTerms: [WhereTerm]? = nil, minCount: MetricMinCount? = nil) {
+  public init(dateGrouping: MetricDateGrouping? = nil, display: MetricDisplayHint? = nil, expression: String? = nil, expressionY: String? = nil, scope: String? = nil, sort: [MetricSort]? = nil, groupLimit: Int? = nil, distribution: MetricDistribution? = nil, id: String, op: String, field: String? = nil, groupBy: [String] = [], whereTerms: [WhereTerm]? = nil, minCount: MetricMinCount? = nil, interval: MetricInterval? = nil) {
     self.dateGrouping = dateGrouping
     self.display = display
     self.expression = expression
@@ -419,6 +447,7 @@ public struct MetricSpecV3: Codable, Equatable, Sendable {
     self.groupBy = groupBy
     self.whereTerms = whereTerms
     self.minCount = minCount
+    self.interval = interval
   }
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -436,6 +465,7 @@ public struct MetricSpecV3: Codable, Equatable, Sendable {
     groupBy = try c.decode([String].self, forKey: .groupBy)
     whereTerms = try c.decodeIfPresent([WhereTerm].self, forKey: .whereTerms)
     minCount = try c.decodeIfPresent(MetricMinCount.self, forKey: .minCount)
+    interval = try c.decodeIfPresent(MetricInterval.self, forKey: .interval)
   }
   public func encode(to encoder: Encoder) throws {
     var c = encoder.container(keyedBy: CodingKeys.self)
@@ -453,6 +483,7 @@ public struct MetricSpecV3: Codable, Equatable, Sendable {
     try c.encode(groupBy, forKey: .groupBy)
     try c.encodeIfPresent(whereTerms, forKey: .whereTerms)
     try c.encodeIfPresent(minCount, forKey: .minCount)
+    try c.encodeIfPresent(interval, forKey: .interval)
   }
 }
 
@@ -668,6 +699,8 @@ public struct QueryCapabilitiesV3: Codable, Equatable, Sendable {
   public var metricMinCount: Bool?
   /// Also executes an object minCount.
   public var metricMinCountMeasures: Bool?
+  /// Executes MetricSpec.interval (proportion and rate) and returns lower and upper bounds.
+  public var metricIntervals: Bool?
   public var version: Int
   public var groupedRows: Bool
   public var calendarGrouping: Bool
@@ -689,6 +722,7 @@ public struct QueryCapabilitiesV3: Codable, Equatable, Sendable {
     case metricFilters
     case metricMinCount
     case metricMinCountMeasures
+    case metricIntervals
     case version
     case groupedRows
     case calendarGrouping
@@ -709,6 +743,7 @@ public struct QueryCapabilitiesV3: Codable, Equatable, Sendable {
     metricFilters = try c.decodeIfPresent(Bool.self, forKey: .metricFilters)
     metricMinCount = try c.decodeIfPresent(Bool.self, forKey: .metricMinCount)
     metricMinCountMeasures = try c.decodeIfPresent(Bool.self, forKey: .metricMinCountMeasures)
+    metricIntervals = try c.decodeIfPresent(Bool.self, forKey: .metricIntervals)
     version = try c.decode(Int.self, forKey: .version)
     groupedRows = try c.decode(Bool.self, forKey: .groupedRows)
     calendarGrouping = try c.decode(Bool.self, forKey: .calendarGrouping)
@@ -729,6 +764,7 @@ public struct QueryCapabilitiesV3: Codable, Equatable, Sendable {
     try c.encodeIfPresent(metricFilters, forKey: .metricFilters)
     try c.encodeIfPresent(metricMinCount, forKey: .metricMinCount)
     try c.encodeIfPresent(metricMinCountMeasures, forKey: .metricMinCountMeasures)
+    try c.encodeIfPresent(metricIntervals, forKey: .metricIntervals)
     try c.encode(version, forKey: .version)
     try c.encode(groupedRows, forKey: .groupedRows)
     try c.encode(calendarGrouping, forKey: .calendarGrouping)
@@ -997,6 +1033,12 @@ public struct AggregationBucket: Codable, Equatable, Sendable {
   /// The scatter y value.
   public var y: JSONValue?
   public var yError: String?
+  /// The interval's lower bound (MetricSpec.interval), in the value's units. Present only with upper, when the value is a number.
+  public var lower: Double?
+  /// The interval's upper bound.
+  public var upper: Double?
+  /// Why a bucket with a numeric value has no interval: interval_domain when its parts are outside the interval kind's domain. The value is unchanged.
+  public var intervalError: String?
   enum CodingKeys: String, CodingKey {
     case distribution
     case nullCount
@@ -1007,6 +1049,9 @@ public struct AggregationBucket: Codable, Equatable, Sendable {
     case error
     case y
     case yError
+    case lower
+    case upper
+    case intervalError
   }
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -1019,6 +1064,9 @@ public struct AggregationBucket: Codable, Equatable, Sendable {
     error = try c.decodeIfPresent(String.self, forKey: .error)
     y = c.contains(.y) ? try c.decode(JSONValue.self, forKey: .y) : nil
     yError = try c.decodeIfPresent(String.self, forKey: .yError)
+    lower = try c.decodeIfPresent(Double.self, forKey: .lower)
+    upper = try c.decodeIfPresent(Double.self, forKey: .upper)
+    intervalError = try c.decodeIfPresent(String.self, forKey: .intervalError)
   }
   public func encode(to encoder: Encoder) throws {
     var c = encoder.container(keyedBy: CodingKeys.self)
@@ -1031,6 +1079,9 @@ public struct AggregationBucket: Codable, Equatable, Sendable {
     try c.encodeIfPresent(error, forKey: .error)
     try c.encodeIfPresent(y, forKey: .y)
     try c.encodeIfPresent(yError, forKey: .yError)
+    try c.encodeIfPresent(lower, forKey: .lower)
+    try c.encodeIfPresent(upper, forKey: .upper)
+    try c.encodeIfPresent(intervalError, forKey: .intervalError)
   }
 }
 
@@ -1476,6 +1527,8 @@ public enum ErrorCode: String, Codable, Equatable, Sendable, CaseIterable {
   case minCountField = "min_count_field"
   /// minCount cannot be combined with a distribution.
   case minCountDistribution = "min_count_distribution"
+  /// An interval needs a single-value ratio of two additive aggregates (SUM, COUNT or COUNT_DISTINCT), scaled by positive constants.
+  case metricInterval = "metric_interval"
   /// The field cannot be a group key (for a computed field: not in the host's grouping allowlist).
   case groupDisabled = "group_disabled"
   /// A grouping definition is invalid: keys, summaries or a calendar key.

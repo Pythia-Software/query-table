@@ -1,4 +1,7 @@
 import {
+  applyMetricInterval,
+  compileMetric,
+  metricRatioParts,
   compileFormula,
   createGroupingModel,
   GROUP_ID_FIELD,
@@ -41,6 +44,7 @@ import {
   type QueryState,
   failedMetric,
   QueryError,
+  type ErrorCode,
 } from "@pythia-software/query-table-core";
 import {
   SQLBuilder,
@@ -214,6 +218,7 @@ export class DuckDBBackend {
       metricFilters: true,
       metricMinCount: true,
       metricMinCountMeasures: true,
+      metricIntervals: true,
       maxRows: positive(options.maxRows, 10000, 10000),
       maxGroups: positive(options.maxGroups, 10000, 10000),
       maxPopulation: positive(options.maxPopulation, 250000, 10000000),
@@ -688,7 +693,10 @@ export class DuckDBBackend {
       clause = { ...clause, display: { kind: clause.distribution.kind } };
     const issues = validateMetric(clause, schema);
     if (issues.length)
-      throw Error(issues.map((issue) => issue.message).join(" "));
+      throw new QueryError(
+        (issues[0]!.code ?? "invalid_metric") as ErrorCode,
+        issues.map((issue) => issue.message).join(" "),
+      );
     const builder = this.builder(schema, now),
       where = builder.where(query.where);
     const window =
@@ -735,6 +743,19 @@ export class DuckDBBackend {
       projections.push(
         `${builder.expression(clause.expressionY ?? "COUNT()", true).sql} AS y`,
       );
+    // An interval reads the exact numerator and denominator of the ratio.
+    let ratio: ReturnType<typeof metricRatioParts> | undefined;
+    if (clause.interval && !distribution) {
+      const source = metricExpression(clause);
+      ratio = metricRatioParts(compileMetric(source, schema).ast);
+      for (const [name, node] of [
+        ["interval_numerator", ratio.numerator],
+        ["interval_denominator", ratio.denominator],
+      ] as const)
+        projections.push(
+          `${builder.expression(source.slice(node.from, node.to), true).sql} AS ${name}`,
+        );
+    }
     // An object minCount measures each group with its own aggregate.
     const minMeasure = metricMinCountMeasure(clause);
     if (minMeasure)
@@ -802,6 +823,18 @@ export class DuckDBBackend {
           : {}),
       };
       if (minMeasure) measures.set(bucket, { value: row.min_measure });
+      if (ratio) {
+        const part = (value: unknown) => ({
+          value: value === null || value === undefined ? null : Number(value),
+        });
+        applyMetricInterval(
+          bucket,
+          clause.interval!,
+          ratio.scale,
+          part(row.interval_numerator),
+          part(row.interval_denominator),
+        );
+      }
       return bucket;
     });
     if (clause.dateGrouping?.includeEmpty) {
@@ -882,6 +915,8 @@ export class DuckDBBackend {
         ? [{ key: "group0", dir: "asc", nulls: "last" }]
         : [{ key: "value", dir: "desc" }];
     buckets.sort((a, b) => {
+      // Errors (an interval's invalid parts) rank last, as in every engine.
+      if (!!a.error !== !!b.error) return a.error ? 1 : -1;
       for (const term of sort) {
         const value = (bucket: typeof a): MetricValue =>
           term.key.startsWith("group")

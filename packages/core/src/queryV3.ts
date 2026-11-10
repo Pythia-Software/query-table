@@ -114,13 +114,15 @@ export function toQueryRequestV3<Row>(query: QueryState, baseSchema: FieldSchema
       dateGrouping = rest;
     }
     for (const issue of validateMetric({ ...clause, ...(dateGrouping ? { dateGrouping } : {}) } as AggregationClause, resultSchema))
-      refusals.push({ code: "invalid_metric", message: issue.message, metricId: projected.id });
+      refusals.push({ code: (issue.code ?? "invalid_metric") as ErrorCode, message: issue.message, metricId: projected.id });
     if (dateGrouping && !capabilities.calendarGrouping)
       refusals.push({ ...unsupported("calendarGrouping", "This server does not support calendar grouping."), metricId: projected.id });
     else if (isMetricCycle(dateGrouping?.interval) && !capabilities.calendarCycles)
       refusals.push({ ...unsupported("calendarCycles", "This server does not support hour-of-day or day-of-week grouping."), metricId: projected.id });
     else if ((dateGrouping?.every ?? 1) > 1 && !capabilities.calendarEvery)
       refusals.push({ ...unsupported("calendarEvery", "This server does not support buckets of several calendar intervals (every)."), metricId: projected.id });
+    if (projected.interval !== undefined && !capabilities.metricIntervals)
+      refusals.push({ ...unsupported("metricIntervals", "This server does not support metric intervals."), metricId: projected.id });
     // The projection keeps only the scatter display hint.
     metrics.push((dateGrouping ? { ...projected, dateGrouping } : projected) as MetricSpecV3);
   }
