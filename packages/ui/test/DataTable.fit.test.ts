@@ -28,6 +28,39 @@ const renderers = {};
 const rowId = (row: Row) => row.id;
 let viewport: number;
 let container: HTMLDivElement;
+
+// The theme's one-line cells, and a host cell class that lets text wrap.
+const CELL_CSS = ".qt-cell { white-space: nowrap; } .host-wrapping-cell { white-space: normal; }";
+const WRAPPING = new Set(["normal", "pre-wrap", "pre-line", "break-spaces"]);
+/** Whether text in `element` may wrap: its own or nearest declared `white-space` (browser default normal). */
+function wrapsAt(element: Element | null): boolean {
+  for (let e = element; e; e = e.parentElement) {
+    const value = getComputedStyle(e).whiteSpace;
+    if (value) return WRAPPING.has(value);
+  }
+  return true;
+}
+/**
+ * Lays a probe out at 10px per character. A `min-content` probe, like a
+ * browser, breaks lines only where the CSS it inherits (from the cell) or sets
+ * allows wrapping, and there its widest word counts; other content stays on
+ * one line.
+ */
+function probeWidth(probe: HTMLElement): number {
+  if (probe.style.width !== "min-content") return (probe.textContent?.length ?? 0) * 10;
+  const visit = (node: Node, wraps: boolean): number => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent ?? "";
+      return 10 * (wraps ? Math.max(0, ...text.split(/\s+/).map((word) => word.length)) : text.length);
+    }
+    const own = getComputedStyle(node as Element).whiteSpace;
+    const wrap = own ? WRAPPING.has(own) : wraps;
+    const parts = Array.from(node.childNodes, (child) => visit(child, wrap));
+    return wrap ? Math.max(0, ...parts) : parts.reduce((a, b) => a + b, 0);
+  };
+  return visit(probe, wrapsAt(probe.parentElement));
+}
+let style: HTMLStyleElement;
 let root: Root;
 
 beforeEach(() => {
@@ -42,8 +75,11 @@ beforeEach(() => {
   const real = HTMLElement.prototype.getBoundingClientRect;
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
     if (this.getAttribute("aria-hidden") !== "true" || this.tagName !== "SPAN") return real.call(this);
-    return { width: (this.textContent?.length ?? 0) * 10 } as DOMRect;
+    return { width: probeWidth(this) } as DOMRect;
   });
+  style = document.createElement("style");
+  style.textContent = CELL_CSS;
+  document.head.appendChild(style);
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -53,6 +89,7 @@ afterEach(async () => {
   await act(async () => {});
   act(() => root.unmount());
   container.remove();
+  style.remove();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -337,5 +374,44 @@ describe("live fit to screen", () => {
 
     expect(state.query.fit).toBeUndefined();
     expect(state.query.select).toEqual([{ field: "a", width: displayed[0] }]);
+  });
+});
+
+describe("control minimums in screen fitting", () => {
+  const title = "a long linked conversation title that wraps over two lines";
+  const wrappingLink = (value: string) => createElement("span", { style: { whiteSpace: "normal" } }, createElement("a", { href: "/c/1" }, value));
+  /** Screen-fits a host-rendered A column next to plain B in a 300px table. */
+  function fitWith(render: (value: string) => unknown, minWidth?: number, cell?: string): number[] {
+    viewport = 302;
+    const [a, b] = schema.fields;
+    const fields = [{ ...a!, render: ({ value }: { value: unknown }) => render(String(value)), ...(minWidth ? { select: { minWidth } } : {}) }, b!];
+    act(() => root.render(createElement(DataTable<Row>, {
+      fields, rows: [{ id: 1, a: title, b: "short" }], loading: false, query: screen, onQueryChange: vi.fn(), renderers, rowId,
+      ...(cell ? { classNames: { cell } } : {}),
+    })));
+    return widths();
+  }
+
+  it("lets a host link that wraps shrink with its column instead of setting a one-line floor", () => {
+    const fitted = fitWith(wrappingLink);
+    expect(fitted.reduce((x, y) => x + y)).toBe(300);
+    expect(fitted[1]).toBeGreaterThanOrEqual(MIN);
+  });
+
+  it("keeps the full width of controls that cannot wrap", () => {
+    // A nowrap host link cannot shorten without host styling, so the table scrolls.
+    expect(fitWith((value) => createElement("a", { href: "/c/1" }, value))[0]).toBeGreaterThanOrEqual(title.length * 10);
+    expect(fitWith((value) => createElement("button", { type: "button" }, value))[0]).toBeGreaterThanOrEqual(title.length * 10);
+  });
+
+  it("follows wrapping turned on for whole cells through classNames.cell", () => {
+    const link = (value: string) => createElement("a", { href: "/c/1" }, value);
+    expect(fitWith(link)[0]).toBeGreaterThanOrEqual(title.length * 10);
+    const fitted = fitWith(link, undefined, "host-wrapping-cell");
+    expect(fitted.reduce((x, y) => x + y)).toBe(300);
+  });
+
+  it("still honours SelectConfig.minWidth for a wrapping link", () => {
+    expect(fitWith(wrappingLink, 260)[0]).toBe(260);
   });
 });

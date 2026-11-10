@@ -45,6 +45,15 @@ for (const [engineName, engine] of [["Chromium", chromium], ["WebKit", webkit]])
       const items = page.locator("[data-table=items] .qt-table-wrap");
       const overflow = await items.evaluate(wrap => wrap.scrollWidth - wrap.clientWidth);
       if (width >= 1024) assert.ok(overflow <= 1, `${where}: fitted items fill the screen without scrolling (${overflow}px)`);
+
+      // A host link whose title wraps sets no one-line floor: it wraps instead.
+      const usage = page.locator("[data-table=usage] .qt-table-wrap");
+      await page.locator("[data-table=usage] .qt-demo-wrapping-title a[href]").first().waitFor();
+      const usageOverflow = await usage.evaluate(wrap => wrap.scrollWidth - wrap.clientWidth);
+      if (width >= 1024) assert.ok(usageOverflow <= 1, `${where}: a wrapping link column fits the screen without scrolling (${usageOverflow}px)`);
+      const wrapped = await page.locator("[data-table=usage] .qt-demo-wrapping-title a[href]").evaluateAll(links =>
+        links.filter(link => new Set([...link.getClientRects()].map(r => Math.round(r.top))).size > 1).length);
+      assert.ok(wrapped > 0, `${where}: long linked titles wrap instead of widening the table`);
       const expand = page.getByRole("button", { name: "Expand item 1", exact: true });
       await expand.scrollIntoViewIfNeeded();
       assert.ok(await expand.evaluate(button => {

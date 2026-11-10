@@ -1,7 +1,7 @@
 import type { FieldSchema, LinkTargets, QueryState } from "@pythia-software/query-table-core";
 import { ITEM_DETAILS_COLUMN, encodeQuery } from "@pythia-software/query-table-core";
 import { useQueryTable } from "@pythia-software/query-table-react";
-import { DataTable, defaultRenderers } from "@pythia-software/query-table-ui";
+import { DataTable, defaultRenderers, type RenderRegistry } from "@pythia-software/query-table-ui";
 import "@pythia-software/query-table-ui/theme.css";
 import "./demo.css";
 
@@ -55,6 +55,34 @@ const groupQuery: QueryState = {
   select: ["conversation", "messages", "word_total", "token_total", "cost_total", "max_words", "tools", "records", "open", ITEM_DETAILS_COLUMN].map((field) => ({ field })),
   where: [], orderBy: [{ field: "conversation", dir: "asc" }], limit: 3, offset: 0, fit: "screen",
 };
+// A host renderer that wraps a long linked title over two lines, as Pharos's
+// usage tables do: fitting must let it wrap, not floor it at one line.
+interface Usage { id: number; title: string; tool: string; status: string; words: number; tokens: number; cost: number; }
+const titles = [
+  "Investigate why the fitted conversation table scrolls horizontally on every desktop viewport width, then compare the measured floors with the previous release",
+  "Plan the query table release, draft the changelog entries for the wrapping link fix and check the structural browser sweep against every workspace query",
+  "Review the agent harness traces for slow tool calls across the last three workspace sessions and summarise which commands dominated the wall clock time",
+];
+const usage: Usage[] = rows.slice(0, 9).map(({ id, tool, status, words, tokens, cost }) => ({ id, title: titles[id % titles.length]!, tool, status, words, tokens, cost }));
+const usageSchema: FieldSchema<Usage> = {
+  name: "fit-usage", idField: "id",
+  fields: [
+    { name: "title", label: "Title", type: "text", source: { kind: "backend" }, render: "wrapping_title" },
+    { name: "tool", label: "Tool", type: "text", source: { kind: "backend" } },
+    { name: "status", label: "Status", type: "text", source: { kind: "backend" } },
+    { name: "words", label: "Words", type: "number", source: { kind: "backend" } },
+    { name: "tokens", label: "Tokens", type: "number", source: { kind: "backend" } },
+    { name: "cost", label: "Cost", type: "number", source: { kind: "backend" } },
+  ],
+};
+const usageQuery: QueryState = {
+  select: ["title", "tool", "status", "words", "tokens", "cost"].map((field) => ({ field })),
+  where: [], orderBy: [], limit: 25, offset: 0, fit: "screen",
+};
+const usageRenderers: RenderRegistry<Usage> = {
+  ...defaultRenderers,
+  wrapping_title: ({ row }) => <span className="qt-demo-wrapping-title"><a href={`/fit-controls?usage=${row.id}`}>{row.title}</a></span>,
+};
 const linkTargets: LinkTargets = { fixture: (query) => `/fit-controls?items=${encodeQuery(query)}` };
 
 /** Fitted tables whose cells hold native controls; see demo/fit-controls-test.mjs. */
@@ -65,6 +93,7 @@ export function FitControlsDemo() {
     itemDetails: { modes: ["modal", "expand"], defaultModes: ["modal", "expand"] } });
   const groups = useQueryTable({ schema: groupSchema, clientRows: rows, ...(linked.has("groups") ? {} : { initialQuery: groupQuery }), syncUrl: true, queryParameter: "groups", debounceMs: 0,
     itemDetails: { modes: ["modal", "expand"], defaultModes: ["modal", "expand"] } });
+  const usageTable = useQueryTable({ schema: usageSchema, clientRows: usage, initialQuery: usageQuery, debounceMs: 0 });
   return (
     <main className="qt-demo">
       <h1>Fitted controls</h1>
@@ -78,6 +107,11 @@ export function FitControlsDemo() {
         <DataTable fields={groups.visibleFields} rows={groups.rows} query={groups.query} onQueryChange={groups.setQuery} renderers={defaultRenderers}
           rowId={groups.rowId} total={groups.total} loading={groups.loading} linkTargets={linkTargets}
           {...(groups.itemDetails ? { itemDetails: groups.itemDetails } : {})} />
+      </section>
+      <section aria-label="Usage" data-table="usage">
+        <h2>Usage</h2>
+        <DataTable fields={usageTable.visibleFields} rows={usageTable.rows} query={usageTable.query} onQueryChange={usageTable.setQuery} renderers={usageRenderers}
+          rowId={(row) => row.id} total={usageTable.total} loading={usageTable.loading} />
       </section>
     </main>
   );
