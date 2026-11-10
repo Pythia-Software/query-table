@@ -201,14 +201,14 @@ export function wholeIntervalSpan(
   schema: FieldSchema,
   now: number,
 ): { start?: number; end: number } {
-  const { interval, timeZone } = c.dateGrouping!;
+  const { interval, timeZone, every } = c.dateGrouping!;
   const { lower, upper } = metricDateBounds(c, query, schema, now);
-  const floor = (time: number) => metricDateFloor(time, interval, timeZone);
+  const floor = (time: number) => metricDateFloor(time, interval, timeZone, every);
   const end = floor(Math.min(upper, now));
   if (!Number.isFinite(lower)) return { end };
   const first = floor(lower);
   return {
-    start: first === lower ? lower : metricDateNext(first, interval, timeZone),
+    start: first === lower ? lower : metricDateNext(first, interval, timeZone, every),
     end,
   };
 }
@@ -336,7 +336,7 @@ export function planMetricSeries(
         !isMetricCycle(config.interval)
       ) {
         const floor = (time: number) =>
-          metricDateFloor(time, config.interval, config.timeZone);
+          metricDateFloor(time, config.interval, config.timeZone, config.every);
         let from = span.start,
           through = span.end - 1;
         if (config.range === "custom") {

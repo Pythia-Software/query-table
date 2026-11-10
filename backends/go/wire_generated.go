@@ -26,6 +26,10 @@ type OrderBy struct {
 type MetricDateGrouping struct {
 	Field    string `json:"field"`
 	Interval string `json:"interval"`
+	// Calendar intervals only: buckets of this many intervals, anchored as
+	// CalendarGroupKey.every describes; omitted is 1. Cycles refuse values above
+	// 1.
+	Every int `json:"every,omitempty"`
 	// IANA identifier; omitted is UTC.
 	TimeZone string `json:"timeZone,omitempty"`
 	// Add a bucket for every interval of the range.
@@ -95,6 +99,12 @@ type AggSpec struct {
 type CalendarGroupKey struct {
 	Field    string `json:"field"`
 	Interval string `json:"interval"`
+	// Buckets of this many intervals; omitted is 1. Anchors are fixed: hours
+	// dividing 24 start at local multiples of every within each day (other counts
+	// are elapsed blocks from 1970-01-01T00:00Z), days count local dates from
+	// 1970-01-01, weeks from Monday 1969-12-29, months from January 1970 and years
+	// from 1970.
+	Every int `json:"every,omitempty"`
 	// IANA identifier; omitted is UTC.
 	TimeZone string `json:"timeZone,omitempty"`
 }
@@ -152,7 +162,10 @@ type QueryCapabilitiesV3 struct {
 	// Executes the hourOfDay and dayOfWeek intervals.
 	CalendarCycles bool `json:"calendarCycles"`
 	// Executes calendar grouping keys.
-	CalendarGroupKeys     bool   `json:"calendarGroupKeys"`
+	CalendarGroupKeys bool `json:"calendarGroupKeys"`
+	// Executes multi-interval buckets: MetricDateGrouping.every and
+	// CalendarGroupKey.every.
+	CalendarEvery         bool   `json:"calendarEvery"`
 	ComputedSourceFilters bool   `json:"computedSourceFilters"`
 	Regex                 bool   `json:"regex"`
 	MaxRows               int    `json:"maxRows"`

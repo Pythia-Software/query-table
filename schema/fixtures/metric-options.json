@@ -39,6 +39,7 @@
       "hourOfDay",
       "dayOfWeek"
     ],
+    "every": "positiveInteger",
     "timeZone": "string",
     "includeEmpty": "boolean",
     "range": [

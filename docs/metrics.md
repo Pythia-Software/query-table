@@ -274,8 +274,8 @@ for the underlying records, or `null` when no exact query exists:
   `= ""`. Local filters treat NULL and empty text alike for both operators, so
   with `clientRows` either drill returns both groups; the bundled backend
   distinguishes them.
-- A date-grouped key adds `>= start` and `< next`, using the clause's interval
-  and timezone (`metricDateNext`), encoded as ISO instants (`…Z`). Filters
+- A date-grouped key adds `>= start` and `< next`, using the clause's interval,
+  `every` and timezone (`metricDateNext`), encoded as ISO instants (`…Z`). Filters
   compare instants, so a date-only source value is read as UTC midnight; group
   date-only columns in UTC to keep drilldown on the same day.
 - An hour-of-day or day-of-week slot selects its occurrences inside the date
@@ -425,6 +425,58 @@ today. The excluded rows leave the metric, so they never appear as a short
 first or last bucket, and completion does not refill those intervals as empty.
 When no interval is whole the result has no buckets.
 
+### Buckets of several intervals
+
+`every` (an integer 1–1,000; omitted means 1) groups several calendar
+intervals into one bucket, such as 3-, 6- or 12-hour periods, fortnights or
+quarters:
+
+```ts
+dateGrouping: { field: "at", interval: "hour", every: 6, timeZone: "America/New_York",
+  includeEmpty: true, range: "query" }
+```
+
+A bucket is keyed by its start instant, as one interval is. Anchors are fixed,
+independent of the query range, so the same rows always fall in the same
+buckets and results stay cache-stable:
+
+- **Hours.** When `every` divides 24 (2, 3, 4, 6, 8, 12), buckets start at local
+  wall-clock hours that are multiples of `every` within each local day in the
+  grouping zone: 00:00, 06:00, 12:00 and 18:00 for `every: 6`, also in a
+  half-hour zone such as Asia/Kolkata. A daylight-saving change makes its
+  bucket longer or shorter: both occurrences of a repeated hour fall in the
+  same bucket, and a bucket whose start hour is skipped starts at the
+  transition, as hourly floors do. Other counts (5, 7, 36 …) are elapsed blocks
+  of `every` hours counted from 1970-01-01T00:00Z, whatever the zone.
+- **Days.** Groups of `every` local calendar dates counted from 1970-01-01
+  (the local date's day number, floor-divided by `every`).
+- **Weeks.** Groups of `every` Monday weeks counted from the week of Monday
+  1969-12-29.
+- **Months.** Groups of `every` months counted from January 1970, so 3, 4 and 6
+  give quarters, thirds and halves of the year starting in January.
+- **Years.** Groups of `every` years counted from 1970.
+
+Everything that works on intervals works on buckets: `includeEmpty` fills every
+bucket of the range; `range: "query"`, `"observed"` and `"custom"` round their
+bounds to whole buckets, and `partialIntervals: "exclude"` treats a bucket the
+date bounds cut, or that has not ended, as partial; a window's `periods` count
+buckets; shares, `sort`, `groupLimit` and `minCount` are unchanged; and
+`inspectBucketQuery` selects the bucket's `[start, next)` range. Hour-of-day
+and day-of-week slots, and their per-occurrence statistics, are single hours or
+days and refuse `every` above 1 with a `date_grouping` diagnostic. Links and
+saved state leave out `every: 1`. Charts label a bucket with its range in the
+grouping zone: `Jul 04 09:00–12:00 -04:00` for hours, `Jan 01–Jan 03` for days
+and weeks (the last day included), `Apr–Jun 2026` for months and `2020–2029`
+for years. Metric settings offer an **Every** count beside Date interval,
+hidden for slots.
+
+`metricDateFloor(time, interval, timeZone, every)` and `metricDateNext(time,
+interval, timeZone, every)` expose the calendar. A server executes `every`
+above 1 when its handshake sets `QueryCapabilitiesV3.calendarEvery`;
+otherwise `toQueryRequestV3` reports a `capability_unsupported` diagnostic for
+that metric. Query Table's Go executor (SQLite and PostgreSQL) and DuckDB
+adapter advertise it.
+
 Calendar metrics execute on the v3 backend, locally on datasets already in
 memory, or over committed shown rows. Legacy v1/v2 server execution rejects date
 grouping explicitly. An unsupported server operation never triggers a population
@@ -531,6 +583,9 @@ const byHour: AggregationClause = {
   as for calendar intervals; use occurrences below.
 - **Whole intervals.** `partialIntervals: "exclude"` keeps only the whole hours
   (`hourOfDay`) or days (`dayOfWeek`) inside the date bounds.
+- **One hour or day per slot.** `every` above 1 is refused with a
+  `date_grouping` diagnostic, also with `occurrence`; see
+  [Buckets of several intervals](#buckets-of-several-intervals).
 - **Engines.** The local engine (`evaluateMetrics`, `applyAggregations`), the
   v3 executor of the Go module (SQLite and PostgreSQL) and DuckDB compute
   slots, and their buckets match for the same rows. Servers advertise

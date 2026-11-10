@@ -440,7 +440,7 @@ func (d QueryDatasetV3) keyCalendarGroups(ctx context.Context, tx *sql.Tx, table
 		if _, err = tx.ExecContext(ctx, "ALTER TABLE "+queryIdent(table)+" ADD COLUMN "+queryIdent(bucket)+" "+d.valueType("datetime")); err != nil {
 			return err
 		}
-		if err = d.keyCalendarColumn(ctx, tx, table, alias, bucket, d.valueType("datetime"), interval.Interval, loc); err != nil {
+		if err = d.keyCalendarColumn(ctx, tx, table, alias, bucket, d.valueType("datetime"), interval.Interval, interval.Every, loc); err != nil {
 			return err
 		}
 		field := staged.Fields[key]

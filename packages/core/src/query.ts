@@ -4,6 +4,7 @@ import type { MetricDisplay, MetricLayout, MetricDistribution, MetricSort, Metri
 import { normalizeMetricOptions } from "./metricNormalize";
 import type { GroupingState, SummaryColumn, RepresentativeOrder, LinkSpec, LinkDestination } from "./grouping";
 import { GROUP_KEY_INTERVALS, groupKeyFields, type CalendarGroupKey, type GroupKey } from "./groupKeys";
+import { isMetricDateEvery } from "./metricDates";
 import type { QueryFacet, QueryPatch } from "./queryPatch";
 import { parseCellDisplay, type CellDisplay } from "./cellDisplay";
 // query.ts — the canonical query state shape.
@@ -629,11 +630,13 @@ function normalizeGroupingState(value: unknown, links: boolean): GroupingState {
     if (boundedString(key, MAX_FIELD_NAME_LENGTH)) { keys.push(key as string); continue; }
     if (!isRecord(key)) continue;
     // A calendar key: the timezone's validity is checked with the schema.
-    const field = boundedString(key.field, MAX_FIELD_NAME_LENGTH), zone = key.timeZone;
-    if (field && GROUP_KEY_INTERVALS.includes(key.interval as never) &&
+    const field = boundedString(key.field, MAX_FIELD_NAME_LENGTH), zone = key.timeZone, every = key.every;
+    if (field && GROUP_KEY_INTERVALS.includes(key.interval as never) && isMetricDateEvery(every) &&
       (zone === undefined || (typeof zone === "string" && zone.length > 0 && zone.length <= 80 && !/^[+-]/.test(zone))))
-      keys.push({ field, interval: key.interval as CalendarGroupKey["interval"], ...(zone !== undefined ? { timeZone: zone as string } : {}) });
-    else fail(`key ${index + 1} must be a field name or a calendar key {field, interval, timeZone} with interval hour, day, week, month or year; hour-of-day and day-of-week are metric intervals.`);
+      // One interval per bucket is the default and is left out.
+      keys.push({ field, interval: key.interval as CalendarGroupKey["interval"], ...(every !== undefined && every !== 1 ? { every: every as number } : {}),
+        ...(zone !== undefined ? { timeZone: zone as string } : {}) });
+    else fail(`key ${index + 1} must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.`);
   }
   const keyNames = groupKeyFields(keys);
   if (!Array.isArray(raw.keys) || !keys.length || keys.length !== raw.keys.length || new Set(keyNames).size !== keys.length)

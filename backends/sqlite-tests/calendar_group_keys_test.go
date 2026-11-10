@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -22,8 +23,12 @@ func TestV3CalendarBoundariesMatchWideRangeFallback(t *testing.T) {
 		{"Australia/Adelaide", "2044-12-31T22:00:00Z"},
 		{"Pacific/Apia", "2011-12-29T12:00:00Z"},
 	} {
-		for _, interval := range []string{"hour", "day", "week", "month", "year"} {
-			t.Run(zone.name+"/"+zone.start+"/"+interval, func(t *testing.T) {
+		for _, step := range []struct {
+			interval string
+			every    int
+		}{{"hour", 1}, {"hour", 3}, {"hour", 5}, {"day", 1}, {"day", 3}, {"week", 1}, {"week", 2}, {"month", 1}, {"month", 3}, {"year", 1}, {"year", 2}} {
+			interval := step.interval
+			t.Run(zone.name+"/"+zone.start+"/"+interval+"/"+strconv.Itoa(step.every), func(t *testing.T) {
 				log := &statementLog{}
 				db, d := hookedV3(t, log, "('null','real',1,NULL,'x')")
 				f := d.Schema.Fields["at"]
@@ -41,7 +46,7 @@ func TestV3CalendarBoundariesMatchWideRangeFallback(t *testing.T) {
 					}
 				}
 				q := groupedRequest()
-				q.Grouping = &qt.GroupingDefinition{Keys: []string{"at", "k"}, KeyIntervals: map[string]qt.GroupKeyInterval{"at": {Interval: interval, TimeZone: zone.name}}, Summaries: []qt.SummaryColumn{{ID: "num", Op: "count"}, {ID: "total", Op: "sum", Field: "n"}}}
+				q.Grouping = &qt.GroupingDefinition{Keys: []string{"at", "k"}, KeyIntervals: map[string]qt.GroupKeyInterval{"at": {Interval: interval, Every: step.every, TimeZone: zone.name}}, Summaries: []qt.SummaryColumn{{ID: "num", Op: "count"}, {ID: "total", Op: "sum", Field: "n"}}}
 				q.Result = qt.WireQuery{Select: []string{"at", "k", "num", "total"}, Where: []qt.WhereTerm{{Field: "k", Op: "=", Value: "real"}}, OrderBy: []qt.OrderBy{{Field: "at", Dir: "asc"}}, Limit: 100}
 				log.reset(nil)
 				got, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
@@ -51,7 +56,12 @@ func TestV3CalendarBoundariesMatchWideRangeFallback(t *testing.T) {
 				if log.count("WITH qt_calendar_keys") != 0 {
 					t.Fatal("bounded range did not use compact calendar keys")
 				}
-				if _, err = db.Exec("INSERT INTO source VALUES('sentinel','hidden',0,'2400-01-01T00:00:00.000Z','x')"); err != nil {
+				sentinel := "2400-01-01T00:00:00.000Z"
+				if interval == "year" && step.every > 1 {
+					// More than the compact plan's 256 boundaries away.
+					sentinel = "2900-01-01T00:00:00.000Z"
+				}
+				if _, err = db.Exec("INSERT INTO source VALUES('sentinel','hidden',0,?,'x')", sentinel); err != nil {
 					t.Fatal(err)
 				}
 				log.reset(nil)

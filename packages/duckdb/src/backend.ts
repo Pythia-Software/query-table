@@ -206,6 +206,7 @@ export class DuckDBBackend {
       calendarGrouping: true,
       calendarCycles: true,
       calendarGroupKeys: true,
+      calendarEvery: true,
       computedSourceFilters: definitions.size > 0,
       regex: true,
       regexSourceFilters: true,
@@ -623,7 +624,7 @@ export class DuckDBBackend {
     population: string,
     builder: SQLBuilder,
     schema: FieldSchema,
-    config: Pick<MetricDateGrouping, "field" | "interval" | "timeZone">,
+    config: Pick<MetricDateGrouping, "field" | "interval" | "every" | "timeZone">,
     tables: string[],
     signal?: AbortSignal,
   ): Promise<string> {
@@ -653,6 +654,7 @@ export class DuckDBBackend {
           metricDateTime(value, config.timeZone),
           config.interval,
           config.timeZone,
+          config.every,
         );
         // A cyclic slot is the local hour or weekday of the record's interval.
         args.push(
@@ -838,7 +840,7 @@ export class DuckDBBackend {
         for (
           let time = range[0];
           time <= range[1];
-          time = metricDateNext(time, config.interval, config.timeZone)
+          time = metricDateNext(time, config.interval, config.timeZone, config.every)
         )
           slots.push(new Date(time).toISOString());
       for (const slot of slots)

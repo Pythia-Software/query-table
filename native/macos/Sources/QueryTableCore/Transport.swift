@@ -34,7 +34,7 @@ public enum QueryTableError: Error, LocalizedError, Sendable {
 extension QueryCapabilitiesV3 {
   public init(
     profile: String, version: Int = 3, groupedRows: Bool = false, calendarGrouping: Bool = false,
-    calendarCycles: Bool? = nil, calendarGroupKeys: Bool? = nil,
+    calendarCycles: Bool? = nil, calendarGroupKeys: Bool? = nil, calendarEvery: Bool? = nil,
     computedSourceFilters: Bool = false, regex: Bool = false, regexSourceFilters: Bool? = nil,
     regexAggregateExpressions: Bool? = nil, metricFilters: Bool? = nil,
     metricMinCount: Bool? = nil, metricMinCountMeasures: Bool? = nil, maxRows: Int = 10_000,
@@ -45,6 +45,7 @@ extension QueryCapabilitiesV3 {
     self.calendarGrouping = calendarGrouping
     self.calendarCycles = calendarCycles
     self.calendarGroupKeys = calendarGroupKeys
+    self.calendarEvery = calendarEvery
     self.computedSourceFilters = computedSourceFilters
     self.regex = regex
     self.regexSourceFilters = regexSourceFilters

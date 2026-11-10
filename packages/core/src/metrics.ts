@@ -1354,11 +1354,13 @@ export function evaluateMetrics<Row>(
                 dateTime,
                 config.interval,
                 config.timeZone,
+                config.every,
               );
               dateEnd = metricDateNext(
                 dateStart,
                 config.interval,
                 config.timeZone,
+                config.every,
               );
               // A cyclic slot is the local hour or weekday of the interval
               // its record falls in; a calendar key is the interval start.
@@ -1485,6 +1487,7 @@ export function evaluateMetrics<Row>(
                 time,
                 config.interval,
                 config.timeZone,
+                config.every,
               );
               if (!Number.isFinite(next) || next <= time)
                 throw new QueryError("resource_limit", "Date grouping exceeds calendar limits.");

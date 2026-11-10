@@ -4,6 +4,7 @@ import {
   groupKeyField,
   isCalendarGroupKey,
   MAX_GROUP_BY_FIELDS,
+  MAX_METRIC_DATE_EVERY,
   OP_LABEL,
   type CalendarGroupKey,
   type GroupKey,
@@ -42,14 +43,20 @@ function localTimeZone(): string {
   }
 }
 
+/** "day", or "3 days" for a key bucketing several intervals. */
+function calendarKeyUnit(key: CalendarGroupKey): string {
+  return (key.every ?? 1) > 1 ? `${key.every} ${key.interval}s` : key.interval;
+}
+
 /** "by day · America/Denver" for a calendar key, "" for an exact key. */
 function groupKeyIntervalLabel(key: GroupKey): string {
   return isCalendarGroupKey(key)
-    ? `by ${key.interval} · ${key.timeZone ?? "UTC"}`
+    ? `by ${calendarKeyUnit(key)} · ${key.timeZone ?? "UTC"}`
     : "";
 }
 
-/** Pick exact values or a calendar interval for a datetime group key. */
+/** Pick exact values or a calendar interval, and how many intervals each
+ * group spans, for a datetime group key. */
 function KeyIntervalControl({
   value,
   label,
@@ -62,39 +69,61 @@ function KeyIntervalControl({
   const field = groupKeyField(value);
   const interval = isCalendarGroupKey(value) ? value.interval : "";
   return (
-    <span
-      className="qt-group-op-control qt-group-key-interval"
-      title={isCalendarGroupKey(value) ? `One group per ${value.interval} in ${value.timeZone ?? "UTC"}` : "One group per exact value"}
-    >
-      <span aria-hidden="true">{interval ? `by ${interval}` : "exact"}</span>
-      <Icon name="chevronDown" size={12} />
-      <select
-        className="qt-group-op"
-        aria-label={`Interval for ${label}`}
-        value={interval}
-        onChange={(event) => {
-          const next = event.target.value as CalendarGroupKey["interval"] | "";
-          onChange(
-            next
-              ? {
-                  field,
-                  interval: next,
-                  timeZone: isCalendarGroupKey(value)
-                    ? (value.timeZone ?? "UTC")
-                    : localTimeZone(),
-                }
-              : field,
-          );
-        }}
+    <>
+      <span
+        className="qt-group-op-control qt-group-key-interval"
+        title={isCalendarGroupKey(value) ? `One group per ${calendarKeyUnit(value)} in ${value.timeZone ?? "UTC"}` : "One group per exact value"}
       >
-        <option value="">Exact value</option>
-        {GROUP_KEY_INTERVALS.map((option) => (
-          <option key={option} value={option}>
-            By {option}
-          </option>
-        ))}
-      </select>
-    </span>
+        <span aria-hidden="true">{isCalendarGroupKey(value) ? `by ${calendarKeyUnit(value)}` : "exact"}</span>
+        <Icon name="chevronDown" size={12} />
+        <select
+          className="qt-group-op"
+          aria-label={`Interval for ${label}`}
+          value={interval}
+          onChange={(event) => {
+            const next = event.target.value as CalendarGroupKey["interval"] | "";
+            const every = isCalendarGroupKey(value) ? value.every : undefined;
+            onChange(
+              next
+                ? {
+                    field,
+                    interval: next,
+                    ...(every !== undefined ? { every } : {}),
+                    timeZone: isCalendarGroupKey(value)
+                      ? (value.timeZone ?? "UTC")
+                      : localTimeZone(),
+                  }
+                : field,
+            );
+          }}
+        >
+          <option value="">Exact value</option>
+          {GROUP_KEY_INTERVALS.map((option) => (
+            <option key={option} value={option}>
+              By {option}
+            </option>
+          ))}
+        </select>
+      </span>
+      {isCalendarGroupKey(value) && (
+        <input
+          className="qt-group-key-every"
+          type="number"
+          min={1}
+          max={MAX_METRIC_DATE_EVERY}
+          step={1}
+          aria-label={`${value.interval[0]!.toUpperCase()}${value.interval.slice(1)}s per group for ${label}`}
+          title={`Each group spans this many ${value.interval}s, counted from 1970 (hours from each local midnight when they divide a day)`}
+          value={value.every ?? 1}
+          onChange={(event) => {
+            const n = event.currentTarget.valueAsNumber;
+            if (!Number.isInteger(n) || n < 1 || n > MAX_METRIC_DATE_EVERY) return;
+            const { every: _every, ...rest } = value;
+            onChange(n > 1 ? { ...rest, every: n } : rest);
+          }}
+        />
+      )}
+    </>
   );
 }
 
@@ -339,7 +368,7 @@ export function useGroupingPresentation<Row>(
             .map((key) => {
               const name = groupKeyField(key);
               const label = model.sourceField(name)?.label ?? name;
-              return isCalendarGroupKey(key) ? `${label} (${key.interval})` : label;
+              return isCalendarGroupKey(key) ? `${label} (${calendarKeyUnit(key)})` : label;
             })
             .join(" + ")}
         </strong>{" "}

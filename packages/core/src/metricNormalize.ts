@@ -37,6 +37,7 @@ export const METRIC_OPTION_SPECS = {
       "hourOfDay",
       "dayOfWeek",
     ],
+    every: "positiveInteger",
     timeZone: "string",
     includeEmpty: "boolean",
     range: ["query", "observed", "custom"],
@@ -201,6 +202,8 @@ export function normalizeMetricOptions(
         !d.range
       )
         diagnostics.push("Invalid metric date grouping.");
+      // One interval per bucket is the default and is left out.
+      if (d.every === 1) delete d.every;
       const occurrence = raw.dateGrouping.occurrence;
       if (record(occurrence)) {
         const o = copy(occurrence, METRIC_OPTION_SPECS.occurrence);

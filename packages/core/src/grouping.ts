@@ -21,7 +21,7 @@ import {
   isCalendarGroupKey,
   type GroupKey,
 } from "./groupKeys";
-import { isGroupingTimeZone, isMetricCycle } from "./metricDates";
+import { isGroupingTimeZone, isMetricCycle, isMetricDateEvery } from "./metricDates";
 import { fillUrlTemplate, templateFields, urlTemplateProblem } from "./itemPage";
 import type { QueryPatch } from "./queryPatch";
 import { type QueryEvaluationOptions } from "./relativeTime";
@@ -406,7 +406,9 @@ export function createGroupingModel<InputRow>(
         return [{
           // A calendar key's column holds each interval's start instant.
           name: field.name,
-          label: isCalendarGroupKey(key) ? `${field.label} (${key.interval})` : field.label,
+          label: isCalendarGroupKey(key)
+            ? `${field.label} (${(key.every ?? 1) > 1 ? `${key.every} ${key.interval}s` : key.interval})`
+            : field.label,
           type: field.type,
           source: { kind: "backend" },
           ...(field.select ? { select: { ...field.select } } : {}),
@@ -839,6 +841,10 @@ export function createGroupingModel<InputRow>(
       if (!GROUP_KEY_INTERVALS.includes(key.interval))
         throw new Error(
           `Group key ${field.label}: choose an hour, day, week, month or year interval.`,
+        );
+      if (!isMetricDateEvery(key.every))
+        throw new Error(
+          `Group key ${field.label}: every is a whole number of intervals, 1–1,000.`,
         );
       if (field.type !== "datetime")
         throw new Error(

@@ -24,6 +24,12 @@ func calendarLocation(config MetricDateGrouping) (*time.Location, error) {
 	if !containsString([]string{"hour", "day", "week", "month", "year", "hourOfDay", "dayOfWeek"}, config.Interval) || !containsString([]string{"query", "observed", "custom"}, config.Range) || config.Field == "" || len(config.Field) > 256 {
 		return nil, diagnostic(ErrorCodeDateGrouping, "invalid date grouping definition")
 	}
+	if config.Every < 0 || config.Every > MaxCalendarEvery {
+		return nil, diagnostic(ErrorCodeDateGrouping, "every is a whole number of intervals, 1-1000")
+	}
+	if config.Every > 1 && calendarCycle(config.Interval) {
+		return nil, diagnostic(ErrorCodeDateGrouping, "hour-of-day and day-of-week slots are single hours or days: every applies to calendar intervals")
+	}
 	location, err := time.LoadLocation(zone)
 	if err != nil {
 		return nil, diagnostic(ErrorCodeDateGrouping, "use an IANA grouping timezone")
@@ -189,6 +195,79 @@ func calendarNext(instant time.Time, interval string, loc *time.Location) (time.
 	}
 	return calendarWall(wall, loc, false)
 }
+
+// MaxCalendarEvery bounds MetricDateGrouping.Every and CalendarGroupKey.Every.
+const MaxCalendarEvery = 1000
+
+// floorMultiple rounds value down to a multiple of step, toward -infinity.
+func floorMultiple(value, step int64) int64 {
+	q := value / step
+	if value%step != 0 && (value < 0) != (step < 0) {
+		q--
+	}
+	return q * step
+}
+
+// calendarElapsedHours reports whether hourly buckets of every hours are
+// elapsed blocks from 1970-01-01T00:00Z: counts that do not divide a day.
+func calendarElapsedHours(interval string, every int) bool {
+	return interval == "hour" && 24%every != 0
+}
+
+// calendarEveryWall is the local wall start (as a UTC wall time) of the
+// bucket of every intervals holding instant, moved by ahead buckets. Anchors
+// are fixed: hours at local multiples of every within each day, days counted
+// from 1970-01-01, weeks from Monday 1969-12-29, months from January 1970 and
+// years from 1970.
+func calendarEveryWall(instant time.Time, interval string, every, ahead int, loc *time.Location) time.Time {
+	local := instant.In(loc)
+	y, m, d := local.Date()
+	step := int64(every) * int64(ahead)
+	size := int64(every)
+	switch interval {
+	case "hour":
+		return time.Date(y, m, d, int(floorMultiple(int64(local.Hour()), size)+step), 0, 0, 0, time.UTC)
+	case "month":
+		index := floorMultiple(int64(y-1970)*12+int64(m)-1, size) + step
+		return time.Date(1970, time.Month(index+1), 1, 0, 0, 0, 0, time.UTC)
+	case "year":
+		return time.Date(1970+int(floorMultiple(int64(y-1970), size)+step), 1, 1, 0, 0, 0, 0, time.UTC)
+	}
+	day := floorMultiple(time.Date(y, m, d, 0, 0, 0, 0, time.UTC).Unix(), 86400) / 86400
+	if interval == "day" {
+		return time.Unix((floorMultiple(day, size)+step)*86400, 0).UTC()
+	}
+	// Monday 1969-12-29 is epoch day -3.
+	week := floorMultiple(day+3, 7) / 7
+	return time.Unix(((floorMultiple(week, size)+step)*7-3)*86400, 0).UTC()
+}
+
+// calendarFloorEvery is the start of the bucket of every intervals holding
+// instant; every <= 1 is one interval, as calendarFloor.
+func calendarFloorEvery(instant time.Time, interval string, every int, loc *time.Location) (time.Time, error) {
+	if every <= 1 || calendarCycle(interval) {
+		return calendarFloor(instant, interval, loc)
+	}
+	if calendarElapsedHours(interval, every) {
+		block := int64(every) * 3600
+		return time.Unix(floorMultiple(instant.Unix(), block), 0).UTC(), nil
+	}
+	start, err := calendarWall(calendarEveryWall(instant, interval, every, 0, loc), loc, false)
+	return start.UTC(), err
+}
+
+// calendarNextEvery is the start of the bucket after the one holding instant.
+func calendarNextEvery(instant time.Time, interval string, every int, loc *time.Location) (time.Time, error) {
+	if every <= 1 || calendarCycle(interval) {
+		return calendarNext(instant, interval, loc)
+	}
+	if calendarElapsedHours(interval, every) {
+		block := int64(every) * 3600
+		return time.Unix(floorMultiple(instant.Unix(), block)+block, 0).UTC(), nil
+	}
+	next, err := calendarWall(calendarEveryWall(instant, interval, every, 1, loc), loc, false)
+	return next.UTC(), err
+}
 func calendarInput(value string, loc *time.Location) (time.Time, error) {
 	if !calendarDatePattern.MatchString(value) {
 		return time.Time{}, diagnostic(ErrorCodeDateGrouping, "use ISO dates or timestamps with an explicit offset")
@@ -240,11 +319,11 @@ func calendarRange(config MetricDateGrouping, q metricRequest, observed []time.T
 		if end.Before(start) {
 			return start, end, false, diagnostic(ErrorCodeDateGrouping, "end date must be on or after start date")
 		}
-		start, err = calendarFloor(start, config.Interval, loc)
+		start, err = calendarFloorEvery(start, config.Interval, config.Every, loc)
 		if err != nil {
 			return start, end, false, err
 		}
-		end, err = calendarFloor(end, config.Interval, loc)
+		end, err = calendarFloorEvery(end, config.Interval, config.Every, loc)
 		if err != nil {
 			return start, end, false, err
 		}
@@ -288,11 +367,11 @@ func calendarRange(config MetricDateGrouping, q metricRequest, observed []time.T
 	if end.Before(start) {
 		return start, end, false, nil
 	}
-	start, err := calendarFloor(start, config.Interval, loc)
+	start, err := calendarFloorEvery(start, config.Interval, config.Every, loc)
 	if err != nil {
 		return start, end, false, err
 	}
-	end, err = calendarFloor(end, config.Interval, loc)
+	end, err = calendarFloorEvery(end, config.Interval, config.Every, loc)
 	return start, end, true, err
 }
 
@@ -409,7 +488,7 @@ func (d QueryDatasetV3) executeMetric(ctx context.Context, tx *sql.Tx, spec AggS
 			dateAlias = column.ValueAlias
 		}
 	}
-	if err = d.keyCalendarColumn(ctx, tx, table, dateAlias, "qt_calendar_key", "text", config.Interval, loc); err != nil {
+	if err = d.keyCalendarColumn(ctx, tx, table, dateAlias, "qt_calendar_key", "text", config.Interval, config.Every, loc); err != nil {
 		return MetricResult{}, err
 	}
 	bucketName := "__qt_calendar_bucket__"
@@ -582,7 +661,7 @@ func fillCalendarBuckets(ctx context.Context, result *MetricResult, config Metri
 				return err
 			}
 		}
-		next, e := calendarNext(at, config.Interval, loc)
+		next, e := calendarNextEvery(at, config.Interval, config.Every, loc)
 		if e != nil {
 			return e
 		}
@@ -739,9 +818,9 @@ func sortCalendarBuckets(buckets []MetricBucket, spec AggSpec) {
 // Go memory nor SQLite/PostgreSQL statement count grows by one per source row.
 // Each row's key (its interval start, or its cyclic slot) is written to the
 // column named key, cast to keyType, by the row's qt_calendar_row ordinal.
-func (d QueryDatasetV3) keyCalendarColumn(ctx context.Context, tx *sql.Tx, table, dateAlias, key, keyType, interval string, loc *time.Location) error {
+func (d QueryDatasetV3) keyCalendarColumn(ctx context.Context, tx *sql.Tx, table, dateAlias, key, keyType, interval string, every int, loc *time.Location) error {
 	if d.Dialect == "sqlite" {
-		if done, err := d.sqliteKeyCalendarColumn(ctx, tx, table, dateAlias, key, keyType, interval, loc); done || err != nil {
+		if done, err := d.sqliteKeyCalendarColumn(ctx, tx, table, dateAlias, key, keyType, interval, every, loc); done || err != nil {
 			return err
 		}
 	}
@@ -772,7 +851,7 @@ func (d QueryDatasetV3) keyCalendarColumn(ctx context.Context, tx *sql.Tx, table
 				rows.Close()
 				return e
 			}
-			floor, e := calendarFloor(instant, interval, loc)
+			floor, e := calendarFloorEvery(instant, interval, every, loc)
 			if e != nil {
 				rows.Close()
 				return e
@@ -808,7 +887,7 @@ func (d QueryDatasetV3) keyCalendarColumn(ctx context.Context, tx *sql.Tx, table
 // using a balanced decision tree. No rows cross the driver or get rebound as
 // VALUES. Sparse/wide ranges retain the bounded per-row implementation above.
 // Both paths use calendarFloor/calendarNext, including DST and cyclic keys.
-func (d QueryDatasetV3) sqliteKeyCalendarColumn(ctx context.Context, tx *sql.Tx, table, dateAlias, key, keyType, interval string, loc *time.Location) (bool, error) {
+func (d QueryDatasetV3) sqliteKeyCalendarColumn(ctx context.Context, tx *sql.Tx, table, dateAlias, key, keyType, interval string, every int, loc *time.Location) (bool, error) {
 	const layout = "2006-01-02T15:04:05.000000000Z"
 	const maxBoundaries = 256 // At most 511 bindings, below legacy SQLite's 999.
 	column := queryIdent(dateAlias) + " COLLATE BINARY"
@@ -827,7 +906,7 @@ func (d QueryDatasetV3) sqliteKeyCalendarColumn(ctx context.Context, tx *sql.Tx,
 	if err != nil || end.Year() > 9998 || end.UTC().Format(layout) != high.String {
 		return false, nil
 	}
-	floor, err := calendarFloor(start, interval, loc)
+	floor, err := calendarFloorEvery(start, interval, every, loc)
 	if err != nil || floor.After(start) {
 		return false, nil
 	}
@@ -840,14 +919,14 @@ func (d QueryDatasetV3) sqliteKeyCalendarColumn(ctx context.Context, tx *sql.Tx,
 		if len(boundaries) > maxBoundaries {
 			return false, nil
 		}
-		next, err := calendarNext(floor, interval, loc)
+		next, err := calendarNextEvery(floor, interval, every, loc)
 		if err != nil || !next.After(floor) {
 			return false, nil
 		}
 		// A skipped civil date can make Next's wall-time resolution land
 		// inside the following period. It is not an interval boundary; keep
 		// the authoritative per-row floor for that exceptional timezone range.
-		verified, err := calendarFloor(next, interval, loc)
+		verified, err := calendarFloorEvery(next, interval, every, loc)
 		if err != nil || !verified.Equal(next) {
 			return false, nil
 		}

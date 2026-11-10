@@ -13,6 +13,7 @@ import {
 } from "react";
 import {
   MAX_AGGREGATIONS,
+  MAX_METRIC_DATE_EVERY,
   MAX_METRIC_WINDOW_PERIODS,
   METRIC_FUNCTIONS,
   aggOpsForField,
@@ -1595,7 +1596,7 @@ export function MetricsEditor<Row>({
                           )
                           .join(" × ") +
                         (selected.dateGrouping
-                          ? ` · ${selected.dateGrouping.interval} · ${selected.dateGrouping.timeZone ?? "UTC"}${selected.dateGrouping.includeEmpty ? " · empty dates" : ""}`
+                          ? ` · ${(selected.dateGrouping.every ?? 1) > 1 ? `every ${selected.dateGrouping.every} ${selected.dateGrouping.interval}s` : selected.dateGrouping.interval} · ${selected.dateGrouping.timeZone ?? "UTC"}${selected.dateGrouping.includeEmpty ? " · empty dates" : ""}`
                           : "")
                       : "One value"
                   }
@@ -1676,7 +1677,7 @@ export function MetricsEditor<Row>({
                             const cyclic =
                               interval === "hourOfDay" ||
                               interval === "dayOfWeek";
-                            const { occurrence, ...previous } =
+                            const { occurrence, every, ...previous } =
                               selected.dateGrouping ?? {};
                             patch(selected.id, {
                               dateGrouping: {
@@ -1685,6 +1686,10 @@ export function MetricsEditor<Row>({
                                 range: "query",
                                 ...previous,
                                 interval,
+                                // A slot is one hour or day.
+                                ...(every !== undefined && !cyclic
+                                  ? { every }
+                                  : {}),
                                 // Hour-of-day slots occur hourly.
                                 ...(cyclic && occurrence
                                   ? {
@@ -1710,6 +1715,41 @@ export function MetricsEditor<Row>({
                           <option value="dayOfWeek">Day of week</option>
                         </select>
                       </label>
+                      {selected.dateGrouping &&
+                        selected.dateGrouping.interval !== "hourOfDay" &&
+                        selected.dateGrouping.interval !== "dayOfWeek" && (
+                          <label className="qt-metric-date-every">
+                            Every
+                            <input
+                              aria-label="Intervals per bucket"
+                              title={`Buckets of this many ${selected.dateGrouping.interval}s, counted from 1970 (hours from each local midnight when they divide a day)`}
+                              type="number"
+                              min={1}
+                              max={MAX_METRIC_DATE_EVERY}
+                              step={1}
+                              placeholder="1"
+                              value={selected.dateGrouping.every ?? 1}
+                              onChange={(e) => {
+                                const n = e.currentTarget.valueAsNumber;
+                                if (
+                                  !Number.isInteger(n) ||
+                                  n < 1 ||
+                                  n > MAX_METRIC_DATE_EVERY
+                                )
+                                  return;
+                                const { every: _every, ...rest } =
+                                  selected.dateGrouping!;
+                                patch(selected.id, {
+                                  dateGrouping: n > 1 ? { ...rest, every: n } : rest,
+                                });
+                              }}
+                            />
+                            <span aria-hidden="true">
+                              {selected.dateGrouping.interval}
+                              {(selected.dateGrouping.every ?? 1) > 1 ? "s" : ""}
+                            </span>
+                          </label>
+                        )}
                       {(selected.dateGrouping?.interval === "hourOfDay" ||
                         selected.dateGrouping?.interval === "dayOfWeek") && (
                         <>
@@ -3111,7 +3151,9 @@ function MetricSeriesSettings({
       ? "hour of the day"
       : dateGrouping?.interval === "dayOfWeek"
         ? "weekday"
-        : (dateGrouping?.interval ?? "interval");
+        : dateGrouping && (dateGrouping.every ?? 1) > 1
+          ? `${dateGrouping.every}-${dateGrouping.interval} bucket`
+          : (dateGrouping?.interval ?? "interval");
   const mode = !window ? "none" : window.periods === "all" ? "all" : "trailing";
   const setWindow = (next: MetricWindow | undefined) =>
     onChange({

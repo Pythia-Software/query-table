@@ -507,6 +507,16 @@
   align-items: center;
   gap: 8px;
 }
+.qt-metric-date-grouping .qt-metric-date-every {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.qt-metric-date-every input {
+  width: 5.5em;
+  min-width: 0;
+  box-sizing: border-box;
+}
 .qt-metric-date-toggle input {
   accent-color: var(--qt-accent, #0969da);
 }

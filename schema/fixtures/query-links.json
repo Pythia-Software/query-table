@@ -1580,6 +1580,7 @@
             "dateGrouping": {
               "field": "time",
               "interval": "week",
+              "every": 2,
               "timeZone": "Europe/Paris",
               "includeEmpty": false,
               "range": "custom",
@@ -1667,7 +1668,7 @@
           }
         ]
       },
-      "token": "2d.ZVTbbhMxFPwV5CeQQpuEi9C-taUUpBQqoIVSRcjxOlkrXp-V7c0mivLvzPFeSJUoD-vx2DPn4rMXK5E97YXJRSaktWIkqOLPzQqfK091dbkDQ1SeNibXXsxHYmm0Zb6VUTu1A9HKhbZAZgOit5XXIRhygC8ebl4-dez5q2e7j_22ohDTXlBU6dbNrYyqMG6wMjOliSJ7NxKlcVdUOyze4EQhPZ-IFCVH0BiXUyOyvfA6r9XxViV9NPjKhHHK1rlmTHtDecBVh5HI4fKGtVgWN_SxRlMy17io_SZd0Gi9BsIbf8ixyHXtYf38TnoTEjcpXJdVRAqX0gY9El66FXNVHSKVHG6EJQDT8fT96_EEf86PY80WmrZQ5_xLZwB2hxDYtgmVlZDZizWix2ZQMoKKk2DXetZV6AHAtl_8xmLXLx65jnoF6TsKJraVW1BsbZZym9IC3Q-ccWq-xQLXZ9HXCGtB21stcaILc_tDSYs496IkOESvGKclu0HlRPZ6csZFlFuRTcawvzuhExc9ccdn4_FkIKcfTizJlxJ5G-LNay-TaSRDK1OmFOFcoNorfe-4cUTQihxKzWnfsaBQlhSXsUrZ4pCLIis54qPC3v-84iRvP52Iolu6znimoytSxa2x1pwqmkDPb78o0YBKnn_Vzd9H8muW2p1IoUuVRsMfhzcFExKJxiW5lB5oV4I6tI18RZYYbgvFtAduiAFZSH9ccG3xdFK6U2PMULdOqTIbaqUaiRnRNzQ1Hw36ALaCwkFFti5dC0kgh7Y7ozeLutUYQkLTpGdS1Zyz_9OkKUxYa_YsYr3WDC2Mw5ILjy4n5u_xzPNYfNcl3I1HotBmVcS0nLxNrfNr2J9ME_D5mIKrAvHLw_RjjawdMWNO8GB-JFxt01tbGo88H0Y9WaXp03O72HuylczFpMyNXDkMNqMAP4kr6b3R-QvaaH8m5of54R8",
+      "token": "2d.ZVTbbhMxEP0V5CeQljYJF6F9a0spSClUQAulipDjdbJWvJ6V7c1FUf6dM94LqRLlYT0-9pkzczx7sRT5016YQuRCWisyQTV_rpf4XHpq6ssdEKL2tDaF9mKWiYXRlvFWRu3UDkAr59oiMh0ielt7HYIhh_DFw83Lpw49e_Vs97HfVhRi2guKat1mcyujKo0bUpmaykSRv8tEZdwVNQ6LNzhRSs8nIkXJCjbGFbQR-V54XTTqeKuWPhp85cI4ZZtCc0x7Q0XAVYdMFMjyhrmYFjf0WqOpGGtc1H6dLthovWIpa-1RoUmWIH_IMd114yHi_E56E9KpxHVd1RHQhbRBZ8JLt2SsakKkioVHJIfAZDR5_3o0xp-vd8zehiZtqNPwpUsFiQ9iWIAJtZWg2YsV6oDNoGQEFCeBbvS069UDAtt-8RuLXb945I7qJajvKJjY9nBOsU2zkttUIPB-4NrT5lsscX0efQNZc9reaokTncztDyUtdO5FRcgQrjFOS84GPRT56_EZt1NuRT4eIf3dCZy4_Qk7OhuNxgM4_XBiQb6SqNugt2i8TEmjGFqZKpUI5wI1Xul7xxYSQStyaDqXfceEQllS3NA6VYsll2VeseKjxt7_vOIibz-dkMI3nUee8eiaVHlrrDWnjCbQ89svKlhRyfOvevP3kfyKqXYnVPCr0rD-sbwJkKBIMG7JpfSIdi1oQmvpK7LE4bZRDHtgQwyRufTHDdcWjyiVOxljir51TLVZU0u1kZgWvaFp89HAB0grKBxUZJvKtSGJyKF1Z_Rm3rQcgySYJj2TuuGa_Z8rm9KEleacRWxWmkNz47DkxsPlxPg9HnwRy--6QnajTJTaLMuYluO3yTq_hv0x3ikCn48huCoQvzzMQebI22Ez4gIPyWfCNTa9tYXxqPMh68EqzaEe22nvwVYyFjOzMHLpMOKMQvhJXEnvjS5eEKbHmZgdZod_",
       "normalized": {
         "select": [],
         "where": [],
@@ -1697,6 +1698,7 @@
             "dateGrouping": {
               "field": "time",
               "interval": "week",
+              "every": 2,
               "timeZone": "Europe/Paris",
               "includeEmpty": false,
               "range": "custom",
@@ -1784,7 +1786,7 @@
           }
         ]
       },
-      "packed": "{\"g\":[{\"id\":\"all\",\"op\":\"avg\",\"groupBy\":[\"provider\"],\"field\":\"latency\",\"label\":\"Latency\",\"expression\":\"AVG([latency])\",\"expressionY\":\"AVG([cost])\",\"scope\":\"allMatching\",\"groupLimit\":5,\"minCount\":3,\"share\":\"total\",\"window\":{\"reduce\":\"total\",\"partial\":\"include\",\"periods\":3},\"dateGrouping\":{\"field\":\"time\",\"interval\":\"week\",\"timeZone\":\"Europe/Paris\",\"includeEmpty\":false,\"range\":\"custom\",\"start\":\"2026-01-01\",\"end\":\"2026-02-01\",\"partialIntervals\":\"include\"},\"display\":{\"kind\":\"scatter\",\"valueLabel\":\"V\",\"xLabel\":\"X\",\"yLabel\":\"Y\",\"legendPosition\":\"bottom\",\"maxGroups\":8,\"showOther\":true,\"boxMean\":false,\"xScale\":{\"mode\":\"linear\",\"min\":-1.5,\"max\":10},\"yScale\":{\"mode\":\"log\",\"min\":0.001,\"max\":1000000},\"format\":{\"kind\":\"duration\",\"decimals\":1,\"sourceUnit\":\"seconds\",\"style\":\"clock\",\"pattern\":\"hh:mm\",\"timeZone\":\"UTC\"},\"xFormat\":{\"kind\":\"datetime\",\"sourceUnit\":\"epochMilliseconds\",\"style\":\"iso\",\"timeZone\":\"America/New_York\"},\"yFormat\":{\"kind\":\"percent\",\"decimals\":2},\"list\":{\"showBars\":false,\"useGroupColors\":true,\"showValues\":true,\"barPosition\":\"below\",\"maxLabelLines\":2},\"pivot\":{\"swap\":false,\"rowDir\":\"desc\",\"columnDir\":\"asc\"}},\"distribution\":{\"kind\":\"box\",\"input\":\"latency\",\"whiskers\":\"tukey\",\"bins\":0},\"layout\":{\"widthRem\":20,\"heightRem\":14,\"minWidthRem\":12,\"minHeightRem\":14},\"sort\":[{\"key\":\"group0\",\"dir\":\"asc\",\"nulls\":\"first\"},{\"key\":\"count\",\"dir\":\"desc\",\"nulls\":\"last\"}],\"diagnostics\":[\"Carried over.\"]}]}"
+      "packed": "{\"g\":[{\"id\":\"all\",\"op\":\"avg\",\"groupBy\":[\"provider\"],\"field\":\"latency\",\"label\":\"Latency\",\"expression\":\"AVG([latency])\",\"expressionY\":\"AVG([cost])\",\"scope\":\"allMatching\",\"groupLimit\":5,\"minCount\":3,\"share\":\"total\",\"window\":{\"reduce\":\"total\",\"partial\":\"include\",\"periods\":3},\"dateGrouping\":{\"field\":\"time\",\"interval\":\"week\",\"every\":2,\"timeZone\":\"Europe/Paris\",\"includeEmpty\":false,\"range\":\"custom\",\"start\":\"2026-01-01\",\"end\":\"2026-02-01\",\"partialIntervals\":\"include\"},\"display\":{\"kind\":\"scatter\",\"valueLabel\":\"V\",\"xLabel\":\"X\",\"yLabel\":\"Y\",\"legendPosition\":\"bottom\",\"maxGroups\":8,\"showOther\":true,\"boxMean\":false,\"xScale\":{\"mode\":\"linear\",\"min\":-1.5,\"max\":10},\"yScale\":{\"mode\":\"log\",\"min\":0.001,\"max\":1000000},\"format\":{\"kind\":\"duration\",\"decimals\":1,\"sourceUnit\":\"seconds\",\"style\":\"clock\",\"pattern\":\"hh:mm\",\"timeZone\":\"UTC\"},\"xFormat\":{\"kind\":\"datetime\",\"sourceUnit\":\"epochMilliseconds\",\"style\":\"iso\",\"timeZone\":\"America/New_York\"},\"yFormat\":{\"kind\":\"percent\",\"decimals\":2},\"list\":{\"showBars\":false,\"useGroupColors\":true,\"showValues\":true,\"barPosition\":\"below\",\"maxLabelLines\":2},\"pivot\":{\"swap\":false,\"rowDir\":\"desc\",\"columnDir\":\"asc\"}},\"distribution\":{\"kind\":\"box\",\"input\":\"latency\",\"whiskers\":\"tukey\",\"bins\":0},\"layout\":{\"widthRem\":20,\"heightRem\":14,\"minWidthRem\":12,\"minHeightRem\":14},\"sort\":[{\"key\":\"group0\",\"dir\":\"asc\",\"nulls\":\"first\"},{\"key\":\"count\",\"dir\":\"desc\",\"nulls\":\"last\"}],\"diagnostics\":[\"Carried over.\"]}]}"
     },
     {
       "name": "item details with pooled views",
@@ -2363,6 +2365,163 @@
         }
       },
       "packed": "{\"w\":[{\"field\":\"rows\",\"op\":\">\",\"value\":\"1\"}],\"o\":[{\"field\":\"cost\",\"dir\":\"desc\"}],\"b\":{\"keys\":[\"provider\"],\"summaries\":[{\"id\":\"rows\",\"op\":\"count\"},{\"id\":\"cost\",\"op\":\"sum\",\"field\":\"cost\",\"label\":\"Cost\",\"display\":{\"kind\":\"number\",\"decimals\":2}},{\"id\":\"p50\",\"op\":\"formula\",\"expression\":\"MEDIAN([latency])\"},{\"id\":\"latest\",\"op\":\"row\",\"field\":\"model\"},{\"id\":\"open\",\"op\":\"link\",\"link\":{\"label\":{\"column\":\"provider\"},\"to\":{\"kind\":\"query\",\"target\":\"tokens\",\"base\":\"source\",\"keyFilters\":true,\"patch\":{\"id\":\"opus\",\"owns\":[\"filters\",\"order\"],\"query\":{\"where\":[{\"field\":\"model\",\"op\":\"contains\",\"value\":\"opus\"}],\"orderBy\":[{\"field\":\"cost\",\"dir\":\"desc\"}]}},\"params\":{\"2\":\"two\",\"view\":\"tokens\"}}},\"label\":\"Open\"},{\"id\":\"docs\",\"op\":\"link\",\"link\":{\"label\":\"Docs\",\"to\":{\"kind\":\"template\",\"template\":\"https://example.com/{provider}\"}}}],\"representative\":{\"orderBy\":[{\"field\":\"time\",\"dir\":\"desc\",\"nulls\":\"last\"}]},\"source\":{\"select\":[],\"where\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"anthropic\"}],\"orderBy\":[],\"limit\":100,\"offset\":0,\"aggregations\":[{\"id\":\"n\",\"op\":\"count\",\"groupBy\":[]}]}}}"
+    },
+    {
+      "name": "grouping with calendar keys of several intervals",
+      "state": {
+        "select": [
+          {
+            "field": "called_at"
+          },
+          {
+            "field": "ended_at"
+          },
+          {
+            "field": "rows"
+          }
+        ],
+        "where": [],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0,
+        "grouping": {
+          "keys": [
+            {
+              "field": "called_at",
+              "interval": "hour",
+              "every": 6,
+              "timeZone": "Asia/Kolkata"
+            },
+            {
+              "field": "ended_at",
+              "interval": "month",
+              "every": 1
+            }
+          ],
+          "summaries": [
+            {
+              "id": "rows",
+              "op": "count"
+            }
+          ],
+          "representative": null,
+          "source": {
+            "select": [],
+            "where": [],
+            "orderBy": [],
+            "limit": 100,
+            "offset": 0
+          }
+        },
+        "aggregations": [
+          {
+            "id": "hours",
+            "op": "count",
+            "groupBy": [
+              "called_at"
+            ],
+            "dateGrouping": {
+              "field": "called_at",
+              "interval": "hour",
+              "every": 3,
+              "timeZone": "America/New_York",
+              "includeEmpty": true,
+              "range": "observed"
+            }
+          },
+          {
+            "id": "days",
+            "op": "count",
+            "groupBy": [
+              "called_at"
+            ],
+            "dateGrouping": {
+              "field": "called_at",
+              "interval": "day",
+              "every": 1,
+              "includeEmpty": false,
+              "range": "query"
+            }
+          }
+        ]
+      },
+      "token": "2d.tZLNTsMwEITfZc-WWoTEoTeQEAck7lBV1TbetFb8E9Z2oiryu7MOhRJx4sAt4x1_GY89QYTNdgsNWkt6jwl2agvk9VVwGCPsdgqO4pzAaNjAKWSOoCD0IpqQfRJx5JD7h7O4FjjQmOipzowXxAStIVshV5MC4xPxgPbClhUaiIV1qyAZR2_Bk8zuHbFpcPVC4_41cDfvbGzW9Oj6JPbEmRQw-mO1h0MUKmkoRV2Sazz_V3BB_8rToo0_Ar3neqhSBH6oxI4kTW31T53cLTuJBlfPwXaYEOo5v1jft7hAueDTCWqCmJ1DNvSZYG5nvutFO9XI1DNF8gmTGeSXPlsr2yVTI0qeEFlqklDEO56IZbF-BtbEc60irHFGLDfrtQzaNpKIdSnlAw",
+      "normalized": {
+        "select": [
+          {
+            "field": "called_at"
+          },
+          {
+            "field": "ended_at"
+          },
+          {
+            "field": "rows"
+          }
+        ],
+        "where": [],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0,
+        "grouping": {
+          "keys": [
+            {
+              "field": "called_at",
+              "interval": "hour",
+              "every": 6,
+              "timeZone": "Asia/Kolkata"
+            },
+            {
+              "field": "ended_at",
+              "interval": "month"
+            }
+          ],
+          "summaries": [
+            {
+              "id": "rows",
+              "op": "count"
+            }
+          ],
+          "representative": null,
+          "source": {
+            "select": [],
+            "where": [],
+            "orderBy": [],
+            "limit": 100,
+            "offset": 0
+          }
+        },
+        "aggregations": [
+          {
+            "id": "hours",
+            "op": "count",
+            "groupBy": [
+              "called_at"
+            ],
+            "dateGrouping": {
+              "field": "called_at",
+              "interval": "hour",
+              "every": 3,
+              "timeZone": "America/New_York",
+              "includeEmpty": true,
+              "range": "observed"
+            }
+          },
+          {
+            "id": "days",
+            "op": "count",
+            "groupBy": [
+              "called_at"
+            ],
+            "dateGrouping": {
+              "field": "called_at",
+              "interval": "day",
+              "includeEmpty": false,
+              "range": "query"
+            }
+          }
+        ]
+      },
+      "packed": "{\"s\":[[\"called_at\"],[\"ended_at\"],[\"rows\"]],\"g\":[{\"id\":\"hours\",\"op\":\"count\",\"groupBy\":[\"called_at\"],\"dateGrouping\":{\"field\":\"called_at\",\"interval\":\"hour\",\"every\":3,\"timeZone\":\"America/New_York\",\"includeEmpty\":true,\"range\":\"observed\"}},{\"id\":\"days\",\"op\":\"count\",\"groupBy\":[\"called_at\"],\"dateGrouping\":{\"field\":\"called_at\",\"interval\":\"day\",\"includeEmpty\":false,\"range\":\"query\"}}],\"b\":{\"keys\":[{\"field\":\"called_at\",\"interval\":\"hour\",\"every\":6,\"timeZone\":\"Asia/Kolkata\"},{\"field\":\"ended_at\",\"interval\":\"month\"}],\"summaries\":[{\"id\":\"rows\",\"op\":\"count\"}],\"representative\":null,\"source\":{\"select\":[],\"where\":[],\"orderBy\":[],\"limit\":100,\"offset\":0}}}"
     },
     {
       "name": "grouping with calendar keys",
@@ -6707,6 +6866,128 @@
       "packed": "{\"b\":{\"keys\":[\"k\",\"k\"],\"summaries\":[{\"id\":\"k\",\"op\":\"count\"},{\"id\":\"x\",\"op\":\"row\"},{\"id\":\"l\",\"op\":\"link\"},{\"id\":\"f\",\"op\":\"formula\"}],\"representative\":{\"orderBy\":[{\"field\":\"t\",\"dir\":[\"asc\"],\"nulls\":\"last\"}]},\"source\":{\"select\":[],\"where\":[{\"field\":\"a\",\"op\":\"=\",\"value\":\"1\"}],\"orderBy\":[],\"limit\":100,\"offset\":0},\"diagnostics\":[\"Invalid grouping: keys must list 1–20 distinct field names.\",\"Invalid grouping: summary \\\"k\\\" uses the same id as group key \\\"k\\\"; summary ids must differ from source field names.\",\"Invalid grouping: summary \\\"f\\\" needs an expression of at most 10,000 characters.\",\"Invalid grouping: summary 1 needs an id of 1–256 characters.\",\"Invalid grouping: summary 2 needs an id of 1–256 characters.\",\"Invalid grouping: summary \\\"x\\\" has unsupported op \\\"MEDIAN\\\"; use count, count_distinct, sum, avg, min, max, row, formula, or link (for a median, use op \\\"formula\\\" with expression \\\"MEDIAN([field])\\\").\",\"Invalid grouping: summary \\\"x\\\" label must be text of at most 1,000 characters.\",\"Invalid grouping: summary \\\"x\\\" display: unsupported option depth.\",\"Invalid grouping: summary \\\"op\\\" has unsupported op \\\"sum\\\"; use count, count_distinct, sum, avg, min, max, row, formula, or link.\",\"Invalid grouping: summary \\\"s\\\" has unsupported op \\\"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀\\\"; use count, count_distinct, sum, avg, min, max, row, formula, or link.\",\"Invalid grouping: each representative ordering term needs a field, dir \\\"asc\\\" or \\\"desc\\\", and optional nulls \\\"first\\\" or \\\"last\\\".\",\"Invalid grouping: only one grouping stage is supported; the source query cannot itself be grouped.\",\"Earlier problem.\",\"Invalid grouping definition.\",\"Invalid grouping: source filters contain malformed predicates or exceed the predicate budget.\"]}}"
     },
     {
+      "name": "unnormalized calendar every",
+      "token": "2j.eyJiIjp7ImtleXMiOlt7ImZpZWxkIjoiYSIsImludGVydmFsIjoiZGF5IiwiZXZlcnkiOjB9LHsiZmllbGQiOiJiIiwiaW50ZXJ2YWwiOiJkYXkiLCJldmVyeSI6MTAwMX0seyJmaWVsZCI6ImMiLCJpbnRlcnZhbCI6ImRheSIsImV2ZXJ5IjoiMiJ9LHsiZmllbGQiOiJkIiwiaW50ZXJ2YWwiOiJkYXkiLCJldmVyeSI6Mi41fSx7ImZpZWxkIjoiZSIsImludGVydmFsIjoiZGF5IiwiZXZlcnkiOjF9LHsiZmllbGQiOiJmIiwiaW50ZXJ2YWwiOiJ3ZWVrIiwiZXZlcnkiOjEwMDAsInRpbWVab25lIjoiVVRDIn1dLCJzdW1tYXJpZXMiOlt7ImlkIjoibiIsIm9wIjoiY291bnQifV0sInNvdXJjZSI6e319LCJnIjpbeyJpZCI6ImEiLCJvcCI6ImNvdW50IiwiZ3JvdXBCeSI6WyJ0Il0sImRhdGVHcm91cGluZyI6eyJmaWVsZCI6InQiLCJpbnRlcnZhbCI6ImhvdXIiLCJldmVyeSI6MCwiaW5jbHVkZUVtcHR5IjpmYWxzZSwicmFuZ2UiOiJxdWVyeSJ9fSx7ImlkIjoiYiIsIm9wIjoiY291bnQiLCJncm91cEJ5IjpbInQiXSwiZGF0ZUdyb3VwaW5nIjp7ImZpZWxkIjoidCIsImludGVydmFsIjoiaG91ciIsImV2ZXJ5IjoiMyIsImluY2x1ZGVFbXB0eSI6ZmFsc2UsInJhbmdlIjoicXVlcnkifX0seyJpZCI6ImMiLCJvcCI6ImNvdW50IiwiZ3JvdXBCeSI6WyJ0Il0sImRhdGVHcm91cGluZyI6eyJmaWVsZCI6InQiLCJpbnRlcnZhbCI6ImhvdXIiLCJldmVyeSI6MSwiaW5jbHVkZUVtcHR5IjpmYWxzZSwicmFuZ2UiOiJxdWVyeSJ9fSx7ImlkIjoiZCIsIm9wIjoiY291bnQiLCJncm91cEJ5IjpbInQiXSwiZGF0ZUdyb3VwaW5nIjp7ImZpZWxkIjoidCIsImludGVydmFsIjoiaG91ck9mRGF5IiwiZXZlcnkiOjIsImluY2x1ZGVFbXB0eSI6ZmFsc2UsInJhbmdlIjoicXVlcnkifX0seyJpZCI6ImUiLCJvcCI6ImNvdW50IiwiZ3JvdXBCeSI6WyJ0Il0sImRhdGVHcm91cGluZyI6eyJmaWVsZCI6InQiLCJpbnRlcnZhbCI6Im1vbnRoIiwiZXZlcnkiOjIwMDAsImluY2x1ZGVFbXB0eSI6ZmFsc2UsInJhbmdlIjoicXVlcnkifX1dfQ",
+      "normalized": {
+        "select": [],
+        "where": [],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0,
+        "grouping": {
+          "keys": [
+            {
+              "field": "e",
+              "interval": "day"
+            },
+            {
+              "field": "f",
+              "interval": "week",
+              "every": 1000,
+              "timeZone": "UTC"
+            }
+          ],
+          "summaries": [
+            {
+              "id": "n",
+              "op": "count"
+            }
+          ],
+          "representative": null,
+          "source": {
+            "select": [],
+            "where": [],
+            "orderBy": [],
+            "limit": 100,
+            "offset": 0
+          },
+          "diagnostics": [
+            "Invalid grouping: key 1 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.",
+            "Invalid grouping: key 2 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.",
+            "Invalid grouping: key 3 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.",
+            "Invalid grouping: key 4 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.",
+            "Invalid grouping: keys must list 1–20 distinct field names."
+          ]
+        },
+        "aggregations": [
+          {
+            "id": "a",
+            "op": "count",
+            "groupBy": [
+              "t"
+            ],
+            "dateGrouping": {
+              "field": "t",
+              "interval": "hour",
+              "includeEmpty": false,
+              "range": "query"
+            },
+            "diagnostics": [
+              "Invalid metric every."
+            ]
+          },
+          {
+            "id": "b",
+            "op": "count",
+            "groupBy": [
+              "t"
+            ],
+            "dateGrouping": {
+              "field": "t",
+              "interval": "hour",
+              "includeEmpty": false,
+              "range": "query"
+            },
+            "diagnostics": [
+              "Invalid metric every."
+            ]
+          },
+          {
+            "id": "c",
+            "op": "count",
+            "groupBy": [
+              "t"
+            ],
+            "dateGrouping": {
+              "field": "t",
+              "interval": "hour",
+              "includeEmpty": false,
+              "range": "query"
+            }
+          },
+          {
+            "id": "d",
+            "op": "count",
+            "groupBy": [
+              "t"
+            ],
+            "dateGrouping": {
+              "field": "t",
+              "interval": "hourOfDay",
+              "every": 2,
+              "includeEmpty": false,
+              "range": "query"
+            }
+          },
+          {
+            "id": "e",
+            "op": "count",
+            "groupBy": [
+              "t"
+            ],
+            "dateGrouping": {
+              "field": "t",
+              "interval": "month",
+              "every": 2000,
+              "includeEmpty": false,
+              "range": "query"
+            }
+          }
+        ]
+      },
+      "packed": "{\"g\":[{\"id\":\"a\",\"op\":\"count\",\"groupBy\":[\"t\"],\"dateGrouping\":{\"field\":\"t\",\"interval\":\"hour\",\"includeEmpty\":false,\"range\":\"query\"},\"diagnostics\":[\"Invalid metric every.\"]},{\"id\":\"b\",\"op\":\"count\",\"groupBy\":[\"t\"],\"dateGrouping\":{\"field\":\"t\",\"interval\":\"hour\",\"includeEmpty\":false,\"range\":\"query\"},\"diagnostics\":[\"Invalid metric every.\"]},{\"id\":\"c\",\"op\":\"count\",\"groupBy\":[\"t\"],\"dateGrouping\":{\"field\":\"t\",\"interval\":\"hour\",\"includeEmpty\":false,\"range\":\"query\"}},{\"id\":\"d\",\"op\":\"count\",\"groupBy\":[\"t\"],\"dateGrouping\":{\"field\":\"t\",\"interval\":\"hourOfDay\",\"every\":2,\"includeEmpty\":false,\"range\":\"query\"}},{\"id\":\"e\",\"op\":\"count\",\"groupBy\":[\"t\"],\"dateGrouping\":{\"field\":\"t\",\"interval\":\"month\",\"every\":2000,\"includeEmpty\":false,\"range\":\"query\"}}],\"b\":{\"keys\":[{\"field\":\"e\",\"interval\":\"day\"},{\"field\":\"f\",\"interval\":\"week\",\"every\":1000,\"timeZone\":\"UTC\"}],\"summaries\":[{\"id\":\"n\",\"op\":\"count\"}],\"representative\":null,\"source\":{\"select\":[],\"where\":[],\"orderBy\":[],\"limit\":100,\"offset\":0},\"diagnostics\":[\"Invalid grouping: key 1 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 2 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 3 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 4 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: keys must list 1–20 distinct field names.\"]}}"
+    },
+    {
       "name": "unnormalized calendar group keys",
       "token": "2j.eyJiIjp7ImtleXMiOlt7ImludGVydmFsIjoid2VlayIsImZpZWxkIjoiYSIsInRpbWVab25lIjoiRXVyb3BlL0JlcmxpbiJ9LHsiZmllbGQiOiJiIiwiaW50ZXJ2YWwiOiJob3VyT2ZEYXkiLCJ0aW1lWm9uZSI6IlVUQyJ9LHsiZmllbGQiOiJjIiwiaW50ZXJ2YWwiOiJkYXkiLCJ0aW1lWm9uZSI6IiswMjowMCJ9LHsiZmllbGQiOiJkIiwiaW50ZXJ2YWwiOiJkYXkiLCJ0aW1lWm9uZSI6N30seyJmaWVsZCI6ImUiLCJpbnRlcnZhbCI6ImRheSIsInRpbWVab25lIjpudWxsfSx7ImZpZWxkIjoiIiwiaW50ZXJ2YWwiOiJkYXkifSx7ImZpZWxkIjoiYSIsImludGVydmFsIjoibW9udGgifSx7ImZpZWxkIjoiZiIsImludGVydmFsIjoieWVhciIsImV4dHJhIjp0cnVlfSxbImciXV0sInN1bW1hcmllcyI6W3siaWQiOiJhIiwib3AiOiJjb3VudCJ9LHsiaWQiOiJmIiwib3AiOiJjb3VudCJ9XSwic291cmNlIjp7fX19",
       "normalized": {
@@ -6750,18 +7031,18 @@
             "offset": 0
           },
           "diagnostics": [
-            "Invalid grouping: key 2 must be a field name or a calendar key {field, interval, timeZone} with interval hour, day, week, month or year; hour-of-day and day-of-week are metric intervals.",
-            "Invalid grouping: key 3 must be a field name or a calendar key {field, interval, timeZone} with interval hour, day, week, month or year; hour-of-day and day-of-week are metric intervals.",
-            "Invalid grouping: key 4 must be a field name or a calendar key {field, interval, timeZone} with interval hour, day, week, month or year; hour-of-day and day-of-week are metric intervals.",
-            "Invalid grouping: key 5 must be a field name or a calendar key {field, interval, timeZone} with interval hour, day, week, month or year; hour-of-day and day-of-week are metric intervals.",
-            "Invalid grouping: key 6 must be a field name or a calendar key {field, interval, timeZone} with interval hour, day, week, month or year; hour-of-day and day-of-week are metric intervals.",
+            "Invalid grouping: key 2 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.",
+            "Invalid grouping: key 3 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.",
+            "Invalid grouping: key 4 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.",
+            "Invalid grouping: key 5 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.",
+            "Invalid grouping: key 6 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.",
             "Invalid grouping: keys must list 1–20 distinct field names.",
             "Invalid grouping: summary \"a\" uses the same id as group key \"a\"; summary ids must differ from source field names.",
             "Invalid grouping: summary \"f\" uses the same id as group key \"f\"; summary ids must differ from source field names."
           ]
         }
       },
-      "packed": "{\"b\":{\"keys\":[{\"field\":\"a\",\"interval\":\"week\",\"timeZone\":\"Europe/Berlin\"},{\"field\":\"a\",\"interval\":\"month\"},{\"field\":\"f\",\"interval\":\"year\"}],\"summaries\":[{\"id\":\"a\",\"op\":\"count\"},{\"id\":\"f\",\"op\":\"count\"}],\"representative\":null,\"source\":{\"select\":[],\"where\":[],\"orderBy\":[],\"limit\":100,\"offset\":0},\"diagnostics\":[\"Invalid grouping: keys must list 1–20 distinct field names.\",\"Invalid grouping: summary \\\"a\\\" uses the same id as group key \\\"a\\\"; summary ids must differ from source field names.\",\"Invalid grouping: summary \\\"f\\\" uses the same id as group key \\\"f\\\"; summary ids must differ from source field names.\",\"Invalid grouping: key 2 must be a field name or a calendar key {field, interval, timeZone} with interval hour, day, week, month or year; hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 3 must be a field name or a calendar key {field, interval, timeZone} with interval hour, day, week, month or year; hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 4 must be a field name or a calendar key {field, interval, timeZone} with interval hour, day, week, month or year; hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 5 must be a field name or a calendar key {field, interval, timeZone} with interval hour, day, week, month or year; hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 6 must be a field name or a calendar key {field, interval, timeZone} with interval hour, day, week, month or year; hour-of-day and day-of-week are metric intervals.\"]}}"
+      "packed": "{\"b\":{\"keys\":[{\"field\":\"a\",\"interval\":\"week\",\"timeZone\":\"Europe/Berlin\"},{\"field\":\"a\",\"interval\":\"month\"},{\"field\":\"f\",\"interval\":\"year\"}],\"summaries\":[{\"id\":\"a\",\"op\":\"count\"},{\"id\":\"f\",\"op\":\"count\"}],\"representative\":null,\"source\":{\"select\":[],\"where\":[],\"orderBy\":[],\"limit\":100,\"offset\":0},\"diagnostics\":[\"Invalid grouping: keys must list 1–20 distinct field names.\",\"Invalid grouping: summary \\\"a\\\" uses the same id as group key \\\"a\\\"; summary ids must differ from source field names.\",\"Invalid grouping: summary \\\"f\\\" uses the same id as group key \\\"f\\\"; summary ids must differ from source field names.\",\"Invalid grouping: key 2 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 3 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 4 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 5 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 6 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.\"]}}"
     },
     {
       "name": "unnormalized item details",

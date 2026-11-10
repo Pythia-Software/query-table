@@ -809,3 +809,18 @@
   margin-left: 4px;
   font-weight: 500;
 }
+/* Intervals per group: a compact number beside the interval chip. */
+.qt-group-key-every {
+  flex: none;
+  width: 3.6em;
+  height: 20px;
+  margin-left: 3px;
+  padding: 0 2px;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 11px;
+  border: 1px solid var(--qt-border-subtle, #d0d7de);
+  border-radius: 3px;
+  background: var(--qt-column-bg);
+  color: inherit;
+}

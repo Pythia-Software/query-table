@@ -7,6 +7,7 @@ import type {
 } from "./metricTypes";
 import { metricTimestamp, formatMetricOutput } from "./metricFormat";
 import { metricTupleKey } from "./metricColors";
+import { metricDateNext } from "@pythia-software/query-table-core";
 /** A cyclic slot's label: "09:00" for an hour of the day and the locale's
  * weekday ("Mon", or "Monday" in detail) for an ISO day of the week. */
 export function metricCycleLabel(
@@ -33,7 +34,57 @@ export function metricCycleLabel(
 const cyclic = (clause?: RenderingClause) =>
   clause?.dateGrouping?.interval === "hourOfDay" ||
   clause?.dateGrouping?.interval === "dayOfWeek";
-/** Calendar group labels must describe the same local dates as the computation. */
+/** Whether a calendar grouping buckets several intervals (`every` > 1). */
+const multiple = (clause?: RenderingClause) =>
+  !cyclic(clause) && (clause?.dateGrouping?.every ?? 1) > 1;
+/** A bucket of several calendar intervals, from its start to the next
+ * bucket's start in the grouping zone: "Mar 08 09:00–12:00 -05:00" for hours,
+ * "Mar 08–Mar 10" for days and weeks (the last day included), "Jan–Mar 2026"
+ * for months and "2020–2029" for years. In detail, both full instants. */
+export function metricEveryLabel(
+  value: MetricValue | undefined,
+  clause: RenderingClause | undefined,
+  locale?: string,
+  detailed = false,
+): string | undefined {
+  const grouping = clause?.dateGrouping;
+  if (!grouping || !multiple(clause) || typeof value !== "string") return undefined;
+  const start = Date.parse(value);
+  if (!Number.isFinite(start)) return undefined;
+  const timeZone = grouping.timeZone ?? "UTC";
+  let next: number;
+  try {
+    next = metricDateNext(start, grouping.interval, timeZone, grouping.every);
+  } catch {
+    return undefined;
+  }
+  if (!Number.isFinite(next) || next <= start) return undefined;
+  const date = (time: number, pattern: string) =>
+    formatMetricOutput(
+      new Date(time).toISOString(),
+      { kind: "date", style: "custom", pattern, sourceUnit: "iso", timeZone },
+      locale,
+    ).text;
+  if (detailed)
+    return `${date(start, "YYYY-MM-DD HH:mm Z")} – ${date(next, "YYYY-MM-DD HH:mm Z")}`;
+  // The last day, month or year the bucket includes.
+  const last = next - 1;
+  switch (grouping.interval) {
+    case "hour":
+      return `${date(start, "MMM DD HH:mm")}–${date(next, "HH:mm Z")}`;
+    case "month":
+      return date(start, "YYYY") === date(last, "YYYY")
+        ? `${date(start, "MMM")}–${date(last, "MMM YYYY")}`
+        : `${date(start, "MMM YYYY")}–${date(last, "MMM YYYY")}`;
+    case "year":
+      return `${date(start, "YYYY")}–${date(last, "YYYY")}`;
+    default:
+      return `${date(start, "MMM DD")}–${date(last, "MMM DD")}`;
+  }
+}
+/** Calendar group labels must describe the same local dates as the computation.
+ * Buckets of several intervals have no single-date format: they are labelled
+ * as ranges by metricGroupKeyLabel. */
 export function metricDateGroupFormat(
   clause: RenderingClause,
 ): MetricValueFormat | undefined {
@@ -41,7 +92,7 @@ export function metricDateGroupFormat(
   // Scatter/histogram X formats survive display changes, but describe the
   // measure axis. Only explicit calendar grouping gives them date-key meaning.
   // Cyclic slots are numbers, labelled by metricGroupKeyLabel.
-  if (!grouping || cyclic(clause)) return undefined;
+  if (!grouping || cyclic(clause) || multiple(clause)) return undefined;
   const format = clause.display?.xFormat;
   return {
     kind: "date",
@@ -75,6 +126,8 @@ export function metricGroupKeyLabel(
       metricCycleLabel(value, clause.dateGrouping.interval, locale, detailed) ??
       String(value)
     );
+  if (multiple(clause))
+    return metricEveryLabel(value, clause, locale, detailed) ?? String(value);
   const format = detailed
     ? {
         kind: "datetime" as const,

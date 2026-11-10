@@ -503,6 +503,7 @@ var (
 	metricDateOptions = []optionSpec{
 		{key: "field", kind: optionString},
 		enumOption("interval", "hour", "day", "week", "month", "year", "hourOfDay", "dayOfWeek"),
+		{key: "every", kind: optionPositiveInteger},
 		{key: "timeZone", kind: optionString},
 		{key: "includeEmpty", kind: optionBoolean},
 		enumOption("range", "query", "observed", "custom"),
@@ -635,6 +636,10 @@ func normalizeLinkMetricOptions(raw *jsValue) *jsValue {
 			if !field.isString() || field.s == "" || jsLength(field.s) > 256 || !d.get("interval").truthy() ||
 				includeEmpty == nil || includeEmpty.kind != jsBool || !d.get("range").truthy() {
 				m.diagnostics = append(m.diagnostics, "Invalid metric date grouping.")
+			}
+			// One interval per bucket is the default and is left out.
+			if every := d.get("every"); every != nil && every.n == 1 {
+				d.del("every")
 			}
 			if occurrence := dateGrouping.get("occurrence"); occurrence.isRecord() {
 				o := m.copy(occurrence, metricOccurrenceOptions)
@@ -1120,17 +1125,22 @@ func normalizeLinkGrouping(value *jsValue, links bool) *jsValue {
 			}
 			// A calendar key: the timezone's validity is checked with the schema.
 			field, fieldOK := boundedJSString(key.get("field"), linkMaxFieldName)
-			interval, zone := key.get("interval"), key.get("timeZone")
+			interval, zone, every := key.get("interval"), key.get("timeZone"), key.get("every")
 			if fieldOK && interval.isString() && includesString(groupKeyIntervals, interval.s) &&
+				(every == nil || (jsIsSafeInteger(every) && every.n >= 1 && every.n <= MaxCalendarEvery)) &&
 				(zone == nil || (zone.isString() && zone.s != "" && jsLength(zone.s) <= 80 && !strings.HasPrefix(zone.s, "+") && !strings.HasPrefix(zone.s, "-"))) {
 				keys = append(keys, field)
 				calendar := jsObj().set("field", jsStr(field)).set("interval", jsStr(interval.s))
+				// One interval per bucket is the default and is left out.
+				if every != nil && every.n != 1 {
+					calendar.set("every", every)
+				}
 				if zone != nil {
 					calendar.set("timeZone", jsStr(zone.s))
 				}
 				normalizedKeys.a = append(normalizedKeys.a, calendar)
 			} else {
-				fail("key " + strconv.Itoa(index+1) + " must be a field name or a calendar key {field, interval, timeZone} with interval hour, day, week, month or year; hour-of-day and day-of-week are metric intervals.")
+				fail("key " + strconv.Itoa(index+1) + " must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000; hour-of-day and day-of-week are metric intervals.")
 			}
 		}
 	}
