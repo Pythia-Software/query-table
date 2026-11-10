@@ -139,6 +139,58 @@ func (a *sqliteSampleQuantileAggregate) Value() (driver.Value, error) {
 	return rankedResult(sqlitePercentile(a.samples, a.p)), nil
 }
 
+// sqliteSampleQuantilesAggregate is qt_v2_sample_quantiles(sample, spec):
+// every order statistic of one input from one in-memory sort. spec is a JSON
+// array of probabilities, -1 for MEDIAN's midpoint. The result is a JSON
+// array of numbers, error codes and nulls for qt_v2_sample_pick, or
+// rankedOverflow.
+type sqliteSampleQuantilesAggregate struct {
+	sqliteSamples
+	spec string
+}
+
+func (a *sqliteSampleQuantilesAggregate) Step(v []driver.Value) error {
+	spec, ok := v[1].(string)
+	if len(v) != 2 || !ok || a.spec != "" && a.spec != spec {
+		return fmt.Errorf("qt_v2_sample_quantiles expects a sample and one specification")
+	}
+	a.spec = spec
+	a.add(v[0])
+	return nil
+}
+
+func (a *sqliteSampleQuantilesAggregate) Value() (driver.Value, error) {
+	defer a.release()
+	if a.overflow {
+		return rankedOverflow, nil
+	}
+	var spec []float64
+	if a.spec != "" && json.Unmarshal([]byte(a.spec), &spec) != nil {
+		return nil, fmt.Errorf("invalid sample quantile specification")
+	}
+	sort.Float64s(a.samples)
+	n := int64(len(a.samples))
+	results := make([]any, len(spec))
+	for i, p := range spec {
+		var value float64
+		var code string
+		switch {
+		case a.err != "":
+			results[i] = a.err
+			continue
+		case n == 0:
+			continue
+		case p < 0:
+			value, code = exactMidpoint(n, a.samples[(n-1)/2], a.samples[n/2])
+		default:
+			value, code = sqlitePercentile(a.samples, p)
+		}
+		results[i] = rankedResult(value, code)
+	}
+	text, err := json.Marshal(results)
+	return string(text), err
+}
+
 // sqliteBoxSamplesAggregate is qt_v2_box_minmax(sample) or
 // qt_v2_box_tukey(sample): the box payload of a group that fits in memory, or
 // rankedOverflow.
@@ -206,6 +258,7 @@ func (a *sqliteExactMeanAggregate) Value() (driver.Value, error) {
 func sqliteRankedAggregates() []SQLiteAggregateDescriptor {
 	return []SQLiteAggregateDescriptor{
 		{Name: "qt_v2_sample_median", Arity: 1, New: func() SQLiteAggregateFunction { return &sqliteSampleQuantileAggregate{midpoint: true} }},
+		{Name: "qt_v2_sample_quantiles", Arity: 2, New: func() SQLiteAggregateFunction { return &sqliteSampleQuantilesAggregate{} }},
 		{Name: "qt_v2_box_minmax", Arity: 1, New: func() SQLiteAggregateFunction { return &sqliteBoxSamplesAggregate{whiskers: "minmax"} }},
 		{Name: "qt_v2_box_tukey", Arity: 1, New: func() SQLiteAggregateFunction { return &sqliteBoxSamplesAggregate{whiskers: "tukey"} }},
 		{Name: "qt_v2_exact_mean", Arity: 1, New: func() SQLiteAggregateFunction { return &sqliteExactMeanAggregate{} }},
@@ -286,6 +339,23 @@ func rankedResult(value float64, code string) driver.Value {
 // sqliteRankedFunctions are scalar helpers called once per group.
 func sqliteRankedFunctions() []SQLiteScalarFunction {
 	return []SQLiteScalarFunction{
+		// qt_v2_sample_pick(results, i): term i of qt_v2_sample_quantiles, as
+		// REAL, TEXT error code or NULL; rankedOverflow stays rankedOverflow.
+		{Name: "qt_v2_sample_pick", Arity: 2, Call: func(a []driver.Value) (driver.Value, error) {
+			text, ok := a[0].(string)
+			i, indexOK := a[1].(int64)
+			if len(a) != 2 || !indexOK || a[0] != nil && !ok {
+				return nil, fmt.Errorf("qt_v2_sample_pick expects sample quantiles and an index")
+			}
+			if a[0] == nil || text == rankedOverflow {
+				return a[0], nil
+			}
+			var results []any
+			if json.Unmarshal([]byte(text), &results) != nil || i < 0 || int(i) >= len(results) {
+				return nil, fmt.Errorf("invalid sample quantiles")
+			}
+			return results[i], nil
+		}},
 		// qt_v2_quantile(n, p, a, b): the exact-linear p-percentile of n samples,
 		// given the samples at its lower and upper ranks.
 		{Name: "qt_v2_quantile", Arity: 4, Call: func(a []driver.Value) (driver.Value, error) {
@@ -496,10 +566,11 @@ func medianRanks() rankedSample {
 // quantileRanks are the exact-linear ranks of p. CAST truncates the IEEE
 // product (n-1)*p, which is non-negative for a nonempty population, exactly
 // as exactLinearIndex floors it.
-func (b *planBuilder) quantileRanks(p float64) rankedSample {
+// The bound probability parameter is returned for the interpolation.
+func (b *planBuilder) quantileRanks(p float64) (rankedSample, string) {
 	param := b.param(p, "double precision")
 	lower := func(n string) string { return "CAST((" + n + "-1)*" + param + " AS INTEGER)+1" }
-	return rankedSample{lower, func(n string) string { return "MIN(" + lower(n) + "+1," + n + ")" }}
+	return rankedSample{lower, func(n string) string { return "MIN(" + lower(n) + "+1," + n + ")" }}, param
 }
 
 // keysMatch joins two relations exposing the same group columns.
@@ -564,7 +635,7 @@ func (b *planBuilder) sqlitePickStage(ranked, counts, n string, groupCols []stri
 }
 
 // sqliteRankedLeaf is an order-statistic aggregate leaf: the reduction stage
-// holds its in-memory result (alias_memory, from qt_v2_sample_median), its
+// holds its input's in-memory result (see sqliteMemoryColumns) and its
 // input error (alias_input); sqliteRankedLeaves
 // adds its value (alias) and error (alias_error) columns, ranking in SQL only
 // the groups whose in-memory result overflowed.
@@ -574,9 +645,51 @@ type sqliteRankedLeaf struct {
 	alias, input, sample string
 	ranks                rankedSample
 	// midpoint selects MEDIAN's exact middle value; otherwise the leaf is
-	// the exact-linear percentile p.
-	midpoint bool
-	p        string
+	// the exact-linear percentile probability (bound as p).
+	midpoint    bool
+	probability float64
+	p           string
+	// memory is the leaf's in-memory result and overflow the column whose
+	// rankedOverflow marks a group to rank; see sqliteMemoryColumns.
+	memory, overflow string
+}
+
+// sqliteMemoryColumns returns the reduction columns sorting each distinct
+// input of the leaves in memory, and sets each leaf's memory and overflow.
+// A lone MEDIAN uses qt_v2_sample_median, whose rows pass only the sample.
+// Otherwise one qt_v2_sample_quantiles sorts the group once for every
+// PERCENTILE and MEDIAN of that input, and qt_v2_sample_pick reads each.
+func (b *planBuilder) sqliteMemoryColumns(leaves []sqliteRankedLeaf) []string {
+	inputs, byInput := []string{}, map[string][]int{}
+	for i, leaf := range leaves {
+		if _, ok := byInput[leaf.input]; !ok {
+			inputs = append(inputs, leaf.input)
+		}
+		byInput[leaf.input] = append(byInput[leaf.input], i)
+	}
+	columns := []string{}
+	for j, input := range inputs {
+		members := byInput[input]
+		column := fmt.Sprintf("m%d_memory", j)
+		sample := leaves[members[0]].sample
+		if len(members) == 1 && leaves[members[0]].midpoint {
+			columns = append(columns, "qt_v2_sample_median("+sample+") AS "+column)
+			leaves[members[0]].memory, leaves[members[0]].overflow = "c."+column, column
+			continue
+		}
+		spec := []float64{}
+		for k, i := range members {
+			p := leaves[i].probability
+			if leaves[i].midpoint {
+				p = -1
+			}
+			spec = append(spec, p)
+			leaves[i].memory, leaves[i].overflow = fmt.Sprintf("qt_v2_sample_pick(c.%s,%d)", column, k), column
+		}
+		encoded, _ := json.Marshal(spec)
+		columns = append(columns, "qt_v2_sample_quantiles("+sample+","+b.param(string(encoded), "text")+") AS "+column)
+	}
+	return columns
 }
 
 // sqliteRankedLeaves ranks each distinct sample input of the leaves once per
@@ -599,11 +712,8 @@ func (b *planBuilder) sqliteRankedLeaves(population string, groups []ValueSQL, l
 	joins, results := []string{}, []string{}
 	for j, input := range inputs {
 		members := byInput[input]
-		overflowed := []string{}
-		for _, i := range members {
-			overflowed = append(overflowed, leaves[i].alias+"_memory IS '"+rankedOverflow+"'")
-		}
-		gate := "EXISTS (SELECT 1 FROM " + reduced + " WHERE " + strings.Join(overflowed, " OR ") + ")"
+		// One in-memory result per input, so one overflow column.
+		gate := "EXISTS (SELECT 1 FROM " + reduced + " WHERE " + leaves[members[0]].overflow + " IS '" + rankedOverflow + "')"
 		rankedRel := b.sqliteRankedStage(population, leaves[members[0]].sample, groupCols, groupExprs, true, gate)
 		// A ranked group's sample count is its largest rank.
 		b.stage("SELECT " + strings.Join(append(qualified("r", groupCols), "MAX(r.rn) AS n"), ",") + " FROM " + rankedRel + " AS r" + groupedBy("r", groupCols))
@@ -622,8 +732,7 @@ func (b *planBuilder) sqliteRankedLeaves(population string, groups []ValueSQL, l
 			if leaf.midpoint {
 				call = "qt_v2_midpoint(" + n + ".n," + lo + "," + hi + ")"
 			}
-			memory := "c." + leaf.alias + "_memory"
-			results = append(results, "CASE WHEN "+memory+" IS '"+rankedOverflow+"' THEN "+call+" ELSE "+memory+" END AS "+leaf.alias+"_result")
+			results = append(results, "CASE WHEN c."+leaf.overflow+" IS '"+rankedOverflow+"' THEN "+call+" ELSE "+leaf.memory+" END AS "+leaf.alias+"_result")
 		}
 	}
 	b.stage("SELECT c.*," + strings.Join(results, ",") + " FROM " + reduced + " AS c" + strings.Join(joins, ""))

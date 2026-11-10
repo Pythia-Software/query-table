@@ -132,7 +132,7 @@ func TestPostgresMetricPopulationFixture(t *testing.T) {
 			out, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
 			if c.Expected["error"] == true {
 				// A refused clause fails on its own; the request still succeeds.
-				if err != nil || !strings.Contains(out.Metrics[0].Error, "minCount") {
+				if err != nil || !strings.Contains(out.Metrics[0].Error, "minCount") && !strings.Contains(out.Metrics[0].Error, "PERCENTILE") {
 					t.Fatalf("expected a per-metric refusal, got %#v / %v", out.Metrics, err)
 				}
 				return

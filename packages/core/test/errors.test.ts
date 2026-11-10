@@ -59,6 +59,26 @@ describe("QueryError", () => {
       .toThrow(expect.objectContaining({ code: "profile_mismatch" }));
     expect(toQueryRequestV3(EMPTY_QUERY, schema, capabilities)).not.toHaveProperty("diagnostics");
   });
+
+  it("refuses PERCENTILE unless the server advertises it", () => {
+    const schema = loadSchema({ name: "runs", idField: "id", fields: [
+      { name: "id", label: "ID", type: "text", source: "backend" },
+      { name: "n", label: "N", type: "number", source: "backend" },
+      { name: "kind", label: "Kind", type: "enum", source: "backend", filter: { values: { source: "static", options: ["a"] } } },
+    ] });
+    const capabilities: QueryCapabilitiesV3 = { version: 3, profile: "p", groupedRows: true, calendarGrouping: false,
+      computedSourceFilters: false, regex: false, maxRows: 100, maxGroups: 100, maxPopulation: 100 };
+    const metric = { ...EMPTY_QUERY, aggregations: [{ id: "p90", op: "count" as const, groupBy: [], expression: "PERCENTILE([n], 0.9)" }] };
+    expect(() => toQueryRequestV3(metric, schema, capabilities))
+      .toThrow(expect.objectContaining({ code: "capability_unsupported", capability: "metricPercentiles", metricId: "p90" }));
+    expect(toQueryRequestV3(metric, schema, { ...capabilities, metricPercentiles: true }).metrics[0]!.expression).toBe("PERCENTILE([n], 0.9)");
+    const summary = { ...EMPTY_QUERY, grouping: { keys: ["kind"], summaries: [{ id: "p", op: "formula" as const, expression: "PERCENTILE([n], 0.5)" }], representative: null, source: EMPTY_QUERY } };
+    expect(() => toQueryRequestV3(summary, schema, capabilities))
+      .toThrow(expect.objectContaining({ capability: "metricPercentiles" }));
+    // Names inside text literals and field references are not calls.
+    const text = { ...EMPTY_QUERY, aggregations: [{ id: "c", op: "count" as const, groupBy: [], expression: "COUNT(IF([kind] = \"PERCENTILE(\", 1, NULL))" }] };
+    expect(toQueryRequestV3(text, schema, capabilities).metrics).toHaveLength(1);
+  });
 });
 
 describe("httpComputedColumnStore", () => {

@@ -218,7 +218,7 @@ func (d QueryDatasetV3) Capabilities() QueryCapabilitiesV3 {
 	if d.Dialect == "sqlite" {
 		profile = SQLiteExpressionProfile
 	}
-	return QueryCapabilitiesV3{Version: 3, GroupedRows: true, CalendarGrouping: true, CalendarCycles: true, CalendarGroupKeys: true, ComputedSourceFilters: len(d.ComputedFilterable) > 0, Regex: false, RegexSourceFilters: d.Dialect == "sqlite", MetricFilters: true, MetricMinCount: true, MetricMinCountMeasures: true, MaxRows: rows, MaxGroups: groups, MaxPopulation: pop, Profile: profile}
+	return QueryCapabilitiesV3{Version: 3, GroupedRows: true, CalendarGrouping: true, CalendarCycles: true, CalendarGroupKeys: true, ComputedSourceFilters: len(d.ComputedFilterable) > 0, Regex: false, RegexSourceFilters: d.Dialect == "sqlite", MetricFilters: true, MetricMinCount: true, MetricMinCountMeasures: true, MetricPercentiles: true, MaxRows: rows, MaxGroups: groups, MaxPopulation: pop, Profile: profile}
 }
 func (d QueryDatasetV3) options(ctx context.Context, tx *sql.Tx, q QueryRequestV3, o PlanOptions) (PlanOptions, error) {
 	if err := ctx.Err(); err != nil {
@@ -692,7 +692,7 @@ func sampledExpression(source string) bool {
 	}
 	var visit func(*exprNode) bool
 	visit = func(n *exprNode) bool {
-		if strings.EqualFold(n.op, "median") {
+		if sampledOp(strings.ToLower(n.op)) {
 			return true
 		}
 		for _, child := range n.args {

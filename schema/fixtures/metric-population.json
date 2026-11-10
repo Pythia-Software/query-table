@@ -277,6 +277,61 @@
       "name": "minCount requires a grouping field",
       "metric": { "id": "m", "op": "count", "groupBy": [], "minCount": 2 },
       "expected": { "error": true }
+    },
+    {
+      "name": "PERCENTILE interpolates between ranks, ignores nulls and keeps singletons",
+      "metric": { "id": "m", "op": "count", "groupBy": ["kind"], "expression": "PERCENTILE([ms], 0.9)" },
+      "expected": {
+        "groupCount": 5,
+        "buckets": [
+          { "keys": ["dns"], "count": 1, "value": 999 },
+          { "keys": ["timeout"], "count": 6, "value": 366 },
+          { "keys": ["auth"], "count": 4, "value": 64 },
+          { "keys": [null], "count": 1, "value": 60 },
+          { "keys": ["disk"], "count": 2, "value": 31.2 }
+        ]
+      }
+    },
+    {
+      "name": "PERCENTILE at 0 and 1 are the extremes of odd, even and singleton groups",
+      "metric": { "id": "m", "op": "count", "groupBy": ["kind"], "expression": "PERCENTILE([ms], 1) - PERCENTILE([ms], 0)", "sort": [{ "key": "group0", "dir": "asc" }] },
+      "expected": {
+        "groupCount": 5,
+        "buckets": [
+          { "keys": ["auth"], "count": 4, "value": 50 },
+          { "keys": ["disk"], "count": 2, "value": 18 },
+          { "keys": ["dns"], "count": 1, "value": 0 },
+          { "keys": ["timeout"], "count": 6, "value": 330 },
+          { "keys": [null], "count": 1, "value": 0 }
+        ]
+      }
+    },
+    {
+      "name": "PERCENTILE of negative duplicates uses IEEE (1-f)*a+f*b",
+      "metric": { "id": "m", "op": "count", "groupBy": [], "expression": "PERCENTILE(0 - [calls], 0.25) * 1000 + PERCENTILE([calls], 0.95)" },
+      "expected": { "groupCount": 1, "buckets": [{ "keys": [], "count": 14, "value": -3238.25 }] }
+    },
+    {
+      "name": "PERCENTILE of a group without samples is null",
+      "metric": { "id": "m", "op": "count", "groupBy": ["status"], "expression": "PERCENTILE([ms], 0.1)" },
+      "expected": {
+        "groupCount": 3,
+        "buckets": [
+          { "keys": ["error"], "count": 9, "value": 46.6 },
+          { "keys": ["ok"], "count": 4, "value": 16.5 },
+          { "keys": [null], "count": 1, "value": null }
+        ]
+      }
+    },
+    {
+      "name": "PERCENTILE needs a probability literal in [0, 1]",
+      "metric": { "id": "m", "op": "count", "groupBy": ["kind"], "expression": "PERCENTILE([ms], 1.5)" },
+      "expected": { "error": true }
+    },
+    {
+      "name": "PERCENTILE refuses a row expression as its probability",
+      "metric": { "id": "m", "op": "count", "groupBy": ["kind"], "expression": "PERCENTILE([ms], [calls])" },
+      "expected": { "error": true }
     }
   ]
 }

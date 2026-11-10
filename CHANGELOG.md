@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Added
+
+- `PERCENTILE(expr, p)` in aggregate formulas and grouped formula summaries:
+  the exact-linear percentile of a group's non-null numeric samples, with `p`
+  a number literal from 0 to 1 (`PERCENTILE([latency], 0.9)`). Position
+  `(n-1)*p`, then `(1-f)*a+f*b` in IEEE double arithmetic, clamped to the two
+  samples, exactly like box quartiles; an empty population is null. Every
+  engine implements it: the local evaluator, DuckDB (from the sorted sample
+  list; `quantile_cont` interpolates in a different order), Go SQLite (sorted
+  in memory per group within a process-wide budget, ranked in SQL beyond it)
+  and Go PostgreSQL (sorted `array_agg`, not `percentile_cont`). Several
+  `PERCENTILE` terms over one input share one sort per group (and `MEDIAN`
+  with them locally and on SQLite). A field whose explicit aggregate
+  operations admit `median` admits PERCENTILE in every engine. Like MEDIAN it is refused in window totals and works per
+  occurrence. Servers advertise it with the new `metricPercentiles`
+  capability; `toQueryRequestV3` refuses a request that needs it from a server
+  without it. The formula editor lists it with the aggregate functions.
+
 ### Changed
 
 - SQLite MEDIAN and box quartiles no longer fail above 100,000 samples per

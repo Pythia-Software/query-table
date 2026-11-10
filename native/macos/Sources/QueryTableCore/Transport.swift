@@ -37,7 +37,7 @@ extension QueryCapabilitiesV3 {
     calendarCycles: Bool? = nil, calendarGroupKeys: Bool? = nil,
     computedSourceFilters: Bool = false, regex: Bool = false, regexSourceFilters: Bool? = nil,
     regexAggregateExpressions: Bool? = nil, metricFilters: Bool? = nil,
-    metricMinCount: Bool? = nil, metricMinCountMeasures: Bool? = nil, maxRows: Int = 10_000,
+    metricMinCount: Bool? = nil, metricMinCountMeasures: Bool? = nil, metricPercentiles: Bool? = nil, maxRows: Int = 10_000,
     maxGroups: Int = 2_000, maxPopulation: Int = 250_000
   ) {
     self.version = version
@@ -52,6 +52,7 @@ extension QueryCapabilitiesV3 {
     self.metricFilters = metricFilters
     self.metricMinCount = metricMinCount
     self.metricMinCountMeasures = metricMinCountMeasures
+    self.metricPercentiles = metricPercentiles
     self.maxRows = maxRows
     self.maxGroups = maxGroups
     self.maxPopulation = maxPopulation

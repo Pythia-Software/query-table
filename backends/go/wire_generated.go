@@ -146,9 +146,11 @@ type QueryCapabilitiesV3 struct {
 	MetricMinCount bool `json:"metricMinCount"`
 	// Also executes an object minCount.
 	MetricMinCountMeasures bool `json:"metricMinCountMeasures"`
-	Version                int  `json:"version"`
-	GroupedRows            bool `json:"groupedRows"`
-	CalendarGrouping       bool `json:"calendarGrouping"`
+	// Executes PERCENTILE(expr, p) in metric and summary formulas.
+	MetricPercentiles bool `json:"metricPercentiles"`
+	Version           int  `json:"version"`
+	GroupedRows       bool `json:"groupedRows"`
+	CalendarGrouping  bool `json:"calendarGrouping"`
 	// Executes the hourOfDay and dayOfWeek intervals.
 	CalendarCycles bool `json:"calendarCycles"`
 	// Executes calendar grouping keys.

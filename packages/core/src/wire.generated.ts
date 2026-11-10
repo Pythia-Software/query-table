@@ -171,6 +171,8 @@ export interface QueryCapabilitiesV3 {
   metricMinCount?: boolean;
   /** Also executes an object minCount. */
   metricMinCountMeasures?: boolean;
+  /** Executes PERCENTILE(expr, p) in metric and summary formulas. */
+  metricPercentiles?: boolean;
   version: 3;
   groupedRows: boolean;
   calendarGrouping: boolean;

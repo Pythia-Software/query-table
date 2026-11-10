@@ -27,7 +27,8 @@ other drivers can register the same function descriptors.
 - Scoped computed-definition persistence with atomic revision checks.
 - The `qt-sqlite-v1` expression profile: composed aggregate formulas, paired
   X/Y metrics, all-matching and shown-row scopes, computed SELECT/ORDER BY,
-  final group sorting and top-N, metric `where`/`minCount`, exact MEDIAN, box
+  final group sorting and top-N, metric `where`/`minCount`, exact MEDIAN and
+  PERCENTILE, box
   plots/histograms, and transaction-based execution.
 
 `DecodeQueryRequestV3` is deliberately strict: it accepts one JSON object of at
@@ -450,7 +451,12 @@ projection and filters, but are not formula operands or metric group keys.
 Supported scalar operators are arithmetic, comparisons, boolean logic, IF,
 COALESCE, NULLIF, IS_NULL, and ABS. Text ordering comparisons are rejected;
 text equality, distinctness, extrema, and group ordering use BINARY collation.
-Aggregate leaves are COUNT, COUNT_DISTINCT, SUM, AVG, MIN, MAX, and MEDIAN.
+Aggregate leaves are COUNT, COUNT_DISTINCT, SUM, AVG, MIN, MAX, MEDIAN and
+`PERCENTILE(expr, p)` (a number literal `p` in [0, 1]; see
+[Ranked percentiles](#ranked-percentiles)). Every MEDIAN and PERCENTILE of one
+row expression in a metric shares one in-memory sort per group
+(`qt_v2_sample_quantiles`), or one ranking for a group beyond the in-memory
+budget.
 Nested reductions and row fields outside reductions are rejected. Aggregate
 allowlists apply through every transitive computed dependency. Base numeric/date
 grouping requires explicit `aggregate.groupable`; computed grouping requires a

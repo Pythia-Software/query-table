@@ -1,11 +1,14 @@
 package querytable
 
 import (
+	"context"
 	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"math/rand"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -217,6 +220,40 @@ func TestSQLiteSampleLimitDefaults(t *testing.T) {
 		}
 		if got, _ := (QueryDatasetV3{Dialect: dialect, MaxSamplesPerGroup: 7}).sampleLimit(); got != 7 {
 			t.Fatal(dialect, got)
+		}
+	}
+}
+
+// Every MEDIAN and PERCENTILE of one input reads one ranking per group;
+// another input ranks separately.
+func TestRankedLeavesShareOneRanking(t *testing.T) {
+	s := sqliteTestSchema()
+	s.Fields["n"] = FieldSpec{Name: "n", Kind: FieldNumber, Expr: "r.n", ExpressionNumeric: true, Sortable: true}
+	for expression, rankings := range map[string]int{
+		"PERCENTILE([n], 0.1) + PERCENTILE([n], 0.9) - MEDIAN([n])": 1,
+		"PERCENTILE([n], 0.9) - PERCENTILE([n] * 2, 0.9)":           2,
+	} {
+		p, err := compileMetricOutputs(context.Background(), metricRequest{Version: 2}, AggSpec{ID: "p", Expression: expression, GroupBy: []string{"text"}}, s, PlanOptions{SourceSQL: "SELECT * FROM fixture"}, true, nil)
+		if err != nil {
+			t.Fatal(expression, err)
+		}
+		if got := strings.Count(p.SQL, "ROW_NUMBER()"); got != rankings {
+			t.Fatal(expression, got, p.SQL)
+		}
+	}
+	for expression, code := range map[string]ErrorCode{
+		"PERCENTILE([n])":         ErrorCodeArity,
+		"PERCENTILE([n], 2)":      ErrorCodeTypeError,
+		"PERCENTILE([n], -0.1)":   ErrorCodeTypeError,
+		"PERCENTILE([n], [n])":    ErrorCodeTypeError,
+		"PERCENTILE([text], 0.5)": ErrorCodeTypeError,
+	} {
+		for _, sqlite := range []bool{true, false} {
+			_, err := compileMetricOutputs(context.Background(), metricRequest{Version: 2}, AggSpec{ID: "p", Expression: expression}, s, PlanOptions{SourceSQL: "SELECT * FROM fixture"}, sqlite, nil)
+			var diag *PlanDiagnostic
+			if !errors.As(err, &diag) || diag.Code != code {
+				t.Fatal(expression, sqlite, err)
+			}
 		}
 	}
 }

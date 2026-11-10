@@ -656,6 +656,8 @@ public struct QueryCapabilitiesV3: Codable, Equatable, Sendable {
   public var metricMinCount: Bool?
   /// Also executes an object minCount.
   public var metricMinCountMeasures: Bool?
+  /// Executes PERCENTILE(expr, p) in metric and summary formulas.
+  public var metricPercentiles: Bool?
   public var version: Int
   public var groupedRows: Bool
   public var calendarGrouping: Bool
@@ -675,6 +677,7 @@ public struct QueryCapabilitiesV3: Codable, Equatable, Sendable {
     case metricFilters
     case metricMinCount
     case metricMinCountMeasures
+    case metricPercentiles
     case version
     case groupedRows
     case calendarGrouping
@@ -694,6 +697,7 @@ public struct QueryCapabilitiesV3: Codable, Equatable, Sendable {
     metricFilters = try c.decodeIfPresent(Bool.self, forKey: .metricFilters)
     metricMinCount = try c.decodeIfPresent(Bool.self, forKey: .metricMinCount)
     metricMinCountMeasures = try c.decodeIfPresent(Bool.self, forKey: .metricMinCountMeasures)
+    metricPercentiles = try c.decodeIfPresent(Bool.self, forKey: .metricPercentiles)
     version = try c.decode(Int.self, forKey: .version)
     groupedRows = try c.decode(Bool.self, forKey: .groupedRows)
     calendarGrouping = try c.decode(Bool.self, forKey: .calendarGrouping)
@@ -713,6 +717,7 @@ public struct QueryCapabilitiesV3: Codable, Equatable, Sendable {
     try c.encodeIfPresent(metricFilters, forKey: .metricFilters)
     try c.encodeIfPresent(metricMinCount, forKey: .metricMinCount)
     try c.encodeIfPresent(metricMinCountMeasures, forKey: .metricMinCountMeasures)
+    try c.encodeIfPresent(metricPercentiles, forKey: .metricPercentiles)
     try c.encode(version, forKey: .version)
     try c.encode(groupedRows, forKey: .groupedRows)
     try c.encode(calendarGrouping, forKey: .calendarGrouping)

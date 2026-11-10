@@ -148,7 +148,7 @@ func TestMetricPopulationFixtureV3(t *testing.T) {
 			out, err := d.Execute(context.Background(), db, populationRequest(c, qt.SQLiteExpressionProfile, now), qt.PlanOptions{})
 			if c.Expected["error"] == true {
 				// A refused clause fails on its own; the request still succeeds.
-				if err != nil || !strings.Contains(out.Metrics[0].Error, "minCount") {
+				if err != nil || !strings.Contains(out.Metrics[0].Error, "minCount") && !strings.Contains(out.Metrics[0].Error, "PERCENTILE") {
 					t.Fatalf("expected a per-metric refusal, got %#v / %v", out.Metrics, err)
 				}
 				return
@@ -179,7 +179,7 @@ func TestMetricPopulationFixtureV3Staged(t *testing.T) {
 		t.Run(c.Name, func(t *testing.T) {
 			out, err := d.Execute(context.Background(), db, populationRequest(c, qt.SQLiteExpressionProfile, now), qt.PlanOptions{})
 			if c.Expected["error"] == true {
-				if err != nil || !strings.Contains(out.Metrics[0].Error, "minCount") {
+				if err != nil || !strings.Contains(out.Metrics[0].Error, "minCount") && !strings.Contains(out.Metrics[0].Error, "PERCENTILE") {
 					t.Fatalf("expected a per-metric refusal, got %#v / %v", out.Metrics, err)
 				}
 				return

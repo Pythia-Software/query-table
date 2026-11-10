@@ -1196,6 +1196,104 @@ describe("MEDIAN aggregate expressions", () => {
   });
 });
 
+describe("PERCENTILE aggregate expressions", () => {
+  const schema: FieldSchema = {
+    name: "percentile",
+    idField: "id",
+    fields: [
+      { name: "id", label: "ID", type: "number", source: { kind: "backend" } },
+      { name: "n", label: "Number", type: "number", source: { kind: "backend" } },
+      { name: "g", label: "Group", type: "text", source: { kind: "backend" } },
+      { name: "text", label: "Text", type: "text", source: { kind: "backend" } },
+    ],
+  };
+  const value = (values: (number | null)[], expression: string) => {
+    const output = evaluateMetrics(
+      values.map((n, id) => ({ id, n })),
+      query(metric(expression)),
+      schema,
+    ).metrics[0]!;
+    expect(output.error).toBeUndefined();
+    return output.buckets[0]?.value ?? null;
+  };
+  it("interpolates exact-linear positions in IEEE order and ignores nulls", () => {
+    // [0,10,20,30]: positions 0.75, 1.5, 2.25 and 2.7.
+    expect(value([30, 0, null, 20, 10], "PERCENTILE([n], 0.25)")).toBe(7.5);
+    expect(value([30, 0, 20, 10], "PERCENTILE([n], 0.5)")).toBe(15);
+    expect(value([30, 0, 20, 10], "PERCENTILE([n], 0.75)")).toBe(22.5);
+    const position = 3 * 0.9,
+      fraction = position - Math.floor(position);
+    expect(value([30, 0, 20, 10], "PERCENTILE([n], 0.9)")).toBe(
+      (1 - fraction) * 20 + fraction * 30,
+    );
+    expect(value([5, -3, 5, 5], "PERCENTILE([n], 0)")).toBe(-3);
+    expect(value([5, -3, 5, 5], "PERCENTILE([n], 1)")).toBe(5);
+    expect(value([4], "PERCENTILE([n], 0.37)")).toBe(4);
+    expect(value([null], "PERCENTILE([n], 0.5)")).toBeNull();
+    expect(value([], "PERCENTILE([n], 0.5)")).toBeNull();
+    expect(
+      value([1, 2, 3, 4, 100], "PERCENTILE([n], 0.9) - PERCENTILE([n], 0.1)"),
+    ).toBe(
+      percentile([1, 2, 3, 4, 100], 0.9)! - percentile([1, 2, 3, 4, 100], 0.1)!,
+    );
+  });
+  it("fails a reduction over an invalid sample", () => {
+    expect(
+      evaluateMetrics([{ id: 1, n: 2 }], query(metric("PERCENTILE([n]/0, 0.5)")), schema)
+        .metrics[0]!.buckets[0]?.error,
+    ).toBeTruthy();
+  });
+  it("groups percentiles and shares one sort per input", () => {
+    const data = [
+      { id: 1, g: "a", n: 1 },
+      { id: 2, g: "a", n: 3 },
+      { id: 3, g: "b", n: 10 },
+    ];
+    const output = evaluateMetrics(
+      data,
+      query(metric("PERCENTILE([n], 0.5) + PERCENTILE([n], 1) + MEDIAN([n])", { groupBy: ["g"] })),
+      schema,
+    ).metrics[0]!;
+    expect(output.buckets.map((b) => [b.keys[0], b.value])).toEqual([
+      ["b", 30],
+      ["a", 7],
+    ]);
+  });
+  it("needs a probability literal from 0 to 1 and a numeric input", () => {
+    for (const expression of [
+      "PERCENTILE([n])",
+      "PERCENTILE([n], 0.5, 1)",
+      "PERCENTILE([n], 1.5)",
+      "PERCENTILE([n], -0.5)",
+      "PERCENTILE([n], [n])",
+      "PERCENTILE([n], 0.2 + 0.3)",
+      "PERCENTILE([n], \"0.5\")",
+    ])
+      expect(() => compileMetric(expression, schema), expression).toThrow(
+        /PERCENTILE/,
+      );
+    expect(() => compileMetric("PERCENTILE([text], 0.5)", schema)).toThrow(/numeric/);
+    expect(() => compileMetric("PERCENTILE(SUM([n]), 0.5)", schema)).toThrow(/Nested/);
+    expect(() =>
+      compileMetric("PERCENTILE([n], 0.5)", {
+        ...schema,
+        fields: schema.fields.map((f) =>
+          f.name === "n" ? { ...f, aggregate: { ops: ["sum"] } } : f,
+        ),
+      }),
+    ).toThrow(/does not allow/);
+    // As in the Go engines, a field admitting MEDIAN also admits PERCENTILE.
+    expect(() =>
+      compileMetric("PERCENTILE([n], 0.5)", {
+        ...schema,
+        fields: schema.fields.map((f) =>
+          f.name === "n" ? { ...f, aggregate: { ops: ["sum", "median" as never] } } : f,
+        ),
+      }),
+    ).not.toThrow();
+  });
+});
+
 it("list bar placement survives query links without changing computation identity", () => {
   const inline = metric("COUNT()", { groupBy: ["platform"], display: { kind: "list", list: { barPosition: "inline" } } });
   const below: AggregationClause = { ...inline, display: { ...inline.display!, list: { barPosition: "below" } } };

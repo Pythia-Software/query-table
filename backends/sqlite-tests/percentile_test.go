@@ -211,5 +211,7 @@ func percentileAgreementMetrics(id, input string, grouping []string) []qt.AggSpe
 		{ID: "median_" + id, Expression: "MEDIAN(" + input + ")", GroupBy: grouping},
 		{ID: "minmax_" + id, Op: "count", GroupBy: grouping, Distribution: &qt.MetricDistribution{Kind: "box", Input: input}},
 		{ID: "tukey_" + id, Op: "count", GroupBy: grouping, Distribution: &qt.MetricDistribution{Kind: "box", Input: input, Whiskers: "tukey"}},
+		{ID: "p90_" + id, Expression: "PERCENTILE(" + input + ", 0.9)", GroupBy: grouping},
+		{ID: "spread_" + id, Expression: "PERCENTILE(" + input + ", 0.95) - PERCENTILE(" + input + ", 0.05) + MEDIAN(" + input + ")", GroupBy: grouping},
 	}
 }

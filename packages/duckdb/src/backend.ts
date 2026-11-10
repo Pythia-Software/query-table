@@ -213,6 +213,7 @@ export class DuckDBBackend {
       metricFilters: true,
       metricMinCount: true,
       metricMinCountMeasures: true,
+      metricPercentiles: true,
       maxRows: positive(options.maxRows, 10000, 10000),
       maxGroups: positive(options.maxGroups, 10000, 10000),
       maxPopulation: positive(options.maxPopulation, 250000, 10000000),

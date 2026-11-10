@@ -221,6 +221,7 @@
         "metricFilters": { "type": "boolean", "x-go-omit": "none", "description": "Executes MetricSpec.where." },
         "metricMinCount": { "type": "boolean", "x-go-omit": "none", "description": "Executes a numeric minCount and reports hiddenGroups." },
         "metricMinCountMeasures": { "type": "boolean", "x-go-omit": "none", "description": "Also executes an object minCount." },
+        "metricPercentiles": { "type": "boolean", "x-go-omit": "none", "description": "Executes PERCENTILE(expr, p) in metric and summary formulas." },
         "version": { "const": 3 },
         "groupedRows": { "type": "boolean" },
         "calendarGrouping": { "type": "boolean" },

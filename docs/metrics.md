@@ -45,7 +45,7 @@ const ratio: AggregationClause = {
 };
 ```
 
-Aggregate formulas reduce row expressions and then compute once per group. `SUM([x]) / SUM([y])` is a ratio of sums, not an average of row ratios. Use `NULLIF` for an intentionally nullable denominator. Nested aggregates and bare row references outside reductions are invalid. `COUNT()`, `COUNT(expr)`, `COUNT_DISTINCT`, `SUM`, `AVG`, `MIN`, `MAX`, and `MEDIAN` retain scalar semantics. `MEDIAN` accepts numeric expressions, ignores nulls, and averages the middle two values for even populations; an empty population returns null. It is available in aggregate formulas, not the legacy `AggOp` selector. The local expression compiler also supports its documented row functions; each server profile advertises a narrower subset.
+Aggregate formulas reduce row expressions and then compute once per group. `SUM([x]) / SUM([y])` is a ratio of sums, not an average of row ratios. Use `NULLIF` for an intentionally nullable denominator. Nested aggregates and bare row references outside reductions are invalid. `COUNT()`, `COUNT(expr)`, `COUNT_DISTINCT`, `SUM`, `AVG`, `MIN`, `MAX`, and `MEDIAN` retain scalar semantics. `MEDIAN` accepts numeric expressions, ignores nulls, and averages the middle two values for even populations; an empty population returns null. `PERCENTILE(expr, p)` is the exact-linear percentile of the same population: `p` must be a number literal from 0 to 1 (`PERCENTILE([latency], 0.9)`; a field, formula or out-of-range `p` is a formula error). Sort the group's non-null samples, take position `(n-1)*p`, `lower = floor(position)` and `fraction = position - lower`, then return `(1-fraction)*a + fraction*b` for the samples `a` at `lower` and `b` at `min(lower+1, n-1)`, in IEEE double arithmetic in that order, clamped to `[a, b]`. `PERCENTILE([x], 0)` and `PERCENTILE([x], 1)` are the minimum and maximum; `PERCENTILE([x], 0.5)` equals the box median and, in the local engine and on SQLite, `MEDIAN([x])` bit for bit. DuckDB (`median`) and PostgreSQL (`percentile_cont(0.5)`) compute `MEDIAN` natively as `a + (b-a)/2`, which can differ from it in the last bit. Nulls are ignored, an empty population returns null, and an invalid sample fails the reduction as for `MEDIAN`. Several `PERCENTILE` terms over the same input share one sort per group in every engine, so `PERCENTILE([gap], 0.95) - PERCENTILE([gap], 0.5)` sorts each group once; `MEDIAN` shares that sort locally and on SQLite, while DuckDB and PostgreSQL reduce it with their native median aggregate. Both are available in aggregate formulas, not the legacy `AggOp` selector. Servers advertise `PERCENTILE` with the `metricPercentiles` capability; `toQueryRequestV3` refuses a request that needs it from a server without it. The local expression compiler also supports its documented row functions; each server profile advertises a narrower subset.
 
 `sort` is a stable multi-term order over `value`, scatter `y`, `count`, distribution `samples`, or `group0`, `group1`, etc. Each term has ascending/descending direction and optional null placement. `groupLimit` (1–10,000) applies after reductions, formulas, `minCount`, and sorting. Results expose total group count/coverage so truncated charts can be identified. An Other bucket is available only when the engine can derive an exact additive remainder; ratios are not treated as additive.
 
@@ -460,8 +460,9 @@ const modelShare: AggregationClause = {
   interval so far with `"all"`. Aggregates are rebuilt from per-interval
   parts: SUM, COUNT, MIN and MAX merge, and AVG is SUM / COUNT of its input, so
   `SUM([a]) / SUM([b])` pools its parts instead of averaging each interval's
-  ratio. COUNT_DISTINCT and MEDIAN cannot be merged across intervals and are
-  refused, because one value can occur in several intervals.
+  ratio. COUNT_DISTINCT, MEDIAN and PERCENTILE cannot be merged across
+  intervals and are refused: one value can occur in several intervals, and an
+  order statistic needs the window's own sorted samples.
 - **Mean per interval** (`reduce: "mean"`). The mean of the per-interval
   values of a single SUM, COUNT or COUNT_DISTINCT; empty intervals count as 0.
   For a distinct count this is the mean of daily counts, so a user active on
@@ -562,7 +563,7 @@ const typicalWeekday: AggregationClause = {
 - **Occurrences.** `occurrence.interval` is one calendar `"day"` or `"hour"`
   of the slot (`hourOfDay` occurs hourly, so it needs `"hour"`). The metric is
   evaluated once per occurrence, with any expression: counts, sums, distinct
-  counts, ratios and medians.
+  counts, ratios, medians and percentiles.
 - **Whole occurrences only.** Occurrences the date bounds cut short, and the
   occurrence still in progress, are left out, using the same boundary as
   `partialIntervals: "exclude"`. "Last 30 days" opened at 14:00 drops the

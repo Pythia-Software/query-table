@@ -47,6 +47,7 @@ import {
 import type { MetricDiagnostic, MetricValue, MetricSort } from "./metricTypes";
 import {
   boxSummary,
+  percentile,
   histogramEdges,
   histogramCounts,
 } from "./metricDistributions";
@@ -70,7 +71,33 @@ const aggregates = new Set([
   "MIN",
   "MAX",
   "MEDIAN",
+  "PERCENTILE",
 ]);
+/** Order-statistic aggregates: they need each group's sorted samples, so they
+ * cannot be merged across intervals or approximated. */
+const SAMPLED_AGGREGATES: ReadonlySet<string> = new Set([
+  "MEDIAN",
+  "PERCENTILE",
+]);
+/** The probability of a PERCENTILE call: its second argument, a numeric
+ * literal in [0, 1]. */
+export function percentileProbability(
+  node: Extract<FormulaNode, { kind: "call" }>,
+): number {
+  const p = node.args[1];
+  if (
+    !p ||
+    p.kind !== "literal" ||
+    typeof p.value !== "number" ||
+    !(p.value >= 0 && p.value <= 1)
+  )
+    throw new FormulaError(
+      "PERCENTILE needs a probability between 0 and 1 as a number literal, such as PERCENTILE([x], 0.9).",
+      p?.from ?? node.from,
+      p?.to ?? node.to,
+    );
+  return p.value;
+}
 /** Functions available only in aggregate expressions, separate from row formulas. */
 export const METRIC_FUNCTIONS: FormulaFunction[] = [
   ["COUNT", "Count rows, or non-empty values."],
@@ -83,14 +110,26 @@ export const METRIC_FUNCTIONS: FormulaFunction[] = [
     "MEDIAN",
     "Middle numeric value; averages the middle pair. Ignores empty values.",
   ],
+  [
+    "PERCENTILE",
+    "Exact percentile p (a number from 0 to 1) of numeric values, interpolated linearly between ranks. Ignores empty values.",
+  ],
 ].map(([name, description]) => ({
   name: name!,
   description: description!,
-  signature: `${name}(row expression${name === "COUNT" ? "?" : ""})`,
-  min: name === "COUNT" ? 0 : 1,
-  max: 1,
+  signature:
+    name === "PERCENTILE"
+      ? "PERCENTILE(row expression, probability)"
+      : `${name}(row expression${name === "COUNT" ? "?" : ""})`,
+  min: name === "COUNT" ? 0 : name === "PERCENTILE" ? 2 : 1,
+  max: name === "PERCENTILE" ? 2 : 1,
   result: name === "MIN" || name === "MAX" ? "branch" : "number",
-  args: ["SUM", "AVG", "MEDIAN"].includes(name!) ? ["number"] : "any",
+  args:
+    name === "PERCENTILE"
+      ? ["number", "number"]
+      : ["SUM", "AVG", "MEDIAN"].includes(name!)
+        ? ["number"]
+        : "any",
 }));
 export interface MetricPlan extends FormulaPlan {
   aggregates: Extract<FormulaNode, { kind: "call" }>[];
@@ -123,7 +162,15 @@ export function compileMetric(
           node.from,
           node.to,
         );
-      if (
+      if (node.name === "PERCENTILE") {
+        if (node.args.length !== 2)
+          throw new FormulaError(
+            "PERCENTILE requires a row expression and a probability.",
+            node.from,
+            node.to,
+          );
+        percentileProbability(node);
+      } else if (
         node.args.length > 1 ||
         (node.name !== "COUNT" && node.args.length !== 1)
       )
@@ -148,13 +195,17 @@ export function compileMetric(
               n.from,
               n.to,
             );
-          // MEDIAN is formula-only, so it is absent from the default AggOp
-          // list. Explicit field restrictions still apply to every reduction.
+          // MEDIAN and PERCENTILE are formula-only, so they are absent from
+          // the default AggOp list. Explicit field restrictions still apply
+          // to every reduction; as in the Go engines, a field that admits
+          // "median" also admits PERCENTILE.
+          const ops: readonly string[] = aggOpsForField(field);
           if (
             !isMeasurable(field) ||
             ((field.aggregate?.ops !== undefined ||
-              (node.args[0] === n && node.name !== "MEDIAN")) &&
-              !aggOpsForField(field).includes(node.name.toLowerCase() as AggOp))
+              (node.args[0] === n && !SAMPLED_AGGREGATES.has(node.name))) &&
+              !ops.includes(node.name.toLowerCase()) &&
+              !(node.name === "PERCENTILE" && ops.includes("median")))
           )
             throw new FormulaError(
               `Field ${n.name} does not allow ${node.name}.`,
@@ -171,9 +222,9 @@ export function compileMetric(
           n.args.forEach(visit);
         }
       };
-      node.args.forEach(visit);
+      node.args.slice(0, 1).forEach(visit);
       if (
-        ["SUM", "AVG", "MEDIAN"].includes(node.name) &&
+        ["SUM", "AVG", "MEDIAN", "PERCENTILE"].includes(node.name) &&
         !["number", "null"].includes(type)
       )
         throw new FormulaError(
@@ -193,9 +244,14 @@ export function compileMetric(
         );
       nodes.push(node);
       aggregateTypes.push(type);
-      return ["COUNT", "COUNT_DISTINCT", "SUM", "AVG", "MEDIAN"].includes(
-        node.name,
-      )
+      return [
+        "COUNT",
+        "COUNT_DISTINCT",
+        "SUM",
+        "AVG",
+        "MEDIAN",
+        "PERCENTILE",
+      ].includes(node.name)
         ? "number"
         : type;
     },
@@ -282,11 +338,66 @@ export function reduceMetricValues(
 ): FormulaResult {
   return reduceResults(node, results, options);
 }
+/** One group's sorted samples of an order-statistic input, or its error,
+ * shared by every MEDIAN and PERCENTILE of the same input expression. */
+type SortedSamples = { sorted: number[] } | { error: string };
+/** A position-free identity of an aggregate's input expression. */
+export function aggregateInputKey(node: FormulaNode | undefined): string {
+  if (!node) return "";
+  if (node.kind === "literal") return JSON.stringify(["literal", node.value]);
+  if (node.kind === "field") return JSON.stringify(["field", node.name]);
+  return JSON.stringify(["call", node.name, ...node.args.map(aggregateInputKey)]);
+}
+function sortedSamples(results: Iterable<FormulaResult>): SortedSamples {
+  const values: number[] = [];
+  let error: string | undefined;
+  for (const r of results) {
+    if (r.error) {
+      error ??= r.error;
+      continue;
+    }
+    if (r.value === null) continue;
+    if (typeof r.value !== "number" || !Number.isFinite(r.value))
+      throw Error("Expected a finite number.");
+    assertMetricNumber(r.value);
+    values.push(r.value);
+  }
+  return error ? { error } : { sorted: values.sort((a, b) => a - b) };
+}
+function sampledResult(
+  node: Extract<FormulaNode, { kind: "call" }>,
+  samples: SortedSamples,
+): FormulaResult {
+  if ("error" in samples) return { value: null, error: samples.error };
+  const sorted = samples.sorted;
+  if (!sorted.length) return { value: null };
+  if (node.name === "PERCENTILE")
+    return { value: percentile(sorted, percentileProbability(node)) };
+  const mid = Math.floor(sorted.length / 2);
+  const value =
+    sorted.length % 2 ? sorted[mid]! : sorted[mid - 1]! / 2 + sorted[mid]! / 2;
+  assertMetricNumber(value);
+  return { value };
+}
 function reduceResults(
   node: Extract<FormulaNode, { kind: "call" }>,
   results: Iterable<FormulaResult>,
   options: MetricReductionOptions,
+  sorted?: Map<string, SortedSamples>,
 ): FormulaResult {
+  if (SAMPLED_AGGREGATES.has(node.name))
+    try {
+      // Every MEDIAN and PERCENTILE of one input shares its sorted samples.
+      const key = aggregateInputKey(node.args[0]);
+      let samples = sorted?.get(key);
+      if (!samples) {
+        samples = sortedSamples(results);
+        sorted?.set(key, samples);
+      }
+      return sampledResult(node, samples);
+    } catch (e) {
+      return { value: null, error: e instanceof Error ? e.message : String(e) };
+    }
   try {
     if (!aggregates.has(node.name)) throw Error("Expected an aggregate node.");
     const distinct =
@@ -313,22 +424,6 @@ function reduceResults(
     if (node.name === "COUNT")
       return { value: node.args.length ? nonnull : count };
     if (!values.length) return { value: null };
-    if (node.name === "MEDIAN") {
-      const sorted = values
-        .map((value) => {
-          if (typeof value !== "number" || !Number.isFinite(value))
-            throw Error("Expected a finite number.");
-          return value;
-        })
-        .sort((a, b) => a - b);
-      const mid = Math.floor(sorted.length / 2);
-      const value =
-        sorted.length % 2
-          ? sorted[mid]!
-          : sorted[mid - 1]! / 2 + sorted[mid]! / 2;
-      assertMetricNumber(value);
-      return { value };
-    }
     if (node.name === "SUM" || node.name === "AVG") {
       let sum = 0;
       for (const v of values) {
@@ -1540,6 +1635,7 @@ export function evaluateMetrics<Row>(
           inputErrors: Set<number>,
         ): FormulaResult => {
           const cache = new Map<FormulaNode, FormulaResult>();
+          const sorted = new Map<string, SortedSamples>();
           return checkedMetricResult(
             formulaRuntime(p.ast, {}, (node) => {
               if (!aggregates.has(node.name)) return undefined;
@@ -1556,7 +1652,7 @@ export function evaluateMetrics<Row>(
                     yield v;
                   }
                 }
-                result = reduceResults(node, results(), options);
+                result = reduceResults(node, results(), options, sorted);
               } catch (e) {
                 result = {
                   value: null,

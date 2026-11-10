@@ -1,4 +1,5 @@
 import {
+  aggregateInputKey,
   branchesOf,
   coerceValue,
   compileFormula,
@@ -7,6 +8,7 @@ import {
   isSortable,
   isSelectable,
   opsForField,
+  percentileProbability,
   type FieldDef,
   type FieldSchema,
   type FormulaNode,
@@ -38,12 +40,16 @@ const aggregates = new Set([
   "MIN",
   "MAX",
   "MEDIAN",
+  "PERCENTILE",
 ]);
 const safeNumber = (value: string) =>
   `(CASE WHEN ${value} IS NULL OR (isfinite(${value}) AND abs(${value}) <= 9007199254740991) THEN ${value} ELSE error('Query Table numeric precision exceeded') END)`;
 
 export class SQLBuilder {
   readonly args: unknown[] = [];
+  /** One sorted sample list per PERCENTILE input, so terms over the same
+   * input compile to identical SQL that DuckDB evaluates once. */
+  private readonly sortedSamples = new Map<string, string>();
   constructor(
     readonly schema: FieldSchema,
     readonly now = Date.now(),
@@ -189,10 +195,28 @@ export class SQLBuilder {
       throw new QueryError("resource_limit", "DuckDB expression SQL budget exceeded.");
     return sql;
   }
+  /** The exact-linear percentile of a group's sorted non-null samples:
+   * position (n-1)*p, then (1-f)*a+f*b in IEEE doubles, clamped to [a,b].
+   * DuckDB's quantile_cont computes a+(b-a)*f instead, which can differ by an
+   * ULP, so the sorted list is read directly. */
+  private percentile(node: Extract<FormulaNode, { kind: "call" }>): string {
+    const key = aggregateInputKey(node.args[0]);
+    let sorted = this.sortedSamples.get(key);
+    if (!sorted) {
+      const input = this.node(node.args[0]!);
+      sorted = `list_sort(list(CAST(${input} AS DOUBLE)) FILTER (WHERE ${input} IS NOT NULL))`;
+      this.sortedSamples.set(key, sorted);
+    }
+    // Lambdas bind the sorted list, the position and the two samples once, so
+    // the expression stays small inside arithmetic wrappers.
+    const p = `CAST(${this.bind(percentileProbability(node))} AS DOUBLE)`;
+    return `list_transform([${sorted}], qt_s -> CASE WHEN qt_s IS NULL OR len(qt_s) = 0 THEN NULL ELSE list_transform([(len(qt_s) - 1) * ${p}], qt_pos -> list_transform([[qt_s[CAST(floor(qt_pos) AS BIGINT) + 1], qt_s[least(CAST(floor(qt_pos) AS BIGINT) + 2, len(qt_s))], qt_pos - floor(qt_pos)]], qt_v -> list_transform([least(qt_v[2], greatest(qt_v[1], (1 - qt_v[3]) * qt_v[1] + qt_v[3] * qt_v[2]))], qt_r -> ${safeNumber("qt_r")})[1])[1])[1] END)[1]`;
+  }
   private nodeSQL(node: FormulaNode): string {
     if (node.kind === "literal")
       return node.value === null ? "NULL" : this.bind(node.value);
     if (node.kind === "field") return this.field(node.name, false);
+    if (node.name === "PERCENTILE") return this.percentile(node);
     const name = node.name,
       vs = node.args.map((arg) => this.node(arg)),
       a = vs[0]!,

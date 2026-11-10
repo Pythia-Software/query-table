@@ -130,6 +130,8 @@ export type {
 } from "./wire.generated";
 export {
   METRIC_FUNCTIONS,
+  aggregateInputKey,
+  percentileProbability,
   compileMetric,
   metricAggregatePlans,
   reduceMetricValues,

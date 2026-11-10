@@ -425,7 +425,8 @@ func (b *planBuilder) sqliteBox(population string, groupCols, inventory []string
 	picks := []rankedSample{}
 	// The quartiles, then the extrema at ranks 1 and n.
 	for _, p := range []float64{0.25, 0.5, 0.75, 0, 1} {
-		picks = append(picks, b.quantileRanks(p))
+		ranks, _ := b.quantileRanks(p)
+		picks = append(picks, ranks)
 	}
 	picked := b.sqlitePickStage(ranked, stats, "samples", groupCols, picks)
 	// The mean is distributionMean: a correctly rounded sum, so any visitation
