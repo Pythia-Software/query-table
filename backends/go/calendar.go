@@ -242,8 +242,21 @@ func calendarEveryWall(instant time.Time, interval string, every, ahead int, loc
 	return time.Unix(((floorMultiple(week, size)+step)*7-3)*86400, 0).UTC()
 }
 
+// calendarEveryAfter is the start of the bucket after the one starting at start.
+func calendarEveryAfter(start time.Time, interval string, every int, loc *time.Location) (time.Time, error) {
+	if calendarElapsedHours(interval, every) {
+		return start.Add(time.Duration(every) * time.Hour).UTC(), nil
+	}
+	next, err := calendarWall(calendarEveryWall(start, interval, every, 1, loc), loc, false)
+	return next.UTC(), err
+}
+
 // calendarFloorEvery is the start of the bucket of every intervals holding
-// instant; every <= 1 is one interval, as calendarFloor.
+// instant; every <= 1 is one interval, as calendarFloor. The wall start
+// resolves to its earlier occurrence; when a fall-back repeat contains a
+// bucket boundary (a two-hour repeat such as Antarctica/Troll's), a later
+// bucket can start before instant too, so step to it. Buckets then partition
+// the timeline, and SQLite's boundary plan agrees with the per-row keys.
 func calendarFloorEvery(instant time.Time, interval string, every int, loc *time.Location) (time.Time, error) {
 	if every <= 1 || calendarCycle(interval) {
 		return calendarFloor(instant, interval, loc)
@@ -253,7 +266,21 @@ func calendarFloorEvery(instant time.Time, interval string, every int, loc *time
 		return time.Unix(floorMultiple(instant.Unix(), block), 0).UTC(), nil
 	}
 	start, err := calendarWall(calendarEveryWall(instant, interval, every, 0, loc), loc, false)
-	return start.UTC(), err
+	if err != nil {
+		return start, err
+	}
+	start = start.UTC()
+	for step := 0; step < 4; step++ {
+		next, err := calendarEveryAfter(start, interval, every, loc)
+		if err != nil {
+			return start, err
+		}
+		if next.After(instant) || !next.After(start) {
+			break
+		}
+		start = next
+	}
+	return start, nil
 }
 
 // calendarNextEvery is the start of the bucket after the one holding instant.
@@ -261,12 +288,37 @@ func calendarNextEvery(instant time.Time, interval string, every int, loc *time.
 	if every <= 1 || calendarCycle(interval) {
 		return calendarNext(instant, interval, loc)
 	}
-	if calendarElapsedHours(interval, every) {
-		block := int64(every) * 3600
-		return time.Unix(floorMultiple(instant.Unix(), block)+block, 0).UTC(), nil
+	start, err := calendarFloorEvery(instant, interval, every, loc)
+	if err != nil {
+		return start, err
 	}
-	next, err := calendarWall(calendarEveryWall(instant, interval, every, 1, loc), loc, false)
-	return next.UTC(), err
+	return calendarEveryAfter(start, interval, every, loc)
+}
+
+// CalendarBucket returns the calendar bucket holding instant: its start (the
+// key a calendar metric or group key reports) and the next bucket's start, so
+// [start, next) selects its records. interval is hour, day, week, month or
+// year; every is the intervals per bucket (0 or 1 for one); timeZone is an
+// IANA name, empty for UTC. It is the calendar the executor groups with, so a
+// Go host can label or drill into buckets of several intervals without
+// reimplementing their anchors. Pass a bucket's key to get its end.
+func CalendarBucket(instant time.Time, interval string, every int, timeZone string) (start, next time.Time, err error) {
+	if !containsString([]string{"hour", "day", "week", "month", "year"}, interval) {
+		return start, next, diagnostic(ErrorCodeDateGrouping, "a calendar bucket's interval is hour, day, week, month or year")
+	}
+	loc, err := calendarLocation(MetricDateGrouping{Field: "bucket", Interval: interval, Every: every, TimeZone: timeZone, Range: "query"})
+	if err != nil {
+		return start, next, err
+	}
+	if start, err = calendarFloorEvery(instant, interval, every, loc); err != nil {
+		return start, next, err
+	}
+	if every > 1 {
+		next, err = calendarEveryAfter(start, interval, every, loc)
+	} else {
+		next, err = calendarNext(start, interval, loc)
+	}
+	return start, next, err
 }
 func calendarInput(value string, loc *time.Location) (time.Time, error) {
 	if !calendarDatePattern.MatchString(value) {

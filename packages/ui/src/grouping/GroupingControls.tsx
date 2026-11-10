@@ -82,13 +82,13 @@ function KeyIntervalControl({
           value={interval}
           onChange={(event) => {
             const next = event.target.value as CalendarGroupKey["interval"] | "";
-            const every = isCalendarGroupKey(value) ? value.every : undefined;
+            // A new interval starts at one interval per group: 6 hours must
+            // not become 6 months.
             onChange(
               next
                 ? {
                     field,
                     interval: next,
-                    ...(every !== undefined ? { every } : {}),
                     timeZone: isCalendarGroupKey(value)
                       ? (value.timeZone ?? "UTC")
                       : localTimeZone(),
@@ -106,24 +106,58 @@ function KeyIntervalControl({
         </select>
       </span>
       {isCalendarGroupKey(value) && (
-        <input
-          className="qt-group-key-every"
-          type="number"
-          min={1}
-          max={MAX_METRIC_DATE_EVERY}
-          step={1}
-          aria-label={`${value.interval[0]!.toUpperCase()}${value.interval.slice(1)}s per group for ${label}`}
-          title={`Each group spans this many ${value.interval}s, counted from 1970 (hours from each local midnight when they divide a day)`}
-          value={value.every ?? 1}
-          onChange={(event) => {
-            const n = event.currentTarget.valueAsNumber;
-            if (!Number.isInteger(n) || n < 1 || n > MAX_METRIC_DATE_EVERY) return;
-            const { every: _every, ...rest } = value;
-            onChange(n > 1 ? { ...rest, every: n } : rest);
-          }}
-        />
+        <KeyEveryInput value={value} label={label} onChange={onChange} />
       )}
     </>
+  );
+}
+
+/** Intervals per group for a calendar key. Typing is kept as a draft and
+ * committed, rounded and clamped to 1–1,000, on blur or Enter; Escape or an
+ * empty field restores the key's count. */
+function KeyEveryInput({
+  value,
+  label,
+  onChange,
+}: {
+  value: CalendarGroupKey;
+  label: string;
+  onChange: (key: GroupKey) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const commit = () => {
+    const n = Number(draft);
+    if (draft !== null && draft.trim() && Number.isFinite(n)) {
+      const every = Math.max(1, Math.min(MAX_METRIC_DATE_EVERY, Math.round(n)));
+      const { every: _every, ...rest } = value;
+      if (every !== (value.every ?? 1)) onChange(every > 1 ? { ...rest, every } : rest);
+    }
+    setDraft(null);
+  };
+  return (
+    <input
+      className="qt-group-key-every"
+      type="number"
+      min={1}
+      max={MAX_METRIC_DATE_EVERY}
+      step={1}
+      aria-label={`${value.interval[0]!.toUpperCase()}${value.interval.slice(1)}s per group for ${label}`}
+      title={`Each group spans this many ${value.interval}s, counted from 1970 (hours from each local midnight when they divide a day)`}
+      value={draft ?? value.every ?? 1}
+      onChange={(event) => setDraft(event.currentTarget.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          event.currentTarget.blur();
+        }
+        if (event.key === "Escape" && draft !== null) {
+          event.preventDefault();
+          event.stopPropagation();
+          setDraft(null);
+        }
+      }}
+    />
   );
 }
 

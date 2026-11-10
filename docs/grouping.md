@@ -140,7 +140,8 @@ grouping: {
   other hour counts are elapsed blocks from 1970-01-01T00:00Z; days count local
   dates from 1970-01-01, weeks from Monday 1969-12-29, months from January 1970
   and years from 1970. Links and saved state leave out `every: 1`, and the key
-  chip shows the count ("by 6 hours") beside a small number input. Servers
+  chip shows the count ("by 6 hours") beside a small number input, reset to 1
+  when the interval changes. Servers
   execute `every` above 1 when they advertise `calendarEvery`.
 - Each group is one local interval, keyed by the interval's start as an ISO
   instant: local midnight of 2026-03-08 in Denver is

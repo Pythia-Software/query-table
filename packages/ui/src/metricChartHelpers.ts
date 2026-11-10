@@ -38,7 +38,7 @@ const cyclic = (clause?: RenderingClause) =>
 const multiple = (clause?: RenderingClause) =>
   !cyclic(clause) && (clause?.dateGrouping?.every ?? 1) > 1;
 /** A bucket of several calendar intervals, from its start to the next
- * bucket's start in the grouping zone: "Mar 08 09:00–12:00 -05:00" for hours,
+ * bucket's start in the grouping zone: "Mar 08 09:00–12:00 -05:00" for hours (both offsets across a DST change),
  * "Mar 08–Mar 10" for days and weeks (the last day included), "Jan–Mar 2026"
  * for months and "2020–2029" for years. In detail, both full instants. */
 export function metricEveryLabel(
@@ -71,7 +71,10 @@ export function metricEveryLabel(
   const last = next - 1;
   switch (grouping.interval) {
     case "hour":
-      return `${date(start, "MMM DD HH:mm")}–${date(next, "HH:mm Z")}`;
+      // A bucket across a DST change shows both offsets.
+      return date(start, "Z") === date(next, "Z")
+        ? `${date(start, "MMM DD HH:mm")}–${date(next, "HH:mm Z")}`
+        : `${date(start, "MMM DD HH:mm Z")}–${date(next, "HH:mm Z")}`;
     case "month":
       return date(start, "YYYY") === date(last, "YYYY")
         ? `${date(start, "MMM")}–${date(last, "MMM YYYY")}`

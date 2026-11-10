@@ -67,10 +67,10 @@ describe("calendar buckets of several intervals", () => {
   });
 
   it("tiles the timeline: each bucket's next start is the following floor", () => {
-    for (const zone of ["America/New_York", "Asia/Kolkata", "Australia/Lord_Howe", "UTC"])
+    for (const zone of ["America/New_York", "Asia/Kolkata", "Australia/Lord_Howe", "Antarctica/Troll", "UTC"])
       for (const [interval, every] of [["hour", 2], ["hour", 3], ["hour", 5], ["hour", 12], ["day", 3], ["week", 2], ["month", 3]] as const)
-        // Around both DST changes in New York and Lord Howe.
-        for (const from of ["2026-03-07", "2026-04-03", "2026-10-02", "2026-10-31"]) {
+        // Around both DST changes in New York, Lord Howe and Troll (a two-hour shift).
+        for (const from of ["2026-03-07", "2026-03-27", "2026-04-03", "2026-10-02", "2026-10-24", "2026-10-31"]) {
           const span = Date.parse(`${from}T00:00:00Z`) + 3 * 86_400_000;
           for (let time = Date.parse(`${from}T00:00:00Z`); time < span; time += 1_800_000) {
             const start = metricDateFloor(time, interval, zone, every);
@@ -167,6 +167,11 @@ describe("calendar buckets of several intervals", () => {
     const message = (c: AggregationClause) => validateMetric(c, schema)[0]?.message;
     expect(message(clause({ every: 1000 }))).toBeUndefined();
     for (const every of [0, 1001, 1.5]) expect(message(clause({ every }))).toMatch(/1–1,000/);
+    // The exported calendar refuses them too, rather than computing nonsense.
+    for (const every of [0, -2, 2.5, 1001]) {
+      expect(() => metricDateFloor(0, "day", "UTC", every)).toThrow(RangeError);
+      expect(() => metricDateNext(0, "hour", "UTC", every)).toThrow(RangeError);
+    }
     expect(message(clause({ interval: "hourOfDay", every: 2 }))).toMatch(/every applies to calendar intervals/);
     expect(message(clause({ interval: "hourOfDay", every: 1 }))).toBeUndefined();
     expect(

@@ -122,7 +122,10 @@ export function compactCalendarLabels(points: readonly { bucket: MetricBucket; x
     return [{ ...point, date, day: dayFormatter.format(date), hour: Number(hourFormatter.format(date)) }];
   });
   const multipleDays = new Set(info.map(point => point.day)).size > 1;
-  const candidates = grouping.interval === "hour"
+  // Hourly buckets label round local hours. Buckets of several hours (whose
+  // starts need not be round, such as 5-hour blocks) label their starts, as
+  // spacing allows; a compact axis marks bucket starts like any other tick.
+  const candidates = grouping.interval === "hour" && (grouping.every ?? 1) === 1
     ? info.filter(point => point.hour % (multipleDays ? 12 : 6) === 0)
     : info;
   // Sparse observed data may contain no round-hour bucket; retain its actual hour.

@@ -22,11 +22,13 @@ func TestV3CalendarBoundariesMatchWideRangeFallback(t *testing.T) {
 		{"Australia/Lord_Howe", "2026-10-03T12:00:00Z"},
 		{"Australia/Adelaide", "2044-12-31T22:00:00Z"},
 		{"Pacific/Apia", "2011-12-29T12:00:00Z"},
+		// A two-hour fall-back repeat that contains a 2-hour bucket boundary.
+		{"Antarctica/Troll", "2025-10-25T20:00:00Z"},
 	} {
 		for _, step := range []struct {
 			interval string
 			every    int
-		}{{"hour", 1}, {"hour", 3}, {"hour", 5}, {"day", 1}, {"day", 3}, {"week", 1}, {"week", 2}, {"month", 1}, {"month", 3}, {"year", 1}, {"year", 2}} {
+		}{{"hour", 1}, {"hour", 2}, {"hour", 3}, {"hour", 5}, {"day", 1}, {"day", 3}, {"week", 1}, {"week", 2}, {"month", 1}, {"month", 3}, {"year", 1}, {"year", 2}} {
 			interval := step.interval
 			t.Run(zone.name+"/"+zone.start+"/"+interval+"/"+strconv.Itoa(step.every), func(t *testing.T) {
 				log := &statementLog{}

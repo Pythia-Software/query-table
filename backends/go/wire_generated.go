@@ -101,9 +101,9 @@ type CalendarGroupKey struct {
 	Interval string `json:"interval"`
 	// Buckets of this many intervals; omitted is 1. Anchors are fixed: hours
 	// dividing 24 start at local multiples of every within each day (other counts
-	// are elapsed blocks from 1970-01-01T00:00Z), days count local dates from
-	// 1970-01-01, weeks from Monday 1969-12-29, months from January 1970 and years
-	// from 1970.
+	// are elapsed blocks from 1970-01-01T00:00Z, whatever the timeZone), days
+	// count local dates from 1970-01-01, weeks from Monday 1969-12-29, months from
+	// January 1970 and years from 1970.
 	Every int `json:"every,omitempty"`
 	// IANA identifier; omitted is UTC.
 	TimeZone string `json:"timeZone,omitempty"`

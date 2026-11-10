@@ -116,11 +116,6 @@ function metricOffsetTransition(
 /** Intervals per bucket accepted by `every`. */
 export const MAX_METRIC_DATE_EVERY = 1000;
 
-/** Intervals per bucket of a date grouping or calendar key: `every`, or 1. */
-export function metricDateEvery(config: { every?: number } | undefined): number {
-  return config?.every ?? 1;
-}
-
 /** Whether `every` is a valid count of intervals per bucket: omitted, or an
  * integer 1–1,000. Cycles accept only 1. */
 export function isMetricDateEvery(every: unknown, interval?: string): boolean {
@@ -213,22 +208,57 @@ function metricEveryWall(
 const elapsedHours = (interval: string, every: number) =>
   interval === "hour" && 24 % every !== 0;
 
+/** A valid count of intervals per bucket, or a RangeError. */
+function metricEvery(every: number): number {
+  if (!Number.isInteger(every) || every < 1 || every > MAX_METRIC_DATE_EVERY)
+    throw RangeError(`every is a whole number of intervals, 1–${MAX_METRIC_DATE_EVERY}.`);
+  return every;
+}
+
+/** The start of the bucket after the one starting at `start`. */
+function metricEveryAfter(
+  start: number,
+  interval: "hour" | "day" | "week" | "month" | "year",
+  timeZone: string,
+  every: number,
+): number {
+  if (elapsedHours(interval, every)) return start + every * HOUR_MS;
+  return metricWallTime(metricEveryWall(start, interval, timeZone, every, 1), timeZone);
+}
+
+/** The start of the bucket of `every` intervals holding `time`. The wall
+ * start resolves to its earlier occurrence; when a fall-back repeat contains
+ * a bucket boundary (a two-hour repeat such as Antarctica/Troll's), a later
+ * bucket can start before `time` too, so step to it. Buckets then partition
+ * the timeline: every instant is in exactly one `[start, next)`. */
+function metricEveryStart(
+  time: number,
+  interval: "hour" | "day" | "week" | "month" | "year",
+  timeZone: string,
+  every: number,
+): number {
+  if (elapsedHours(interval, every)) return floorTo(time, every * HOUR_MS);
+  let start = metricWallTime(metricEveryWall(time, interval, timeZone, every, 0), timeZone);
+  for (let step = 0; step < 4; step++) {
+    const next = metricEveryAfter(start, interval, timeZone, every);
+    if (next > time || next <= start) break;
+    start = next;
+  }
+  return start;
+}
+
 /** The start of the interval (`every` > 1: the bucket of `every` intervals)
- * holding `time`. A cycle's interval is its hour or day. */
+ * holding `time`. A cycle's interval is its hour or day. `every` must be an
+ * integer 1–1,000 (a RangeError otherwise); cycles ignore it, and
+ * validateDateGrouping refuses it above 1 for them. */
 export function metricDateFloor(
   time: number,
   cycleOrInterval: MetricDateGrouping["interval"],
   timeZone = "UTC",
   every = 1,
 ): number {
-  if (every > 1 && !isMetricCycle(cycleOrInterval)) {
-    if (elapsedHours(cycleOrInterval, every))
-      return floorTo(time, every * HOUR_MS);
-    return metricWallTime(
-      metricEveryWall(time, cycleOrInterval, timeZone, every, 0),
-      timeZone,
-    );
-  }
+  if (every !== 1 && !isMetricCycle(cycleOrInterval))
+    return metricEveryStart(time, cycleOrInterval, timeZone, metricEvery(every));
   const interval = metricCalendarUnit(cycleOrInterval);
   if (timeZone !== "UTC") {
     const zoned =
@@ -265,12 +295,13 @@ export function metricDateNext(
   timeZone = "UTC",
   every = 1,
 ): number {
-  if (every > 1 && !isMetricCycle(cycleOrInterval)) {
-    if (elapsedHours(cycleOrInterval, every))
-      return floorTo(time, every * HOUR_MS) + every * HOUR_MS;
-    return metricWallTime(
-      metricEveryWall(time, cycleOrInterval, timeZone, every, 1),
+  if (every !== 1 && !isMetricCycle(cycleOrInterval)) {
+    const count = metricEvery(every);
+    return metricEveryAfter(
+      metricEveryStart(time, cycleOrInterval, timeZone, count),
+      cycleOrInterval,
       timeZone,
+      count,
     );
   }
   const interval = metricCalendarUnit(cycleOrInterval);

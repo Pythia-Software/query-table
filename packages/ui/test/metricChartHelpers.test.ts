@@ -169,9 +169,9 @@ describe("labels of buckets of several intervals", () => {
   const clause = (interval: "hour" | "day" | "week" | "month" | "year", every: number, timeZone = "UTC"): RenderingClause =>
     ({ id: "m", op: "count", groupBy: ["at"], dateGrouping: { field: "at", interval, every, timeZone, includeEmpty: true, range: "query" } });
   it("shows each bucket's range in the grouping zone", () => {
-    // 09:00–12:00 EDT, and 00:00 EDT to 03:00 EST across the repeated hour.
+    // 09:00–12:00 EDT, and 00:00 EDT to 03:00 EST (both offsets) across the repeated hour.
     expect(metricGroupKeyLabel("2026-07-04T13:00:00.000Z", 0, clause("hour", 3, "America/New_York"))).toBe("Jul 04 09:00–12:00 -04:00");
-    expect(metricGroupKeyLabel("2026-11-01T04:00:00.000Z", 0, clause("hour", 3, "America/New_York"))).toBe("Nov 01 00:00–03:00 -05:00");
+    expect(metricGroupKeyLabel("2026-11-01T04:00:00.000Z", 0, clause("hour", 3, "America/New_York"))).toBe("Nov 01 00:00 -04:00–03:00 -05:00");
     expect(metricGroupKeyLabel("2026-03-02T00:30:00.000Z", 0, clause("hour", 6, "Asia/Kolkata"))).toBe("Mar 02 06:00–12:00 +05:30");
     expect(metricGroupKeyLabel("2026-01-01T00:00:00.000Z", 0, clause("day", 3))).toBe("Jan 01–Jan 03");
     expect(metricGroupKeyLabel("2025-12-29T00:00:00.000Z", 0, clause("week", 2))).toBe("Dec 29–Jan 11");

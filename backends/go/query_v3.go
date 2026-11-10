@@ -86,6 +86,13 @@ func (g *GroupingDefinition) UnmarshalJSON(data []byte) error {
 		if err := keyDecoder.Decode(&key); err != nil {
 			return diagnostic(ErrorCodeGrouping, "a group key is a field name or {field, interval, every, timeZone}")
 		}
+		// Every 0 stands only for an omitted every; an explicit 0 is invalid.
+		var explicit struct {
+			Every *int `json:"every"`
+		}
+		if json.Unmarshal(raw, &explicit) == nil && explicit.Every != nil && *explicit.Every < 1 {
+			return diagnostic(ErrorCodeGrouping, "a group key's every is a whole number of intervals, 1-1000")
+		}
 		if g.KeyIntervals == nil {
 			g.KeyIntervals = map[string]GroupKeyInterval{}
 		}

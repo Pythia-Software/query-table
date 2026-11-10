@@ -31,6 +31,9 @@
     { "name": "utc quarter before the epoch", "zone": "UTC", "interval": "month", "every": 3, "at": "1969-11-15T12:00:00Z", "floor": "1969-10-01T00:00:00.000Z", "next": "1970-01-01T00:00:00.000Z" },
     { "name": "utc decade", "zone": "UTC", "interval": "year", "every": 10, "at": "2026-05-15T12:00:00Z", "floor": "2020-01-01T00:00:00.000Z", "next": "2030-01-01T00:00:00.000Z" },
     { "name": "kathmandu 2 years", "zone": "Asia/Kathmandu", "interval": "year", "every": 2, "at": "2026-12-31T18:30:00Z", "floor": "2025-12-31T18:15:00.000Z", "next": "2027-12-31T18:15:00.000Z" },
+    { "name": "troll 2h first occurrence of a two-hour repeat", "zone": "Antarctica/Troll", "interval": "hour", "every": 2, "at": "2025-10-25T23:30:00Z", "floor": "2025-10-25T22:00:00.000Z", "next": "2025-10-26T00:00:00.000Z" },
+    { "name": "troll 2h repeat containing a boundary steps to the later bucket", "zone": "Antarctica/Troll", "interval": "hour", "every": 2, "at": "2025-10-26T01:30:00Z", "floor": "2025-10-26T00:00:00.000Z", "next": "2025-10-26T04:00:00.000Z" },
+    { "name": "troll 2h spring gap", "zone": "Antarctica/Troll", "interval": "hour", "every": 2, "at": "2026-03-29T01:30:00Z", "floor": "2026-03-29T01:00:00.000Z", "next": "2026-03-29T02:00:00.000Z" },
     { "name": "every 1 is one interval", "zone": "America/New_York", "interval": "hour", "every": 1, "at": "2026-11-01T06:30:00Z", "floor": "2026-11-01T06:00:00.000Z", "next": "2026-11-01T07:00:00.000Z" }
   ]
 }

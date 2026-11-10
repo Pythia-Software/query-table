@@ -1677,7 +1677,9 @@ export function MetricsEditor<Row>({
                             const cyclic =
                               interval === "hourOfDay" ||
                               interval === "dayOfWeek";
-                            const { occurrence, every, ...previous } =
+                            // A new interval starts at one interval per
+                            // bucket: 6 hours must not become 6 months.
+                            const { occurrence, every: _every, ...previous } =
                               selected.dateGrouping ?? {};
                             patch(selected.id, {
                               dateGrouping: {
@@ -1686,10 +1688,6 @@ export function MetricsEditor<Row>({
                                 range: "query",
                                 ...previous,
                                 interval,
-                                // A slot is one hour or day.
-                                ...(every !== undefined && !cyclic
-                                  ? { every }
-                                  : {}),
                                 // Hour-of-day slots occur hourly.
                                 ...(cyclic && occurrence
                                   ? {
@@ -1720,23 +1718,14 @@ export function MetricsEditor<Row>({
                         selected.dateGrouping.interval !== "dayOfWeek" && (
                           <label className="qt-metric-date-every">
                             Every
-                            <input
+                            <MetricNumberInput
                               aria-label="Intervals per bucket"
                               title={`Buckets of this many ${selected.dateGrouping.interval}s, counted from 1970 (hours from each local midnight when they divide a day)`}
-                              type="number"
                               min={1}
                               max={MAX_METRIC_DATE_EVERY}
                               step={1}
-                              placeholder="1"
                               value={selected.dateGrouping.every ?? 1}
-                              onChange={(e) => {
-                                const n = e.currentTarget.valueAsNumber;
-                                if (
-                                  !Number.isInteger(n) ||
-                                  n < 1 ||
-                                  n > MAX_METRIC_DATE_EVERY
-                                )
-                                  return;
+                              onCommit={(n) => {
                                 const { every: _every, ...rest } =
                                   selected.dateGrouping!;
                                 patch(selected.id, {

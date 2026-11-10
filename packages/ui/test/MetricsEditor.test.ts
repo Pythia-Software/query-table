@@ -1220,22 +1220,33 @@ it("chooses buckets of several calendar intervals, hidden for slots", async () =
   };
   try {
     await act(async () => root.render(createElement(MetricsEditor, { api, fields, onClose: vi.fn() })));
+    const enter = (value: string) => { editInput(every()!, value); commitInput(every()!); };
     expect(every()!.value).toBe("1");
+    // Typing is a draft: clearing the field does not snap back or apply.
+    editInput(every()!, "");
+    expect(every()!.value).toBe("");
     editInput(every()!, "3");
+    commitInput(every()!);
     expect(saved().dateGrouping).toMatchObject({ interval: "hour", every: 3, timeZone: "America/New_York" });
-    // Out-of-range counts are not applied.
-    editInput(every()!, "1001");
-    expect(saved().dateGrouping?.every).toBe(3);
-    // The count is kept across calendar intervals and dropped for slots.
-    choose("Date interval", "day");
-    expect(saved().dateGrouping).toMatchObject({ interval: "day", every: 3 });
+    // An empty field restores the count; out-of-range counts are clamped.
+    enter("");
+    expect(every()!.value).toBe("3");
+    enter("1001");
+    expect(saved().dateGrouping?.every).toBe(1000);
+    // A new interval starts at one per bucket: 6 hours must not become 6 months.
+    enter("6");
+    choose("Date interval", "month");
+    expect(every()!.value).toBe("1");
+    expect(saved().dateGrouping).not.toHaveProperty("every");
+    enter("3");
+    expect(saved().dateGrouping).toMatchObject({ interval: "month", every: 3 });
+    // Slots have no count.
     choose("Date interval", "hourOfDay");
     expect(every()).toBeNull();
     expect(saved().dateGrouping).not.toHaveProperty("every");
-    choose("Date interval", "month");
-    editInput(every()!, "3");
-    expect(saved().dateGrouping).toMatchObject({ interval: "month", every: 3 });
-    editInput(every()!, "1");
+    choose("Date interval", "day");
+    enter("2");
+    enter("1");
     expect(saved().dateGrouping).not.toHaveProperty("every");
   } finally { act(() => root.unmount()); host.remove(); }
 });

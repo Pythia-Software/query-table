@@ -446,8 +446,14 @@ buckets and results stay cache-stable:
   half-hour zone such as Asia/Kolkata. A daylight-saving change makes its
   bucket longer or shorter: both occurrences of a repeated hour fall in the
   same bucket, and a bucket whose start hour is skipped starts at the
-  transition, as hourly floors do. Other counts (5, 7, 36 …) are elapsed blocks
-  of `every` hours counted from 1970-01-01T00:00Z, whatever the zone.
+  transition, as hourly floors do. Buckets always partition the timeline: in
+  the rare zone whose fall-back repeat contains a bucket boundary (the
+  two-hour repeat of Antarctica/Troll with `every: 2`), the instants after
+  the later bucket's start belong to that bucket. Other counts (5, 7, 36 …)
+  are elapsed blocks of `every` hours counted from 1970-01-01T00:00Z and
+  ignore `timeZone`, matching Pharos's own periods: 5-hour buckets in
+  Asia/Kolkata start at :30 local time, and `every: 48` hours is not two local
+  days. Use `interval: "day"` with `every` for spans of whole local days.
 - **Days.** Groups of `every` local calendar dates counted from 1970-01-01
   (the local date's day number, floor-divided by `every`).
 - **Weeks.** Groups of `every` Monday weeks counted from the week of Monday
@@ -468,10 +474,16 @@ saved state leave out `every: 1`. Charts label a bucket with its range in the
 grouping zone: `Jul 04 09:00–12:00 -04:00` for hours, `Jan 01–Jan 03` for days
 and weeks (the last day included), `Apr–Jun 2026` for months and `2020–2029`
 for years. Metric settings offer an **Every** count beside Date interval,
-hidden for slots.
+hidden for slots and reset to 1 when the interval changes.
 
 `metricDateFloor(time, interval, timeZone, every)` and `metricDateNext(time,
-interval, timeZone, every)` expose the calendar. A server executes `every`
+interval, timeZone, every)` expose the calendar; they throw a `RangeError`
+for an `every` that is not an integer 1–1,000. Go hosts use
+`CalendarBucket(instant, interval, every, timeZone)`, which returns a
+bucket's start (its key) and the next bucket's start, so they can label or
+drill into buckets without reimplementing the anchors. In Go, `Every: 0` is
+the omitted value (one interval); an explicit `"every": 0` on the wire is
+refused, as the schema and the TypeScript engine refuse it. A server executes `every`
 above 1 when its handshake sets `QueryCapabilitiesV3.calendarEvery`;
 otherwise `toQueryRequestV3` reports a `capability_unsupported` diagnostic for
 that metric. Query Table's Go executor (SQLite and PostgreSQL) and DuckDB

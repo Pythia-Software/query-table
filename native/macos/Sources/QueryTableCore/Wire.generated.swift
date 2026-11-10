@@ -460,7 +460,7 @@ public struct MetricSpecV3: Codable, Equatable, Sendable {
 public struct CalendarGroupKey: Codable, Equatable, Sendable {
   public var field: String
   public var interval: String
-  /// Buckets of this many intervals; omitted is 1. Anchors are fixed: hours dividing 24 start at local multiples of every within each day (other counts are elapsed blocks from 1970-01-01T00:00Z), days count local dates from 1970-01-01, weeks from Monday 1969-12-29, months from January 1970 and years from 1970.
+  /// Buckets of this many intervals; omitted is 1. Anchors are fixed: hours dividing 24 start at local multiples of every within each day (other counts are elapsed blocks from 1970-01-01T00:00Z, whatever the timeZone), days count local dates from 1970-01-01, weeks from Monday 1969-12-29, months from January 1970 and years from 1970.
   public var every: Int?
   /// IANA identifier; omitted is UTC.
   public var timeZone: String?
