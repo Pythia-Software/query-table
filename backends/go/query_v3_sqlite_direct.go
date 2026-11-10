@@ -52,7 +52,7 @@ func (d QueryDatasetV3) sqliteDirectGroups(ctx context.Context, tx *sql.Tx, q Qu
 	*tables = append(*tables, table) // Register before potentially interrupted DDL.
 	// This flag is consulted only when the direct plan is declined.
 	*declined = true
-	for _, statement := range []string{integer.NonnegativeSQL, integer.SQL} {
+	for _, statement := range integer.attempts() {
 		statement = strings.Replace(statement, " AS MATERIALIZED (", " AS NOT MATERIALIZED (", 1)
 		valid, attemptErr := sqliteTryIntegerReduction(ctx, tx, table, statement, integer.Args)
 		if ctx.Err() != nil {

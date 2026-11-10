@@ -13,6 +13,16 @@ type sqliteIntegerPlan struct {
 	storedOnly                 bool
 }
 
+// attempts lists the distinct reductions to try, nonnegative first. Without
+// a SUM/AVG leaf both modes compile to the same statement; retrying it would
+// repeat a full-population scan that has already declined.
+func (p *sqliteIntegerPlan) attempts() []string {
+	if p.NonnegativeSQL == p.SQL {
+		return []string{p.SQL}
+	}
+	return []string{p.NonnegativeSQL, p.SQL}
+}
+
 // V3 also proves the complete narrow source's byte size and identity storage.
 // These private columns never become public summary outputs.
 type sqliteIntegerSourceProof struct {
@@ -23,8 +33,9 @@ type sqliteIntegerSourceProof struct {
 // Speculative reductions for scalar metrics and aggregate leaves over integer
 // storage. Existing opaque multi-input batches retain one materialized raw
 // projection. Checked integer SUM proves nonnegative populations directly;
-// signed inputs also check their exact absolute total. Other domains retain
-// the ordinary exact decimal reducer.
+// signed inputs also check their exact absolute total. Text COUNT leaves use
+// binary identity and prove storage/encoding/size without decimal reduction.
+// Other domains retain the ordinary exact decimal reducer.
 // No schema declaration or sampled row is treated as proof about the population.
 func sqliteIntegerReduction(ctx context.Context, q metricRequest, specs []AggSpec, s Schema, o PlanOptions, combined SQLPlan, sourceProof ...sqliteIntegerSourceProof) *sqliteIntegerPlan {
 	if len(specs) == 0 || combined.Scope != "allMatching" {
@@ -32,6 +43,7 @@ func sqliteIntegerReduction(ctx context.Context, q metricRequest, specs []AggSpe
 	}
 	fields := map[string]bool{}
 	nodes := map[string]*exprNode{}
+	textCounts := false
 	expressions := []string{}
 	for _, spec := range specs {
 		expressions = append(expressions, metricExpression(spec))
@@ -73,8 +85,17 @@ func sqliteIntegerReduction(ctx context.Context, q metricRequest, specs []AggSpe
 			}
 			name := n.args[0].text
 			f, ok := s.Fields[name]
-			if !ok || f.Kind != FieldNumber || !f.ExpressionNumeric || f.ValueErrorExpr != "" && !f.typedValue {
+			if !ok || f.ValueErrorExpr != "" && !f.typedValue {
 				return false
+			}
+			if f.Kind == FieldNumber {
+				if !f.ExpressionNumeric {
+					return false
+				}
+			} else if (op != "count" && op != "count_distinct") || (f.Kind != FieldText && f.Kind != FieldEnum) {
+				return false
+			} else {
+				textCounts = true
 			}
 			fields[name] = true
 		}
@@ -89,6 +110,9 @@ func sqliteIntegerReduction(ctx context.Context, q metricRequest, specs []AggSpe
 		}
 		storedOnly = storedOnly || !aggOpKnown(strings.ToLower(n.op))
 	}
+	// These newly eligible batches must not retry an opaque host expression
+	// when a text value declines validation. EXPLAIN proves stored reads first.
+	storedOnly = storedOnly || textCounts
 	for _, name := range specs[0].GroupBy {
 		f, ok := s.Fields[name]
 		if !ok || (f.Kind != FieldText && f.Kind != FieldEnum && f.Kind != FieldBool && !(f.Kind == FieldDatetime && f.typedValue)) || f.ValueErrorExpr != "" && !f.typedValue {
@@ -177,9 +201,6 @@ func sqliteIntegerReduction(ctx context.Context, q metricRequest, specs []AggSpe
 		for _, column := range sourceProof[0].columns {
 			raw := aliases[column.Field]
 			parts = append(parts, "COALESCE(length(CAST(CAST("+raw+" AS TEXT) AS BLOB)),0)")
-			if !containsString(specs[0].GroupBy, column.Field) && (column.Type == "text" || column.Type == "enum") {
-				guards = append(guards, "MIN(qt_v2_field_error("+raw+",'source_text')) IS NULL")
-			}
 		}
 		// Window proofs cover every group before LIMIT bounds the staged
 		// output. Budgets and invalid values in an omitted group must not be
@@ -192,6 +213,10 @@ func sqliteIntegerReduction(ctx context.Context, q metricRequest, specs []AggSpe
 	for _, mode := range modes {
 		nonnegative := mode == "nonnegative"
 		columns, guards := append([]string{}, baseColumns...), append([]string{}, baseGuards...)
+		// Fields whose per-row 'text' check is already in the guards. It
+		// subsumes the source identity's 'source_text' check, and one check
+		// covers every COUNT/COUNT_DISTINCT leaf over that field.
+		textChecked := map[string]bool{}
 		for _, col := range combined.SQLiteReductionColumns {
 			identity := combined.reduction.keys[col.Name]
 			if identity == "count" {
@@ -220,7 +245,18 @@ func sqliteIntegerReduction(ctx context.Context, q metricRequest, specs []AggSpe
 			}
 			value := ""
 			sum := ""
-			if raw != "*" {
+			text := raw != "*" && expressionType(s.Fields[n.args[0].text].Kind) == "text"
+			if text {
+				if s.Fields[n.args[0].text].typedValue {
+					guards = append(guards, fmt.Sprintf("COALESCE(MAX(length(CAST(%s AS BLOB))),0)<=%d", raw, maxFormulaTextBytes))
+				} else if !textChecked[n.args[0].text] {
+					// COUNT ignores NULL, but invalid storage/encoding and oversized
+					// formula operands must still decline to the typed error path.
+					guards = append(guards, "MIN(qt_v2_field_error("+raw+",'text')) IS NULL")
+					textChecked[n.args[0].text] = true
+				}
+				raw += " COLLATE BINARY"
+			} else if raw != "*" {
 				// Declined inputs contribute a REAL zero. Thus an INTEGER/NULL
 				// SUM proves every consumed value met this plan's domain; numeric
 				// text must never be accepted through SQLite's SUM coercion.
@@ -255,6 +291,13 @@ func sqliteIntegerReduction(ctx context.Context, q metricRequest, specs []AggSpe
 				value = strings.ToUpper(op) + "(" + raw + ")"
 			}
 			columns = append(columns, value+" AS "+col.Name)
+		}
+		if len(sourceProof) > 0 {
+			for _, column := range sourceProof[0].columns {
+				if !textChecked[column.Field] && !containsString(specs[0].GroupBy, column.Field) && (column.Type == "text" || column.Type == "enum") {
+					guards = append(guards, "MIN(qt_v2_field_error("+aliases[column.Field]+",'source_text')) IS NULL")
+				}
+			}
 		}
 		if len(guards) == 0 {
 			guards = append(guards, "1")

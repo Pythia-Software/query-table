@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- SQLite metrics and grouped formula summaries can combine text/enum `COUNT`
+  and `COUNT_DISTINCT` with guarded native integer reductions. This avoids the
+  per-field typed staging chain for eligible stored sources, including
+  `SUM([events])/NULLIF(COUNT_DISTINCT([message_id])/1000,0)`. Binary text
+  identity, input validation, unsafe-integer fallback, measured `minCount`,
+  group limits and staging budgets are preserved. No host hints or additional
+  registered functions are needed. See the
+  [typed metric benchmark](docs/sqlite-typed-metric-performance.md).
+
 ## 1.0.3 — 2026-11-08
 
 ### Added
