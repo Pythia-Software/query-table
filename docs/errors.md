@@ -150,7 +150,7 @@ the stored object).
 | `filter_disabled` | 400 | no | The field is not server-filterable (for a computed field: not in the host's filter allowlist). |
 | `sort` | 400 | no | A sort term is invalid, or the field is not server-sortable. |
 | `collation_required` | 400 | no | Text ordering needs a collation this profile does not provide. |
-| `unsupported_regex` | 400 | no | Regex filtering or sorting is outside this server profile. |
+| `unsupported_regex` | 400 | no | Regex filtering, sorting or a formula regex pattern is outside this server profile. |
 | `unsupported_literal` | 400 | no | A text value cannot be represented (for example NUL or an unpaired surrogate). |
 | `unsupported_type` | 400 | no | The value type does not support the operation (for example boolean extrema or arrays in expressions). |
 | `invalid_source_value` | 400 | no | A stored source value does not match its declared type. |
@@ -179,6 +179,7 @@ the stored object).
 | `min_count_grouping` | 400 | no | minCount needs a grouped metric. |
 | `min_count_field` | 400 | no | minCount's distinct or sum field is invalid. |
 | `min_count_distribution` | 400 | no | minCount cannot be combined with a distribution. |
+| `metric_interval` | 400 | no | An interval needs a single-value ratio of two additive aggregates (SUM, COUNT or COUNT_DISTINCT), scaled by positive constants. |
 | `group_disabled` | 400 | no | The field cannot be a group key (for a computed field: not in the host's grouping allowlist). |
 | `grouping` | 400 | no | A grouping definition is invalid: keys, summaries or a calendar key. |
 | `representative` | 400 | no | The representative-row ordering of a grouping is invalid. |

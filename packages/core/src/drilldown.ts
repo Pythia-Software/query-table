@@ -30,7 +30,7 @@ function metricSchema(query: QueryState, schema: FieldSchema): FieldSchema {
 }
 
 function distributionActive(clause: AggregationClause): boolean {
-  return !!clause.distribution && (!clause.display || clause.display.kind === "box" || clause.display.kind === "histogram");
+  return !!clause.distribution && (!clause.display || ["box", "histogram", "quantiles"].includes(clause.display.kind));
 }
 
 /** The query selecting the records behind one metric bucket, or null when no
@@ -84,8 +84,8 @@ export function inspectBucketQuery(
       } catch {
         return null;
       }
-      const { interval, timeZone, partialIntervals } = clause.dateGrouping;
-      const next = metricDateNext(start, interval, timeZone);
+      const { interval, timeZone, partialIntervals, every } = clause.dateGrouping;
+      const next = metricDateNext(start, interval, timeZone, every);
       // A windowed point reads its trailing intervals; a running one, every
       // interval from the start of the range.
       let from: number | undefined = start;
@@ -93,7 +93,7 @@ export function inspectBucketQuery(
       if (periods === "all") from = undefined;
       else if (periods !== undefined) {
         if (!Number.isInteger(periods) || periods < 2 || periods > MAX_METRIC_WINDOW_PERIODS) return null;
-        for (let i = 1; i < periods; i++) from = metricDateFloor(from! - 1, interval, timeZone);
+        for (let i = 1; i < periods; i++) from = metricDateFloor(from! - 1, interval, timeZone, every);
       }
       if (partialIntervals === "exclude") {
         const whole = wholeIntervalSpan(clause, query, fields, Date.now()).start;

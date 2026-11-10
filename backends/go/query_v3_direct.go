@@ -172,7 +172,7 @@ func (d QueryDatasetV3) executeUngrouped(ctx context.Context, tx *sql.Tx, q Quer
 		}
 		metric, e := isolateMetric(ctx, tx, spec.ID, spec.Scope, func() (MetricResult, error) {
 			if batched {
-				return MetricResult{}, d.checkMetricSamples(ctx, tx, spec, metricQuery, d.Schema, o, maxGroups)
+				return MetricResult{}, d.checkMetricSamples(ctx, tx, spec, metricQuery, d.Schema, o, maxGroups, total)
 			}
 			return d.executeMetric(ctx, tx, spec, metricQuery, d.Schema, computed, o, total, maxGroups, tables)
 		})

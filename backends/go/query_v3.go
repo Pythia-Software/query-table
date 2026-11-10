@@ -28,9 +28,12 @@ type GroupingDefinition struct {
 // GroupKeyInterval buckets a datetime grouping key by calendar interval: one
 // group per hour, day, week (from Monday), month or year in TimeZone (an IANA
 // name; empty means UTC), keyed by the interval's start instant. Intervals
-// follow the metric calendar, including daylight-saving changes.
+// follow the metric calendar, including daylight-saving changes. Every > 1
+// groups that many intervals per bucket, anchored as CalendarGroupKey.Every
+// describes; 0 and 1 are one interval.
 type GroupKeyInterval struct {
 	Interval string `json:"interval"`
+	Every    int    `json:"every,omitempty"`
 	TimeZone string `json:"timeZone,omitempty"`
 }
 
@@ -50,7 +53,7 @@ func (g GroupingDefinition) MarshalJSON() ([]byte, error) {
 	for _, key := range g.Keys {
 		var value any = key
 		if interval, ok := g.KeyIntervals[key]; ok {
-			value = CalendarGroupKey{key, interval.Interval, interval.TimeZone}
+			value = CalendarGroupKey{Field: key, Interval: interval.Interval, Every: interval.Every, TimeZone: interval.TimeZone}
 		}
 		raw, err := json.Marshal(value)
 		if err != nil {
@@ -81,7 +84,14 @@ func (g *GroupingDefinition) UnmarshalJSON(data []byte) error {
 		keyDecoder := json.NewDecoder(bytes.NewReader(raw))
 		keyDecoder.DisallowUnknownFields()
 		if err := keyDecoder.Decode(&key); err != nil {
-			return diagnostic(ErrorCodeGrouping, "a group key is a field name or {field, interval, timeZone}")
+			return diagnostic(ErrorCodeGrouping, "a group key is a field name or {field, interval, every, timeZone}")
+		}
+		// Every 0 stands only for an omitted every; an explicit 0 is invalid.
+		var explicit struct {
+			Every *int `json:"every"`
+		}
+		if json.Unmarshal(raw, &explicit) == nil && explicit.Every != nil && *explicit.Every < 1 {
+			return diagnostic(ErrorCodeGrouping, "a group key's every is a whole number of intervals, 1-1000")
 		}
 		if g.KeyIntervals == nil {
 			g.KeyIntervals = map[string]GroupKeyInterval{}
@@ -90,7 +100,7 @@ func (g *GroupingDefinition) UnmarshalJSON(data []byte) error {
 			return diagnostic(ErrorCodeGrouping, "invalid or duplicate group key")
 		}
 		g.Keys = append(g.Keys, key.Field)
-		g.KeyIntervals[key.Field] = GroupKeyInterval{key.Interval, key.TimeZone}
+		g.KeyIntervals[key.Field] = GroupKeyInterval{Interval: key.Interval, Every: key.Every, TimeZone: key.TimeZone}
 	}
 	if in.Keys != nil && g.Keys == nil {
 		g.Keys = []string{}
@@ -107,7 +117,13 @@ func groupKeyLocation(typ, field string, interval GroupKeyInterval) (*time.Locat
 	if typ != "datetime" {
 		return nil, diagnostic(ErrorCodeGrouping, "a calendar group key needs a datetime field")
 	}
-	return calendarLocation(MetricDateGrouping{Field: field, Interval: interval.Interval, TimeZone: interval.TimeZone, Range: "query"})
+	if interval.Every < 0 || interval.Every > MaxCalendarEvery {
+		return nil, diagnostic(ErrorCodeGrouping, "a group key's every is a whole number of intervals, 1-1000")
+	}
+	if interval.Interval == "hour" && interval.Every > 1 && !calendarHourEvery(interval.Every) {
+		return nil, diagnostic(ErrorCodeGrouping, "a group key's "+calendarHourEveryMessage)
+	}
+	return calendarLocation(MetricDateGrouping{Field: field, Interval: interval.Interval, Every: interval.Every, TimeZone: interval.TimeZone, Range: "query"})
 }
 
 // Validate classifies malformed wire stages and metrics as request diagnostics,
@@ -161,7 +177,13 @@ type QueryDatasetV3 struct {
 	MaxRows, MaxGroups, MaxPopulation int
 	// UTF-8 value/error payload of the narrow source, checked before its copy.
 	// Database storage overhead and query scratch space remain host-managed.
-	MaxStagingBytes    int64
+	MaxStagingBytes int64
+	// MaxSamplesPerGroup bounds the rows of one group of a MEDIAN, PERCENTILE
+	// or distribution metric (at most 1,000,000 when set). PostgreSQL defaults
+	// to DefaultMaxSamplesPerGroup, since it sorts each group's samples in an
+	// array. SQLite defaults to 10,000,000, a CPU and temporary-space bound for
+	// ungrouped requests: it sorts groups in memory within a process-wide
+	// budget, or ranks them in SQL.
 	MaxSamplesPerGroup int
 	// PredicateRelations optionally supplies host relations for base-field
 	// source and row filter predicates (SQLite only). Group filters over
@@ -212,7 +234,7 @@ func (d QueryDatasetV3) Capabilities() QueryCapabilitiesV3 {
 	if d.Dialect == "sqlite" {
 		profile = SQLiteExpressionProfile
 	}
-	return QueryCapabilitiesV3{Version: 3, GroupedRows: true, CalendarGrouping: true, CalendarCycles: true, CalendarGroupKeys: true, ComputedSourceFilters: len(d.ComputedFilterable) > 0, Regex: false, RegexSourceFilters: d.Dialect == "sqlite", MetricFilters: true, MetricMinCount: true, MetricMinCountMeasures: true, MaxRows: rows, MaxGroups: groups, MaxPopulation: pop, Profile: profile}
+	return QueryCapabilitiesV3{Version: 3, GroupedRows: true, CalendarGrouping: true, CalendarCycles: true, CalendarGroupKeys: true, CalendarEvery: true, ComputedSourceFilters: len(d.ComputedFilterable) > 0, Regex: false, RegexSourceFilters: d.Dialect == "sqlite", MetricFilters: true, MetricMinCount: true, MetricMinCountMeasures: true, MetricIntervals: true, MetricPercentiles: true, BoxPercentileWhiskers: true, QuantileDistributions: true, MaxRows: rows, MaxGroups: groups, MaxPopulation: pop, Profile: profile}
 }
 func (d QueryDatasetV3) options(ctx context.Context, tx *sql.Tx, q QueryRequestV3, o PlanOptions) (PlanOptions, error) {
 	if err := ctx.Err(); err != nil {
@@ -308,8 +330,9 @@ func resultField(name, typ, expr string, groupable bool) FieldSpec {
 }
 
 // SourcePlan discovers keys, formulas, ROW projections, representative ordering,
-// source predicates and canonical transitive inputs. Result/HAVING aliases are
-// never mistaken for source fields. It performs no reads outside the resolver.
+// distinct targets, source predicates and canonical transitive inputs.
+// Result/HAVING aliases are never mistaken for source fields. It performs no
+// reads outside the resolver.
 func (d QueryDatasetV3) SourcePlan(ctx context.Context, q QueryRequestV3, o PlanOptions) (SourceDependencyPlan, error) {
 	var out SourceDependencyPlan
 	if err := ctx.Err(); err != nil {
@@ -339,6 +362,7 @@ func (d QueryDatasetV3) SourcePlan(ctx context.Context, q QueryRequestV3, o Plan
 	o.ComputedGroupable = d.ComputedGroupable
 	o.ComputedFilterable = d.ComputedFilterable
 	fields := map[string]bool{d.Schema.IDField: true}
+	distinctBase := ""
 	if len(q.ExpectedRevisions) > 64 {
 		return out, diagnostic(ErrorCodeDependencyLimit, "revision envelope exceeds budget")
 	}
@@ -447,6 +471,21 @@ func (d QueryDatasetV3) SourcePlan(ctx context.Context, q QueryRequestV3, o Plan
 		source.OrderBy = nil
 		source.Offset = 0
 		source.Limit = pop + 1
+	} else if q.Distinct != nil {
+		// Distinct values read the source.where population. The target and its
+		// computed inputs/revisions are dependencies even though no row selects it.
+		_, computed, e := d.distinctTarget(q.Distinct.Field)
+		if e != nil {
+			return out, e
+		}
+		source = WireQuery{Where: q.Source.Where, Limit: pop + 1}
+		if computed {
+			fields[q.Distinct.Field] = true
+		} else {
+			// Execution reads a base target's raw binding, as native predicates
+			// do, so it joins BaseFields without the projection's typed compile.
+			distinctBase = q.Distinct.Field
+		}
 	} else {
 		source = q.Result
 		// The result stage reapplies ordinary-row predicates after the narrow
@@ -583,6 +622,9 @@ func (d QueryDatasetV3) SourcePlan(ctx context.Context, q QueryRequestV3, o Plan
 			}
 		}
 	}
+	if distinctBase != "" {
+		out.BaseFields = append(out.BaseFields, distinctBase)
+	}
 	sort.Strings(out.BaseFields)
 	out.BaseFields = uniqueStrings(out.BaseFields)
 	return out, nil
@@ -659,10 +701,20 @@ func computedInputPolicy(plan SQLPlan, s Schema) []string {
 	sort.Strings(result)
 	return result
 }
+
+// sampleLimit is the exact sample budget per group. PostgreSQL retains each
+// group's sorted samples and defaults to DefaultMaxSamplesPerGroup. SQLite
+// sorts groups in memory or ranks them in SQL and defaults to
+// sqliteDirectPopulation (10,000,000): staged groups never reach it, and it
+// bounds the CPU and temporary space an ungrouped request, which reads
+// SourceSQL directly, can spend sorting one group.
 func (d QueryDatasetV3) sampleLimit() (int, error) {
 	limit := d.MaxSamplesPerGroup
 	if limit == 0 {
-		limit = SQLiteMaxMedianSamples
+		if d.Dialect == "sqlite" {
+			return sqliteDirectPopulation, nil
+		}
+		limit = DefaultMaxSamplesPerGroup
 	}
 	if limit < 1 || limit > 1000000 {
 		return 0, diagnostic(ErrorCodeDataset, "invalid exact sample budget")
@@ -676,7 +728,7 @@ func sampledExpression(source string) bool {
 	}
 	var visit func(*exprNode) bool
 	visit = func(n *exprNode) bool {
-		if strings.EqualFold(n.op, "median") {
+		if sampledOp(strings.ToLower(n.op)) {
 			return true
 		}
 		for _, child := range n.args {
@@ -687,4 +739,14 @@ func sampledExpression(source string) bool {
 		return false
 	}
 	return visit(node)
+}
+
+// populationBudget is the staged population budget (MaxPopulation or its
+// default), or zero for an invalid dataset, which limits reports.
+func (d QueryDatasetV3) populationBudget() int {
+	_, _, population, _, err := d.limits()
+	if err != nil {
+		return 0
+	}
+	return population
 }

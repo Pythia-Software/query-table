@@ -180,8 +180,8 @@ export function PropertyViewEditor<Row>({
                 <button type="button" className="qt-property-pick" aria-pressed={item.id === selected?.id} onClick={() => editProperty(item.id)}>
                   <strong>{item.label}</strong><small>{draft.properties[index]?.field}</small>
                 </button>
-                <button type="button" className="qt-link-btn qt-property-icon-button" disabled={index === 0} aria-label={`Move ${item.label} up`} onClick={() => moveById(item.id, index - 1)}><Icon name="arrowUp" size={14} /></button>
-                <button type="button" className="qt-link-btn qt-property-icon-button" disabled={index === draft.properties.length - 1} aria-label={`Move ${item.label} down`} onClick={() => moveById(item.id, index + 1)}><Icon name="arrowDown" size={14} /></button>
+                <button type="button" className="qt-link-btn qt-property-icon-button" disabled={index === 0} aria-label={`Move ${item.label} up`} title="Move up" onClick={() => moveById(item.id, index - 1)}><Icon name="arrowUp" size={14} /></button>
+                <button type="button" className="qt-link-btn qt-property-icon-button" disabled={index === draft.properties.length - 1} aria-label={`Move ${item.label} down`} title="Move down" onClick={() => moveById(item.id, index + 1)}><Icon name="arrowDown" size={14} /></button>
                 <button type="button" className="qt-link-btn qt-property-icon-button" aria-label={`Remove ${item.label}`} onClick={() => setDraft((previous) => ({ ...previous, properties: previous.properties.filter((property) => property.id !== item.id) }))}><Icon name="close" size={14} /></button>
               </>
             )}
@@ -300,6 +300,22 @@ export function PropertyViewEditor<Row>({
                         })
                       }
                     />
+                  </label>
+                ) : null}
+                {format?.kind === "currency" || format?.kind === "number" ? (
+                  <label>
+                    <input
+                      type="checkbox"
+                      aria-label={`Compact notation for ${property.id}`}
+                      checked={format.notation === "compact"}
+                      onChange={(event) => {
+                        const { notation: _notation, ...rest } = format;
+                        update(property.id, {
+                          format: (event.target.checked ? { ...rest, notation: "compact" } : rest) as PropertyFormat,
+                        });
+                      }}
+                    />
+                    Compact
                   </label>
                 ) : null}
                 {format &&

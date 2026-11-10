@@ -117,6 +117,60 @@ func TestV3FrontendParity(t *testing.T) {
 			}
 		}
 	}
+	// Buckets of several intervals: local multiples of hours dividing a day
+	// across DST and half-hour offsets, elapsed hour blocks, and day, week,
+	// month and year counts from 1970, filled over custom, observed and query
+	// ranges.
+	everyCases := []struct {
+		name, zone, interval string
+		every                int
+		rng, start, end      string
+		times                []string
+	}{
+		{"ny/spring-3h", "America/New_York", "hour", 3, "custom", "2026-03-08", "2026-03-08", []string{"2026-03-08T06:15:00.000Z", "2026-03-08T07:15:00.000Z", "2026-03-08T08:15:00.000Z", "2026-03-08T13:00:00.000Z"}},
+		{"ny/spring-2h", "America/New_York", "hour", 2, "custom", "2026-03-08", "2026-03-08", []string{"2026-03-08T06:15:00.000Z", "2026-03-08T07:15:00.000Z", "2026-03-08T08:15:00.000Z"}},
+		{"ny/fall-3h", "America/New_York", "hour", 3, "custom", "2026-11-01", "2026-11-01", []string{"2026-11-01T05:15:00.000Z", "2026-11-01T06:15:00.000Z", "2026-11-01T07:15:00.000Z", "2026-11-01T08:15:00.000Z"}},
+		{"ny/fall-12h", "America/New_York", "hour", 12, "observed", "", "", []string{"2026-10-31T05:15:00.000Z", "2026-11-01T06:15:00.000Z", "2026-11-02T17:15:00.000Z"}},
+		{"kolkata/6h", "Asia/Kolkata", "hour", 6, "custom", "2026-03-02", "2026-03-03", []string{"2026-03-01T18:45:00.000Z", "2026-03-02T00:29:00.000Z", "2026-03-02T00:30:00.000Z", "2026-03-03T03:15:00.000Z"}},
+		{"kolkata/24h", "Asia/Kolkata", "hour", 24, "custom", "2026-01-01", "2026-01-03", []string{"2025-12-31T18:30:00.000Z", "2026-01-01T18:29:00.000Z", "2026-01-02T18:30:00.000Z"}},
+		{"lord-howe/spring-3h", "Australia/Lord_Howe", "hour", 3, "custom", "2026-10-04", "2026-10-04", []string{"2026-10-03T14:45:00.000Z", "2026-10-03T15:35:00.000Z", "2026-10-03T16:15:00.000Z"}},
+		{"ny/3-days-dst", "America/New_York", "day", 3, "custom", "2026-03-01", "2026-03-20", []string{"2026-03-07T12:00:00.000Z", "2026-03-08T12:00:00.000Z", "2026-03-15T03:00:00.000Z"}},
+		{"utc/fortnight", "UTC", "week", 2, "query", "2025-12-20T00:00:00.000Z", "2026-02-20T00:00:00.000Z", []string{"2025-12-29T00:00:00.000Z", "2026-01-11T23:59:59.000Z", "2026-01-12T00:00:00.000Z"}},
+		{"denver/quarter", "America/Denver", "month", 3, "custom", "2026-01-01", "2026-12-31", []string{"2026-04-01T05:59:00.000Z", "2026-04-01T06:00:00.000Z", "2026-12-31T23:45:00.000Z"}},
+		{"kathmandu/2-years", "Asia/Kathmandu", "year", 2, "observed", "", "", []string{"2025-12-31T18:30:00.000Z", "2026-12-31T18:30:00.000Z", "2029-06-01T00:00:00.000Z"}},
+	}
+	for _, c := range everyCases {
+		for _, op := range []string{"count", "sum"} {
+			for _, extra := range []bool{false, true} {
+				rows := []map[string]any{}
+				for i, at := range c.times {
+					key := any("a")
+					if i%2 != 0 {
+						key = nil
+					}
+					rows = append(rows, map[string]any{"id": fmt.Sprint(i), "k": key, "n": float64(i) + 0.5, "at": at, "label": "row", "flag": i%2 == 0})
+				}
+				rows = append(rows, map[string]any{"id": "null", "k": "a", "n": nil, "at": nil, "label": nil, "flag": nil})
+				groupBy := []string{"at"}
+				if extra {
+					groupBy = append(groupBy, "k")
+				}
+				field := ""
+				if op != "count" {
+					field = "n"
+				}
+				grouping := qt.MetricDateGrouping{Field: "at", Interval: c.interval, Every: c.every, TimeZone: c.zone, IncludeEmpty: true, Range: c.rng}
+				result := qt.WireQuery{Select: []string{"id"}, Limit: 10}
+				if c.rng == "custom" {
+					grouping.Start, grouping.End = c.start, c.end
+				} else if c.rng == "query" {
+					result.Where = []qt.WhereTerm{{Field: "at", Op: ">=", Value: c.start}, {Field: "at", Op: "<", Value: c.end}}
+				}
+				q := qt.QueryRequestV3{Version: 3, Profile: qt.SQLiteExpressionProfile, Now: time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC).UnixMilli(), Result: result, Metrics: []qt.AggSpec{{ID: "calendar", Op: op, Field: field, GroupBy: groupBy, DateGrouping: &grouping}}}
+				run(fmt.Sprintf("calendar-every/%s/%s/%t", c.name, op, extra), rows, q)
+			}
+		}
+	}
 	// Cyclic slots: local hours across DST changes and fractional or
 	// half-hour-DST offsets, and ISO weekdays across local midnight.
 	cycles := []struct {
@@ -208,15 +262,21 @@ func TestV3FrontendParity(t *testing.T) {
 	// metrics over the groups, across DST and partial-hour offsets.
 	calendarKeys := []struct {
 		name, zone, interval string
+		every                int
 		times                []string
 	}{
-		{"denver/day", "America/Denver", "day", []string{"2026-03-08T06:30:00.000Z", "2026-03-08T07:30:00.000Z", "2026-03-08T10:30:00.000Z", "2026-03-09T05:59:00.000Z", "2026-03-09T06:00:00.000Z"}},
-		{"utc/hour", "", "hour", []string{"2026-03-01T23:59:59.000Z", "2026-03-02T00:00:00.000Z", "2026-03-02T00:30:00.000Z", "2026-03-02T01:00:00.000Z"}},
-		{"ny/fall-hour", "America/New_York", "hour", []string{"2026-11-01T05:15:00.000Z", "2026-11-01T05:45:00.000Z", "2026-11-01T06:15:00.000Z", "2026-11-01T07:15:00.000Z"}},
-		{"lord-howe/spring-hour", "Australia/Lord_Howe", "hour", []string{"2026-10-03T14:45:00.000Z", "2026-10-03T15:15:00.000Z", "2026-10-03T15:35:00.000Z", "2026-10-03T16:15:00.000Z"}},
-		{"berlin/week", "Europe/Berlin", "week", []string{"2026-12-27T22:30:00.000Z", "2026-12-28T00:30:00.000Z", "2027-01-04T11:00:00.000Z"}},
-		{"denver/month", "America/Denver", "month", []string{"2026-12-31T23:45:00.000Z", "2027-01-01T07:15:00.000Z", "2027-03-15T12:00:00.000Z"}},
-		{"kathmandu/year", "Asia/Kathmandu", "year", []string{"2026-12-31T18:30:00.000Z", "2027-12-31T18:10:00.000Z"}},
+		{"denver/day", "America/Denver", "day", 0, []string{"2026-03-08T06:30:00.000Z", "2026-03-08T07:30:00.000Z", "2026-03-08T10:30:00.000Z", "2026-03-09T05:59:00.000Z", "2026-03-09T06:00:00.000Z"}},
+		{"utc/hour", "", "hour", 0, []string{"2026-03-01T23:59:59.000Z", "2026-03-02T00:00:00.000Z", "2026-03-02T00:30:00.000Z", "2026-03-02T01:00:00.000Z"}},
+		{"ny/fall-hour", "America/New_York", "hour", 0, []string{"2026-11-01T05:15:00.000Z", "2026-11-01T05:45:00.000Z", "2026-11-01T06:15:00.000Z", "2026-11-01T07:15:00.000Z"}},
+		{"lord-howe/spring-hour", "Australia/Lord_Howe", "hour", 0, []string{"2026-10-03T14:45:00.000Z", "2026-10-03T15:15:00.000Z", "2026-10-03T15:35:00.000Z", "2026-10-03T16:15:00.000Z"}},
+		{"berlin/week", "Europe/Berlin", "week", 0, []string{"2026-12-27T22:30:00.000Z", "2026-12-28T00:30:00.000Z", "2027-01-04T11:00:00.000Z"}},
+		{"denver/month", "America/Denver", "month", 0, []string{"2026-12-31T23:45:00.000Z", "2027-01-01T07:15:00.000Z", "2027-03-15T12:00:00.000Z"}},
+		{"kathmandu/year", "Asia/Kathmandu", "year", 0, []string{"2026-12-31T18:30:00.000Z", "2027-12-31T18:10:00.000Z"}},
+		{"ny/fall-3-hours", "America/New_York", "hour", 3, []string{"2026-11-01T03:15:00.000Z", "2026-11-01T05:45:00.000Z", "2026-11-01T06:15:00.000Z", "2026-11-01T07:15:00.000Z", "2026-11-01T08:15:00.000Z"}},
+		{"kolkata/6-hours", "Asia/Kolkata", "hour", 6, []string{"2026-03-02T00:29:00.000Z", "2026-03-02T00:30:00.000Z", "2026-03-02T06:29:00.000Z", "2026-03-02T06:30:00.000Z"}},
+		{"utc/8-hours", "", "hour", 8, []string{"2025-12-31T23:59:00.000Z", "2026-01-01T00:00:00.000Z", "2026-01-01T07:59:00.000Z", "2026-01-01T08:00:00.000Z"}},
+		{"denver/3-days", "America/Denver", "day", 3, []string{"2026-03-07T06:30:00.000Z", "2026-03-08T07:30:00.000Z", "2026-03-10T06:00:00.000Z"}},
+		{"denver/quarter", "America/Denver", "month", 3, []string{"2026-03-31T23:45:00.000Z", "2026-04-01T07:15:00.000Z", "2026-12-15T12:00:00.000Z"}},
 	}
 	for _, c := range calendarKeys {
 		for _, extra := range []bool{false, true} {
@@ -234,7 +294,7 @@ func TestV3FrontendParity(t *testing.T) {
 			if extra {
 				q.Grouping.Keys = append(q.Grouping.Keys, "k")
 			}
-			q.Grouping.KeyIntervals = map[string]qt.GroupKeyInterval{"at": {Interval: c.interval, TimeZone: c.zone}}
+			q.Grouping.KeyIntervals = map[string]qt.GroupKeyInterval{"at": {Interval: c.interval, Every: c.every, TimeZone: c.zone}}
 			q.Grouping.Summaries = []qt.SummaryColumn{{ID: "num", Op: "count"}, {ID: "total", Op: "sum", Field: "n"}, {ID: "first_at", Op: "min", Field: "at"}, {ID: "example", Op: "row", Field: "label"}}
 			q.Result.Select = append(append([]string{}, q.Grouping.Keys...), "num", "total", "first_at", "example")
 			q.Result.OrderBy = []qt.OrderBy{{Field: "at", Dir: "asc", Nulls: "last"}}

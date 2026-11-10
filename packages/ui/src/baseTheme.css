@@ -582,8 +582,9 @@
 .qt-picker-empty { padding: 6px 8px; color: var(--qt-muted); font-size: 12px; }
 .qt-picker-group-label { padding: 3px 8px; background: var(--qt-header-bg); color: var(--qt-muted); text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }
 .qt-picker-item { display: block; width: 100%; text-align: left; border: 0; background: transparent; color: var(--qt-text); cursor: pointer; padding: 5px 8px; font-size: 12px; }
-.qt-picker-item:hover { background: var(--qt-cell-hover); }
-.qt-picker-item--disabled { opacity: 0.4; cursor: not-allowed; }
+.qt-picker-item:not(.qt-picker-item--disabled):hover { background: var(--qt-cell-hover); }
+/* Unavailable fields keep the ordinary arrow; .qt-picker-item asks for a hand. */
+.qt-picker-item--disabled { opacity: 0.4; cursor: default; }
 .qt-picker-row { display: flex; justify-content: space-between; gap: 8px; }
 .qt-picker-label { font-weight: 500; }
 .qt-picker-name { color: var(--qt-muted); }

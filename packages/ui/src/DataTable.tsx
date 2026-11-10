@@ -1348,12 +1348,22 @@ function measureIntrinsicWidth(cells: HTMLElement[]): number {
   return Math.ceil(width);
 }
 
-// Controls that keep their full size in a fitted column. Links and JSON
+// Controls that keep their size in a fitted column. Library links and JSON
 // previews may shorten to an ellipsis, keeping their full accessible name.
 const CONTROL_SELECTOR = "a[href], button, [role=button], input, select, textarea";
 const SHRINKABLE_SELECTOR = "a.qt-link, .qt-json-preview-text";
 /** Shortest a link label is cut to before its column stops narrowing. */
 const SHRINKABLE_LINK_PX = 96;
+/**
+ * Probe for the narrowest a control-holding cell can get without clipping:
+ * the cell content's min-content width, laid out with the cell's own CSS (it
+ * inherits the cell's `white-space`, `nowrap` under the default theme). Content
+ * stays on one line unless its CSS lets it wrap: a host link title with
+ * `white-space: normal` counts only its longest unbreakable run, and a host
+ * button in a wrapping wrapper or a `flex-wrap` bar may wrap or stack too. The
+ * library's Detail buttons, JSON previews and `a.qt-link` never wrap.
+ */
+const CONTROL_PROBE_STYLE = "position:absolute;left:0;top:0;width:min-content;visibility:hidden;pointer-events:none;";
 
 /** Widest control content (plus padding) among cells that hold controls; 0 when none do. */
 function measureControlWidth(cells: HTMLElement[]): number {
@@ -1361,7 +1371,7 @@ function measureControlWidth(cells: HTMLElement[]): number {
   const probes = holders.map((cell) => {
     const probe = document.createElement("span");
     probe.setAttribute("aria-hidden", "true");
-    probe.style.cssText = "position:absolute;left:0;top:0;width:max-content;white-space:nowrap;visibility:hidden;pointer-events:none;";
+    probe.style.cssText = CONTROL_PROBE_STYLE;
     cell.childNodes.forEach((node) => probe.appendChild(node.cloneNode(true)));
     probe.querySelectorAll<HTMLElement>(SHRINKABLE_SELECTOR).forEach((element) => {
       element.style.maxWidth = `${SHRINKABLE_LINK_PX}px`;

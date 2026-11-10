@@ -120,7 +120,7 @@ func (d sqliteV2Dataset) executeMetrics(ctx context.Context, tx *sql.Tx, metrics
 			err = errors.Join(err, cleanupErr)
 		}
 	}()
-	direct, _, _, directErr := d.directDistributions(ctx, tx, metrics, failures, o, maxGroups, maxPopulation)
+	direct, _, _, directErr := d.directDistributions(ctx, tx, metrics, failures, o, maxGroups, maxPopulation, total)
 	if directErr != nil {
 		return nil, directErr
 	}
@@ -137,7 +137,7 @@ func (d sqliteV2Dataset) executeMetrics(ctx context.Context, tx *sql.Tx, metrics
 			out = append(out, m)
 			continue
 		}
-		key := p.Fingerprint + "\x00" + p.Scope
+		key := p.Fingerprint + "\x00" + p.Scope + "\x00" + metricIntervalKey(spec)
 		if previous, ok := memo[key]; ok {
 			previous = cloneSQLiteMetric(previous)
 			previous.ID = p.ID
@@ -258,6 +258,15 @@ func (d sqliteV2Dataset) readV2Metric(ctx context.Context, tx *sql.Tx, p metricS
 		}
 	}
 	out := MetricResult{ID: p.ID, Scope: p.Scope, ProcessedRows: processed, Coverage: "exact", Buckets: []MetricBucket{}}
+	var ratio metricRatio
+	if spec.Interval != nil {
+		var err error
+		if ratio, err = validateMetricInterval(spec); err != nil {
+			return out, err
+		}
+	}
+	shape := metricOtherShape(spec)
+	var otherRow map[string]any
 	rows, e := tx.QueryContext(ctx, p.SQL, p.Args...)
 	if e != nil {
 		return out, e
@@ -346,6 +355,10 @@ func (d sqliteV2Dataset) readV2Metric(ctx context.Context, tx *sql.Tx, p metricS
 					var payload MetricHistogramDistribution
 					e = json.Unmarshal([]byte(data), &payload)
 					b.Distribution = &payload
+				case "quantiles":
+					var payload MetricQuantilesDistribution
+					e = json.Unmarshal([]byte(data), &payload)
+					b.Distribution = &payload
 				default:
 					return out, fmt.Errorf("unknown distribution result")
 				}
@@ -359,9 +372,25 @@ func (d sqliteV2Dataset) readV2Metric(ctx context.Context, tx *sql.Tx, p metricS
 			b.Y = &yv
 			b.YError = sqliteErrorCode(v["y_error"])
 		}
+		if _, ok := v["ratio_numerator"]; ok {
+			b.ratioParts = [2]any{v["ratio_numerator"], v["ratio_denominator"]}
+			b.ratioPartError = v["ratio_numerator_error"] != nil || v["ratio_denominator_error"] != nil
+		}
+		if spec.Interval != nil && !b.ratioPartError {
+			applyMetricInterval(&b, spec.Interval, ratio.scale, b.ratioParts[0], b.ratioParts[1])
+		}
+		if _, ok := v["other_groups"]; ok && otherRow == nil {
+			otherRow = v
+		}
 		out.Buckets = append(out.Buckets, b)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	if otherRow != nil {
+		out.Other = shape.remainder(spec, otherSumsFromRow(otherRow, len(shape.columns())))
+	}
+	return out, nil
 }
 func (d sqliteV2Dataset) computedCapability(name, typ string) ComputedFieldCapability {
 	if typ == "null" {
@@ -427,6 +456,10 @@ func cloneSQLiteMetric(m MetricResult) MetricResult {
 			n := *b.InputErrorCount
 			b.InputErrorCount = &n
 		}
+		if b.Lower != nil {
+			lower, upper := *b.Lower, *b.Upper
+			b.Lower, b.Upper = &lower, &upper
+		}
 		switch d := b.Distribution.(type) {
 		case *MetricHistogramDistribution:
 			c := *d
@@ -438,10 +471,31 @@ func cloneSQLiteMetric(m MetricResult) MetricResult {
 			if d.Summary != nil {
 				summary := *d.Summary
 				summary.Outliers = append([]float64{}, d.Summary.Outliers...)
+				if d.Summary.WhiskerProbabilities != nil {
+					summary.WhiskerProbabilities = append([]float64{}, d.Summary.WhiskerProbabilities...)
+				}
+				c.Summary = &summary
+			}
+			b.Distribution = &c
+		case *MetricQuantilesDistribution:
+			c := *d
+			if d.Summary != nil {
+				summary := *d.Summary
+				summary.Probabilities = append([]float64{}, d.Summary.Probabilities...)
+				summary.Values = append([]float64{}, d.Summary.Values...)
 				c.Summary = &summary
 			}
 			b.Distribution = &c
 		}
+	}
+	if m.Other != nil {
+		other := *m.Other
+		other.Keys = append([]any{}, other.Keys...)
+		if other.Lower != nil {
+			lower, upper := *other.Lower, *other.Upper
+			other.Lower, other.Upper = &lower, &upper
+		}
+		m.Other = &other
 	}
 	return m
 }

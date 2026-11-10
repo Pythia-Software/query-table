@@ -49,8 +49,8 @@ export function calendarKeyReader(key: CalendarGroupKey): (value: unknown) => st
       throw Error(`Calendar group key ${key.field} needs ISO dates or timestamps with a timezone.`);
     const time = metricDateTime(input, key.timeZone);
     if (time < start || time >= end) {
-      start = metricDateFloor(time, key.interval, key.timeZone);
-      end = metricDateNext(start, key.interval, key.timeZone);
+      start = metricDateFloor(time, key.interval, key.timeZone, key.every);
+      end = metricDateNext(start, key.interval, key.timeZone, key.every);
       iso = new Date(start).toISOString();
     }
     return iso;
@@ -88,7 +88,7 @@ export function calendarKeyClauses(field: FieldDef | undefined, key: CalendarGro
   if (value == null) return [{ field: field.name, op: "is_null", value: "" }];
   const iso = datetimeValue(value);
   if (iso === null) return null;
-  const start = Date.parse(iso), end = metricDateNext(start, key.interval, key.timeZone);
+  const start = Date.parse(iso), end = metricDateNext(start, key.interval, key.timeZone, key.every);
   if (!Number.isFinite(end) || end <= start) return null;
   return [
     { field: field.name, op: ">=", value: iso },

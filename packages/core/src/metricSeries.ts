@@ -19,6 +19,7 @@ import {
   evaluateMetricReductions,
   metricExpression,
   occurrenceDistribution,
+  distributionBucket,
   metricMinCount,
   metricMinCountKeeps,
   metricMinCountMeasure,
@@ -35,8 +36,8 @@ import {
   metricDateNext,
   metricDateTime,
 } from "./metricDates";
-import { boxSummary } from "./metricDistributions";
 import { assertMetricNumber } from "./metricPrecision";
+import { applyMetricInterval, metricRatioParts } from "./metricIntervals";
 import type { MetricDateGrouping, MetricValue } from "./metricTypes";
 import { coerceValue } from "./ops";
 import {
@@ -201,14 +202,14 @@ export function wholeIntervalSpan(
   schema: FieldSchema,
   now: number,
 ): { start?: number; end: number } {
-  const { interval, timeZone } = c.dateGrouping!;
+  const { interval, timeZone, every } = c.dateGrouping!;
   const { lower, upper } = metricDateBounds(c, query, schema, now);
-  const floor = (time: number) => metricDateFloor(time, interval, timeZone);
+  const floor = (time: number) => metricDateFloor(time, interval, timeZone, every);
   const end = floor(Math.min(upper, now));
   if (!Number.isFinite(lower)) return { end };
   const first = floor(lower);
   return {
-    start: first === lower ? lower : metricDateNext(first, interval, timeZone),
+    start: first === lower ? lower : metricDateNext(first, interval, timeZone, every),
     end,
   };
 }
@@ -231,7 +232,7 @@ type Reduction =
   | { name: Merge; part: number }
   | { name: "AVG"; sum: number; count: number };
 type Prepared =
-  | { kind: "error"; clause: AggregationClause; error: string }
+  | { kind: "error"; clause: AggregationClause; error: string; code?: string }
   | { kind: "empty"; clause: AggregationClause }
   | { kind: "plain"; clause: AggregationClause; parts: [AggregationClause] }
   | {
@@ -249,6 +250,8 @@ type Prepared =
       size: number;
       /** The part measuring an object minCount: SUM or COUNT_DISTINCT per group. */
       minPart?: number;
+      /** A ratio interval: its parts' positions in plan.aggregates. */
+      ratio?: { numerator: number; denominator: number; scale: number };
     };
 
 /** Expand clauses with a window, a share or whole intervals into plain
@@ -295,12 +298,14 @@ export function planMetricSeries(
         kind: "error",
         clause: c,
         error: e instanceof Error ? e.message : String(e),
+        ...(e instanceof FormulaError && e.code ? { code: e.code } : {}),
       };
     }
   });
   function prepare(c: AggregationClause): Prepared {
     const issue = validateMetric(c, schema, options.resolveComputed)[0];
-    if (issue) return { kind: "error", clause: c, error: issue.message };
+    if (issue)
+      return { kind: "error", clause: c, error: issue.message, ...(issue.code ? { code: issue.code } : {}) };
     // Narrow to the intervals the query's bounds and the clock leave whole;
     // undefined when none remain.
     function whole(
@@ -336,7 +341,7 @@ export function planMetricSeries(
         !isMetricCycle(config.interval)
       ) {
         const floor = (time: number) =>
-          metricDateFloor(time, config.interval, config.timeZone);
+          metricDateFloor(time, config.interval, config.timeZone, config.every);
         let from = span.start,
           through = span.end - 1;
         if (config.range === "custom") {
@@ -480,11 +485,23 @@ export function planMetricSeries(
         groupBy: c.groupBy,
         ...scoped(c.groupBy),
       });
+    // A ratio's interval reads its pooled parts; a share's, the bucket and
+    // its total.
+    let ratio: { numerator: number; denominator: number; scale: number } | undefined;
+    if (c.interval && c.share === undefined) {
+      const found = metricRatioParts(plan.ast);
+      ratio = {
+        numerator: plan.aggregates.indexOf(found.numerator),
+        denominator: plan.aggregates.indexOf(found.denominator),
+        scale: found.scale,
+      };
+    }
     return {
       kind: "series",
       clause: c,
       plan,
       parts: all,
+      ...(ratio ? { ratio } : {}),
       ...(reductions ? { reductions } : {}),
       size: texts.length,
       ...(minPart !== undefined ? { minPart } : {}),
@@ -508,7 +525,7 @@ export function planMetricSeries(
       return prepared.map((item): AggregationResultEntry => {
         const c = item.clause;
         if (item.kind === "error")
-          return { id: c.id, buckets: [], error: item.error, errorCode: "invalid_metric" };
+          return { id: c.id, buckets: [], error: item.error, errorCode: item.code ?? "invalid_metric" };
         if (item.kind === "empty") {
           const none: AggregationResultEntry = {
             id: c.id,
@@ -648,6 +665,8 @@ function combineSeries(
     count: number;
     error?: string;
     intervals?: number;
+    /** A ratio's pooled numerator and denominator. */
+    parts?: [FormulaResult, FormulaResult];
   };
   const checked = (result: FormulaResult, count: number): Point => {
     if (!result.error && typeof result.value === "number")
@@ -686,7 +705,13 @@ function combineSeries(
               : Number(sum.value) / Number(rows.value),
         };
       });
-      return checked(evaluateMetricReductions(item.plan, reductions), count);
+      const point = checked(evaluateMetricReductions(item.plan, reductions), count);
+      if (item.ratio)
+        point.parts = [
+          reductions[item.ratio.numerator]!,
+          reductions[item.ratio.denominator]!,
+        ];
+      return point;
     }
     if (!mean)
       return own[0]?.error
@@ -737,11 +762,14 @@ function combineSeries(
   let buckets = [...keyed.values()].map((keys): AggregationBucket => {
     const own = point(keys, numeratorTracks, numeratorBuckets);
     let { value } = own,
-      error = own.error;
+      error = own.error,
+      parts = own.parts;
     if (c.share && !error) {
       const total = c.share === "group0" ? keys.slice(0, 1) : [];
       const whole = point(total, denominatorTracks, denominatorBuckets);
       error = whole.error;
+      // A share's interval is a proportion of the bucket in its total.
+      parts = [{ value }, { value: whole.value }];
       value =
         error ||
         typeof value !== "number" ||
@@ -750,13 +778,16 @@ function combineSeries(
           ? null
           : value / whole.value;
     }
-    return {
+    const bucket: AggregationBucket = {
       keys,
       value: error ? null : value,
       count: own.count,
       ...(error ? { error } : {}),
       ...(own.intervals !== undefined ? { intervals: own.intervals } : {}),
     };
+    if (c.interval)
+      applyMetricInterval(bucket, c.interval, item.ratio?.scale ?? 1, parts?.[0], parts?.[1]);
+    return bucket;
   });
   // A minimum's measure over the same rows as the point: its bucket, or the
   // sum over the window (distinct minimums are refused with windows).
@@ -862,8 +893,8 @@ function combineOccurrences(
     for (const number of metricCycleSlots(cycle))
       for (const tail of tails.values()) slotOf([number, ...tail]);
   }
-  // Validation allows only a box over occurrences.
-  const box = occurrenceDistribution(c);
+  // Validation allows only a box or quantiles over occurrences.
+  const distribution = occurrenceDistribution(c);
   let buckets = [...slots.values()].map((slot): AggregationBucket => {
     const bucket: AggregationBucket = {
       keys: slot.keys,
@@ -873,10 +904,10 @@ function combineOccurrences(
     };
     if (slot.error) return { ...bucket, error: slot.error };
     try {
-      if (box) {
-        const summary = boxSummary(slot.values, c.distribution!.whiskers);
-        bucket.distribution = { kind: "box", summary };
-        bucket.value = summary?.median ?? null;
+      if (distribution) {
+        const summary = distributionBucket(c.distribution!, slot.values);
+        bucket.distribution = summary.distribution;
+        bucket.value = summary.value;
       } else if (slot.values.length) {
         const mean =
           slot.values.reduce((sum, value) => sum + value, 0) /

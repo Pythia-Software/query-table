@@ -156,6 +156,8 @@ public struct OrderByClause: Codable, Equatable, Sendable {
 public struct MetricDateGrouping: Codable, Equatable, Sendable {
   public var field: String
   public var interval: String
+  /// Calendar intervals only: buckets of this many intervals, anchored as CalendarGroupKey.every describes; omitted is 1. Hours accept only 1, 2, 3, 4, 6, 8, 12 or 24; cycles refuse values above 1.
+  public var every: Int?
   /// IANA identifier; omitted is UTC.
   public var timeZone: String?
   /// Add a bucket for every interval of the range.
@@ -166,15 +168,17 @@ public struct MetricDateGrouping: Codable, Equatable, Sendable {
   enum CodingKeys: String, CodingKey {
     case field
     case interval
+    case every
     case timeZone
     case includeEmpty
     case range
     case start
     case end
   }
-  public init(field: String, interval: String, timeZone: String? = nil, includeEmpty: Bool, range: String, start: String? = nil, end: String? = nil) {
+  public init(field: String, interval: String, every: Int? = nil, timeZone: String? = nil, includeEmpty: Bool, range: String, start: String? = nil, end: String? = nil) {
     self.field = field
     self.interval = interval
+    self.every = every
     self.timeZone = timeZone
     self.includeEmpty = includeEmpty
     self.range = range
@@ -185,6 +189,7 @@ public struct MetricDateGrouping: Codable, Equatable, Sendable {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     field = try c.decode(String.self, forKey: .field)
     interval = try c.decode(String.self, forKey: .interval)
+    every = try c.decodeIfPresent(Int.self, forKey: .every)
     timeZone = try c.decodeIfPresent(String.self, forKey: .timeZone)
     includeEmpty = try c.decode(Bool.self, forKey: .includeEmpty)
     range = try c.decode(String.self, forKey: .range)
@@ -195,6 +200,7 @@ public struct MetricDateGrouping: Codable, Equatable, Sendable {
     var c = encoder.container(keyedBy: CodingKeys.self)
     try c.encode(field, forKey: .field)
     try c.encode(interval, forKey: .interval)
+    try c.encodeIfPresent(every, forKey: .every)
     try c.encodeIfPresent(timeZone, forKey: .timeZone)
     try c.encode(includeEmpty, forKey: .includeEmpty)
     try c.encode(range, forKey: .range)
@@ -250,37 +256,49 @@ public struct MetricSort: Codable, Equatable, Sendable {
   }
 }
 
-/// A box or histogram over `input` per group instead of a scalar value.
+/// A box, histogram or quantile curve over `input` per group instead of a scalar value.
 public struct MetricDistribution: Codable, Equatable, Sendable {
   public var kind: String
   public var input: String
   public var whiskers: String?
+  /// Box whiskers at these exact-linear percentiles [lo, hi] with whiskers "percentile": 0 <= lo < 0.25 and 0.75 < hi <= 1. Default [0.1, 0.9].
+  public var whiskerProbabilities: [Double]?
   public var bins: Int?
+  /// Quantiles: 1–101 strictly increasing probabilities in [0, 1].
+  public var probabilities: [Double]?
   enum CodingKeys: String, CodingKey {
     case kind
     case input
     case whiskers
+    case whiskerProbabilities
     case bins
+    case probabilities
   }
-  public init(kind: String, input: String, whiskers: String? = nil, bins: Int? = nil) {
+  public init(kind: String, input: String, whiskers: String? = nil, whiskerProbabilities: [Double]? = nil, bins: Int? = nil, probabilities: [Double]? = nil) {
     self.kind = kind
     self.input = input
     self.whiskers = whiskers
+    self.whiskerProbabilities = whiskerProbabilities
     self.bins = bins
+    self.probabilities = probabilities
   }
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     kind = try c.decode(String.self, forKey: .kind)
     input = try c.decode(String.self, forKey: .input)
     whiskers = try c.decodeIfPresent(String.self, forKey: .whiskers)
+    whiskerProbabilities = try c.decodeIfPresent([Double].self, forKey: .whiskerProbabilities)
     bins = try c.decodeIfPresent(Int.self, forKey: .bins)
+    probabilities = try c.decodeIfPresent([Double].self, forKey: .probabilities)
   }
   public func encode(to encoder: Encoder) throws {
     var c = encoder.container(keyedBy: CodingKeys.self)
     try c.encode(kind, forKey: .kind)
     try c.encode(input, forKey: .input)
     try c.encodeIfPresent(whiskers, forKey: .whiskers)
+    try c.encodeIfPresent(whiskerProbabilities, forKey: .whiskerProbabilities)
     try c.encodeIfPresent(bins, forKey: .bins)
+    try c.encodeIfPresent(probabilities, forKey: .probabilities)
   }
 }
 
@@ -361,6 +379,31 @@ public enum MetricMinCount: Codable, Equatable, Sendable {
   }
 }
 
+/// A confidence interval around a ratio metric, returned as lower and upper on every bucket. The metric must be a ratio of two additive aggregates, numerator over denominator (SUM, COUNT or COUNT_DISTINCT), optionally scaled by constants and with NULLIF(denominator, 0): for example COUNT_DISTINCT(IF([events]>0,[turn_id],NULL))/COUNT_DISTINCT([turn_id]) or SUM([events])/NULLIF(COUNT_DISTINCT([message_id])/1000,0). proportion: a share of units (0 <= numerator <= denominator), Wilson score interval. rate: a count over an exposure, the exact (Garwood) Poisson interval on the numerator divided by the exposure. Bounds use the exact numerator and denominator of each bucket and are in the metric's units, after its constant scale. An interval is an annotation: it never changes a bucket's value, error, ranking or the result's other buckets. Parts outside the kind's domain (a negative or non-integer numerator; for a proportion, a non-integer denominator or a numerator above it) give the bucket intervalError interval_domain instead of bounds. Both methods assume independent units; clustered or over-dispersed counts make the intervals too narrow.
+public struct MetricInterval: Codable, Equatable, Sendable {
+  public var kind: String
+  /// Confidence level, 0.5 to 0.9999; omitted is 0.95.
+  public var level: Double?
+  enum CodingKeys: String, CodingKey {
+    case kind
+    case level
+  }
+  public init(kind: String, level: Double? = nil) {
+    self.kind = kind
+    self.level = level
+  }
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    kind = try c.decode(String.self, forKey: .kind)
+    level = try c.decodeIfPresent(Double.self, forKey: .level)
+  }
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: CodingKeys.self)
+    try c.encode(kind, forKey: .kind)
+    try c.encodeIfPresent(level, forKey: .level)
+  }
+}
+
 /// One metric as sent: an AggregationClause without its presentation (label, layout, display other than scatter, window, share).
 public struct MetricSpecV3: Codable, Equatable, Sendable {
   public var dateGrouping: MetricDateGrouping?
@@ -382,6 +425,8 @@ public struct MetricSpecV3: Codable, Equatable, Sendable {
   /// The metric's own predicate, ANDed with the table WHERE.
   public var whereTerms: [WhereTerm]?
   public var minCount: MetricMinCount?
+  /// Return lower and upper bounds on every bucket; see MetricInterval. Servers advertise it as metricIntervals.
+  public var interval: MetricInterval?
   enum CodingKeys: String, CodingKey {
     case dateGrouping
     case display
@@ -397,8 +442,9 @@ public struct MetricSpecV3: Codable, Equatable, Sendable {
     case groupBy
     case whereTerms = "where"
     case minCount
+    case interval
   }
-  public init(dateGrouping: MetricDateGrouping? = nil, display: MetricDisplayHint? = nil, expression: String? = nil, expressionY: String? = nil, scope: String? = nil, sort: [MetricSort]? = nil, groupLimit: Int? = nil, distribution: MetricDistribution? = nil, id: String, op: String, field: String? = nil, groupBy: [String] = [], whereTerms: [WhereTerm]? = nil, minCount: MetricMinCount? = nil) {
+  public init(dateGrouping: MetricDateGrouping? = nil, display: MetricDisplayHint? = nil, expression: String? = nil, expressionY: String? = nil, scope: String? = nil, sort: [MetricSort]? = nil, groupLimit: Int? = nil, distribution: MetricDistribution? = nil, id: String, op: String, field: String? = nil, groupBy: [String] = [], whereTerms: [WhereTerm]? = nil, minCount: MetricMinCount? = nil, interval: MetricInterval? = nil) {
     self.dateGrouping = dateGrouping
     self.display = display
     self.expression = expression
@@ -413,6 +459,7 @@ public struct MetricSpecV3: Codable, Equatable, Sendable {
     self.groupBy = groupBy
     self.whereTerms = whereTerms
     self.minCount = minCount
+    self.interval = interval
   }
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -430,6 +477,7 @@ public struct MetricSpecV3: Codable, Equatable, Sendable {
     groupBy = try c.decode([String].self, forKey: .groupBy)
     whereTerms = try c.decodeIfPresent([WhereTerm].self, forKey: .whereTerms)
     minCount = try c.decodeIfPresent(MetricMinCount.self, forKey: .minCount)
+    interval = try c.decodeIfPresent(MetricInterval.self, forKey: .interval)
   }
   public func encode(to encoder: Encoder) throws {
     var c = encoder.container(keyedBy: CodingKeys.self)
@@ -447,6 +495,7 @@ public struct MetricSpecV3: Codable, Equatable, Sendable {
     try c.encode(groupBy, forKey: .groupBy)
     try c.encodeIfPresent(whereTerms, forKey: .whereTerms)
     try c.encodeIfPresent(minCount, forKey: .minCount)
+    try c.encodeIfPresent(interval, forKey: .interval)
   }
 }
 
@@ -454,28 +503,34 @@ public struct MetricSpecV3: Codable, Equatable, Sendable {
 public struct CalendarGroupKey: Codable, Equatable, Sendable {
   public var field: String
   public var interval: String
+  /// Buckets of this many intervals; omitted is 1. Anchors are fixed: hours must divide a day (1, 2, 3, 4, 6, 8, 12 or 24) and start at local multiples of every within each day, days count local dates from 1970-01-01, weeks from Monday 1969-12-29, months from January 1970 and years from 1970.
+  public var every: Int?
   /// IANA identifier; omitted is UTC.
   public var timeZone: String?
   enum CodingKeys: String, CodingKey {
     case field
     case interval
+    case every
     case timeZone
   }
-  public init(field: String, interval: String, timeZone: String? = nil) {
+  public init(field: String, interval: String, every: Int? = nil, timeZone: String? = nil) {
     self.field = field
     self.interval = interval
+    self.every = every
     self.timeZone = timeZone
   }
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     field = try c.decode(String.self, forKey: .field)
     interval = try c.decode(String.self, forKey: .interval)
+    every = try c.decodeIfPresent(Int.self, forKey: .every)
     timeZone = try c.decodeIfPresent(String.self, forKey: .timeZone)
   }
   public func encode(to encoder: Encoder) throws {
     var c = encoder.container(keyedBy: CodingKeys.self)
     try c.encode(field, forKey: .field)
     try c.encode(interval, forKey: .interval)
+    try c.encodeIfPresent(every, forKey: .every)
     try c.encodeIfPresent(timeZone, forKey: .timeZone)
   }
 }
@@ -656,6 +711,14 @@ public struct QueryCapabilitiesV3: Codable, Equatable, Sendable {
   public var metricMinCount: Bool?
   /// Also executes an object minCount.
   public var metricMinCountMeasures: Bool?
+  /// Executes MetricSpec.interval (proportion and rate) and returns lower and upper bounds.
+  public var metricIntervals: Bool?
+  /// Executes PERCENTILE(expr, p) in metric and summary formulas.
+  public var metricPercentiles: Bool?
+  /// Executes box whiskers "percentile" with whiskerProbabilities.
+  public var boxPercentileWhiskers: Bool?
+  /// Executes the "quantiles" distribution.
+  public var quantileDistributions: Bool?
   public var version: Int
   public var groupedRows: Bool
   public var calendarGrouping: Bool
@@ -663,6 +726,8 @@ public struct QueryCapabilitiesV3: Codable, Equatable, Sendable {
   public var calendarCycles: Bool?
   /// Executes calendar grouping keys.
   public var calendarGroupKeys: Bool?
+  /// Executes multi-interval buckets: MetricDateGrouping.every and CalendarGroupKey.every.
+  public var calendarEvery: Bool?
   public var computedSourceFilters: Bool
   public var regex: Bool
   public var maxRows: Int
@@ -675,11 +740,16 @@ public struct QueryCapabilitiesV3: Codable, Equatable, Sendable {
     case metricFilters
     case metricMinCount
     case metricMinCountMeasures
+    case metricIntervals
+    case metricPercentiles
+    case boxPercentileWhiskers
+    case quantileDistributions
     case version
     case groupedRows
     case calendarGrouping
     case calendarCycles
     case calendarGroupKeys
+    case calendarEvery
     case computedSourceFilters
     case regex
     case maxRows
@@ -694,11 +764,16 @@ public struct QueryCapabilitiesV3: Codable, Equatable, Sendable {
     metricFilters = try c.decodeIfPresent(Bool.self, forKey: .metricFilters)
     metricMinCount = try c.decodeIfPresent(Bool.self, forKey: .metricMinCount)
     metricMinCountMeasures = try c.decodeIfPresent(Bool.self, forKey: .metricMinCountMeasures)
+    metricIntervals = try c.decodeIfPresent(Bool.self, forKey: .metricIntervals)
+    metricPercentiles = try c.decodeIfPresent(Bool.self, forKey: .metricPercentiles)
+    boxPercentileWhiskers = try c.decodeIfPresent(Bool.self, forKey: .boxPercentileWhiskers)
+    quantileDistributions = try c.decodeIfPresent(Bool.self, forKey: .quantileDistributions)
     version = try c.decode(Int.self, forKey: .version)
     groupedRows = try c.decode(Bool.self, forKey: .groupedRows)
     calendarGrouping = try c.decode(Bool.self, forKey: .calendarGrouping)
     calendarCycles = try c.decodeIfPresent(Bool.self, forKey: .calendarCycles)
     calendarGroupKeys = try c.decodeIfPresent(Bool.self, forKey: .calendarGroupKeys)
+    calendarEvery = try c.decodeIfPresent(Bool.self, forKey: .calendarEvery)
     computedSourceFilters = try c.decode(Bool.self, forKey: .computedSourceFilters)
     regex = try c.decode(Bool.self, forKey: .regex)
     maxRows = try c.decode(Int.self, forKey: .maxRows)
@@ -713,11 +788,16 @@ public struct QueryCapabilitiesV3: Codable, Equatable, Sendable {
     try c.encodeIfPresent(metricFilters, forKey: .metricFilters)
     try c.encodeIfPresent(metricMinCount, forKey: .metricMinCount)
     try c.encodeIfPresent(metricMinCountMeasures, forKey: .metricMinCountMeasures)
+    try c.encodeIfPresent(metricIntervals, forKey: .metricIntervals)
+    try c.encodeIfPresent(metricPercentiles, forKey: .metricPercentiles)
+    try c.encodeIfPresent(boxPercentileWhiskers, forKey: .boxPercentileWhiskers)
+    try c.encodeIfPresent(quantileDistributions, forKey: .quantileDistributions)
     try c.encode(version, forKey: .version)
     try c.encode(groupedRows, forKey: .groupedRows)
     try c.encode(calendarGrouping, forKey: .calendarGrouping)
     try c.encodeIfPresent(calendarCycles, forKey: .calendarCycles)
     try c.encodeIfPresent(calendarGroupKeys, forKey: .calendarGroupKeys)
+    try c.encodeIfPresent(calendarEvery, forKey: .calendarEvery)
     try c.encode(computedSourceFilters, forKey: .computedSourceFilters)
     try c.encode(regex, forKey: .regex)
     try c.encode(maxRows, forKey: .maxRows)
@@ -811,6 +891,8 @@ public struct MetricBoxSummary: Codable, Equatable, Sendable {
   public var outliers: [Double]
   public var outlierCount: Int
   public var whiskers: String
+  /// The [lo, hi] probabilities of percentile whiskers; present only when whiskers is "percentile".
+  public var whiskerProbabilities: [Double]?
   public var method: String
   enum CodingKeys: String, CodingKey {
     case n
@@ -825,9 +907,10 @@ public struct MetricBoxSummary: Codable, Equatable, Sendable {
     case outliers
     case outlierCount
     case whiskers
+    case whiskerProbabilities
     case method
   }
-  public init(n: Int, min: Double, q1: Double, median: Double, q3: Double, max: Double, mean: Double, low: Double, high: Double, outliers: [Double], outlierCount: Int, whiskers: String, method: String) {
+  public init(n: Int, min: Double, q1: Double, median: Double, q3: Double, max: Double, mean: Double, low: Double, high: Double, outliers: [Double], outlierCount: Int, whiskers: String, whiskerProbabilities: [Double]? = nil, method: String) {
     self.n = n
     self.min = min
     self.q1 = q1
@@ -840,6 +923,7 @@ public struct MetricBoxSummary: Codable, Equatable, Sendable {
     self.outliers = outliers
     self.outlierCount = outlierCount
     self.whiskers = whiskers
+    self.whiskerProbabilities = whiskerProbabilities
     self.method = method
   }
   public init(from decoder: Decoder) throws {
@@ -856,6 +940,7 @@ public struct MetricBoxSummary: Codable, Equatable, Sendable {
     outliers = try c.decode([Double].self, forKey: .outliers)
     outlierCount = try c.decode(Int.self, forKey: .outlierCount)
     whiskers = try c.decode(String.self, forKey: .whiskers)
+    whiskerProbabilities = try c.decodeIfPresent([Double].self, forKey: .whiskerProbabilities)
     method = try c.decode(String.self, forKey: .method)
   }
   public func encode(to encoder: Encoder) throws {
@@ -872,6 +957,7 @@ public struct MetricBoxSummary: Codable, Equatable, Sendable {
     try c.encode(outliers, forKey: .outliers)
     try c.encode(outlierCount, forKey: .outlierCount)
     try c.encode(whiskers, forKey: .whiskers)
+    try c.encodeIfPresent(whiskerProbabilities, forKey: .whiskerProbabilities)
     try c.encode(method, forKey: .method)
   }
 }
@@ -940,9 +1026,66 @@ public struct MetricHistogramDistribution: Codable, Equatable, Sendable {
   }
 }
 
+public struct MetricQuantilesSummary: Codable, Equatable, Sendable {
+  public var n: Int
+  public var probabilities: [Double]
+  /// The exact-linear percentile at each probability.
+  public var values: [Double]
+  enum CodingKeys: String, CodingKey {
+    case n
+    case probabilities
+    case values
+  }
+  public init(n: Int, probabilities: [Double], values: [Double]) {
+    self.n = n
+    self.probabilities = probabilities
+    self.values = values
+  }
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    n = try c.decode(Int.self, forKey: .n)
+    probabilities = try c.decode([Double].self, forKey: .probabilities)
+    values = try c.decode([Double].self, forKey: .values)
+  }
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: CodingKeys.self)
+    try c.encode(n, forKey: .n)
+    try c.encode(probabilities, forKey: .probabilities)
+    try c.encode(values, forKey: .values)
+  }
+}
+
+public struct MetricQuantilesDistribution: Codable, Equatable, Sendable {
+  public var kind: String
+  /// null when the group has no numeric samples.
+  public var summary: MetricQuantilesSummary?
+  enum CodingKeys: String, CodingKey {
+    case kind
+    case summary
+  }
+  public init(summary: MetricQuantilesSummary? = nil) {
+    self.kind = "quantiles"
+    self.summary = summary
+  }
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    kind = try c.decode(String.self, forKey: .kind)
+    guard kind == "quantiles" else {
+      throw DecodingError.dataCorruptedError(forKey: .kind, in: c, debugDescription: "Expected quantiles")
+    }
+    summary = try c.decodeNil(forKey: .summary) ? nil : try c.decode(MetricQuantilesSummary.self, forKey: .summary)
+  }
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: CodingKeys.self)
+    try c.encode(kind, forKey: .kind)
+    if let v = summary { try c.encode(v, forKey: .summary) } else { try c.encodeNil(forKey: .summary) }
+  }
+}
+
 public enum MetricDistributionResult: Codable, Equatable, Sendable {
   case box(MetricBoxDistribution)
   case histogram(MetricHistogramDistribution)
+  case quantiles(MetricQuantilesDistribution)
   public init(from decoder: Decoder) throws {
     let c = try decoder.singleValueContainer()
     if let v = try? c.decode(MetricBoxDistribution.self) {
@@ -953,6 +1096,10 @@ public enum MetricDistributionResult: Codable, Equatable, Sendable {
       self = .histogram(v)
       return
     }
+    if let v = try? c.decode(MetricQuantilesDistribution.self) {
+      self = .quantiles(v)
+      return
+    }
     throw DecodingError.dataCorruptedError(in: c, debugDescription: "Invalid MetricDistributionResult")
   }
   public func encode(to encoder: Encoder) throws {
@@ -960,6 +1107,7 @@ public enum MetricDistributionResult: Codable, Equatable, Sendable {
     switch self {
     case .box(let v): try c.encode(v)
     case .histogram(let v): try c.encode(v)
+    case .quantiles(let v): try c.encode(v)
     }
   }
 }
@@ -980,6 +1128,12 @@ public struct AggregationBucket: Codable, Equatable, Sendable {
   /// The scatter y value.
   public var y: JSONValue?
   public var yError: String?
+  /// The interval's lower bound (MetricSpec.interval), in the value's units. Present only with upper, when the value is a number.
+  public var lower: Double?
+  /// The interval's upper bound.
+  public var upper: Double?
+  /// Why a bucket with a numeric value has no interval: interval_domain when its parts are outside the interval kind's domain. The value is unchanged.
+  public var intervalError: String?
   enum CodingKeys: String, CodingKey {
     case distribution
     case nullCount
@@ -990,6 +1144,9 @@ public struct AggregationBucket: Codable, Equatable, Sendable {
     case error
     case y
     case yError
+    case lower
+    case upper
+    case intervalError
   }
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -1002,6 +1159,9 @@ public struct AggregationBucket: Codable, Equatable, Sendable {
     error = try c.decodeIfPresent(String.self, forKey: .error)
     y = c.contains(.y) ? try c.decode(JSONValue.self, forKey: .y) : nil
     yError = try c.decodeIfPresent(String.self, forKey: .yError)
+    lower = try c.decodeIfPresent(Double.self, forKey: .lower)
+    upper = try c.decodeIfPresent(Double.self, forKey: .upper)
+    intervalError = try c.decodeIfPresent(String.self, forKey: .intervalError)
   }
   public func encode(to encoder: Encoder) throws {
     var c = encoder.container(keyedBy: CodingKeys.self)
@@ -1014,6 +1174,9 @@ public struct AggregationBucket: Codable, Equatable, Sendable {
     try c.encodeIfPresent(error, forKey: .error)
     try c.encodeIfPresent(y, forKey: .y)
     try c.encodeIfPresent(yError, forKey: .yError)
+    try c.encodeIfPresent(lower, forKey: .lower)
+    try c.encodeIfPresent(upper, forKey: .upper)
+    try c.encodeIfPresent(intervalError, forKey: .intervalError)
   }
 }
 
@@ -1032,7 +1195,7 @@ public struct AggregationResultEntry: Codable, Equatable, Sendable {
   public var errorCode: ErrorCode?
   /// Groups removed by minCount; present whenever it is set.
   public var hiddenGroups: Int?
-  /// The exact omitted additive quantity beyond groupLimit, when an executor computes it.
+  /// The exact remainder of the groups beyond groupLimit (hidden groups excluded): the sum of a single SUM or COUNT, or a ratio of SUM or COUNT parts evaluated on the pooled parts, with its interval. Absent when the executor does not compute one: clients key off its presence.
   public var other: AggregationBucket?
   enum CodingKeys: String, CodingKey {
     case id
@@ -1401,7 +1564,7 @@ public enum ErrorCode: String, Codable, Equatable, Sendable, CaseIterable {
   case sort
   /// Text ordering needs a collation this profile does not provide.
   case collationRequired = "collation_required"
-  /// Regex filtering or sorting is outside this server profile.
+  /// Regex filtering, sorting or a formula regex pattern is outside this server profile.
   case unsupportedRegex = "unsupported_regex"
   /// A text value cannot be represented (for example NUL or an unpaired surrogate).
   case unsupportedLiteral = "unsupported_literal"
@@ -1459,6 +1622,8 @@ public enum ErrorCode: String, Codable, Equatable, Sendable, CaseIterable {
   case minCountField = "min_count_field"
   /// minCount cannot be combined with a distribution.
   case minCountDistribution = "min_count_distribution"
+  /// An interval needs a single-value ratio of two additive aggregates (SUM, COUNT or COUNT_DISTINCT), scaled by positive constants.
+  case metricInterval = "metric_interval"
   /// The field cannot be a group key (for a computed field: not in the host's grouping allowlist).
   case groupDisabled = "group_disabled"
   /// A grouping definition is invalid: keys, summaries or a calendar key.

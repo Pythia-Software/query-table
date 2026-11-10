@@ -9,6 +9,7 @@ import {
   evaluateMetrics,
   formulaRuntime,
   normalizeQueryState,
+  percentile,
   toQueryRequestV3,
   type MetricSpecV3,
   toServerQuery,
@@ -292,6 +293,54 @@ describe("DuckDB native conformance", () => {
       ).rows[0]?.id,
     ).toBe("6");
   });
+  it("matches exact-linear PERCENTILE, not quantile_cont, on random groups", async () => {
+    await native.run("CREATE TABLE samples (g INTEGER, x DOUBLE)");
+    let seed = 7;
+    const random = () => (seed = (seed * 48271) % 2147483647) / 2147483647;
+    const groups = new Map<number, number[]>();
+    const inserts: string[] = [];
+    for (let i = 0; i < 600; i++) {
+      const g = i % 12,
+        x = random() < 0.05 ? null : Math.round((random() - 0.3) * 1e6) / 997;
+      inserts.push(`(${g}, ${x === null ? "NULL" : x.toPrecision(17)})`);
+      if (x !== null) groups.set(g, [...(groups.get(g) ?? []), x]);
+    }
+    await native.run(`INSERT INTO samples VALUES ${inserts.join(",")}`);
+    const builder = new SQLBuilder({
+      name: "samples",
+      idField: "g",
+      fields: [
+        { name: "g", label: "G", type: "number", source: { kind: "backend" }, aggregate: { groupable: true } },
+        { name: "x", label: "X", type: "number", source: { kind: "backend" } },
+      ],
+    });
+    const probabilities = [0, 0.1, 0.25, 0.37, 0.5, 0.9, 0.95, 0.99, 1];
+    const sql = probabilities.map((p, i) => `${builder.expression(`PERCENTILE([x], ${p})`, true).sql} AS p${i}`);
+    const result = (
+      await native.runAndReadAll(`SELECT g, ${sql.join(", ")}, ${probabilities.map((p, i) => `quantile_cont(x, ${p}) AS q${i}`).join(", ")} FROM samples GROUP BY g`, builder.args as any[])
+    ).getRowObjectsJS();
+    for (const row of result) {
+      const sorted = [...groups.get(row.g as number)!].sort((a, b) => a - b);
+      probabilities.forEach((p, i) => {
+        expect(row[`p${i}`]).toBe(percentile(sorted, p));
+      });
+    }
+    // DuckDB's quantile_cont (selected as q<i> for comparison) computes
+    // a+(b-a)*f, which differs from these values in the last bit for some
+    // of these groups; that is why PERCENTILE reads the sorted list.
+  });
+  it("keeps multi-term PERCENTILE formulas within the expression budget", () => {
+    const builder = new SQLBuilder(schema);
+    // Four terms fit; a fifth trips the 4x operand repetition of DuckDB's
+    // arithmetic guards, which predates PERCENTILE (five SUMs do too).
+    const terms = [0.1, 0.25, 0.5, 0.75, 0.9].map((p) => `PERCENTILE([amount], ${p})`);
+    for (const expression of [
+      terms.slice(0, 4).join(" + "),
+      `(${terms[4]} - ${terms[2]}) / ${terms[2]}`,
+      `PERCENTILE([amount] * 2 + 1, 0.9) - PERCENTILE([amount] * 2 + 1, 0.5)`,
+    ])
+      expect(builder.expression(expression, true).sql.length, expression).toBeLessThan(131072);
+  });
   it("matches composed reductions, exact median, distinct and scatter", async () => {
     const clauses = [
       metric("SUM([amount]) / NULLIF(SUM([duration]), 0)"),
@@ -433,6 +482,42 @@ describe("DuckDB native conformance", () => {
       ["2025-01-04T00:00:00.000Z", 0],
       [null, 1],
     ]);
+  });
+  it("fills buckets of several intervals like the local executor", async () => {
+    for (const [interval, every, timeZone] of [
+      ["hour", 6, "Asia/Kolkata"],
+      ["hour", 8, "America/New_York"],
+      ["day", 2, "America/New_York"],
+      ["week", 2, "UTC"],
+      ["month", 3, "America/Denver"],
+    ] as const) {
+      const query = normalizeQueryState({
+        aggregations: [
+          metric("COUNT()", {
+            groupBy: ["date", "category"],
+            dateGrouping: { field: "date", interval, every, timeZone, includeEmpty: true, range: "custom", start: "2025-01-01", end: "2025-01-04" },
+          }),
+        ],
+      });
+      const result = await execute(query);
+      expect(result.metrics[0]?.error).toBeUndefined();
+      expect(result.metrics[0]!.buckets, `${interval} ${every}`).toEqual(
+        evaluateMetrics(rows, query, schema, { now: Date.parse("2025-01-04T00:00:00Z") }).metrics[0]!.buckets,
+      );
+    }
+    // Hour buckets must divide a day, even in a request built by hand.
+    const request = (input: Parameters<typeof normalizeQueryState>[0]) =>
+      toQueryRequestV3(normalizeQueryState(input), schema, backend.capabilities, undefined, { now: Date.parse("2025-01-04T00:00:00Z") });
+    const metricRequest = request({
+      aggregations: [metric("COUNT()", { groupBy: ["date"], dateGrouping: { field: "date", interval: "hour", every: 6, includeEmpty: false, range: "query" } })],
+    });
+    metricRequest.metrics[0]!.dateGrouping!.every = 5;
+    expect((await backend.execute(metricRequest)).metrics[0]?.error).toMatch(/every is 1, 2, 3, 4, 6, 8, 12 or 24 hours/);
+    const keyRequest = request({
+      grouping: { source: normalizeQueryState({}), keys: [{ field: "date", interval: "hour", every: 6 }], summaries: [{ id: "n", op: "count" }], representative: null },
+    });
+    keyRequest.grouping!.keys = [{ field: "date", interval: "hour", every: 5 }];
+    await expect(backend.execute(keyRequest)).rejects.toThrow(/every is 1, 2, 3, 4, 6, 8, 12 or 24 hours/);
   });
   it("supports autocomplete, array suggestions and full item lookup", async () => {
     const transport = backend.transport();
@@ -684,6 +769,8 @@ describe("DuckDB native conformance", () => {
       { field: "date", interval: "day" as const, timeZone: "America/Denver" },
       { field: "date", interval: "hour" as const },
       { field: "date", interval: "week" as const, timeZone: "Asia/Kolkata" },
+      { field: "date", interval: "hour" as const, every: 6, timeZone: "Asia/Kolkata" },
+      { field: "date", interval: "day" as const, every: 3, timeZone: "America/New_York" },
     ]) {
       const query = normalizeQueryState({
         grouping: {

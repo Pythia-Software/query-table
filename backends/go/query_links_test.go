@@ -328,14 +328,15 @@ func TestMetricOptionTablesMatchTypeScript(t *testing.T) {
 		t.Fatal(err)
 	}
 	tables := map[string][]optionSpec{
-		"top": metricTopOptions, "window": metricWindowOptions, "dateGrouping": metricDateOptions, "occurrence": metricOccurrenceOptions,
+		"top": metricTopOptions, "window": metricWindowOptions, "interval": metricIntervalOptions, "dateGrouping": metricDateOptions, "occurrence": metricOccurrenceOptions,
 		"display": metricDisplayOptions, "scale": metricScaleOptions, "format": metricFormatOptions,
 		"list": metricListOptions, "pivot": metricPivotOptions, "distribution": metricDistributionOptions,
 		"layout": metricLayoutOptions, "minCount": metricMinCountOptions,
 	}
 	kinds := map[string]optionKind{
 		"string": optionString, "boolean": optionBoolean, "integer": optionInteger,
-		"positiveInteger": optionPositiveInteger, "number": optionNumber, "minCount": optionMinCount,
+		"positiveInteger": optionPositiveInteger, "number": optionNumber, "numberList": optionNumberList, "minCount": optionMinCount,
+		"currencyCode": optionCurrencyCode,
 	}
 	names := specs.o.keys()
 	if len(names) != len(tables) {

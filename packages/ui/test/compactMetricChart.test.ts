@@ -39,6 +39,14 @@ describe("compact chart axes", () => {
     expect(compactMetricTick(.5, { kind: "percent" })).toBe("50%");
     expect(compactMetricTick(.0001, { kind: "percent" })).toBe("0.01%");
     expect(compactMetricTick(.000001, { kind: "percent" })).toBe("0.0001%");
+    expect(compactMetricTick(2_500_000, { kind: "currency", currency: "USD" }, "en-US", 500_000)).toBe("$2.5M");
+    expect(compactMetricTick(2000, { kind: "number", notation: "compact" }, "en-US")).toBe("2K");
+    // Unabbreviated fractions keep whole minor units; integers stay short.
+    expect(compactMetricTick(0.5, { kind: "currency", currency: "USD" }, "en-US", 0.5)).toBe("$0.50");
+    expect(compactMetricTick(0.25, { kind: "currency", currency: "USD" }, "en-US", 0.005)).toBe("$0.250");
+    expect(compactMetricTick(500, { kind: "currency", currency: "USD" }, "en-US", 250)).toBe("$500");
+    // An invalid code is reported, as in values and tooltips.
+    expect(compactMetricTick(2000, { kind: "currency" }, "en-US")).toBe("Invalid format");
     const narrow = compactMetricScale([140000, 170000], undefined, false, format);
     expect(narrow.ticks.map(v => compactMetricTick(v, format))).toEqual(["2m", "2.5m", "3m"]);
     const constant = compactMetricScale([160000, 160000], undefined, false, format);
@@ -62,5 +70,11 @@ describe("compact chart axes", () => {
     expect([...labels.values()]).toEqual(["Oct 8 12h", "Oct 9 12h"]);
     clause.dateGrouping!.timeZone = "UTC";
     expect([...compactCalendarLabels(buckets.map((bucket, i) => ({ bucket, x: i * 100 })), clause, "en-US").values()]).toEqual(["Oct 9 00h"]);
+  });
+  it("labels the starts of buckets of several hours past the round-hour filter", () => {
+    // 8-hour buckets start at 00:00, 08:00 and 16:00; only 00:00 is a multiple of 6.
+    const clause: RenderingClause = { id: "m", op: "count", groupBy: ["at"], dateGrouping: { field: "at", interval: "hour", every: 8, timeZone: "UTC", range: "observed", includeEmpty: true } };
+    const buckets: MetricBucket[] = ["2026-01-01T00:00:00Z", "2026-01-01T08:00:00Z", "2026-01-01T16:00:00Z"].map(key => ({ keys: [key], value: 1, count: 1 }));
+    expect([...compactCalendarLabels(buckets.map((bucket, i) => ({ bucket, x: i * 100 })), clause, "en-US").values()]).toEqual(["00h", "08h", "16h"]);
   });
 });

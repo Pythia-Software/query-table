@@ -172,6 +172,7 @@ export function applyAggregations<Row>(
       a.groupLimit !== undefined ||
       a.where !== undefined ||
       a.minCount !== undefined ||
+      a.interval !== undefined ||
       hasMetricSeries(a),
   );
   if (advanced.length) {

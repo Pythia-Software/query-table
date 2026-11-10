@@ -132,6 +132,17 @@ grouping: {
 
 - `interval` is `"hour"`, `"day"`, `"week"` (from Monday), `"month"` or
   `"year"`. `timeZone` is an IANA name; omitted means UTC.
+- `every` (1–1,000; omitted means 1) makes each group span that many
+  intervals, such as `{ field: "called_at", interval: "hour", every: 6 }`. The
+  anchors are fixed and are the ones `dateGrouping.every` uses (see
+  [Buckets of several intervals](metrics.md#buckets-of-several-intervals)):
+  hours must divide a day (1, 2, 3, 4, 6, 8, 12 or 24; other counts are a
+  diagnostic) and start at local multiples of `every` within each day; days count local
+  dates from 1970-01-01, weeks from Monday 1969-12-29, months from January 1970
+  and years from 1970. Links and saved state leave out `every: 1`, and the key
+  chip shows the count ("by 6 hours") beside a small count control (a choice
+  of those divisors for hours), reset to 1 when the interval changes. Servers
+  execute `every` above 1 when they advertise `calendarEvery`.
 - Each group is one local interval, keyed by the interval's start as an ISO
   instant: local midnight of 2026-03-08 in Denver is
   `"2026-03-08T07:00:00.000Z"`. Records with no value form one `null` group.
@@ -140,7 +151,7 @@ grouping: {
   days, partial DST hours and half-hour offsets fall into the same buckets, and
   the groups' totals equal those of the matching `dateGrouping` metric.
 - The result column is named after the field (`called_at`), typed `datetime`
-  and labelled with its interval ("Called at (day)"). It is the column name in
+  and labelled with its interval ("Called at (day)", "Called at (6 hours)"). It is the column name in
   `select`, `where` (HAVING), `orderBy`, metrics over the groups and link
   templates. A field appears once among the keys, so it cannot be grouped by
   its exact value and by an interval at the same time. Group identity is the

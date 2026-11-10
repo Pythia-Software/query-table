@@ -507,6 +507,16 @@
   align-items: center;
   gap: 8px;
 }
+.qt-metric-date-grouping .qt-metric-date-every {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.qt-metric-date-every input {
+  width: 5.5em;
+  min-width: 0;
+  box-sizing: border-box;
+}
 .qt-metric-date-toggle input {
   accent-color: var(--qt-accent, #0969da);
 }
@@ -574,6 +584,14 @@
 }
 .qt-metric-format-controls select {
   padding-inline: 6px;
+}
+.qt-metric-format-controls label.qt-metric-format-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  align-self: end;
+  min-height: 28px;
+  grid-column: span 2;
 }
 .qt-metric-temporal-controls {
   grid-column: 1 / -1;

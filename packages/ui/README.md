@@ -137,8 +137,17 @@ and grouping) only grows content-fitted columns, so a live table stays calm;
 any change to the query refits from scratch. Content fitting stops at 800px.
 No column is fitted below what its buttons and links need (links shorten to
 an ellipsis first); in screen mode, if those minimums exceed the screen, the
-table scrolls horizontally. Set `select.minWidth` on a field whose host renderer needs room
-the table cannot measure.
+table scrolls horizontally. A column's floor is the min-content width of its
+control cells, laid out with the cell's own CSS: one line, unless your
+renderer's CSS (or `classNames.cell`) lets it wrap. A linked title with
+`white-space: normal`, for example, needs only its longest unbreakable word
+(a single character with `overflow-wrap: anywhere`), so the column narrows and
+the link wraps. A host button in a wrapping wrapper or a `flex-wrap` bar may
+likewise wrap its label or stack. A wrapping link whose label is one
+unbreakable token, such as a URL or path, still needs the whole token. The
+library's Detail buttons, JSON previews and links do not wrap under the default theme, so they keep
+their full minimums. Set `select.minWidth` on a field whose host renderer
+needs room the table cannot measure.
 
 Set `fit` on a default or initial query to opt in; a stored query without
 `fit` has no live sizing. The mode travels in the encoded `?q=` parameter
@@ -698,8 +707,9 @@ Set `display.list.maxLabelLines` to a positive integer to cap the wrapped label
 height when `barPosition` is `"below"`, for example
 `list: { barPosition: "below", maxLabelLines: 2 }`. Omit it for unlimited lines;
 the editor's **Maximum label lines** input accepts a blank value for unlimited.
-The limit has no effect on inline bars. Truncated labels keep their full text in
-the tooltip, and the limit survives query links and saved views.
+The limit has no effect on inline bars. Truncated labels offer their full text in
+the tooltip (and labels never repeat it while they fit), and the limit survives
+query links and saved views.
 
 ### Visible groups and remainder
 

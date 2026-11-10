@@ -12,9 +12,15 @@ import {
   type InputHTMLAttributes,
 } from "react";
 import {
+  DEFAULT_METRIC_INTERVAL_LEVEL,
+  METRIC_INTERVAL_LEVELS,
+  validateMetricInterval,
   MAX_AGGREGATIONS,
+  MAX_METRIC_DATE_EVERY,
   MAX_METRIC_WINDOW_PERIODS,
+  METRIC_HOUR_EVERY,
   METRIC_FUNCTIONS,
+  MAX_QUANTILE_PROBABILITIES,
   aggOpsForField,
   compileFormula,
   compileMetric,
@@ -33,6 +39,7 @@ import {
   type MetricLayout,
   type MetricValueFormat,
   type MetricDateGrouping,
+  type MetricInterval,
   type MetricShare,
   type MetricWindow,
   type WhereTerm,
@@ -49,11 +56,12 @@ import { MenuButton, MenuItem, MenuSeparator } from "./Menu";
 import { ReorderList } from "./ReorderList";
 import { MetricCard, cardDecimals } from "./MetricsPanel";
 import { formatMetricOutput, validateMetricFormat } from "./metricFormat";
-import type { MetricTheme } from "./metricColors";
+import { metricKeyColored, type MetricTheme } from "./metricColors";
 import { useMetricWorkbench } from "./useMetricWorkbench";
 import { useMetricResize } from "./useMetricResize";
 import { Icon, type IconName } from "./Icon";
 import { MetricWhereEditor } from "./MetricWhereEditor";
+import { formatMetricIntervalLevel } from "./metricChartHelpers";
 import { FORMULA_FUNCTIONS } from "@pythia-software/query-table-core";
 
 const FormulaEditor = lazy(() => import("./FormulaEditor"));
@@ -78,7 +86,10 @@ const kinds: Array<[MetricDisplay["kind"], string]> = [
   ["scatter", "Scatterplot"],
   ["box", "Box & whisker"],
   ["histogram", "Histogram"],
+  ["quantiles", "Quantile curve"],
 ];
+/** A new quantile curve reads 0, 0.01, …, 1 (MAX_QUANTILE_PROBABILITIES points). */
+const defaultProbabilities = Array.from({ length: 101 }, (_, i) => i / 100);
 const panes: Array<{ label: string; icon: IconName }> = [
   { label: "Metric list", icon: "panelList" },
   { label: "Definition", icon: "panelDefinition" },
@@ -175,7 +186,7 @@ export function MetricsEditor<Row>({
   // A distribution reads a row formula, except a box over a slot's
   // occurrences, which summarises the metric itself.
   const rowInput =
-    ["box", "histogram"].includes(chosen.kind) &&
+    ["box", "histogram", "quantiles"].includes(chosen.kind) &&
     !selected?.dateGrouping?.occurrence;
   const dateField = fields.find(
     (f) => f.name === selected?.groupBy[0] && f.type === "datetime",
@@ -209,7 +220,7 @@ export function MetricsEditor<Row>({
         else if (
           c.distribution &&
           !c.dateGrouping?.occurrence &&
-          ["box", "histogram"].includes(c.display?.kind ?? c.distribution.kind)
+          ["box", "histogram", "quantiles"].includes(c.display?.kind ?? c.distribution.kind)
         )
           compileFormula(c.distribution.input, fields);
         else {
@@ -242,6 +253,30 @@ export function MetricsEditor<Row>({
     return problems;
   }, [drafts, computationDiagnostics]);
   const diagnosticKey = JSON.stringify([...computationDiagnostics]);
+  // Why each interval kind cannot apply to the selected metric (undefined when
+  // it can), from the same validation that reports a chosen interval's issue.
+  // Undefined while the metric itself does not compile: then nothing is known.
+  const intervalReasons = useMemo(() => {
+    if (!selected) return undefined;
+    const check = (c: AggregationClause) => {
+      if (compileRef.current) compileRef.current(c);
+      else validateMetricInterval(c, compileMetric(metricExpression(c), fields));
+    };
+    const { interval: _interval, ...base } = selected;
+    try {
+      check(base);
+    } catch {
+      return undefined;
+    }
+    const reasons: Partial<Record<MetricInterval["kind"], string>> = {};
+    for (const kind of ["proportion", "rate"] as const)
+      try {
+        check({ ...base, interval: { kind } });
+      } catch (e) {
+        reasons[kind] = e instanceof Error ? e.message : String(e);
+      }
+    return reasons;
+  }, [selected, fields, api.aggregations.compile]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -553,21 +588,25 @@ export function MetricsEditor<Row>({
     if (!selected) return;
     // Distributions and scatters have no window or share, and hide their
     // settings, so leaving them set would strand an invalid metric.
-    const single = !["box", "histogram", "scatter"].includes(kind);
-    const display =
+    const single = !["box", "histogram", "quantiles", "scatter"].includes(kind);
+    let display =
       (!single && shareDisplay(selected.share, undefined).display) || chosen;
+    // They have no interval either; it leaves with its display setting.
+    if (!single) display = withoutIntervalDisplay(display);
     const next: {
       [K in keyof AggregationClause]?: AggregationClause[K] | undefined;
     } = {
       display: { ...display, kind },
-      ...(single ? {} : { window: undefined, share: undefined }),
+      ...(single
+        ? {}
+        : { window: undefined, share: undefined, interval: undefined }),
     };
-    setFormatTarget(kind === "scatter" || kind === "histogram" ? "x" : "value");
+    setFormatTarget(kind === "scatter" || kind === "histogram" || kind === "quantiles" ? "x" : "value");
     if (selected.sort)
       next.sort = selected.sort.filter(
         (s) =>
           (s.key !== "y" || kind === "scatter") &&
-          (s.key !== "samples" || kind === "box" || kind === "histogram"),
+          (s.key !== "samples" || kind === "box" || kind === "histogram" || kind === "quantiles"),
       );
     if (kind === "scatter" && !selected.expressionY)
       next.expressionY = "COUNT()";
@@ -575,11 +614,17 @@ export function MetricsEditor<Row>({
       next.expression = metricExpression(selected);
     // Distributions count rows for their minimum; a distinct or summed one
     // would be rejected, so it keeps its threshold over rows.
-    if ((kind === "box" || kind === "histogram") && metricMinCountMeasure(selected))
+    const distributionKind = kind === "box" || kind === "histogram" || kind === "quantiles";
+    if (distributionKind && metricMinCountMeasure(selected))
       next.minCount = metricMinCount(selected);
-    if (kind === "box" || kind === "histogram")
+    if (distributionKind) {
+      // Options of other kinds are retained as inactive alternatives, which
+      // every engine ignores, so a box → quantiles → box round trip keeps them.
       next.distribution = {
         ...selected.distribution,
+        ...(kind === "quantiles" && !selected.distribution?.probabilities
+          ? { probabilities: defaultProbabilities }
+          : {}),
         kind,
         input:
           selected.distribution?.input ??
@@ -589,6 +634,7 @@ export function MetricsEditor<Row>({
               ? fieldSource(measurable[0].name)
               : "NULL"),
       };
+    }
     // Retain inactive expressions in the draft; only the active shape executes.
     patch(selected.id, next);
   }
@@ -599,7 +645,7 @@ export function MetricsEditor<Row>({
       patch(selected.id, {
         distribution: {
           ...(selected.distribution ?? {
-            kind: chosen.kind as "box" | "histogram",
+            kind: chosen.kind as "box" | "histogram" | "quantiles",
             input: source,
           }),
           input: source,
@@ -704,7 +750,7 @@ export function MetricsEditor<Row>({
           wrap: false,
         }))
       : [
-          ...(concept !== "row" && !["box", "histogram"].includes(chosen.kind)
+          ...(concept !== "row" && !["box", "histogram", "quantiles"].includes(chosen.kind)
             ? aggregateFunctions
             : []),
           ...(concept !== "aggregate" ? FORMULA_FUNCTIONS : []),
@@ -746,7 +792,7 @@ export function MetricsEditor<Row>({
     );
   const menu = (c: AggregationClause, index: number) => (
     <span className="qt-metric-actions">
-      <MenuButton label={`Actions for ${titleOf(c, fields)}`} width={200} trigger={<span aria-hidden>⋯</span>}>
+      <MenuButton label={`Actions for ${titleOf(c, fields)}`} width={200} buttonProps={{ title: "Metric actions" }} trigger={<span aria-hidden>⋯</span>}>
         {view === "dashboard" && <MenuItem onSelect={() => navigate("editor", c.id)}>Edit metric</MenuItem>}
         <MenuItem disabled={drafts.length >= MAX_AGGREGATIONS} onSelect={() => duplicate(c)}>Duplicate</MenuItem>
         <MenuItem disabled={index === 0} onSelect={() => move(c.id, index - 1)}>Move up</MenuItem>
@@ -1351,13 +1397,13 @@ export function MetricsEditor<Row>({
                 </label>
                 <div className="qt-metric-expression-heading">
                   <strong>
-                    {["box", "histogram"].includes(chosen.kind)
+                    {["box", "histogram", "quantiles"].includes(chosen.kind)
                       ? "Values to summarize"
                       : chosen.kind === "scatter"
                         ? "X expression"
                         : "Expression"}
                   </strong>
-                  {!["box", "histogram", "scatter"].includes(chosen.kind) && (
+                  {!["box", "histogram", "quantiles", "scatter"].includes(chosen.kind) && (
                     <div
                       className="qt-metric-mode"
                       role="group"
@@ -1403,7 +1449,7 @@ export function MetricsEditor<Row>({
                   )}
                 </div>
                 {selected.expression === undefined &&
-                !["box", "histogram", "scatter"].includes(chosen.kind) ? (
+                !["box", "histogram", "quantiles", "scatter"].includes(chosen.kind) ? (
                   <div className="qt-metric-basic">
                     <select
                       aria-label="Aggregation function"
@@ -1518,7 +1564,7 @@ export function MetricsEditor<Row>({
                 {diagnostics.get(selected.id) &&
                   (!computationDiagnostics.has(selected.id) ||
                     (selected.expression === undefined &&
-                      !["box", "histogram", "scatter"].includes(
+                      !["box", "histogram", "quantiles", "scatter"].includes(
                         chosen.kind,
                       ))) && (
                     <p className="qt-metric-editor-error" role="status">
@@ -1595,7 +1641,7 @@ export function MetricsEditor<Row>({
                           )
                           .join(" × ") +
                         (selected.dateGrouping
-                          ? ` · ${selected.dateGrouping.interval} · ${selected.dateGrouping.timeZone ?? "UTC"}${selected.dateGrouping.includeEmpty ? " · empty dates" : ""}`
+                          ? ` · ${(selected.dateGrouping.every ?? 1) > 1 ? `every ${selected.dateGrouping.every} ${selected.dateGrouping.interval}s` : selected.dateGrouping.interval} · ${selected.dateGrouping.timeZone ?? "UTC"}${selected.dateGrouping.includeEmpty ? " · empty dates" : ""}`
                           : "")
                       : "One value"
                   }
@@ -1676,7 +1722,9 @@ export function MetricsEditor<Row>({
                             const cyclic =
                               interval === "hourOfDay" ||
                               interval === "dayOfWeek";
-                            const { occurrence, ...previous } =
+                            // A new interval starts at one interval per
+                            // bucket: 6 hours must not become 6 months.
+                            const { occurrence, every: _every, ...previous } =
                               selected.dateGrouping ?? {};
                             patch(selected.id, {
                               dateGrouping: {
@@ -1710,6 +1758,55 @@ export function MetricsEditor<Row>({
                           <option value="dayOfWeek">Day of week</option>
                         </select>
                       </label>
+                      {selected.dateGrouping &&
+                        selected.dateGrouping.interval !== "hourOfDay" &&
+                        selected.dateGrouping.interval !== "dayOfWeek" && (
+                          <label className="qt-metric-date-every">
+                            Every
+                            {selected.dateGrouping.interval === "hour" ? (
+                              // Hour buckets divide a day, aligned to local midnight.
+                              <select
+                                aria-label="Intervals per bucket"
+                                title="Buckets of this many hours from each local midnight; the count divides a day"
+                                value={selected.dateGrouping.every ?? 1}
+                                onChange={(e) => {
+                                  const n = Number(e.target.value);
+                                  const { every: _every, ...rest } =
+                                    selected.dateGrouping!;
+                                  patch(selected.id, {
+                                    dateGrouping: n > 1 ? { ...rest, every: n } : rest,
+                                  });
+                                }}
+                              >
+                                {METRIC_HOUR_EVERY.map((n) => (
+                                  <option key={n} value={n}>
+                                    {n}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <MetricNumberInput
+                                aria-label="Intervals per bucket"
+                                title={`Buckets of this many ${selected.dateGrouping.interval}s, counted from 1970`}
+                                min={1}
+                                max={MAX_METRIC_DATE_EVERY}
+                                step={1}
+                                value={selected.dateGrouping.every ?? 1}
+                                onCommit={(n) => {
+                                  const { every: _every, ...rest } =
+                                    selected.dateGrouping!;
+                                  patch(selected.id, {
+                                    dateGrouping: n > 1 ? { ...rest, every: n } : rest,
+                                  });
+                                }}
+                              />
+                            )}
+                            <span aria-hidden="true">
+                              {selected.dateGrouping.interval}
+                              {(selected.dateGrouping.every ?? 1) > 1 ? "s" : ""}
+                            </span>
+                          </label>
+                        )}
                       {(selected.dateGrouping?.interval === "hourOfDay" ||
                         selected.dateGrouping?.interval === "dayOfWeek") && (
                         <>
@@ -1975,7 +2072,7 @@ export function MetricsEditor<Row>({
                   </select>
                 </Settings>
                 {selected.groupBy.length > 0 &&
-                  !["box", "histogram", "scatter"].includes(chosen.kind) && (
+                  !["box", "histogram", "quantiles", "scatter"].includes(chosen.kind) && (
                     <MetricSeriesSettings
                       clause={selected}
                       fields={fields}
@@ -1990,6 +2087,32 @@ export function MetricsEditor<Row>({
                       }
                     />
                   )}
+                {/* Shown when an interval is set, or some kind could apply. */}
+                {(selected.interval ||
+                  (!["box", "histogram", "scatter"].includes(chosen.kind) &&
+                    (!intervalReasons || !intervalReasons.proportion || !intervalReasons.rate))) && (
+                  <MetricIntervalSettings
+                    interval={selected.interval}
+                    reasons={intervalReasons ?? {}}
+                    display={chosen}
+                    locale={locale}
+                    settings={settingsState("Confidence interval")}
+                    onChange={(interval) =>
+                      patch(selected.id, {
+                        interval,
+                        // Turning the interval off drops its display setting.
+                        ...(interval ? {} : { display: withoutIntervalDisplay(chosen) }),
+                      })
+                    }
+                    onDisplayChange={(show) =>
+                      patch(selected.id, {
+                        display: show
+                          ? withoutIntervalDisplay(chosen)
+                          : { ...chosen, showIntervals: false },
+                      })
+                    }
+                  />
+                )}
                 <Settings
                   title="Ordering & limits"
                   {...settingsState("Ordering & limits")}
@@ -2029,7 +2152,7 @@ export function MetricsEditor<Row>({
                           <option value="y">Y value</option>
                         )}
                         <option value="count">Rows</option>
-                        {["box", "histogram"].includes(chosen.kind) && (
+                        {["box", "histogram", "quantiles"].includes(chosen.kind) && (
                           <option value="samples">Numeric samples</option>
                         )}
                         {selected.groupBy.map((g, i) => (
@@ -2250,6 +2373,7 @@ export function MetricsEditor<Row>({
                     "scatter",
                     "box",
                     "histogram",
+                    "quantiles",
                     "list",
                   ].includes(chosen.kind) && (
                     <details className="qt-metric-settings">
@@ -2260,6 +2384,7 @@ export function MetricsEditor<Row>({
                         ? (["xScale", "yScale"] as const)
                         : ([
                             chosen.kind === "box" ||
+                            chosen.kind === "quantiles" ||
                             chosen.kind === "bar-horizontal" ||
                             chosen.kind === "list"
                               ? "xScale"
@@ -2318,7 +2443,7 @@ export function MetricsEditor<Row>({
                       </p>
                     </details>
                   )}
-                  {["pie", "donut", "scatter", "histogram"].includes(
+                  {["pie", "donut", "scatter", "histogram", "quantiles"].includes(
                     chosen.kind,
                   ) && (
                     <label>
@@ -2347,6 +2472,33 @@ export function MetricsEditor<Row>({
                                 none: "None",
                               }[position]
                             }
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  {selected.groupBy.length > 1 && metricKeyColored(chosen.kind) && (
+                    <label>
+                      Colour by
+                      <select
+                        aria-label="Colour groups by"
+                        value={
+                          chosen.colorBy !== undefined &&
+                          selected.groupBy.includes(chosen.colorBy)
+                            ? chosen.colorBy
+                            : ""
+                        }
+                        onChange={(e) => {
+                          const display = { ...chosen };
+                          if (e.target.value) display.colorBy = e.target.value;
+                          else delete display.colorBy;
+                          patch(selected.id, { display });
+                        }}
+                      >
+                        <option value="">Whole group (theme default)</option>
+                        {selected.groupBy.map((group) => (
+                          <option key={group} value={group}>
+                            {fieldLabel(group)}
                           </option>
                         ))}
                       </select>
@@ -2478,7 +2630,10 @@ export function MetricsEditor<Row>({
                             patch(selected.id, {
                               distribution: {
                                 ...selected.distribution!,
-                                whiskers: e.target.value as "minmax" | "tukey",
+                                whiskers: e.target.value as
+                                  | "minmax"
+                                  | "tukey"
+                                  | "percentile",
                               },
                             })
                           }
@@ -2487,8 +2642,49 @@ export function MetricsEditor<Row>({
                           <option value="tukey">
                             1.5 × IQR · show outliers
                           </option>
+                          <option value="percentile">Percentiles</option>
                         </select>
                       </label>
+                      {selected.distribution.whiskers === "percentile" &&
+                        ([0, 1] as const).map((side) => {
+                          const range = selected.distribution!
+                            .whiskerProbabilities ?? [0.1, 0.9];
+                          return (
+                            <label key={side}>
+                              {side === 0
+                                ? "Lower whisker percentile"
+                                : "Upper whisker percentile"}
+                              <MetricNumberInput
+                                key={`${selected.id}-${side}`}
+                                aria-label={
+                                  side === 0
+                                    ? "Lower whisker percentile"
+                                    : "Upper whisker percentile"
+                                }
+                                min={side === 0 ? 0 : 76}
+                                max={side === 0 ? 24 : 100}
+                                step={1}
+                                value={Math.round(range[side]! * 1000) / 10}
+                                onCommit={(n) => {
+                                  const next: [number, number] = [range[0]!, range[1]!];
+                                  next[side] = n / 100;
+                                  if (
+                                    next[0] >= 0 &&
+                                    next[0] < 0.25 &&
+                                    next[1] > 0.75 &&
+                                    next[1] <= 1
+                                  )
+                                    patch(selected.id, {
+                                      distribution: {
+                                        ...selected.distribution!,
+                                        whiskerProbabilities: next,
+                                      },
+                                    });
+                                }}
+                              />
+                            </label>
+                          );
+                        })}
                       <label>
                         <input
                           type="checkbox"
@@ -2501,6 +2697,49 @@ export function MetricsEditor<Row>({
                       </label>
                     </>
                   )}
+                  {chosen.kind === "quantiles" && selected.distribution && (() => {
+                    const shown = (
+                      selected.distribution.probabilities ?? defaultProbabilities
+                    )
+                      .map((p) => Math.round(p * 1e6) / 1e4)
+                      .join(", ");
+                    return (
+                      <label>
+                        Probabilities (percent, increasing)
+                        <input
+                          // Re-mount when the list changes elsewhere (undo,
+                          // links, kind switches), so the text never goes stale.
+                          key={`${selected.id}:${shown}`}
+                          aria-label="Quantile probabilities"
+                          defaultValue={shown}
+                          onBlur={(e) => {
+                            const probabilities = e.target.value
+                              .split(/[\s,]+/)
+                              .filter(Boolean)
+                              .map((text) => Number(text) / 100);
+                            if (
+                              probabilities.length >= 1 &&
+                              probabilities.length <= MAX_QUANTILE_PROBABILITIES &&
+                              probabilities.every(
+                                (p, i) =>
+                                  p >= 0 &&
+                                  p <= 1 &&
+                                  (i === 0 || p > probabilities[i - 1]!),
+                              )
+                            )
+                              patch(selected.id, {
+                                distribution: {
+                                  ...selected.distribution!,
+                                  probabilities,
+                                },
+                              });
+                            // An invalid list reverts to the one that runs.
+                            else e.target.value = shown;
+                          }}
+                        />
+                      </label>
+                    );
+                  })()}
                   {chosen.kind === "histogram" && selected.distribution && (
                     <label>
                       Equal-width bins
@@ -2952,7 +3191,7 @@ function minimumOf(key: string, min: number): MinCount {
  * values cannot be combined across a window's intervals. */
 function minimumAllowed(c: AggregationClause, key: string): boolean {
   if (key === "rows") return true;
-  const distribution = !!c.distribution && (!c.display || c.display.kind === "box" || c.display.kind === "histogram");
+  const distribution = !!c.distribution && (!c.display || ["box", "histogram", "quantiles"].includes(c.display.kind));
   if (distribution || c.dateGrouping?.occurrence) return false;
   return !(key.startsWith("distinct:") && c.window);
 }
@@ -3111,7 +3350,9 @@ function MetricSeriesSettings({
       ? "hour of the day"
       : dateGrouping?.interval === "dayOfWeek"
         ? "weekday"
-        : (dateGrouping?.interval ?? "interval");
+        : dateGrouping && (dateGrouping.every ?? 1) > 1
+          ? `${dateGrouping.every}-${dateGrouping.interval} bucket`
+          : (dateGrouping?.interval ?? "interval");
   const mode = !window ? "none" : window.periods === "all" ? "all" : "trailing";
   const setWindow = (next: MetricWindow | undefined) =>
     onChange({
@@ -3274,6 +3515,124 @@ function MetricSeriesSettings({
     </Settings>
   );
 }
+/** Offered levels, within the range engines accept. */
+const INTERVAL_LEVELS = [0.9, 0.95, 0.99].filter(
+  (l) => l >= METRIC_INTERVAL_LEVELS.min && l <= METRIC_INTERVAL_LEVELS.max,
+);
+const INTERVAL_KINDS: Array<[MetricInterval["kind"], string]> = [
+  ["proportion", "Proportion (Wilson)"],
+  ["rate", "Rate (Poisson)"],
+];
+/** A display without the interval toggle, which defaults to drawn. */
+function withoutIntervalDisplay(display: MetricDisplay): MetricDisplay {
+  const { showIntervals: _showIntervals, ...rest } = display;
+  return rest;
+}
+/** A confidence interval on each value: Wilson for a proportion, exact
+ * Poisson for a rate. A kind that cannot apply to the metric is disabled,
+ * with validation's reason as its title; a chosen one stays selectable. */
+function MetricIntervalSettings({
+  interval,
+  reasons,
+  display,
+  locale,
+  settings,
+  onChange,
+  onDisplayChange,
+}: {
+  interval: MetricInterval | undefined;
+  reasons: Partial<Record<MetricInterval["kind"], string>>;
+  display: MetricDisplay;
+  locale: string | undefined;
+  settings: { open: boolean; onOpenChange: (open: boolean) => void };
+  onChange: (interval: MetricInterval | undefined) => void;
+  onDisplayChange: (show: boolean) => void;
+}) {
+  const level = interval?.level ?? DEFAULT_METRIC_INTERVAL_LEVEL;
+  // The default level is left implicit, so saved metrics stay minimal.
+  const withLevel = (kind: MetricInterval["kind"], next: number): MetricInterval =>
+    next === DEFAULT_METRIC_INTERVAL_LEVEL ? { kind } : { kind, level: next };
+  const levels = INTERVAL_LEVELS.includes(level)
+    ? INTERVAL_LEVELS
+    : [...INTERVAL_LEVELS, level].sort((a, b) => a - b);
+  const drawn = ["bar-vertical", "bar-horizontal", "line"].includes(display.kind);
+  const problem = interval && reasons[interval.kind];
+  return (
+    <Settings
+      title="Confidence interval"
+      {...settings}
+      summary={
+        interval
+          ? `${formatMetricIntervalLevel(level, locale)} ${interval.kind === "rate" ? "rate (Poisson)" : "proportion (Wilson)"}`
+          : "None"
+      }
+    >
+      <label>
+        Confidence interval
+        <select
+          aria-label="Confidence interval"
+          value={interval?.kind ?? "none"}
+          onChange={(e) =>
+            onChange(
+              e.target.value === "none"
+                ? undefined
+                : withLevel(e.target.value as MetricInterval["kind"], level),
+            )
+          }
+        >
+          <option value="none">None</option>
+          {INTERVAL_KINDS.map(([kind, label]) => (
+            <option
+              key={kind}
+              value={kind}
+              disabled={!!reasons[kind] && interval?.kind !== kind}
+              title={reasons[kind]}
+            >
+              {label}
+            </option>
+          ))}
+        </select>
+      </label>
+      {interval && (
+        <>
+          <label>
+            Confidence level
+            <select
+              aria-label="Confidence level"
+              value={String(level)}
+              onChange={(e) => onChange(withLevel(interval.kind, Number(e.target.value)))}
+            >
+              {levels.map((l) => (
+                <option key={l} value={String(l)}>
+                  {formatMetricIntervalLevel(l, locale)}
+                </option>
+              ))}
+            </select>
+          </label>
+          {drawn && (
+            <label className="qt-metric-date-toggle">
+              <input
+                type="checkbox"
+                aria-label="Show interval whiskers and bands"
+                checked={display.showIntervals !== false}
+                onChange={(e) => onDisplayChange(e.target.checked)}
+              />
+              Show interval whiskers and bands
+            </label>
+          )}
+        </>
+      )}
+      <p className="qt-metric-help">
+        {problem ??
+          (interval?.kind === "rate"
+            ? "An exact Poisson interval for a count per exposure. Hover a value for its interval."
+            : interval
+              ? "A Wilson interval for a share of units. Hover a value for its interval."
+              : "Bounds each value: a Wilson interval for a proportion, an exact Poisson interval for a rate. Unavailable kinds give their reason on hover.")}
+      </p>
+    </Settings>
+  );
+}
 function MetricFormatControls({
   format,
   onChange,
@@ -3287,8 +3646,12 @@ function MetricFormatControls({
   format: MetricValueFormat;
   onChange: (format: MetricValueFormat) => void;
 }) {
-  const temporal = !["number", "percent"].includes(format.kind),
-    duration = format.kind === "duration";
+  const temporal = !["number", "percent", "currency"].includes(format.kind),
+    duration = format.kind === "duration",
+    compact = format.notation === "compact" && (format.kind === "number" || format.kind === "currency"),
+    // Decimals may be left unset: currency uses its own minor units and
+    // compact output shows at most one.
+    autoDecimals = format.kind === "currency" || compact;
   const patch = (values: Partial<MetricValueFormat>) =>
     onChange({ ...format, ...values });
   const units: Array<[NonNullable<MetricValueFormat["sourceUnit"]>, string]> =
@@ -3323,21 +3686,27 @@ function MetricFormatControls({
         <select
           aria-label="Metric output type"
           value={format.kind}
-          onChange={(e) =>
-            onChange({
-              kind: e.target.value as MetricValueFormat["kind"],
-              decimals: format.decimals ?? 0,
-              sourceUnit:
-                e.target.value === "duration" ? "milliseconds" : "iso",
-              style: "human",
-              timeZone: "UTC",
-            })
-          }
+          onChange={(e) => {
+            const kind = e.target.value as MetricValueFormat["kind"];
+            // Currency starts at its own minor units (Auto decimals).
+            onChange(
+              kind === "currency"
+                ? { kind, currency: format.currency ?? "USD", ...(format.notation === "compact" ? { notation: "compact" as const } : {}) }
+                : {
+                    kind,
+                    decimals: format.decimals ?? 0,
+                    sourceUnit: kind === "duration" ? "milliseconds" : "iso",
+                    style: "human",
+                    timeZone: "UTC",
+                  },
+            );
+          }}
         >
           {(
             [
               "number",
               "percent",
+              "currency",
               "duration",
               "date",
               "time",
@@ -3349,6 +3718,7 @@ function MetricFormatControls({
                 {
                   number: "Number",
                   percent: "Percent",
+                  currency: "Currency",
                   duration: "Duration",
                   date: "Date",
                   time: "Time",
@@ -3359,7 +3729,27 @@ function MetricFormatControls({
           ))}
         </select>
       </label>
-      {!temporal && (
+      {!temporal && (autoDecimals ? (
+        <label>
+          Decimals
+          <MetricNumberInput
+            aria-label="Metric decimals"
+            min={0}
+            max={6}
+            step={1}
+            allowEmpty
+            placeholder="Auto"
+            title={compact ? "At most this many decimals; Auto shows at most 1" : "Auto uses the currency's own decimals"}
+            value={format.decimals}
+            onCommit={(n) => {
+              if (n === undefined) {
+                const { decimals: _decimals, ...rest } = format;
+                onChange(rest);
+              } else if (Number.isInteger(n) && n >= 0 && n <= 6) patch({ decimals: n });
+            }}
+          />
+        </label>
+      ) : (
         <label>
           Decimals
           <MetricNumberInput
@@ -3373,6 +3763,34 @@ function MetricFormatControls({
                 patch({ decimals: n });
             }}
           />
+        </label>
+      ))}
+      {format.kind === "currency" && (
+        <label>
+          Currency
+          <input
+            aria-label="Metric currency code"
+            maxLength={3}
+            pattern="[A-Z]{3}"
+            placeholder="USD"
+            value={format.currency ?? ""}
+            onChange={(e) => patch({ currency: e.target.value.toUpperCase() })}
+          />
+        </label>
+      )}
+      {(format.kind === "number" || format.kind === "currency") && (
+        <label className="qt-metric-format-check">
+          <input
+            type="checkbox"
+            aria-label="Compact notation"
+            checked={compact}
+            onChange={(e) => {
+              const { notation: _notation, decimals: _decimals, ...rest } = format;
+              // Compact decimals are a maximum; start from Auto (at most 1).
+              onChange(e.target.checked ? { ...rest, notation: "compact" } : { ...rest, ...(format.kind === "number" ? { decimals: 0 } : {}) });
+            }}
+          />
+          {format.kind === "currency" ? "Compact ($1.2M)" : "Compact (1.2K, 3.4M)"}
         </label>
       )}
       {temporal && (
@@ -3482,7 +3900,9 @@ function MetricFormatControls({
                     ? "14:30:00"
                     : format.kind === "duration"
                       ? 83400
-                      : 0.875
+                      : format.kind === "currency" || compact
+                        ? 1234567.89
+                        : 0.875
                 : sample,
               format,
               locale,
@@ -3531,9 +3951,9 @@ function MetricInspection({
       [
         "Numeric samples",
         String(
-          bucket.distribution.kind === "box"
-            ? (bucket.distribution.summary?.n ?? 0)
-            : bucket.distribution.n,
+          bucket.distribution.kind === "histogram"
+            ? bucket.distribution.n
+            : (bucket.distribution.summary?.n ?? 0),
         ),
       ],
       ["NULL values", String(bucket.nullCount ?? 0)],
@@ -3543,7 +3963,7 @@ function MetricInspection({
       <code className="qt-metric-inspection-expression">
         {clause.distribution &&
         !clause.dateGrouping?.occurrence &&
-        ["box", "histogram"].includes(clause.display?.kind ?? "")
+        ["box", "histogram", "quantiles"].includes(clause.display?.kind ?? "")
           ? clause.distribution.input
           : metricExpression(clause)}
       </code>

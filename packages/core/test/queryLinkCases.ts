@@ -193,8 +193,39 @@ export const stateCases: StateCase[] = [
         { id: "hourly", op: "count", groupBy: ["time"], dateGrouping: { field: "time", interval: "hourOfDay", timeZone: "America/New_York", includeEmpty: true, range: "observed" }, display: { kind: "line" } },
         { id: "conversations", op: "sum", field: "cost", groupBy: ["model_family"], minCount: { min: 5, distinct: "conversation_id" } },
         { id: "calls", op: "count", groupBy: ["tool_name"], minCount: { min: 10, sum: "call_count" } },
+        { id: "rate", op: "sum", expression: "SUM([events])/NULLIF(COUNT_DISTINCT([message_id])/1000,0)", groupBy: ["model"], interval: { kind: "rate" } },
         { id: "spread", op: "count", groupBy: [], distribution: { kind: "histogram", input: "latency", bins: 20 }, expression: "COUNT()", scope: "shownRows" },
         { id: "future", op: "median" as never, field: "latency", groupBy: [] },
+      ],
+    },
+  },
+  {
+    // A saved colour key survives links even when the clause no longer
+    // groups by it; renderers then ignore it.
+    name: "metric colour keys",
+    state: {
+      ...EMPTY_QUERY,
+      aggregations: [
+        { id: "kinds", op: "count", groupBy: ["repository", "family"], display: { kind: "bar-vertical", colorBy: "family" } },
+        { id: "stale", op: "count", groupBy: ["repository"], display: { kind: "bar-horizontal", colorBy: "family" } },
+      ],
+    },
+  },
+  {
+    name: "percentile whiskers and quantile distributions",
+    state: {
+      ...EMPTY_QUERY,
+      aggregations: [
+        {
+          id: "whiskers", op: "count", groupBy: ["provider"],
+          distribution: { kind: "box", input: "latency", whiskers: "percentile", whiskerProbabilities: [0.05, 0.95] },
+          display: { kind: "box" },
+        },
+        {
+          id: "curve", op: "count", groupBy: ["provider"],
+          distribution: { kind: "quantiles", input: "latency", probabilities: [0, 0.25, 0.5, 0.9, 1] },
+          display: { kind: "quantiles" },
+        },
       ],
     },
   },
@@ -207,9 +238,10 @@ export const stateCases: StateCase[] = [
           id: "all", op: "avg", field: "latency", groupBy: ["provider"], label: "Latency",
           expression: "AVG([latency])", expressionY: "AVG([cost])", scope: "allMatching", groupLimit: 5, minCount: 3, share: "total",
           window: { periods: 3, reduce: "total", partial: "include" },
-          dateGrouping: { field: "time", interval: "week", timeZone: "Europe/Paris", includeEmpty: false, range: "custom", start: "2026-01-01", end: "2026-02-01", partialIntervals: "include" },
+          interval: { kind: "proportion", level: 0.9 },
+          dateGrouping: { field: "time", interval: "week", every: 2, timeZone: "Europe/Paris", includeEmpty: false, range: "custom", start: "2026-01-01", end: "2026-02-01", partialIntervals: "include" },
           display: {
-            kind: "scatter", valueLabel: "V", xLabel: "X", yLabel: "Y", legendPosition: "bottom", maxGroups: 8, showOther: true, boxMean: false,
+            kind: "scatter", valueLabel: "V", xLabel: "X", yLabel: "Y", legendPosition: "bottom", colorBy: "provider", maxGroups: 8, showOther: true, boxMean: false, showIntervals: false,
             xScale: { mode: "linear", min: -1.5, max: 10 }, yScale: { mode: "log", min: 0.001, max: 1e6 },
             format: { kind: "duration", decimals: 1, sourceUnit: "seconds", style: "clock", pattern: "hh:mm", timeZone: "UTC" },
             xFormat: { kind: "datetime", sourceUnit: "epochMilliseconds", style: "iso", timeZone: "America/New_York" },
@@ -223,6 +255,36 @@ export const stateCases: StateCase[] = [
           diagnostics: ["Carried over."],
         } as never,
       ],
+    },
+  },
+  {
+    name: "currency and compact formats",
+    state: {
+      ...EMPTY_QUERY,
+      select: [
+        { field: "cost", display: { kind: "currency", currency: "USD", decimals: 2, notation: "compact", locale: "en-US" } },
+        { field: "tokens", display: { kind: "number", notation: "compact", decimals: 1 } },
+        { field: "old", display: { kind: "compact" } as never },
+        { field: "cost_eur", display: { kind: "currency", currency: "eur" } as never },
+        { field: "cost_any", display: { kind: "currency" } as never },
+      ],
+      aggregations: [
+        { id: "spend", op: "sum", field: "cost", groupBy: ["model"], display: { kind: "bar-horizontal", format: { kind: "currency", currency: "USD", decimals: 0, notation: "compact" } } },
+        { id: "tokens", op: "sum", field: "tokens", groupBy: [], display: { kind: "value", format: { kind: "number", notation: "compact", decimals: 2 } } },
+        // Canonical: currency only on currency, notation only on number/currency, no default notation.
+        { id: "stray", op: "avg", field: "cost", groupBy: [], display: { kind: "value", format: { kind: "number", currency: "USD", notation: "standard" } as never, yFormat: { kind: "percent", notation: "compact" } as never } },
+        { id: "bad", op: "sum", field: "cost", groupBy: [], display: { kind: "value", format: { kind: "currency", currency: "usd", notation: "short" } as never } },
+      ],
+      itemDetails: {
+        modes: ["modal"],
+        views: {
+          modal: { version: 1, properties: [
+            { id: "c", field: "cost", format: { kind: "currency", currency: "JPY", notation: "compact" } },
+            { id: "s", field: "cost", format: { kind: "currency", currency: "GBP", notation: "standard" } },
+            { id: "t", field: "tokens", format: { kind: "number", notation: "compact", decimals: 1 } },
+          ] },
+        },
+      },
     },
   },
   {
@@ -273,6 +335,23 @@ export const stateCases: StateCase[] = [
         representative: { orderBy: [{ field: "time", dir: "desc" }] },
         source: { ...EMPTY_QUERY, where: [{ field: "provider", op: "=", value: "anthropic" }], aggregations: [{ id: "n", op: "count", groupBy: [] }] },
       } as never,
+    },
+  },
+  {
+    name: "grouping with calendar keys of several intervals",
+    state: {
+      ...EMPTY_QUERY,
+      select: [{ field: "called_at" }, { field: "ended_at" }, { field: "rows" }],
+      grouping: {
+        keys: [{ field: "called_at", interval: "hour", every: 6, timeZone: "Asia/Kolkata" }, { field: "ended_at", interval: "month", every: 1 }],
+        summaries: [{ id: "rows", op: "count" }],
+        representative: null,
+        source: { ...EMPTY_QUERY },
+      },
+      aggregations: [
+        { id: "hours", op: "count", groupBy: ["called_at"], dateGrouping: { field: "called_at", interval: "hour", every: 3, timeZone: "America/New_York", includeEmpty: true, range: "observed" } },
+        { id: "days", op: "count", groupBy: ["called_at"], dateGrouping: { field: "called_at", interval: "day", every: 1, includeEmpty: false, range: "query" } },
+      ],
     },
   },
   {
@@ -402,9 +481,11 @@ export const tokenCases: TokenCase[] = [
       g: [
         { id: "a", op: "sum", field: "", groupBy: "x", scope: "everything", layout: { widthRem: 3, minWidthRem: 9 }, sort: [{ key: "value", dir: "up" }, { key: "group7", dir: ["desc"] }, 3], diagnostics: ["kept", 4, "kept"] },
         { id: "b", op: "avg", groupBy: ["g1", 7], window: "weekly", dateGrouping: { field: "t" }, display: { kind: 3, xScale: 1 }, distribution: [], where: [{ field: "x", op: "nope", value: "1" }] },
-        { id: "c", op: "max", unsupportedOp: "p99", groupBy: [], display: { maxGroups: 0, legendPosition: "left", format: { kind: "percent", pattern: "x".repeat(10001) } }, window: { periods: "all", partial: "omit" } },
+        { id: "c", op: "max", unsupportedOp: "p99", groupBy: [], display: { maxGroups: 0, legendPosition: "left", colorBy: 7, format: { kind: "percent", pattern: "x".repeat(10001) } }, window: { periods: "all", partial: "omit" } },
         { id: "d", op: "count", groupBy: ["t"], dateGrouping: { field: "t", interval: "dayOfWeek", includeEmpty: false, range: "query", occurrence: { interval: "week", includeEmpty: "yes" } } },
         { id: "e", op: "count", groupBy: ["t"], dateGrouping: { field: "t", interval: "hourOfDay", includeEmpty: true, range: "query", occurrence: "hourly" } },
+        { id: "f", op: "count", groupBy: ["t"], interval: { kind: "wald", level: "high" } },
+        { id: "g", op: "count", groupBy: ["t"], interval: "wilson" },
       ],
     }),
   },
@@ -420,6 +501,35 @@ export const tokenCases: TokenCase[] = [
         source: { grouping: { keys: ["nested"] }, where: [{ field: "a", op: "=", value: "1" }, { field: "b" }] },
         diagnostics: ["Earlier problem.", "", 5, "Earlier problem."],
       },
+    }),
+  },
+  {
+    name: "unnormalized calendar every",
+    token: plain({
+      b: {
+        keys: [
+          { field: "a", interval: "day", every: 0 },
+          { field: "b", interval: "day", every: 1001 },
+          { field: "c", interval: "day", every: "2" },
+          { field: "d", interval: "day", every: 2.5 },
+          { field: "e", interval: "day", every: 1 },
+          { field: "f", interval: "week", every: 1000, timeZone: "UTC" },
+          // Hour buckets must divide a day.
+          { field: "g", interval: "hour", every: 5 },
+          { field: "h", interval: "hour", every: 24 },
+        ],
+        summaries: [{ id: "n", op: "count" }],
+        source: {},
+      },
+      g: [
+        { id: "a", op: "count", groupBy: ["t"], dateGrouping: { field: "t", interval: "hour", every: 0, includeEmpty: false, range: "query" } },
+        { id: "b", op: "count", groupBy: ["t"], dateGrouping: { field: "t", interval: "hour", every: "3", includeEmpty: false, range: "query" } },
+        { id: "c", op: "count", groupBy: ["t"], dateGrouping: { field: "t", interval: "hour", every: 1, includeEmpty: false, range: "query" } },
+        { id: "d", op: "count", groupBy: ["t"], dateGrouping: { field: "t", interval: "hourOfDay", every: 2, includeEmpty: false, range: "query" } },
+        { id: "e", op: "count", groupBy: ["t"], dateGrouping: { field: "t", interval: "month", every: 2000, includeEmpty: false, range: "query" } },
+        { id: "f", op: "count", groupBy: ["t"], dateGrouping: { field: "t", interval: "hour", every: 5, includeEmpty: false, range: "query" } },
+        { id: "g", op: "count", groupBy: ["t"], dateGrouping: { field: "t", interval: "hour", every: 12, includeEmpty: false, range: "query" } },
+      ],
     }),
   },
   {

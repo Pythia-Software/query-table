@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
+import { decodeQueryStrict } from '../packages/core/dist/index.js';
 const browser = await chromium.launch({ headless: true });
 const base = process.env.QT_DEMO_URL ?? 'http://127.0.0.1:5182';
 const errors = [];
@@ -69,9 +70,9 @@ try {
   assert.equal(await modal.locator('.qt-property-toolbar').getByRole('button', { name: 'Share', exact: true }).isVisible(), true);
   await modal.getByRole('button', { name: 'Share', exact: true }).click();
   const sharedUrl = await page.evaluate(() => navigator.clipboard.readText());
-  const state = JSON.parse(Buffer.from(new URL(sharedUrl).searchParams.get('q'), 'base64url').toString());
-  assert.deepEqual(state.d.active, { id: 'call-1', mode: 'modal' });
-  assert.equal(state.d.page.target, '_self');
+  const state = decodeQueryStrict(new URL(sharedUrl).searchParams.get('q'));
+  assert.deepEqual(state.itemDetails.active, { id: 'call-1', mode: 'modal' });
+  assert.equal(state.itemDetails.page.target, '_self');
   await page.keyboard.press('Escape');
   await modal.waitFor({ state: 'detached' });
   // Icon controls still drive history when the builder is collapsed.

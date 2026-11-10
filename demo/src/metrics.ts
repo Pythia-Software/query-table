@@ -60,19 +60,23 @@ export const DEMO_METRICS: AggregationClause[] = [
     24,
     13,
   ),
-  metric(
-    "pass-platform",
-    "Pass rate by platform",
-    {
-      kind: "bar-horizontal",
-      format: { kind: "percent", decimals: 1 },
-      xLabel: "Share of runs",
-    },
-    'SUM(IF([overall] = "PASS", 1, 0)) / NULLIF(COUNT(), 0)',
-    ["platform"],
-    26,
-    13,
-  ),
+  {
+    ...metric(
+      "pass-platform",
+      "Pass rate by platform",
+      {
+        kind: "bar-horizontal",
+        format: { kind: "percent", decimals: 1 },
+        xLabel: "Share of runs",
+      },
+      'SUM(IF([overall] = "PASS", 1, 0)) / NULLIF(COUNT(), 0)',
+      ["platform"],
+      26,
+      13,
+    ),
+    // Whiskers show each platform's 95% Wilson interval.
+    interval: { kind: "proportion" },
+  },
   metric(
     "platform-duration",
     "Total duration by platform",

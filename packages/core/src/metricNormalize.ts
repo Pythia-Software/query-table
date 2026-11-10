@@ -1,9 +1,11 @@
 import type { AggregationClause } from "./query";
+import { METRIC_HOUR_EVERY } from "./metricDates";
 
 /** How normalizeMetricOptions validates one option: an allowed value list or a
  *  type. "minCount" is a positive integer, or an object read with the
- *  `minCount` table that has `min` and exactly one of `distinct` and `sum`. */
-export type MetricOptionSpec = readonly string[] | "string" | "boolean" | "integer" | "positiveInteger" | "number" | "minCount";
+ *  `minCount` table that has `min` and exactly one of `distinct` and `sum`.
+ *  "currencyCode" is a three-letter upper-case ISO 4217 code. */
+export type MetricOptionSpec = readonly string[] | "string" | "boolean" | "integer" | "positiveInteger" | "number" | "numberList" | "minCount" | "currencyCode";
 
 /** The option tables normalizeMetricOptions copies from, in output order. Other
  *  implementations of query links (the Go module) are checked against this
@@ -26,6 +28,10 @@ export const METRIC_OPTION_SPECS = {
     reduce: ["total", "mean"],
     partial: ["omit", "include"],
   },
+  interval: {
+    kind: ["proportion", "rate"],
+    level: "number",
+  },
   dateGrouping: {
     field: "string",
     interval: [
@@ -37,6 +43,7 @@ export const METRIC_OPTION_SPECS = {
       "hourOfDay",
       "dayOfWeek",
     ],
+    every: "positiveInteger",
     timeZone: "string",
     includeEmpty: "boolean",
     range: ["query", "observed", "custom"],
@@ -62,14 +69,17 @@ export const METRIC_OPTION_SPECS = {
       "scatter",
       "box",
       "histogram",
+      "quantiles",
     ],
     valueLabel: "string",
     xLabel: "string",
     yLabel: "string",
     legendPosition: ["left", "right", "top", "bottom", "none"],
+    colorBy: "string",
     maxGroups: "positiveInteger",
     showOther: "boolean",
     boxMean: "boolean",
+    showIntervals: "boolean",
   },
   scale: {
     mode: ["linear", "log"],
@@ -77,8 +87,10 @@ export const METRIC_OPTION_SPECS = {
     max: "number",
   },
   format: {
-    kind: ["number", "percent", "duration", "date", "time", "datetime"],
+    kind: ["number", "percent", "currency", "duration", "date", "time", "datetime"],
     decimals: "integer",
+    currency: "currencyCode",
+    notation: ["standard", "compact"],
     sourceUnit: [
       "milliseconds",
       "seconds",
@@ -108,10 +120,12 @@ export const METRIC_OPTION_SPECS = {
     columnDir: ["asc", "desc"],
   },
   distribution: {
-    kind: ["box", "histogram"],
+    kind: ["box", "histogram", "quantiles"],
     input: "string",
-    whiskers: ["minmax", "tukey"],
+    whiskers: ["minmax", "tukey", "percentile"],
+    whiskerProbabilities: "numberList",
     bins: "integer",
+    probabilities: "numberList",
   },
   layout: {
     widthRem: "integer",
@@ -161,8 +175,15 @@ export function normalizeMetricOptions(
           ? typeof v === "string" && v.length <= 10000
           : spec === "number"
             ? typeof v === "number" && Number.isFinite(v)
+            : spec === "numberList"
+              ? Array.isArray(v) &&
+                v.length >= 1 &&
+                v.length <= 101 &&
+                v.every((x) => typeof x === "number" && Number.isFinite(x))
             : spec === "boolean"
               ? typeof v === "boolean"
+              : spec === "currencyCode"
+                ? typeof v === "string" && /^[A-Z]{3}$/.test(v)
               : spec === "integer" || spec === "positiveInteger"
                 ? typeof v === "number" &&
                   Number.isSafeInteger(v) &&
@@ -189,6 +210,13 @@ export function normalizeMetricOptions(
       out.window = w;
     } else diagnostics.push("Invalid metric window.");
   }
+  if (raw.interval !== undefined) {
+    if (record(raw.interval)) {
+      const i = copy(raw.interval, METRIC_OPTION_SPECS.interval);
+      if (!i.kind) diagnostics.push("Invalid metric interval.");
+      out.interval = i;
+    } else diagnostics.push("Invalid metric interval.");
+  }
   if (raw.dateGrouping !== undefined) {
     if (record(raw.dateGrouping)) {
       const d = copy(raw.dateGrouping, METRIC_OPTION_SPECS.dateGrouping);
@@ -201,6 +229,13 @@ export function normalizeMetricOptions(
         !d.range
       )
         diagnostics.push("Invalid metric date grouping.");
+      // Hour buckets must divide a day.
+      if (d.every !== undefined && d.interval === "hour" && !METRIC_HOUR_EVERY.includes(d.every as number)) {
+        delete d.every;
+        diagnostics.push("Invalid metric every.");
+      }
+      // One interval per bucket is the default and is left out.
+      if (d.every === 1) delete d.every;
       const occurrence = raw.dateGrouping.occurrence;
       if (record(occurrence)) {
         const o = copy(occurrence, METRIC_OPTION_SPECS.occurrence);
@@ -224,8 +259,14 @@ export function normalizeMetricOptions(
           diagnostics.push(`Invalid metric ${k}.`);
       }
       for (const k of ["format", "xFormat", "yFormat"])
-        if (record(raw.display[k]))
-          d[k] = copy(raw.display[k], METRIC_OPTION_SPECS.format);
+        if (record(raw.display[k])) {
+          const f = copy(raw.display[k], METRIC_OPTION_SPECS.format);
+          // Canonical links: currency and notation only where they apply, and
+          // no default notation.
+          if (f.kind !== "currency") delete f.currency;
+          if ((f.kind !== "number" && f.kind !== "currency") || f.notation === "standard") delete f.notation;
+          d[k] = f;
+        }
       if (record(raw.display.list))
         d.list = copy(raw.display.list, METRIC_OPTION_SPECS.list);
       if (record(raw.display.pivot))

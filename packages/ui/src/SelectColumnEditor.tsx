@@ -479,6 +479,7 @@ export function SelectColumnEditor<Row>({
                       disabled={i === 0}
                       onClick={() => move(c.field, i - 1)}
                       aria-label={`Move ${f?.label ?? c.field} up`}
+                      title="Move up"
                     >
                       <Icon name="arrowUp" />
                     </button>
@@ -488,6 +489,7 @@ export function SelectColumnEditor<Row>({
                       disabled={i === columns.length - 1}
                       onClick={() => move(c.field, i + 1)}
                       aria-label={`Move ${f?.label ?? c.field} down`}
+                      title="Move down"
                     >
                       <Icon name="arrowDown" />
                     </button>

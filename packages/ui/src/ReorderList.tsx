@@ -88,6 +88,7 @@ export function ReorderList({
               className="qt-reorder-handle"
               disabled={disabled}
               aria-label={`Drag to reorder ${item.label}`}
+              title="Reorder"
               onPointerDown={(event) => {
                 if (event.button !== 0 || disabled) return;
                 event.preventDefault();

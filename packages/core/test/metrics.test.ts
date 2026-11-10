@@ -13,6 +13,7 @@ import {
   histogramEdges,
   histogramCounts,
   percentile,
+  quantilesSummary,
   type AggregationClause,
   type FieldSchema,
   type QueryState,
@@ -1193,6 +1194,162 @@ describe("MEDIAN aggregate expressions", () => {
         ),
       }),
     ).toThrow(/does not allow/);
+  });
+});
+
+describe("PERCENTILE aggregate expressions", () => {
+  const schema: FieldSchema = {
+    name: "percentile",
+    idField: "id",
+    fields: [
+      { name: "id", label: "ID", type: "number", source: { kind: "backend" } },
+      { name: "n", label: "Number", type: "number", source: { kind: "backend" } },
+      { name: "g", label: "Group", type: "text", source: { kind: "backend" } },
+      { name: "text", label: "Text", type: "text", source: { kind: "backend" } },
+    ],
+  };
+  const value = (values: (number | null)[], expression: string) => {
+    const output = evaluateMetrics(
+      values.map((n, id) => ({ id, n })),
+      query(metric(expression)),
+      schema,
+    ).metrics[0]!;
+    expect(output.error).toBeUndefined();
+    return output.buckets[0]?.value ?? null;
+  };
+  it("interpolates exact-linear positions in IEEE order and ignores nulls", () => {
+    // [0,10,20,30]: positions 0.75, 1.5, 2.25 and 2.7.
+    expect(value([30, 0, null, 20, 10], "PERCENTILE([n], 0.25)")).toBe(7.5);
+    expect(value([30, 0, 20, 10], "PERCENTILE([n], 0.5)")).toBe(15);
+    expect(value([30, 0, 20, 10], "PERCENTILE([n], 0.75)")).toBe(22.5);
+    const position = 3 * 0.9,
+      fraction = position - Math.floor(position);
+    expect(value([30, 0, 20, 10], "PERCENTILE([n], 0.9)")).toBe(
+      (1 - fraction) * 20 + fraction * 30,
+    );
+    expect(value([5, -3, 5, 5], "PERCENTILE([n], 0)")).toBe(-3);
+    expect(value([5, -3, 5, 5], "PERCENTILE([n], 1)")).toBe(5);
+    expect(value([4], "PERCENTILE([n], 0.37)")).toBe(4);
+    expect(value([null], "PERCENTILE([n], 0.5)")).toBeNull();
+    expect(value([], "PERCENTILE([n], 0.5)")).toBeNull();
+    expect(
+      value([1, 2, 3, 4, 100], "PERCENTILE([n], 0.9) - PERCENTILE([n], 0.1)"),
+    ).toBe(
+      percentile([1, 2, 3, 4, 100], 0.9)! - percentile([1, 2, 3, 4, 100], 0.1)!,
+    );
+  });
+  it("fails a reduction over an invalid sample", () => {
+    expect(
+      evaluateMetrics([{ id: 1, n: 2 }], query(metric("PERCENTILE([n]/0, 0.5)")), schema)
+        .metrics[0]!.buckets[0]?.error,
+    ).toBeTruthy();
+  });
+  it("groups percentiles and shares one sort per input", () => {
+    const data = [
+      { id: 1, g: "a", n: 1 },
+      { id: 2, g: "a", n: 3 },
+      { id: 3, g: "b", n: 10 },
+    ];
+    const output = evaluateMetrics(
+      data,
+      query(metric("PERCENTILE([n], 0.5) + PERCENTILE([n], 1) + MEDIAN([n])", { groupBy: ["g"] })),
+      schema,
+    ).metrics[0]!;
+    expect(output.buckets.map((b) => [b.keys[0], b.value])).toEqual([
+      ["b", 30],
+      ["a", 7],
+    ]);
+  });
+  it("needs a probability literal from 0 to 1 and a numeric input", () => {
+    for (const expression of [
+      "PERCENTILE([n])",
+      "PERCENTILE([n], 0.5, 1)",
+      "PERCENTILE([n], 1.5)",
+      "PERCENTILE([n], -0.5)",
+      "PERCENTILE([n], [n])",
+      "PERCENTILE([n], 0.2 + 0.3)",
+      "PERCENTILE([n], \"0.5\")",
+    ])
+      expect(() => compileMetric(expression, schema), expression).toThrow(
+        /PERCENTILE/,
+      );
+    expect(() => compileMetric("PERCENTILE([text], 0.5)", schema)).toThrow(/numeric/);
+    expect(() => compileMetric("PERCENTILE(SUM([n]), 0.5)", schema)).toThrow(/Nested/);
+    expect(() =>
+      compileMetric("PERCENTILE([n], 0.5)", {
+        ...schema,
+        fields: schema.fields.map((f) =>
+          f.name === "n" ? { ...f, aggregate: { ops: ["sum"] } } : f,
+        ),
+      }),
+    ).toThrow(/does not allow/);
+    // As in the Go engines, a field admitting MEDIAN also admits PERCENTILE.
+    expect(() =>
+      compileMetric("PERCENTILE([n], 0.5)", {
+        ...schema,
+        fields: schema.fields.map((f) =>
+          f.name === "n" ? { ...f, aggregate: { ops: ["sum", "median" as never] } } : f,
+        ),
+      }),
+    ).not.toThrow();
+  });
+});
+
+describe("percentile whiskers and quantile distributions", () => {
+  const schema: FieldSchema = {
+    name: "q",
+    idField: "id",
+    fields: [
+      { name: "id", label: "ID", type: "number", source: { kind: "backend" } },
+      { name: "n", label: "Number", type: "number", source: { kind: "backend" } },
+      { name: "g", label: "Group", type: "text", source: { kind: "backend" } },
+    ],
+  };
+  const data = [3, 1, 4, 1, 5, 9, 2, 6, null].map((n, id) => ({ id, n, g: "a" }));
+  type Distribution = NonNullable<AggregationClause["distribution"]>;
+  const run = (distribution: Distribution) =>
+    evaluateMetrics(data, query(metric("COUNT()", { groupBy: ["g"], distribution })), schema).metrics[0]!;
+  it("draws whiskers at interpolated percentiles and counts the samples beyond them", () => {
+    const sorted = [1, 1, 2, 3, 4, 5, 6, 9];
+    const summary = boxSummary(sorted, "percentile", [0.1, 0.9])!;
+    expect(summary).toMatchObject({
+      whiskers: "percentile",
+      whiskerProbabilities: [0.1, 0.9],
+      low: percentile(sorted, 0.1),
+      high: percentile(sorted, 0.9),
+      outliers: [],
+      // Only 9 lies beyond: the low whisker equals the repeated minimum.
+      outlierCount: 1,
+    });
+    expect(boxSummary(sorted, "percentile")!.low).toBe(percentile(sorted, 0.1));
+    expect(() => boxSummary(sorted, "percentile", [0.3, 0.9])).toThrow(/Percentile whiskers/);
+    const entry = run({ kind: "box", input: "[n]", whiskers: "percentile", whiskerProbabilities: [0, 1] });
+    expect(entry.error).toBeUndefined();
+    expect(entry.buckets[0]!.distribution).toMatchObject({ kind: "box", summary: { low: 1, high: 9, outlierCount: 0 } });
+  });
+  it("interpolates each quantile; the value is the median", () => {
+    const entry = run({ kind: "quantiles", input: "[n]", probabilities: [0, 0.5, 0.95, 1] });
+    expect(entry.error).toBeUndefined();
+    const sorted = [1, 1, 2, 3, 4, 5, 6, 9];
+    expect(entry.buckets[0]).toMatchObject({
+      value: 3.5,
+      nullCount: 1,
+      distribution: { kind: "quantiles", summary: { n: 8, probabilities: [0, 0.5, 0.95, 1], values: [0, 0.5, 0.95, 1].map((p) => percentile(sorted, p)) } },
+    });
+    expect(quantilesSummary([], [0.5])).toBeNull();
+  });
+  it("validates whisker percentiles and probabilities", () => {
+    const message = (distribution: Distribution) =>
+      validateMetric(metric("COUNT()", { groupBy: ["g"], distribution }), schema)[0]?.message;
+    expect(message({ kind: "box", input: "[n]", whiskers: "percentile", whiskerProbabilities: [0.25, 0.9] })).toMatch(/Percentile whiskers/);
+    // Options of another kind or whisker mode are inactive and ignored.
+    expect(message({ kind: "box", input: "[n]", whiskers: "tukey", whiskerProbabilities: [0.5, 0.5] })).toBeUndefined();
+    expect(message({ kind: "histogram", input: "[n]", whiskers: "tukey" })).toBeUndefined();
+    expect(message({ kind: "quantiles", input: "[n]" })).toMatch(/strictly increasing/);
+    expect(message({ kind: "quantiles", input: "[n]", probabilities: [0.5, 0.2] })).toMatch(/strictly increasing/);
+    expect(message({ kind: "quantiles", input: "[n]", probabilities: Array.from({ length: 102 }, (_, i) => i / 101) })).toMatch(/strictly increasing/);
+    expect(message({ kind: "box", input: "[n]", probabilities: [0.5, 0.2] })).toBeUndefined();
+    expect(message({ kind: "quantiles", input: "[n]", probabilities: Array.from({ length: 101 }, (_, i) => i / 100) })).toBeUndefined();
   });
 });
 

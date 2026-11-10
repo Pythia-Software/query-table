@@ -336,6 +336,36 @@ it("picks a calendar interval for a datetime group key and shows it on the chip"
   expect(typeof (key as { timeZone?: string }).timeZone).toBe("string");
   expect(api.query.grouping!.keys[1]).toBe("team");
   expect(container.querySelector(".qt-group-key-interval")?.textContent).toContain("by day");
+  // Each group may span several intervals. Typing is a draft until blur.
+  const every = (unit = "Days") => container.querySelector<HTMLInputElement>(`input[aria-label="${unit} per group for At"]`)!;
+  const type = async (value: string) => act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(every(), value);
+    every().dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  const blur = async () => act(async () => { every().dispatchEvent(new FocusEvent("focusout", { bubbles: true })); });
+  expect(every().value).toBe("1");
+  await type("");
+  expect(every().value).toBe("");
+  await type("7");
+  expect(api.query.grouping!.keys[0]).not.toHaveProperty("every");
+  await blur();
+  expect(api.query.grouping!.keys[0]).toMatchObject({ field: "at", interval: "day", every: 7 });
+  expect(container.querySelector(".qt-group-key-interval")?.textContent).toContain("by 7 days");
+  // A new interval starts at one per group: 7 days must not become 7 hours.
+  await act(async () => {
+    interval.value = "hour";
+    interval.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  expect(api.query.grouping!.keys[0]).not.toHaveProperty("every");
+  // Hours offer only counts that divide a day.
+  const hours = container.querySelector<HTMLSelectElement>('select[aria-label="Hours per group for At"]')!;
+  expect([...hours.options].map((o) => o.value)).toEqual(["1", "2", "3", "4", "6", "8", "12", "24"]);
+  await act(async () => {
+    hours.value = "6";
+    hours.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  expect(api.query.grouping!.keys[0]).toMatchObject({ interval: "hour", every: 6 });
+  expect(container.querySelector(".qt-group-key-interval")?.textContent).toContain("by 6 hours");
   const exact = container.querySelector<HTMLSelectElement>('select[aria-label="Interval for At"]')!;
   await act(async () => {
     exact.value = "";

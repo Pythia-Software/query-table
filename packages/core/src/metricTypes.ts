@@ -57,9 +57,19 @@ export type MetricShare = "total" | "group0";
 export type MetricMinCountOf =
   | (MetricMinCountDistinct & { sum?: never })
   | (MetricMinCountSum & { distinct?: never });
+/** How a metric value is labelled. `currency` needs an ISO 4217 `currency`
+ * code. Formatting never changes the computed values. */
 export interface MetricValueFormat {
-  kind: "number" | "percent" | "duration" | "date" | "time" | "datetime";
+  kind: "number" | "percent" | "currency" | "duration" | "date" | "time" | "datetime";
+  /** Fraction digits (0–20): exactly this many for number, percent and
+   * currency (currency defaults to its own minor units); see `notation`. */
   decimals?: number;
+  /** Currency only: an ISO 4217 code such as "USD". */
+  currency?: string;
+  /** Number and currency only. "compact" abbreviates with the locale's compact
+   * notation (1.2K, 3.4M, $1.2M) and shows at most `decimals` fraction digits
+   * (default 1) instead of exactly `decimals`. "standard" is the default. */
+  notation?: "standard" | "compact";
   sourceUnit?:
     | "milliseconds"
     | "seconds"
@@ -94,7 +104,8 @@ export interface MetricDisplay {
     | "donut"
     | "scatter"
     | "box"
-    | "histogram";
+    | "histogram"
+    | "quantiles";
   valueLabel?: string;
   xLabel?: string;
   yLabel?: string;
@@ -102,6 +113,13 @@ export interface MetricDisplay {
   xFormat?: MetricValueFormat;
   yFormat?: MetricValueFormat;
   legendPosition?: "left" | "right" | "top" | "bottom" | "none";
+  /**
+   * The group key whose value colours labelled marks grouped by several keys
+   * (bars, boxes, list swatches), taking precedence over the theme's
+   * `colorBy`. Pie and ring slices keep whole-group colours. A key the clause
+   * no longer groups by is ignored.
+   */
+  colorBy?: string;
   /** Maximum displayed groups; does not change the computed result or ordering. */
   maxGroups?: number;
   /** Show the exact additive remainder in pie/donut (default true) or list (default false). */
@@ -121,6 +139,8 @@ export interface MetricDisplay {
     columnDir?: "asc" | "desc";
   };
   boxMean?: boolean;
+  /** Draw interval whiskers and bands when buckets have bounds (default true). */
+  showIntervals?: boolean;
   xScale?: MetricAxisScale;
   yScale?: MetricAxisScale;
 }

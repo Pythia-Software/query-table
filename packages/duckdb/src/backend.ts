@@ -1,4 +1,11 @@
 import {
+  additiveRatioParts,
+  applyMetricInterval,
+  metricOtherRemainder,
+  type FormulaResult,
+  type MetricPlan,
+  compileMetric,
+  metricRatioParts,
   compileFormula,
   createGroupingModel,
   GROUP_ID_FIELD,
@@ -9,7 +16,7 @@ import {
   validateMetric,
   isSelectable,
   isFilterable,
-  boxSummary,
+  distributionBucket,
   histogramEdges,
   histogramCounts,
   compareMetricValues,
@@ -41,6 +48,7 @@ import {
   type QueryState,
   failedMetric,
   QueryError,
+  type ErrorCode,
 } from "@pythia-software/query-table-core";
 import {
   SQLBuilder,
@@ -206,6 +214,7 @@ export class DuckDBBackend {
       calendarGrouping: true,
       calendarCycles: true,
       calendarGroupKeys: true,
+      calendarEvery: true,
       computedSourceFilters: definitions.size > 0,
       regex: true,
       regexSourceFilters: true,
@@ -213,6 +222,10 @@ export class DuckDBBackend {
       metricFilters: true,
       metricMinCount: true,
       metricMinCountMeasures: true,
+      metricIntervals: true,
+      metricPercentiles: true,
+      boxPercentileWhiskers: true,
+      quantileDistributions: true,
       maxRows: positive(options.maxRows, 10000, 10000),
       maxGroups: positive(options.maxGroups, 10000, 10000),
       maxPopulation: positive(options.maxPopulation, 250000, 10000000),
@@ -623,7 +636,7 @@ export class DuckDBBackend {
     population: string,
     builder: SQLBuilder,
     schema: FieldSchema,
-    config: Pick<MetricDateGrouping, "field" | "interval" | "timeZone">,
+    config: Pick<MetricDateGrouping, "field" | "interval" | "every" | "timeZone">,
     tables: string[],
     signal?: AbortSignal,
   ): Promise<string> {
@@ -653,6 +666,7 @@ export class DuckDBBackend {
           metricDateTime(value, config.timeZone),
           config.interval,
           config.timeZone,
+          config.every,
         );
         // A cyclic slot is the local hour or weekday of the record's interval.
         args.push(
@@ -686,7 +700,10 @@ export class DuckDBBackend {
       clause = { ...clause, display: { kind: clause.distribution.kind } };
     const issues = validateMetric(clause, schema);
     if (issues.length)
-      throw Error(issues.map((issue) => issue.message).join(" "));
+      throw new QueryError(
+        (issues[0]!.code ?? "invalid_metric") as ErrorCode,
+        issues.map((issue) => issue.message).join(" "),
+      );
     const builder = this.builder(schema, now),
       where = builder.where(query.where);
     const window =
@@ -714,7 +731,7 @@ export class DuckDBBackend {
       groups = keys.length ? `GROUP BY ${keys.join(", ")}` : "";
     const distribution =
       clause.distribution &&
-      ["box", "histogram"].includes(clause.display?.kind ?? "")
+      ["box", "histogram", "quantiles"].includes(clause.display?.kind ?? "")
         ? clause.distribution
         : undefined;
     const expression = distribution
@@ -733,6 +750,27 @@ export class DuckDBBackend {
       projections.push(
         `${builder.expression(clause.expressionY ?? "COUNT()", true).sql} AS y`,
       );
+    // An interval and a ratio's Other remainder read the exact numerator
+    // and denominator of the ratio.
+    const plan: MetricPlan | undefined = distribution
+      ? undefined
+      : compileMetric(metricExpression(clause), schema);
+    const ratio = !plan
+      ? undefined
+      : clause.interval
+        ? metricRatioParts(plan.ast)
+        : additiveRatioParts(plan.ast);
+    const ratioParts = new Map<object, [FormulaResult, FormulaResult]>();
+    if (ratio) {
+      const source = metricExpression(clause);
+      for (const [name, node] of [
+        ["ratio_numerator", ratio.numerator],
+        ["ratio_denominator", ratio.denominator],
+      ] as const)
+        projections.push(
+          `${builder.expression(source.slice(node.from, node.to), true).sql} AS ${name}`,
+        );
+    }
     // An object minCount measures each group with its own aggregate.
     const minMeasure = metricMinCountMeasure(clause);
     if (minMeasure)
@@ -784,22 +822,32 @@ export class DuckDBBackend {
         ...(distribution
           ? {
               nullCount: (row.count as number) - samples.length,
-              distribution:
-                distribution.kind === "box"
-                  ? {
-                      kind: "box" as const,
-                      summary: boxSummary(samples, distribution.whiskers),
-                    }
-                  : {
+              ...(distribution.kind === "histogram"
+                ? {
+                    distribution: {
                       kind: "histogram" as const,
                       n: samples.length,
                       edges,
                       counts: histogramCounts(samples, edges),
                     },
+                  }
+                : distributionBucket(distribution, samples)),
             }
           : {}),
       };
       if (minMeasure) measures.set(bucket, { value: row.min_measure });
+      if (ratio) {
+        const part = (value: unknown) => ({
+          value: value === null || value === undefined ? null : Number(value),
+        });
+        const parts: [FormulaResult, FormulaResult] = [
+          part(row.ratio_numerator),
+          part(row.ratio_denominator),
+        ];
+        ratioParts.set(bucket, parts);
+        if (clause.interval)
+          applyMetricInterval(bucket, clause.interval, ratio.scale, ...parts);
+      }
       return bucket;
     });
     if (clause.dateGrouping?.includeEmpty) {
@@ -838,7 +886,7 @@ export class DuckDBBackend {
         for (
           let time = range[0];
           time <= range[1];
-          time = metricDateNext(time, config.interval, config.timeZone)
+          time = metricDateNext(time, config.interval, config.timeZone, config.every)
         )
           slots.push(new Date(time).toISOString());
       for (const slot of slots)
@@ -880,14 +928,16 @@ export class DuckDBBackend {
         ? [{ key: "group0", dir: "asc", nulls: "last" }]
         : [{ key: "value", dir: "desc" }];
     buckets.sort((a, b) => {
+      // Errors (an interval's invalid parts) rank last, as in every engine.
+      if (!!a.error !== !!b.error) return a.error ? 1 : -1;
       for (const term of sort) {
         const value = (bucket: typeof a): MetricValue =>
           term.key.startsWith("group")
             ? (bucket.keys[Number(term.key.slice(5))] ?? null)
             : term.key === "samples"
-              ? bucket.distribution?.kind === "box"
-                ? (bucket.distribution.summary?.n ?? 0)
-                : (bucket.distribution?.n ?? 0)
+              ? bucket.distribution?.kind === "histogram"
+                ? bucket.distribution.n
+                : (bucket.distribution?.summary?.n ?? 0)
               : ((bucket as unknown as Record<string, MetricValue>)[term.key] ??
                 null);
         const av = value(a),
@@ -903,11 +953,18 @@ export class DuckDBBackend {
       return JSON.stringify(a.keys).localeCompare(JSON.stringify(b.keys));
     });
     const limit = clause.groupLimit ?? 10000;
+    // Every group was read, so a limited result is exact, with the omitted
+    // groups' remainder where they have one.
+    const other =
+      plan && buckets.length > limit
+        ? metricOtherRemainder(clause, plan, buckets.slice(limit), (b) => ratioParts.get(b))
+        : undefined;
     return {
       id: clause.id,
       buckets: buckets.slice(0, limit),
       groupCount: buckets.length,
-      coverage: buckets.length > limit ? "partial" : "exact",
+      coverage: "exact",
+      ...(other ? { other } : {}),
       ...(clause.scope ? { scope: clause.scope } : {}),
       ...(hiddenGroups !== undefined ? { hiddenGroups } : {}),
     };

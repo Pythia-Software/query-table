@@ -119,6 +119,13 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 	if spec.Display != nil && spec.Display.Kind == "scatter" && spec.ExpressionY == "" {
 		return SQLPlan{}, diagnostic(ErrorCodePairedExpressionRequired, "scatter requires both X and Y aggregate expressions")
 	}
+	var ratio metricRatio
+	if spec.Interval != nil {
+		var err error
+		if ratio, err = validateMetricInterval(spec); err != nil {
+			return SQLPlan{}, err
+		}
+	}
 	b, e := newPlanDialect(ctx, s, o, sqlite)
 	if e != nil {
 		return SQLPlan{}, e
@@ -216,22 +223,29 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 	reductionMemo := map[string]ValueSQL{}
 	reductions := []string{}
 	reductionKeys := map[string]string{}
+	ranked := []sqliteRankedLeaf{}
 	var collect func(*exprNode) error
 	collect = func(n *exprNode) error {
 		op := strings.ToLower(n.op)
-		if aggOpKnown(op) || op == "median" {
+		if aggOpKnown(op) || sampledOp(op) {
 			key := expressionKey(n)
 			if cached, ok := reductionMemo[key]; ok {
 				leaves[n] = cached
 				return nil
 			}
-			if len(n.args) > 1 || (len(n.args) == 0 && op != "count") {
+			probability := 0.0
+			if op == "percentile" {
+				var err error
+				if probability, err = percentileProbability(n); err != nil {
+					return err
+				}
+			} else if len(n.args) > 1 || (len(n.args) == 0 && op != "count") {
 				return diagnostic(ErrorCodeArity, "aggregate requires one row expression (COUNT also accepts none)")
 			}
 			raw := "*"
 			errSQL := b.nullError()
 			typ := "number"
-			if len(n.args) == 1 {
+			if len(n.args) > 0 {
 				v, err := b.row(n.args[0])
 				if err != nil {
 					return err
@@ -245,7 +259,7 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 				raw = v.Value
 				errSQL = v.Error
 				typ = v.Type
-				if (op == "sum" || op == "avg" || op == "median") && typ != "number" && typ != "null" {
+				if (op == "sum" || op == "avg" || sampledOp(op)) && typ != "number" && typ != "null" {
 					return diagnostic(ErrorCodeTypeError, "numeric aggregate requires numeric input")
 				}
 				if (op == "min" || op == "max") && typ == "bool" {
@@ -264,6 +278,9 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 					typ = "number"
 				case "median":
 					value = "percentile_cont(0.5) WITHIN GROUP (ORDER BY " + raw + ")"
+					typ = "number"
+				case "percentile":
+					value = b.postgresPercentile(raw, probability)
 					typ = "number"
 				case "sum", "avg":
 					value = strings.ToUpper(op) + "((" + raw + ")::text::numeric)"
@@ -287,7 +304,7 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 				}
 
 			}
-			if b.sqlite {
+			if b.sqlite && !sampledOp(op) {
 				if op == "count" || op == "count_distinct" {
 					typ = "number"
 				}
@@ -296,7 +313,24 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 			index := len(leaves)
 			a := fmt.Sprintf("a%d", index)
 			z := a + "_error"
-			reductions = append(reductions, value+" AS "+a, errorExpr+" AS "+z)
+			if b.sqlite && sampledOp(op) {
+				// Sorted in memory per group, or ranked after the reduction
+				// for a group above sqliteInMemorySamples: keep the input
+				// error here; sqliteMemoryColumns adds the in-memory result and
+				// sqliteRankedLeaves supplies a and z. The sample count is read
+				// from the ranking, so each row evaluates its validated input
+				// once per reduction, as before.
+				reductions = append(reductions, "MIN("+errSQL+") AS "+a+"_input")
+				leaf := sqliteRankedLeaf{alias: a, input: expressionKey(n.args[0]), sample: raw, ranks: medianRanks(), midpoint: true}
+				reductionKeys[a+"_input"] = "input\x00" + key
+				if op == "percentile" {
+					leaf.midpoint, leaf.probability = false, probability
+					leaf.ranks, leaf.p = b.quantileRanks(probability)
+				}
+				ranked = append(ranked, leaf)
+			} else {
+				reductions = append(reductions, value+" AS "+a, errorExpr+" AS "+z)
+			}
 			reductionKeys[a], reductionKeys[z] = "value\x00"+key, "error\x00"+key
 			leaves[n] = ValueSQL{a, z, typ}
 			reductionMemo[key] = leaves[n]
@@ -354,9 +388,14 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 	}
 	reductionKeys["count"] = "count"
 	reductions = append(selectGroups, append(reductions, "COUNT(*) AS count")...)
+	population := b.rel
+	reductions = append(reductions, b.sqliteMemoryColumns(ranked)...)
 	reductionFrom := " FROM " + b.rel + by
 	b.stage("SELECT " + strings.Join(reductions, ",") + reductionFrom)
 	reductionStage := len(b.stages) - 1
+	if len(ranked) > 0 {
+		b.sqliteRankedLeaves(population, groups, ranked)
+	}
 	var lower func(*exprNode) (ValueSQL, error)
 	lower = func(n *exprNode) (ValueSQL, error) {
 		if v, ok := leaves[n]; ok {
@@ -365,21 +404,39 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 		if n.op == "literal" {
 			return b.row(n)
 		}
+		if formulaRegexFunction(n.op) {
+			return ValueSQL{}, diagnostic(ErrorCodeAggregateContext, "regex is supported only inside aggregate row expressions")
+		}
+		op, operands := splitCountNode(n)
 		a := []ValueSQL{}
-		for _, arg := range n.args {
+		for _, arg := range operands {
 			v, err := lower(arg)
 			if err != nil {
 				return v, err
 			}
 			a = append(a, v)
 		}
-		return b.operation(n.op, a)
+		return b.operation(op, a)
 	}
 	v, e := lower(n)
 	if e != nil {
 		return SQLPlan{}, e
 	}
 	v = b.metricNumber(v)
+	// A ratio's exact parts, from this metric's own reductions, for its
+	// interval and its Other remainder.
+	shape := metricOtherShapeOf(spec, n)
+	var ratioParts []ValueSQL
+	if spec.Interval != nil || shape.ratio != nil {
+		if spec.Interval != nil {
+			if ratio, e = metricRatioParts(n); e != nil {
+				return SQLPlan{}, e
+			}
+		} else {
+			ratio = *shape.ratio
+		}
+		ratioParts = []ValueSQL{leaves[ratio.numerator], leaves[ratio.denominator]}
+	}
 	extraValues := make([]ValueSQL, len(extraNodes))
 	for i, node := range extraNodes {
 		if extraValues[i], e = lower(node); e != nil {
@@ -427,12 +484,17 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 		leaf := leaves[minNode]
 		fields = append(fields, leaf.Value+" AS min_measure", leaf.Error+" AS min_measure_error")
 	}
+	if ratioParts != nil {
+		num, den := ratioParts[0], ratioParts[1]
+		fields = append(fields, num.Value+" AS ratio_numerator", num.Error+" AS ratio_numerator_error",
+			den.Value+" AS ratio_denominator", den.Error+" AS ratio_denominator_error")
+	}
 	b.stage("SELECT " + strings.Join(fields, ",") + " FROM " + b.rel)
 	order, e := metricOrder(spec, len(groups), y != nil, false)
 	if e != nil {
 		return SQLPlan{}, e
 	}
-	sql := b.metricResult(spec, order)
+	sql := b.metricResult(spec, order, shape.columns())
 	cols := []OutputColumn{}
 	{
 		for i, g := range groups {
@@ -447,6 +509,9 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 		}
 	}
 	plan := b.finish(sql, scope, cols)
+	// Ranked leaves keep the reduction stage reusable: they read it and the
+	// population before it, which a cached or fused reduction leaves intact
+	// (and the gated ranking only scans when a group overflowed).
 	if b.lateSource {
 		reductionStage++ // finish prepends the shared authorized source.
 	}
@@ -470,12 +535,38 @@ func compileMetricOutputs(ctx context.Context, q metricRequest, spec AggSpec, s 
 // rows are LEFT JOINed to a one-row hidden_groups count, so a result whose
 // every group is hidden still returns that count in one row whose count is
 // NULL (no bucket). Hidden groups never reach the ranking, LIMIT or Other.
-func (b *planBuilder) metricResult(spec AggSpec, order string) string {
-	limit := ""
+//
+// With other (the columns an Other remainder pools) and a group limit, window
+// aggregates over the kept groups ranked beyond the limit are added to every
+// row: other_groups, other_count, other_errors and, for each pooled column,
+// other_pN (its sum), other_pN_n (its non-NULL values) and other_pN_errors.
+func (b *planBuilder) metricResult(spec AggSpec, order string, other []ValueSQL) string {
+	limit, rankLimit := "", ""
 	if spec.GroupLimit > 0 {
-		limit = " LIMIT " + b.param(spec.GroupLimit, "integer")
+		rankLimit = b.param(spec.GroupLimit, "integer")
+		limit = " LIMIT " + rankLimit
+	}
+	pool := func() {
+		if rankLimit == "" || len(other) == 0 {
+			return
+		}
+		b.stage("SELECT *,ROW_NUMBER() OVER (" + strings.TrimSpace(order) + ") AS qt_rank FROM " + b.rel)
+		beyond := "qt_rank>" + rankLimit
+		cols := []string{
+			"COUNT(CASE WHEN " + beyond + " THEN 1 END) OVER () AS other_groups",
+			"SUM(CASE WHEN " + beyond + " THEN count END) OVER () AS other_count",
+			"COUNT(CASE WHEN " + beyond + " AND error IS NOT NULL THEN 1 END) OVER () AS other_errors",
+		}
+		for i, part := range other {
+			p := fmt.Sprintf("other_p%d", i)
+			cols = append(cols, "SUM(CASE WHEN "+beyond+" THEN "+part.Value+" END) OVER () AS "+p,
+				"COUNT(CASE WHEN "+beyond+" THEN "+part.Value+" END) OVER () AS "+p+"_n",
+				"COUNT(CASE WHEN "+beyond+" AND "+part.Error+" IS NOT NULL THEN 1 END) OVER () AS "+p+"_errors")
+		}
+		b.stage("SELECT *," + strings.Join(cols, ",") + " FROM " + b.rel)
 	}
 	if !spec.MinCount.Active() {
+		pool()
 		return "SELECT *,COUNT(*) OVER () AS group_count FROM " + b.rel + order + limit
 	}
 	groups := b.rel
@@ -490,6 +581,7 @@ func (b *planBuilder) metricResult(spec AggSpec, order string) string {
 		hide = "NOT " + keep
 	}
 	b.stage("SELECT *,COUNT(*) OVER () AS group_count FROM " + groups + " WHERE " + keep)
+	pool()
 	return "SELECT k.*,h.hidden_groups FROM (SELECT COUNT(*) AS hidden_groups FROM " + groups + " WHERE " + hide + ") AS h LEFT JOIN " + b.rel + " AS k ON 1=1" + order + limit
 }
 func groupSQL(groups []ValueSQL) ([]string, string) {
@@ -576,12 +668,14 @@ func (b *planBuilder) aggregatePolicy(n *exprNode, op string, seen map[string]bo
 			return diagnostic(ErrorCodeUnknownField, n.text)
 		}
 		if f.AggregateOps != nil {
-			if (op == "box" || op == "histogram") && len(f.AggregateOps) > 0 {
+			// Distributions are not scalar ops: any admitted op admits them.
+			if distributionKinds[op] && len(f.AggregateOps) > 0 {
 				return nil
 			}
 			allowed := false
 			for _, a := range f.AggregateOps {
-				allowed = allowed || a == op
+				// A field admitting MEDIAN also admits PERCENTILE.
+				allowed = allowed || a == op || op == "percentile" && a == "median"
 			}
 			if !allowed {
 				return fieldDiagnostic(ErrorCodeAggregateDisabled, n.text, "aggregate "+op+" disabled for "+n.text)
@@ -594,6 +688,35 @@ func (b *planBuilder) aggregatePolicy(n *exprNode, op string, seen map[string]bo
 		}
 	}
 	return nil
+}
+
+// sampledOp reports an order-statistic reduction, which needs each group's
+// sorted samples.
+func sampledOp(op string) bool { return op == "median" || op == "percentile" }
+
+// percentileProbability is the second argument of PERCENTILE(expr, p): a
+// number literal in [0, 1].
+func percentileProbability(n *exprNode) (float64, error) {
+	if len(n.args) != 2 {
+		return 0, diagnostic(ErrorCodeArity, "PERCENTILE requires a row expression and a probability")
+	}
+	p, ok := n.args[1].value.(float64)
+	if n.args[1].op != "literal" || !ok || !(p >= 0 && p <= 1) {
+		return 0, &PlanDiagnostic{Code: ErrorCodeTypeError, Message: "PERCENTILE needs a probability between 0 and 1 as a number literal", Offset: n.args[1].pos}
+	}
+	return p, nil
+}
+
+// postgresPercentile is the exact-linear percentile of raw's non-NULL values
+// in each group, from their sorted array: position (n-1)*p, then
+// (1-f)*a+f*b in double precision, clamped to [a,b]. percentile_cont computes
+// a+(b-a)*f, which can differ by an ULP. PostgreSQL evaluates identical
+// array_agg calls once, so every PERCENTILE of one input shares the sort.
+func (b *planBuilder) postgresPercentile(raw string, p float64) string {
+	sample := "(" + raw + ")::double precision"
+	sorted := "array_agg(" + sample + " ORDER BY " + sample + ") FILTER (WHERE (" + raw + ") IS NOT NULL)"
+	position := "(n-1)::double precision*" + b.param(p, "double precision")
+	return "(SELECT CASE WHEN n>0 THEN LEAST(s[u],GREATEST(s[l],(1::double precision-f)*s[l]+f*s[u])) END FROM (SELECT s,n,floor(position)::integer+1 AS l,LEAST(floor(position)::integer+2,n) AS u,position-floor(position) AS f FROM (SELECT s,n," + position + " AS position FROM (SELECT " + sorted + " AS s,COALESCE(cardinality(" + sorted + "),0) AS n) samples) positions) ranks)"
 }
 
 func fieldGroupable(f FieldSpec) bool {

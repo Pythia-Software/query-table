@@ -10,7 +10,7 @@ The v1/v2 standalone compilers and their request types were removed in this rele
 - `QueryDatasetV3.ExecuteIn(ctx, tx, request, options)` validates the version/profile/revision/token/snapshot envelope once, then executes inside the caller's transaction. `Execute(ctx, db, request, options)` owns a REPEATABLE READ transaction and refuses requests that carry a `snapshot`.
 - `NewQueryV3Handler(db, authorize)` serves POST requests: `authorize` returns the trusted dataset and `PlanOptions` (nil denies), the body is capped at 2 MiB, execution runs under a 30-second deadline, and `PlanDiagnostic` errors return 400, timeouts 504, cancellation 408 and other failures 500.
 - `DescribeComputedPartialIn(ctx, tx, ids, options)` is the computed-field handshake. It returns a `ComputedDescription` whose `execution` advertises only healthy transitive graphs (field keys `@computed/id`, revision keys bare IDs) and whose `diagnostics` reports the rest, at most 64 IDs.
-- `SourcePlan(ctx, request, options)` returns the narrow source projection, transitive base inputs and summary plans without reading anything except definitions.
+- `SourcePlan(ctx, request, options)` returns the narrow source projection, transitive base inputs and summary plans without reading anything except definitions. For a `distinct` request it plans the `source.where` population plus the distinct target: a base target joins `BaseFields` directly (execution reads its raw binding), a computed target joins the projection with its transitive base inputs and must be in `expectedRevisions`. A host staging `BaseFields` then returns the same values as the unprojected source.
 
 `QueryRequestV3` carries `version: 3`, `profile`, `now`, `source` and `result` stages, optional `grouping`, `rows`, `metrics`, `expectedRevisions`, `planToken`, `snapshot`, opaque `hostState`, and optional `distinct`. `result.limit` must be 1 through `MaxRows` even for metric-only requests. `AggSpec` retains `id/op/field/groupBy` and adds `expression`, `expressionY`, `scope`, `sort`, `groupLimit`, `distribution`, `dateGrouping`, `where`, and `minCount`. Requests carry no client diagnostics (an unknown `diagnostics` key is `invalid_query`); errors are coded, see [Error codes](errors.md). Presentation properties have no SQL or fingerprint effect; `display.kind: scatter` is retained only to reject a missing second expression. Explicit `expressionY` is always paired, and explicit `distribution` selects a distribution reduction. The frontend computation projection removes inactive saved alternatives.
 
@@ -58,8 +58,9 @@ The profile is `qt-postgres-v1` (`ServerExpressionProfile`), which PostgreSQL da
 
 - JSON strings, finite numeric literals, booleans, NULL, escaped bracket references (`[a]]b]`), arithmetic `+ - * /`, comparisons, boolean AND/OR/NOT.
 - `IF`, `NULLIF`, `COALESCE`, `IS_NULL`, `ABS`, with strict scalar type checking.
-- Metric reductions `COUNT()`, `COUNT(expr)`, `COUNT_DISTINCT`, `SUM`, `AVG`, `MIN`, `MAX`; the SQL planner additionally admits `MEDIAN` as exact continuous percentile reduction.
-- Regex, array formulas/group keys, conversions, dates/functions, `%`, power, arbitrary SQL, and nested aggregates are rejected. Raw selected text-array fields are supported and mapped as `textarray`; this does not admit arrays into expressions or metric grouping. Regex predicates and sort extraction are also rejected for PostgreSQL (`Capabilities().RegexSourceFilters` is false).
+- Text and array functions `LENGTH`, `LOWER`, `UPPER`, `TRIM`, `LTRIM`, `RTRIM`, `CONTAINS`, `STARTS_WITH`, `ENDS_WITH` (with optional `ignoreCase`), `SPLIT` and `ARRAY_LENGTH`; see [Text and array functions](#text-and-array-functions). The SQLite profile also runs `REGEX_TEST`, `REGEX_EXTRACT` and `REGEX_REPLACE`.
+- Metric reductions `COUNT()`, `COUNT(expr)`, `COUNT_DISTINCT`, `SUM`, `AVG`, `MIN`, `MAX`; the SQL planner additionally admits `MEDIAN` as exact continuous percentile reduction, and `PERCENTILE(expr, p)` (a number literal `p` in [0, 1]) with the box quartiles' `exact-linear` interpolation. PostgreSQL reads each group's sorted samples (`array_agg(... ORDER BY ...)`, shared by every `PERCENTILE` of one input) instead of `percentile_cont`, whose interpolation order differs. Like MEDIAN, PERCENTILE counts against `MaxSamplesPerGroup`; a field with explicit aggregate operations must list `percentile` or `median`.
+- Regex functions (PostgreSQL), other array formulas and array group keys, other text functions, conversions, dates/functions, `%`, power, arbitrary SQL, and nested aggregates are rejected (`unsupported_function`, `unsupported_regex` or `unsupported_type`). Raw selected text-array fields are supported and mapped as `textarray`; this does not admit array fields into expressions or metric grouping. Regex predicates and sort extraction are also rejected for PostgreSQL (`Capabilities().RegexSourceFilters` is false).
 
 Numeric fields must explicitly set `FieldSpec.ExpressionNumeric`. The shared schema admits `bindings.postgres.expressionNumeric`; both the Go loader and schema code generator preserve this trusted binding flag. The generator also preserves `aggregate.measure`, `aggregate.ops`, and `aggregate.groupable` policy. SQL numeric bindings must hold finite display-arithmetic values. Nonzero magnitudes outside `[1e-300, 1e100]`, NaN, and infinities produce `numeric_range`; zero and NULL are supported. Numeric literals outside that domain fail compilation. This intentionally bounded profile does not claim arbitrary IEEE-double or exact accounting support.
 
@@ -68,6 +69,76 @@ Division emits `divide_by_zero` only for a non-null numerator and zero denominat
 Arithmetic uses native double operations after numeric range guards. Guard conversions pass through PostgreSQL's round-trip text representation to avoid the precision loss of a direct `double precision::numeric` cast. **Use `extra_float_digits >= 1`** (the PostgreSQL 12+ default) so those conversions preserve input precision. SUM/AVG accumulate using PostgreSQL numeric before returning double. Numeric SUM, AVG, MIN, MAX, COUNT_DISTINCT (and the backend-only MEDIAN) reject integral input samples outside ±9,007,199,254,740,991 with `unsafe_integer`, even if cancellation, averaging, an extremum, or distinct cardinality would yield a safe result. Numeric reduction outputs and final scalar/paired metric expression results use the same guard on the returned IEEE double. COUNT observes presence and permits otherwise profile-valid unsafe numeric inputs; its numeric output is still checked. NULL samples remain excluded, and text/date extrema retain their semantics. The safety threshold is a bound SQL parameter. These checks apply at metric boundaries, not inside every row-expression arithmetic operation. Failed reductions retain separate value/error columns: unused IF/COALESCE branches do not observe them, while a consumed error is never treated as an ordinary NULL. IFERROR is not part of this PostgreSQL profile. SUM also conservatively declines an absolute population sum above MAX_SAFE_INTEGER, including cancellation cases that could be safe in some row orders; this prevents claiming sequential browser intermediate-overflow equivalence. Reduction order and floating-point accumulation differ from sequential browser arithmetic: require tolerance-based numeric conformance, do not claim bit-for-bit equality or identical intermediate overflow behavior. Row-expression arithmetic fixtures cover exact integer division, branching and errors.
 
 Text bindings are cast to text with PostgreSQL `C` collation for exact grouping/equality. Values above 100,000 UTF-8 bytes emit `text_range` (a conservative subset of the browser text-size bound). NUL and unpaired-surrogate literals are rejected rather than silently changed. Text ordering comparisons inside formulas are declined with `collation_required`. Text MIN/MAX and final group/row ordering use PostgreSQL C ordering, which agrees with the core metric engine’s ordinal Unicode code-point ordering on valid UTF-8. Hosts should still negotiate this profile rather than substitute a locale collation. Datetime bindings retain the database's typed timestamp semantics; row output is normalized to UTC `YYYY-MM-DDTHH:mm:ss.sssZ`. Do not advertise universal locale/timezone equivalence.
+
+### Text and array functions
+
+Both server dialects compile these row functions wherever a row expression is allowed: inside aggregates (`SUM(LENGTH([text]))`), in computed definitions (and so in computed filters, sorts and group keys the host allows), in distribution inputs and in grouped formula summaries. Outside an aggregate they apply to the reduced value (`LENGTH(MAX([text]))`). The result is the browser formula runtime's, checked by the shared fixtures [`schema/fixtures/text-functions.json`](../schema/fixtures/text-functions.json) (local engine, DuckDB, Go SQLite and Go PostgreSQL) and [`schema/fixtures/formula-regex.json`](../schema/fixtures/formula-regex.json):
+
+| Function | Server semantics |
+| --- | --- |
+| `LENGTH(text)` | Unicode code points (`Array.from(text).length`): an emoji with a skin-tone modifier is 2, `e` plus a combining accent is 2, CJK characters are 1 each. Embedded NUL counts. |
+| `TRIM`, `LTRIM`, `RTRIM` | Remove the ECMAScript white space and line terminator set, exactly what `String.prototype.trim` removes: tab, LF, VT, FF, CR, space, U+00A0, U+1680, U+2000–U+200A, U+2028, U+2029, U+202F, U+205F, U+3000 and U+FEFF. U+0085 and U+180E are kept. |
+| `LOWER(text)`, `UPPER(text)` | The engine's Unicode case mapping, which agrees with the browser on ASCII, Latin-1, basic Greek and Cyrillic letters and leaves CJK, emoji and other uncased text unchanged; see [Case mapping](#case-mapping) for the characters that differ. |
+| `CONTAINS`, `STARTS_WITH`, `ENDS_WITH` | Exact, case-sensitive code point comparison with no normalization; an empty search text matches. With `ignoreCase` true, both sides are lower-cased with `LOWER` first, as the browser does, so the same case-mapping differences apply; `FALSE` is exact and `NULL` gives NULL. |
+| `WORD_COUNT(text)` | The number of maximal runs of characters outside the TRIM set (`text.match(/\S+/gu).length`): spaces, tabs, line breaks and the other white space all separate words, repeated separators count once, and empty or all-white-space text is 0. No element bound applies. Use it for word counts. |
+| `SPLIT(text, separator)` | The parts of `text.split(separator)`: non-overlapping separators left to right, empty parts kept, `""` gives one empty part, and an empty separator splits UTF-16 code units (`SPLIT("😀", "")` has 2). More than 10,000 parts is the per-row error `array_range` (the browser's "Array result is too large"). |
+| `ARRAY_LENGTH(array)` | The number of parts. The server has no array values: it compiles `ARRAY_LENGTH(SPLIT(...))` as one count, and any other use of an array (a result, a branch of `IF`, `COUNT(SPLIT(...))`, `JOIN`, `ARRAY_GET`, a text-array field) is `unsupported_type`. |
+
+NULL arguments return NULL, and a missing text stays distinct from an empty one: `LENGTH("")` and `WORD_COUNT("")` are 0 and `ARRAY_LENGTH(SPLIT("", " "))` is 1, while all three are NULL for a missing text. Argument errors propagate as for other strict operators.
+
+For word counts prefer `WORD_COUNT([text])` to `ARRAY_LENGTH(SPLIT(TRIM([text]), " "))`. The split counts `"a\nb"` as one word and `"a  b"` as three, and fails with `array_range` for any message of more than 10,000 space-separated parts, which turns that message's whole group into an error. Both remain subject to the formula text bound below.
+
+**Text operand bound.** A text field read by a formula fails with the per-row error `text_range` above 100,000 UTF-8 bytes on the server. The browser's bound is 100,000 UTF-16 code units, so text of mostly 3-byte characters (CJK) between about 33,000 and 100,000 characters fails only on the server. DuckDB applies no formula text bound.
+
+**Counting functions read text in full.** The bound exists because text-producing functions copy and transform their input. It does not apply where a source text field is the *direct* argument of a function that reads it once and returns a number or a boolean without copying it:
+
+- `LENGTH([field])` and `WORD_COUNT([field])`;
+- `CONTAINS`, `STARTS_WITH` and `ENDS_WITH` in their two-argument, case-sensitive form (either argument may be the field).
+
+This holds in every engine (browser runtime, DuckDB, Go SQLite and Go PostgreSQL), so `SUM(LENGTH([text]))` and `SUM(WORD_COUNT([text]))` count a 150,000-character message instead of failing its group. Storage-type and UTF-8 checks still apply, and so do the host's population and staging budgets (`MaxPopulation`, `MaxStagingBytes`). The bound still applies to:
+
+- any other argument expression. In `LENGTH(TRIM([text]))` or `WORD_COUNT(LOWER([text]))` the field is read by `TRIM`/`LOWER`, which keep the bound, so the count fails with `text_range` like its argument. A computed column reference is an expression too;
+- the three-argument `CONTAINS`/`STARTS_WITH`/`ENDS_WITH`, including `ignoreCase` `FALSE`, because the browser lower-cases (copies) the text when the flag is true;
+- `ARRAY_LENGTH(SPLIT(...))`. The browser builds the array and bounds its total size, and DuckDB builds it too, so `SPLIT` keeps both the input bound and the 10,000-element bound;
+- every other use of a text field: comparisons, `IS_NULL`, `COALESCE`, `MIN`/`MAX`, `COUNT_DISTINCT` and the text functions.
+
+The fixture's `largeText` section checks these cases in all four engines.
+
+SQLite uses native `length`, `trim`/`ltrim`/`rtrim` with the explicit character set, `instr` and byte-prefix/suffix comparisons; NUL-containing text, `WORD_COUNT`, `SPLIT` counts, case mapping and the regex functions use the registered `qt_v2_*` descriptors from `SQLiteV2Functions()`, which receive text as BLOBs so a driver cannot cut it at a NUL. PostgreSQL uses `char_length`, `btrim`/`ltrim`/`rtrim` with the same set, `strpos`, `left`, `right`, `replace`, and `regexp_split_to_array` over a bracket of the TRIM set's characters for `WORD_COUNT`; the empty-separator count adds one for each supplementary code point.
+
+#### Case mapping
+
+`LOWER`, `UPPER` and `ignoreCase` are the one place where the server accepts drift from the browser in favor of the common case. The browser uses JavaScript's `toLowerCase`/`toUpperCase`: full Unicode case mapping with context rules, from the Unicode version of the browser's engine. The servers use:
+
+- **SQLite:** the registered `qt_v2_lower`/`qt_v2_upper` (Go's `strings.ToLower`/`ToUpper`, simple one-to-one Unicode mapping from the Go release's Unicode tables). SQLite's own `lower()`/`upper()` map only ASCII and are not used.
+- **PostgreSQL:** `lower()`/`upper()` under the database's **default collation** (`COLLATE "default"`, not the `C` collation formula text otherwise carries). With a libc provider the database's `LC_CTYPE` decides, one character at a time; with an ICU default collation ICU's full mapping applies. A database whose default collation is `C` or `POSIX` maps only ASCII letters, so `LOWER("É")` stays `É`: create the database with a UTF-8 locale or ICU to case-map non-ASCII text.
+- **DuckDB:** its `lower()`/`upper()`.
+
+Known differences from the browser (SQLite and a libc PostgreSQL; an ICU PostgreSQL follows JavaScript on the first two):
+
+| Input | Browser | SQLite (Go) |
+| --- | --- | --- |
+| `UPPER("straße")` | `STRASSE` (ß expands) | `STRAßE` |
+| `LOWER("ΟΔΟΣ")` | `οδος` (final sigma) | `οδοσ` |
+| `LOWER("İ")` (U+0130) | `i̇` (`i` plus U+0307, 2 code points) | `i` |
+| Other one-to-many mappings (`ŉ`, `ǰ`, ligatures such as `ﬁ`, Greek with ypogegrammeni) | expanded | unchanged or mapped one-to-one |
+| Letters added or changed in a newer Unicode version | the browser's version | the engine's version |
+
+Turkish and Lithuanian locale rules are not applied: the browser's `toLowerCase` is locale-independent, and `UPPER("ı")` is `I` in the browser and SQLite (a PostgreSQL database with a Turkish `LC_CTYPE` may differ). `CONTAINS([text], "i", TRUE)` therefore matches `İ` in SQLite but not in the browser. The shared fixture covers only the letters every engine maps alike (ASCII, Latin-1 accents, basic Greek and Cyrillic, CJK and emoji unchanged, empty and NULL text); `TestTextCaseMappingV3` in `backends/sqlite-tests` pins the SQLite results above.
+
+**Regex functions (SQLite only).** `REGEX_TEST`, `REGEX_EXTRACT` and `REGEX_REPLACE` follow the browser's JavaScript `RegExp` with the `u` flag. The pattern and flags must be text literals. The server translates a validated subset to Go RE2: `.` excludes `\n`, `\r`, U+2028 and U+2029 unless `s` is set, and `\s`/`\S` use the TRIM set above. Patterns whose meaning would differ are refused with `unsupported_regex` rather than approximated:
+
+- lookahead, lookbehind, backreferences, named groups, `\p{...}` and lone surrogate escapes;
+- repetition counts above 1,000 (an RE2 limit);
+- a quantifier over a subpattern that can match empty text, such as `(?:a*)+` (JavaScript rejects empty iterations; RE2 does not);
+- the `m` flag with `^` or `$` (JavaScript also breaks lines at `\r`, U+2028 and U+2029); `m` without anchors has no effect and is accepted;
+- with the `i` flag, a non-ASCII literal or range (case folding follows each engine's Unicode version) and `\b`/`\B` (JavaScript's `u`+`i` word set adds U+017F and U+212A);
+- for `REGEX_EXTRACT` and `REGEX_REPLACE`, a capture group inside a repeated quantifier, such as `(?:(a)|b)+` (JavaScript clears it on each iteration);
+- for `REGEX_REPLACE`, a pattern that can match empty text, such as `a*` (JavaScript keeps an empty match right after a match; RE2 drops it).
+
+Invalid JavaScript patterns and flags are refused too. `REGEX_REPLACE` supports `$$`, `$&` and `$1`–`$99` like the browser; `` $` ``, `$'` and a capture number the pattern does not have are the per-row error `regex_replacement` (raised only where a match occurs). A replacement result above 100,000 UTF-16 code units is `text_range`. A `REGEX_EXTRACT` group that is not an integer from 0 to 100 is `argument_range`. As in the browser, regex is allowed only inside aggregate row expressions. PostgreSQL's regex dialect differs from JavaScript's, so the PostgreSQL profile refuses all three functions with `unsupported_regex`.
+
+The browser client still refuses regex in all-matching metrics and grouped columns it composes (it evaluates regex locally only in an isolated worker), and `Capabilities().RegexAggregateExpressions` stays false, so shown-row regex metrics keep running in that worker. The server functions serve host-defined requests, such as server-side scatter definitions, and computed definitions whose patterns fit the subset. The handshake does not describe the subset: a host learns that a pattern is refused from the metric's `unsupported_regex` error. Advertising server regex to the client would need the client to fall back to its worker when a shown-row metric's pattern is refused.
 
 `FieldSpec.AggregateOps` is an allowlist: nil uses type defaults, an empty list disables measures. `aggregate.measure:false` loads as an empty list. Explicit operation restrictions propagate through computed dependencies and conditional row-expression inputs. Distributions require measurable inputs; they do not invent box/histogram names in the scalar-op allowlist. `aggregate.groupable` is honored; the default is text/enum/bool grouping, requiring explicit opt-in for numeric/datetime backend keys. Resolver access controls computed definitions. Computed grouping additionally requires a true entry in the trusted `QueryDatasetV3.ComputedGroupable` ID allowlist, so a definition cannot silently bypass the dataset’s grouping policy.
 
@@ -99,7 +170,7 @@ Each `AggSpec` produces one `MetricResult` in request order: `id`, `buckets`, `s
 
 A group error nulls its scalar output. X/Y errors remain independent. Errors sort after valid groups, then requested value/Y/count/sample/key terms apply; the default is value descending, and complete group tuples break ties. NULL placement is independent of direction. No-group empty input produces one COUNT=0 or nullable scalar/empty-distribution bucket; grouped empty input produces no buckets.
 
-Box results contain `{kind:"box",summary}`. Summary is null for zero numeric samples. Distribution samples are explicitly projected as double precision, including `NULL` and `COALESCE(NULL,NULL)` inputs; these count as excluded NULLs without errors. Exact quartiles use the complete non-NULL sorted double population, method `exact-linear`: zero-based position `(n-1)*p`, `lower=floor(position)`, `fraction=position-lower`, then `(1-fraction)*a+fraction*b`, with the upper sample index clamped to `n-1`. All operations use IEEE double arithmetic in the same order as TypeScript. PostgreSQL `percentile_cont` uses a different interpolation order and must not substitute for these box quartiles. Fence comparisons are exact, without an epsilon: even a one-ULP quartile difference can change outlier membership. Min/max or Tukey whiskers use actual observed endpoints. Tukey outputs exact outlier count and at most 20 values, keeping ten from each tail without duplicating rows. Numeric distribution samples use the same unsafe-integer boundary as metric reductions. Invalid samples carry errors and are excluded from the sample count; they do not increase `nullCount`. A group input error suppresses that group's summary. Interpolated quartiles and the mean are checked before returning the summary; observed endpoints, whiskers, and outliers inherit sample validation.
+Box results contain `{kind:"box",summary}`. Summary is null for zero numeric samples. Distribution samples are explicitly projected as double precision, including `NULL` and `COALESCE(NULL,NULL)` inputs; these count as excluded NULLs without errors. Exact quartiles use the complete non-NULL sorted double population, method `exact-linear`: zero-based position `(n-1)*p`, `lower=floor(position)`, `fraction=position-lower`, then `(1-fraction)*a+fraction*b`, with the upper sample index clamped to `n-1`. All operations use IEEE double arithmetic in the same order as TypeScript. PostgreSQL `percentile_cont` uses a different interpolation order and must not substitute for these box quartiles. Fence comparisons are exact, without an epsilon: even a one-ULP quartile difference can change outlier membership. Min/max or Tukey whiskers use actual observed endpoints. Tukey outputs exact outlier count and at most 20 values, keeping ten from each tail without duplicating rows. Percentile whiskers (`whiskerProbabilities`, default `[0.1, 0.9]`) are the exact-linear percentiles themselves; `outlierCount` counts the samples outside them and no outlier values are returned. A `quantiles` distribution interpolates every requested probability (1–101, strictly increasing) from the same sorted population and reports the median as the bucket value; PostgreSQL computes them in one pass over the sorted array, SQLite reads only the ranks they need. Numeric distribution samples use the same unsafe-integer boundary as metric reductions. Invalid samples carry errors and are excluded from the sample count; they do not increase `nullCount`. A group input error suppresses that group's summary. Interpolated quartiles and the mean are checked before returning the summary; observed endpoints, whiskers, and outliers inherit sample validation.
 
 Histograms support zero or one grouping key and 2–30 equal-width bins (default ten). Global extent comes from all scoped values before group ranking/limits. Groups share one edge array; counts include zero bins. Edges use the browser’s double arithmetic order, `min + (max - min) * (i / bins)`, with endpoints pinned to the observed minimum and maximum. Bucket counts at floating boundaries must agree exactly; numeric tolerances do not excuse shifted counts. Lower edges are inclusive, upper edges exclusive except the final maximum. Constants produce `[value,value]` and one count; empty inputs produce empty edges/counts. Unsafe integral edges produce `unsafe_integer`; collapsed floating-point edges produce `histogram_precision`. Any input error invalidates every histogram group because the global extent is unknowable; never present the remaining counts as complete.
 
@@ -134,12 +205,60 @@ executor emits no bucket. `groupCount` counts only kept groups, while kept plus
 hidden groups are checked against `MaxGroups`. Calendar metrics in
 `QueryDatasetV3` apply `MinCount` in Go after empty buckets are filled; filled
 buckets (count 0) are never hidden or counted, and hidden observed buckets are
-not refilled. Hidden groups are not part of any additive Other remainder an
-adapter derives.
+not refilled. Hidden groups are never part of the Other remainder.
 
 `QueryDatasetV3` (both dialects) implements both controls and sets `hiddenGroups` on the metric result; `QueryCapabilitiesV3` advertises `metricFilters`/`metricMinCount`/`metricMinCountMeasures`. The frontend refuses those clauses individually when a host does not advertise them.
 `AggSpec.MinCount` is a `MetricMinCount` (`Min`, plus `Distinct` or `Sum`), read
 from and written as either a number or `{"min":5,"distinct":"conversation_id"}`.
+
+## Metric intervals
+
+`AggSpec.Interval` (`interval` on the wire: `{"kind":"proportion"|"rate","level":0.95}`)
+asks for a confidence interval on every bucket. The compiler accepts it only on
+a scalar metric whose expression is a ratio of two SUM, COUNT or COUNT_DISTINCT
+aggregates, scaled by positive literals and optionally wrapped in
+`NULLIF(x, 0)`; anything else, an unknown kind or a level outside 0.5–0.9999
+is the clause error `metric_interval`. The two parts are reductions the metric
+already computes, so the final stage only adds `interval_numerator`,
+`interval_denominator` and their error sidecars beside `value`; the value,
+its error and the ranking are unchanged. `readV2Metric` then sets
+`Lower`/`Upper` from the parts: the Wilson score interval for `proportion`, and
+the exact Poisson (Garwood) interval divided by the denominator for `rate`,
+both multiplied by the expression's constant scale. A bucket with an error, a
+NULL value or a zero denominator has no bounds. Parts outside the kind's domain
+(a negative or non-integer numerator; for a proportion, a non-integer
+denominator or a numerator above it) set `IntervalError` to `interval_domain`
+instead. The quantile functions return 0, +Inf or NaN rather than panic, and
+such bounds are omitted. The row-streaming reducer refuses intervals, so they
+always run on a plan that returns both parts.
+
+The same applies to calendar metrics, the SQLite batch with its fused and
+reused reductions (results are reused only between metrics with the same
+interval), and the staged executor. `QueryCapabilitiesV3.MetricIntervals` is
+true for both dialects. The numerics (`metric_interval.go`) port those of
+`packages/core/src/metricIntervals.ts`, and `schema/fixtures/metric-intervals.json`
+is executed by the SQLite and PostgreSQL integration suites as well as by the
+TypeScript engines.
+
+## Other remainders
+
+`MetricResult.Other` is the exact remainder of the groups `GroupLimit` omits
+for a single SUM or COUNT, or for a ratio of SUM or COUNT parts (the shapes
+`AggSpec.Interval` accepts, without COUNT_DISTINCT); see
+[Other remainders](metrics.md#other-remainders). The compiled plan ranks the
+kept groups (after `MinCount`) with `ROW_NUMBER()` in the result order and adds
+window aggregates over the groups ranked beyond the limit, so every returned
+row carries `other_groups`, `other_count`, `other_errors` and, for each pooled
+column (`value`, or the ratio's `ratio_numerator` and `ratio_denominator`), its
+sum, its non-NULL values and its errors. No additional statement runs and the
+`LIMIT` still bounds the rows read. `readV2Metric` builds the bucket: the
+summed value, or the metric's expression evaluated in Go on the pooled parts
+(its multiplications, divisions, literals and NULLIFs in order, with NULL
+propagation and `divide_by_zero` as in SQL), with interval bounds when the
+metric has `Interval`. PostgreSQL computes per-group values in `numeric`, so a
+remainder evaluated in double precision can differ from a group with the same
+parts in the last bits. Calendar metrics rank and limit in Go and pool their omitted
+buckets there; an empty fill-in adds 0.
 
 ## Required service behavior and limits
 
@@ -149,7 +268,7 @@ The request's `now` is the single reference clock for every relative filter in t
 
 Compiler limits include 10,000 source bytes, 2,000 tokens, 512 AST nodes per expression, nesting depth 50, 64 resolved definitions, dependency depth 32, 2,048 expanded row nodes, approximately 500 SQL stages, and 512 schema bindings. Request limits retain 20 metrics, 20 grouping keys, and 20 result sort terms; group limit is at most 10,000. Group limits do not bound scanned rows or total groups.
 
-Executor budgets default to 10,000 page rows (`MaxRows`), 2,000 groups per metric or grouping (`MaxGroups`, explicitly 1–100,000), 250,000 staged source rows (`MaxPopulation`), 64 MiB of staged value payload (`MaxStagingBytes`) and 100,000 exact samples per group for medians and distributions (`MaxSamplesPerGroup`, at most 1,000,000). Request `groupLimit` and result paging do not raise them. Exceeding a row or staging budget fails the request; exceeding a metric's group or sample budget fails only that metric.
+Executor budgets default to 10,000 page rows (`MaxRows`), 2,000 groups per metric or grouping (`MaxGroups`, explicitly 1–100,000), 250,000 staged source rows (`MaxPopulation`), 64 MiB of staged value payload (`MaxStagingBytes`) and, for PostgreSQL, 100,000 exact samples per group for medians and distributions (`MaxSamplesPerGroup`, at most 1,000,000). SQLite sorts groups in memory within a process-wide budget or ranks them in SQL, and defaults `MaxSamplesPerGroup` to 10,000,000, a bound on the CPU and temporary space of ungrouped requests. Request `groupLimit` and result paging do not raise them. Exceeding a row or staging budget fails the request; exceeding a metric's group or sample budget fails only that metric.
 
 Box planning materializes a sorted double array per group for exact quartiles and removes it before producing result rows. This requires O(n) sample storage (at least eight bytes per non-NULL sample, plus array/aggregate/sort/CTE overhead); the 20-value outlier response cap and `groupLimit` do not bound this working state. The executor checks each group's sample count against `MaxSamplesPerGroup` before running a sampled metric, but ungrouped populations are not otherwise bounded. Configure `work_mem`, `temp_file_limit`, and `statement_timeout`, but do not treat `work_mem` as a hard query-memory ceiling: array aggregate transition state is not bounded by that setting. Use admission limits and a process/container memory limit as well.
 

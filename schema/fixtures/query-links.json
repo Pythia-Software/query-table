@@ -1345,6 +1345,17 @@
             }
           },
           {
+            "id": "rate",
+            "op": "sum",
+            "expression": "SUM([events])/NULLIF(COUNT_DISTINCT([message_id])/1000,0)",
+            "groupBy": [
+              "model"
+            ],
+            "interval": {
+              "kind": "rate"
+            }
+          },
+          {
             "id": "spread",
             "op": "count",
             "groupBy": [],
@@ -1364,7 +1375,7 @@
           }
         ]
       },
-      "token": "2d.lVTbbhMxEP0V5CeQAr0ghBSJh7YgQFSNVFpVUFXRZD3ZteL1LF47mxDl35nxJtk0aSP6tGt7LsfnnPFC5ap_v1BGq74KNEFXq56iild1LPk39xSr8zkHqZI02uEYSmPn6qGnxgbtozQLI7S8cbPeSMmXpjRB9U-Oe6o07oKi49VpT2lTVxa48kJNjJNCI_BvC_LmL7kAlvOnYCNe7lYdky-Ba2zyXCxH6PlEY2ZKsLXqHy8ZjqlTVF1Qcw6ed4OPuJQTmFNMZ43RobjGUvXfM74CTV6EtDxhhAz3bnN-ktbftiK4UE2eyzB_E-SLtHgFh_G80lhnaslENQV6TGFryipPU6MT5sT1p_Vl-R9cKDxVRnKXvZU0GoT0VXSWONzWRpowF9TInTzqmEmlEsFxWIXekObrf2TEGgJ-lTzjWPkOUTClIDcuoGckqaU0lP3f5KTc7c1Fishs1PilrAJ3FkZ7yoPLJeJPRC9JFfhgwH5fFePWCmcpTQmEPeGt4QY9NfuZgeU6i2S11T54yZnvHVHOGayICMGarniqC2Cqn3PwFu3JzNsuzojdwoqmAv026zhpuYs2wIih8C3NlFqDNcDtWnNtkDSIk5bCZzRbU74BxWBepM5gfMc9Hmt0Vhs4-kF2AgH-UyzKsug9OrEMY981wH4JmaAnhpdmK3GDN6MYDLE0j06lViVjp_i3KUw9QRlKFaJMT8dcQdEfMnvLxovYkpKD8eddR5-VPBoZHF1hM_xFXrg8xBiNai6I-oCJu1tk5KZ8PxAiXv6mrtzYPZhsfPH6h5ZhRik8bvcYctet7mB57A5QSGSHDloe97rIWy1Q2zrDNn9ryCqPoA--RjjjmLpOJlAXg9urm9dvZLoyqoRJeZLdNTUC8RnHsD8C5R6EsLVvLAvuMhFxZJjU_ulxB2ocQ-xG_0lQa3K7MtHVsar4EUc9kLQStUlvJn9yxxqYjNvcq9su7hXkucecS7ziu_jE_Tv1wG_1Pw",
+      "token": "2d.lVVdb-M2EPwrBz7lALdxrigKGOjDXa4fQdMEuNg4tEFgrKW1RJgiVX5YSYP8985StmUnF6N5sknuzs7ODqlHVanJ7aPSpZqo6FZsgxop12IVUoO_lXep_fSAINW4ks18SY02D-pupJaazUGaoQUbbEy3Gzn5Ujc6qsnZeKQabc9dslh9GKlSh9YQkB_VSlsBWpD_rnZe_-tsJIP8NZnEl89Rl843BIxdnk3Ngj1OSi50QyaoyfgJdHTIUaF23Sfy2I0-8ZOc0INL-azTZay_cKMmP4BfzbqqY16egSHoft2dn-X173sRAArOAwb6rRiN9HyFh_ZYlRwK9QShupo957CtZK13a11mzlnrn7fN4j_ZWHvXasl9Gm1GU5KIvokusob7s5Ei0MJ10pPnMhWC1DBZhLXstSvR_k9gXFLk3yRPW0x-YBR1I8y1jezBJJeUgrL_t7MCN5ue54jCpJJ_adqIyqLoSHmylUT8k9hLUks-ajIXGzCUVnyf05RQeDF4o1FgpO5vCjLAecxW2-yTl5yHF0euQgYmIoPATDc6hZog9WsO3pM9m3nfxYWDWzDRDDDps8Z5ls_ZRlqACrrUa9cbrCOU6821Y9Ixr3oJX5nZVvIdKZB503Sul19R43BGH4Om0z-cWVGk_zksVxTJe7ZiGXB_boCXEHKDvnF53f1muNHrRYraYTQHp4LVyrVT-NvVOqxYLqWKSW7PoFztkj9m9l6NN6klkNfLz88d_bHB1Sjo9Iq7-V_Oi5bHFHOLAEAuj5h46KJwdo3-SIR4-5u6cePwYML44vUfe4XBUnTcrzFH1b3qZHDtjkjonJlb6nV8UUXeaqHa48z7_AHcQ_fjHQkq37eeQ8g-UDezP09uec02hrv3p1ezy8uLX0_Or2dX0_nni5vpxdX59OS2QThVjE4QczYej0fj9wdz3GmdGezdelSi8ujzeMAmFz4R7FC4VkYr3wj7xXWi2SsWhmGjqzxJv1sjG_CwhbhqoTHlyYfxQGqZYhreom-S2k57gEk2pLbFV4XLa0lruNT5EcdPZWEKXaDMrZoNce-oqjxXgHiHXqAMaH-v7vDx-A8",
       "normalized": {
         "select": [],
         "where": [],
@@ -1524,6 +1535,17 @@
             }
           },
           {
+            "id": "rate",
+            "op": "sum",
+            "groupBy": [
+              "model"
+            ],
+            "expression": "SUM([events])/NULLIF(COUNT_DISTINCT([message_id])/1000,0)",
+            "interval": {
+              "kind": "rate"
+            }
+          },
+          {
             "id": "spread",
             "op": "count",
             "groupBy": [],
@@ -1547,7 +1569,179 @@
           }
         ]
       },
-      "packed": "{\"g\":[{\"id\":\"tokens\",\"op\":\"sum\",\"groupBy\":[\"model_family\"],\"field\":\"tokens\",\"label\":\"Tokens\",\"groupLimit\":10,\"minCount\":2,\"display\":{\"kind\":\"bar-horizontal\",\"valueLabel\":\"Tokens\",\"format\":{\"kind\":\"number\",\"decimals\":0},\"list\":{\"showBars\":true}},\"layout\":{\"widthRem\":30,\"heightRem\":12,\"minWidthRem\":1,\"minHeightRem\":1},\"sort\":[{\"key\":\"value\",\"dir\":\"desc\"}],\"where\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"anthropic\"}]},{\"id\":\"daily\",\"op\":\"count\",\"groupBy\":[],\"window\":{\"reduce\":\"mean\",\"periods\":7},\"dateGrouping\":{\"field\":\"time\",\"interval\":\"day\",\"timeZone\":\"UTC\",\"includeEmpty\":true,\"range\":\"query\",\"partialIntervals\":\"exclude\"},\"display\":{\"kind\":\"line\",\"xScale\":{\"mode\":\"linear\"},\"yScale\":{\"mode\":\"log\",\"min\":1}}},{\"id\":\"share\",\"op\":\"sum\",\"groupBy\":[\"provider\",\"model\"],\"field\":\"cost\",\"share\":\"group0\",\"display\":{\"kind\":\"table\",\"pivot\":{\"swap\":true}}},{\"id\":\"weekday\",\"op\":\"count\",\"groupBy\":[\"time\",\"provider\"],\"dateGrouping\":{\"field\":\"time\",\"interval\":\"dayOfWeek\",\"timeZone\":\"Asia/Kolkata\",\"includeEmpty\":true,\"range\":\"query\",\"occurrence\":{\"interval\":\"day\",\"includeEmpty\":true}},\"display\":{\"kind\":\"box\"},\"distribution\":{\"kind\":\"box\",\"input\":\"\",\"whiskers\":\"tukey\"}},{\"id\":\"hourly\",\"op\":\"count\",\"groupBy\":[\"time\"],\"dateGrouping\":{\"field\":\"time\",\"interval\":\"hourOfDay\",\"timeZone\":\"America/New_York\",\"includeEmpty\":true,\"range\":\"observed\"},\"display\":{\"kind\":\"line\"}},{\"id\":\"conversations\",\"op\":\"sum\",\"groupBy\":[\"model_family\"],\"field\":\"cost\",\"minCount\":{\"min\":5,\"distinct\":\"conversation_id\"}},{\"id\":\"calls\",\"op\":\"count\",\"groupBy\":[\"tool_name\"],\"minCount\":{\"min\":10,\"sum\":\"call_count\"}},{\"id\":\"spread\",\"op\":\"count\",\"groupBy\":[],\"expression\":\"COUNT()\",\"scope\":\"shownRows\",\"distribution\":{\"kind\":\"histogram\",\"input\":\"latency\",\"bins\":20}},{\"id\":\"future\",\"op\":\"count\",\"groupBy\":[],\"field\":\"latency\",\"diagnostics\":[\"Unsupported aggregate operation.\"],\"unsupportedOp\":\"median\"}]}"
+      "packed": "{\"g\":[{\"id\":\"tokens\",\"op\":\"sum\",\"groupBy\":[\"model_family\"],\"field\":\"tokens\",\"label\":\"Tokens\",\"groupLimit\":10,\"minCount\":2,\"display\":{\"kind\":\"bar-horizontal\",\"valueLabel\":\"Tokens\",\"format\":{\"kind\":\"number\",\"decimals\":0},\"list\":{\"showBars\":true}},\"layout\":{\"widthRem\":30,\"heightRem\":12,\"minWidthRem\":1,\"minHeightRem\":1},\"sort\":[{\"key\":\"value\",\"dir\":\"desc\"}],\"where\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"anthropic\"}]},{\"id\":\"daily\",\"op\":\"count\",\"groupBy\":[],\"window\":{\"reduce\":\"mean\",\"periods\":7},\"dateGrouping\":{\"field\":\"time\",\"interval\":\"day\",\"timeZone\":\"UTC\",\"includeEmpty\":true,\"range\":\"query\",\"partialIntervals\":\"exclude\"},\"display\":{\"kind\":\"line\",\"xScale\":{\"mode\":\"linear\"},\"yScale\":{\"mode\":\"log\",\"min\":1}}},{\"id\":\"share\",\"op\":\"sum\",\"groupBy\":[\"provider\",\"model\"],\"field\":\"cost\",\"share\":\"group0\",\"display\":{\"kind\":\"table\",\"pivot\":{\"swap\":true}}},{\"id\":\"weekday\",\"op\":\"count\",\"groupBy\":[\"time\",\"provider\"],\"dateGrouping\":{\"field\":\"time\",\"interval\":\"dayOfWeek\",\"timeZone\":\"Asia/Kolkata\",\"includeEmpty\":true,\"range\":\"query\",\"occurrence\":{\"interval\":\"day\",\"includeEmpty\":true}},\"display\":{\"kind\":\"box\"},\"distribution\":{\"kind\":\"box\",\"input\":\"\",\"whiskers\":\"tukey\"}},{\"id\":\"hourly\",\"op\":\"count\",\"groupBy\":[\"time\"],\"dateGrouping\":{\"field\":\"time\",\"interval\":\"hourOfDay\",\"timeZone\":\"America/New_York\",\"includeEmpty\":true,\"range\":\"observed\"},\"display\":{\"kind\":\"line\"}},{\"id\":\"conversations\",\"op\":\"sum\",\"groupBy\":[\"model_family\"],\"field\":\"cost\",\"minCount\":{\"min\":5,\"distinct\":\"conversation_id\"}},{\"id\":\"calls\",\"op\":\"count\",\"groupBy\":[\"tool_name\"],\"minCount\":{\"min\":10,\"sum\":\"call_count\"}},{\"id\":\"rate\",\"op\":\"sum\",\"groupBy\":[\"model\"],\"expression\":\"SUM([events])/NULLIF(COUNT_DISTINCT([message_id])/1000,0)\",\"interval\":{\"kind\":\"rate\"}},{\"id\":\"spread\",\"op\":\"count\",\"groupBy\":[],\"expression\":\"COUNT()\",\"scope\":\"shownRows\",\"distribution\":{\"kind\":\"histogram\",\"input\":\"latency\",\"bins\":20}},{\"id\":\"future\",\"op\":\"count\",\"groupBy\":[],\"field\":\"latency\",\"diagnostics\":[\"Unsupported aggregate operation.\"],\"unsupportedOp\":\"median\"}]}"
+    },
+    {
+      "name": "metric colour keys",
+      "state": {
+        "select": [],
+        "where": [],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0,
+        "aggregations": [
+          {
+            "id": "kinds",
+            "op": "count",
+            "groupBy": [
+              "repository",
+              "family"
+            ],
+            "display": {
+              "kind": "bar-vertical",
+              "colorBy": "family"
+            }
+          },
+          {
+            "id": "stale",
+            "op": "count",
+            "groupBy": [
+              "repository"
+            ],
+            "display": {
+              "kind": "bar-horizontal",
+              "colorBy": "family"
+            }
+          }
+        ]
+      },
+      "token": "2d.jY1BDsIwDAT_4nP4QI98A_VgklAsTBw5KVKI8ncMghuVetzV7kyHBaZTBwowwY1SKOBAsgUva6oWFpU1H5utQGOWQlW0WX_BO3GD2UGgkhlt0T8E-55RD4-olTyyTb2w6BvxO43hvspSkeM-5abpKkpPSUb675rHCw",
+      "normalized": {
+        "select": [],
+        "where": [],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0,
+        "aggregations": [
+          {
+            "id": "kinds",
+            "op": "count",
+            "groupBy": [
+              "repository",
+              "family"
+            ],
+            "display": {
+              "kind": "bar-vertical",
+              "colorBy": "family"
+            }
+          },
+          {
+            "id": "stale",
+            "op": "count",
+            "groupBy": [
+              "repository"
+            ],
+            "display": {
+              "kind": "bar-horizontal",
+              "colorBy": "family"
+            }
+          }
+        ]
+      },
+      "packed": "{\"g\":[{\"id\":\"kinds\",\"op\":\"count\",\"groupBy\":[\"repository\",\"family\"],\"display\":{\"kind\":\"bar-vertical\",\"colorBy\":\"family\"}},{\"id\":\"stale\",\"op\":\"count\",\"groupBy\":[\"repository\"],\"display\":{\"kind\":\"bar-horizontal\",\"colorBy\":\"family\"}}]}"
+    },
+    {
+      "name": "percentile whiskers and quantile distributions",
+      "state": {
+        "select": [],
+        "where": [],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0,
+        "aggregations": [
+          {
+            "id": "whiskers",
+            "op": "count",
+            "groupBy": [
+              "provider"
+            ],
+            "distribution": {
+              "kind": "box",
+              "input": "latency",
+              "whiskers": "percentile",
+              "whiskerProbabilities": [
+                0.05,
+                0.95
+              ]
+            },
+            "display": {
+              "kind": "box"
+            }
+          },
+          {
+            "id": "curve",
+            "op": "count",
+            "groupBy": [
+              "provider"
+            ],
+            "distribution": {
+              "kind": "quantiles",
+              "input": "latency",
+              "probabilities": [
+                0,
+                0.25,
+                0.5,
+                0.9,
+                1
+              ]
+            },
+            "display": {
+              "kind": "quantiles"
+            }
+          }
+        ]
+      },
+      "token": "2d.nY-xDsIwDET_xXOEClIHOvIF7FWHJo2K1SgJTlKoqvw7boWoQIiB8c5n3_MMPVT1DNhBBbcLhkFTAAHOs1Yu2ciiJ5f8aeIgeHIjdpqgEdBh8KZle4YB7XJAujvkdRAJZYro7MdUAFqfIivTRm3VxM6rtgKvSWkb0ejNP5OTrUSDETVn6mJXlKLYHcsmZ_EkV4nGZeU_7Gtq187wA37LfHuB778zMuBhoVxJxZ5Rm_wA",
+      "normalized": {
+        "select": [],
+        "where": [],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0,
+        "aggregations": [
+          {
+            "id": "whiskers",
+            "op": "count",
+            "groupBy": [
+              "provider"
+            ],
+            "display": {
+              "kind": "box"
+            },
+            "distribution": {
+              "kind": "box",
+              "input": "latency",
+              "whiskers": "percentile",
+              "whiskerProbabilities": [
+                0.05,
+                0.95
+              ]
+            }
+          },
+          {
+            "id": "curve",
+            "op": "count",
+            "groupBy": [
+              "provider"
+            ],
+            "display": {
+              "kind": "quantiles"
+            },
+            "distribution": {
+              "kind": "quantiles",
+              "input": "latency",
+              "probabilities": [
+                0,
+                0.25,
+                0.5,
+                0.9,
+                1
+              ]
+            }
+          }
+        ]
+      },
+      "packed": "{\"g\":[{\"id\":\"whiskers\",\"op\":\"count\",\"groupBy\":[\"provider\"],\"display\":{\"kind\":\"box\"},\"distribution\":{\"kind\":\"box\",\"input\":\"latency\",\"whiskers\":\"percentile\",\"whiskerProbabilities\":[0.05,0.95]}},{\"id\":\"curve\",\"op\":\"count\",\"groupBy\":[\"provider\"],\"display\":{\"kind\":\"quantiles\"},\"distribution\":{\"kind\":\"quantiles\",\"input\":\"latency\",\"probabilities\":[0,0.25,0.5,0.9,1]}}]}"
     },
     {
       "name": "every metric option",
@@ -1577,9 +1771,14 @@
               "reduce": "total",
               "partial": "include"
             },
+            "interval": {
+              "kind": "proportion",
+              "level": 0.9
+            },
             "dateGrouping": {
               "field": "time",
               "interval": "week",
+              "every": 2,
               "timeZone": "Europe/Paris",
               "includeEmpty": false,
               "range": "custom",
@@ -1593,9 +1792,11 @@
               "xLabel": "X",
               "yLabel": "Y",
               "legendPosition": "bottom",
+              "colorBy": "provider",
               "maxGroups": 8,
               "showOther": true,
               "boxMean": false,
+              "showIntervals": false,
               "xScale": {
                 "mode": "linear",
                 "min": -1.5,
@@ -1667,7 +1868,7 @@
           }
         ]
       },
-      "token": "2d.ZVTbbhMxFPwV5CeQQpuEi9C-taUUpBQqoIVSRcjxOlkrXp-V7c0mivLvzPFeSJUoD-vx2DPn4rMXK5E97YXJRSaktWIkqOLPzQqfK091dbkDQ1SeNibXXsxHYmm0Zb6VUTu1A9HKhbZAZgOit5XXIRhygC8ebl4-dez5q2e7j_22ohDTXlBU6dbNrYyqMG6wMjOliSJ7NxKlcVdUOyze4EQhPZ-IFCVH0BiXUyOyvfA6r9XxViV9NPjKhHHK1rlmTHtDecBVh5HI4fKGtVgWN_SxRlMy17io_SZd0Gi9BsIbf8ixyHXtYf38TnoTEjcpXJdVRAqX0gY9El66FXNVHSKVHG6EJQDT8fT96_EEf86PY80WmrZQ5_xLZwB2hxDYtgmVlZDZizWix2ZQMoKKk2DXetZV6AHAtl_8xmLXLx65jnoF6TsKJraVW1BsbZZym9IC3Q-ccWq-xQLXZ9HXCGtB21stcaILc_tDSYs496IkOESvGKclu0HlRPZ6csZFlFuRTcawvzuhExc9ccdn4_FkIKcfTizJlxJ5G-LNay-TaSRDK1OmFOFcoNorfe-4cUTQihxKzWnfsaBQlhSXsUrZ4pCLIis54qPC3v-84iRvP52Iolu6znimoytSxa2x1pwqmkDPb78o0YBKnn_Vzd9H8muW2p1IoUuVRsMfhzcFExKJxiW5lB5oV4I6tI18RZYYbgvFtAduiAFZSH9ccG3xdFK6U2PMULdOqTIbaqUaiRnRNzQ1Hw36ALaCwkFFti5dC0kgh7Y7ozeLutUYQkLTpGdS1Zyz_9OkKUxYa_YsYr3WDC2Mw5ILjy4n5u_xzPNYfNcl3I1HotBmVcS0nLxNrfNr2J9ME_D5mIKrAvHLw_RjjawdMWNO8GB-JFxt01tbGo88H0Y9WaXp03O72HuylczFpMyNXDkMNqMAP4kr6b3R-QvaaH8m5of54R8",
+      "token": "2d.ZVTbbhMxEP0V5CeQlnQTLoJ9a0MpSClUQAulipDjdbJWvOuVL9lEUf6dM95LUiXKw3p85nJmjmfPVix72jOVs4xxrVnCTE2fmxU-V9aE-moHBKut2ahcWjZP2FJJTXjNvazEDkDNF1LDMhsscltb6ZwyFcyXDzcvnzr0_NWz28f-Whjn450TppZtNbfci0JVQykzVSrPsncJK1U1NaHC4Q08Cm7JwxvPiUGjqtw0LNszK_MgTq9qbr3CV8ZUJXTIJdmkVSZ3CHVIYPbSbgixZ2vEARLUawM3UAFTuSGm6egjwDko3VBhVCMc-sZ4VVLgYyzWSLkm3htp0c5JEiF_TUW1XQckkBd33CoXvWJh12XtAV1y7WTCLK9WhBXBeVNSlzyYwDBJJ-9fp2P8KXystzVNWlNH-GtXClgOzImAcrXmSDOQdYJ7QOEJdJCzbrAPMGz7wx8cdv3hMTZlhdR3xqnYpYwtjG_LFEYbSwo6CgjD49vYNRTzgaZnmu--wE3mbQDXhdneSo4wHXcCnNTfWbc_BddoyZ6VBmSgRlVJHsMr-L4ej0gmfMuycQqmuzO4IVlFbDpK0_EAjj94LI0tOVo8tCYPlncqyKVQZawGfs4EK-R9RdJkTgpTQUw0oR0lZEIbQbOvY2OpO0WRldScEw3c_5rSPLafz5JCYp2cnuWRtRHFrdJanWdUzjyPfllC4oJffJPNv0dj15Rqd5YK70BIPKlTehMgkSLCaA5X3B5HEFyr_ikNGeZ2fAR7IO0MlgW3p9qQGo8ztjtqaIa5dZlqtTFtqoZjC_XaN80nBXWgLCdaTYWyak0clkMrZG_VIrQ5BkqQUnxRdaCeHfdVUyi3llQz82EtybRQFY40eDwIQ_g9Fknuix-yRHVpwgqpVoWPx_HbKJ3fw_0YTxqGL6cQhHLYG3G_Uo6sXWIpNXgoPmFV0PFZLpVFnw9JDxZxv_XYjnsP1pyw2MW54qsKq1MJmJ_YlFurZP7CYNGM2PwwP_wH",
       "normalized": {
         "select": [],
         "where": [],
@@ -1694,9 +1895,14 @@
               "partial": "include",
               "periods": 3
             },
+            "interval": {
+              "kind": "proportion",
+              "level": 0.9
+            },
             "dateGrouping": {
               "field": "time",
               "interval": "week",
+              "every": 2,
               "timeZone": "Europe/Paris",
               "includeEmpty": false,
               "range": "custom",
@@ -1710,9 +1916,11 @@
               "xLabel": "X",
               "yLabel": "Y",
               "legendPosition": "bottom",
+              "colorBy": "provider",
               "maxGroups": 8,
               "showOther": true,
               "boxMean": false,
+              "showIntervals": false,
               "xScale": {
                 "mode": "linear",
                 "min": -1.5,
@@ -1784,7 +1992,298 @@
           }
         ]
       },
-      "packed": "{\"g\":[{\"id\":\"all\",\"op\":\"avg\",\"groupBy\":[\"provider\"],\"field\":\"latency\",\"label\":\"Latency\",\"expression\":\"AVG([latency])\",\"expressionY\":\"AVG([cost])\",\"scope\":\"allMatching\",\"groupLimit\":5,\"minCount\":3,\"share\":\"total\",\"window\":{\"reduce\":\"total\",\"partial\":\"include\",\"periods\":3},\"dateGrouping\":{\"field\":\"time\",\"interval\":\"week\",\"timeZone\":\"Europe/Paris\",\"includeEmpty\":false,\"range\":\"custom\",\"start\":\"2026-01-01\",\"end\":\"2026-02-01\",\"partialIntervals\":\"include\"},\"display\":{\"kind\":\"scatter\",\"valueLabel\":\"V\",\"xLabel\":\"X\",\"yLabel\":\"Y\",\"legendPosition\":\"bottom\",\"maxGroups\":8,\"showOther\":true,\"boxMean\":false,\"xScale\":{\"mode\":\"linear\",\"min\":-1.5,\"max\":10},\"yScale\":{\"mode\":\"log\",\"min\":0.001,\"max\":1000000},\"format\":{\"kind\":\"duration\",\"decimals\":1,\"sourceUnit\":\"seconds\",\"style\":\"clock\",\"pattern\":\"hh:mm\",\"timeZone\":\"UTC\"},\"xFormat\":{\"kind\":\"datetime\",\"sourceUnit\":\"epochMilliseconds\",\"style\":\"iso\",\"timeZone\":\"America/New_York\"},\"yFormat\":{\"kind\":\"percent\",\"decimals\":2},\"list\":{\"showBars\":false,\"useGroupColors\":true,\"showValues\":true,\"barPosition\":\"below\",\"maxLabelLines\":2},\"pivot\":{\"swap\":false,\"rowDir\":\"desc\",\"columnDir\":\"asc\"}},\"distribution\":{\"kind\":\"box\",\"input\":\"latency\",\"whiskers\":\"tukey\",\"bins\":0},\"layout\":{\"widthRem\":20,\"heightRem\":14,\"minWidthRem\":12,\"minHeightRem\":14},\"sort\":[{\"key\":\"group0\",\"dir\":\"asc\",\"nulls\":\"first\"},{\"key\":\"count\",\"dir\":\"desc\",\"nulls\":\"last\"}],\"diagnostics\":[\"Carried over.\"]}]}"
+      "packed": "{\"g\":[{\"id\":\"all\",\"op\":\"avg\",\"groupBy\":[\"provider\"],\"field\":\"latency\",\"label\":\"Latency\",\"expression\":\"AVG([latency])\",\"expressionY\":\"AVG([cost])\",\"scope\":\"allMatching\",\"groupLimit\":5,\"minCount\":3,\"share\":\"total\",\"window\":{\"reduce\":\"total\",\"partial\":\"include\",\"periods\":3},\"interval\":{\"kind\":\"proportion\",\"level\":0.9},\"dateGrouping\":{\"field\":\"time\",\"interval\":\"week\",\"every\":2,\"timeZone\":\"Europe/Paris\",\"includeEmpty\":false,\"range\":\"custom\",\"start\":\"2026-01-01\",\"end\":\"2026-02-01\",\"partialIntervals\":\"include\"},\"display\":{\"kind\":\"scatter\",\"valueLabel\":\"V\",\"xLabel\":\"X\",\"yLabel\":\"Y\",\"legendPosition\":\"bottom\",\"colorBy\":\"provider\",\"maxGroups\":8,\"showOther\":true,\"boxMean\":false,\"showIntervals\":false,\"xScale\":{\"mode\":\"linear\",\"min\":-1.5,\"max\":10},\"yScale\":{\"mode\":\"log\",\"min\":0.001,\"max\":1000000},\"format\":{\"kind\":\"duration\",\"decimals\":1,\"sourceUnit\":\"seconds\",\"style\":\"clock\",\"pattern\":\"hh:mm\",\"timeZone\":\"UTC\"},\"xFormat\":{\"kind\":\"datetime\",\"sourceUnit\":\"epochMilliseconds\",\"style\":\"iso\",\"timeZone\":\"America/New_York\"},\"yFormat\":{\"kind\":\"percent\",\"decimals\":2},\"list\":{\"showBars\":false,\"useGroupColors\":true,\"showValues\":true,\"barPosition\":\"below\",\"maxLabelLines\":2},\"pivot\":{\"swap\":false,\"rowDir\":\"desc\",\"columnDir\":\"asc\"}},\"distribution\":{\"kind\":\"box\",\"input\":\"latency\",\"whiskers\":\"tukey\",\"bins\":0},\"layout\":{\"widthRem\":20,\"heightRem\":14,\"minWidthRem\":12,\"minHeightRem\":14},\"sort\":[{\"key\":\"group0\",\"dir\":\"asc\",\"nulls\":\"first\"},{\"key\":\"count\",\"dir\":\"desc\",\"nulls\":\"last\"}],\"diagnostics\":[\"Carried over.\"]}]}"
+    },
+    {
+      "name": "currency and compact formats",
+      "state": {
+        "select": [
+          {
+            "field": "cost",
+            "display": {
+              "kind": "currency",
+              "currency": "USD",
+              "decimals": 2,
+              "notation": "compact",
+              "locale": "en-US"
+            }
+          },
+          {
+            "field": "tokens",
+            "display": {
+              "kind": "number",
+              "notation": "compact",
+              "decimals": 1
+            }
+          },
+          {
+            "field": "old",
+            "display": {
+              "kind": "compact"
+            }
+          },
+          {
+            "field": "cost_eur",
+            "display": {
+              "kind": "currency",
+              "currency": "eur"
+            }
+          },
+          {
+            "field": "cost_any",
+            "display": {
+              "kind": "currency"
+            }
+          }
+        ],
+        "where": [],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0,
+        "aggregations": [
+          {
+            "id": "spend",
+            "op": "sum",
+            "field": "cost",
+            "groupBy": [
+              "model"
+            ],
+            "display": {
+              "kind": "bar-horizontal",
+              "format": {
+                "kind": "currency",
+                "currency": "USD",
+                "decimals": 0,
+                "notation": "compact"
+              }
+            }
+          },
+          {
+            "id": "tokens",
+            "op": "sum",
+            "field": "tokens",
+            "groupBy": [],
+            "display": {
+              "kind": "value",
+              "format": {
+                "kind": "number",
+                "notation": "compact",
+                "decimals": 2
+              }
+            }
+          },
+          {
+            "id": "stray",
+            "op": "avg",
+            "field": "cost",
+            "groupBy": [],
+            "display": {
+              "kind": "value",
+              "format": {
+                "kind": "number",
+                "currency": "USD",
+                "notation": "standard"
+              },
+              "yFormat": {
+                "kind": "percent",
+                "notation": "compact"
+              }
+            }
+          },
+          {
+            "id": "bad",
+            "op": "sum",
+            "field": "cost",
+            "groupBy": [],
+            "display": {
+              "kind": "value",
+              "format": {
+                "kind": "currency",
+                "currency": "usd",
+                "notation": "short"
+              }
+            }
+          }
+        ],
+        "itemDetails": {
+          "modes": [
+            "modal"
+          ],
+          "views": {
+            "modal": {
+              "version": 1,
+              "properties": [
+                {
+                  "id": "c",
+                  "field": "cost",
+                  "format": {
+                    "kind": "currency",
+                    "currency": "JPY",
+                    "notation": "compact"
+                  }
+                },
+                {
+                  "id": "s",
+                  "field": "cost",
+                  "format": {
+                    "kind": "currency",
+                    "currency": "GBP",
+                    "notation": "standard"
+                  }
+                },
+                {
+                  "id": "t",
+                  "field": "tokens",
+                  "format": {
+                    "kind": "number",
+                    "notation": "compact",
+                    "decimals": 1
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "token": "2d.pVPBbsIwDP0V5HNAsCNHNG3aTkiIw4SqKaSmi0iTKk07sar_PieDtnTtmLZTE8d-fn5-rSCH5W4HwuQOmC6UYhUcpY5hCaKwFrU4AWuPS9hu7ikQo5ApV1R8x0Abx5002teYNOOCoEAZwRVSCPV0u4E6Yjtw5og67_fRRbpHSyWDOG2nRcAwKgb_9YxfsbDthesTRBGDhCaqQHroPENqwcBk_lKkdEysKbIVTbKD1MSoqB4OEgnVd_UqQCzzTHFKaSjuuZ2-GSs_jHZcUcrB2JS7TkZHrJbxfEC5gSHruiY1AuGLQsOMO1SbxO9kS64KHOLYCH1rex1CubMEfubDy2SMz6h0t9jUDE4P_bcMrUB9RWTPRxf5LxrNgqgV1fFEE4QU_reAJ01lMp6k6KwUk0vqjHB6TxcRZxCRS4GAq2CvAEMHMg2FS4nvFKkgM0YFl5Zo86D9gkFmDc3tZCg6Ty085evZfrJex23P65cxtzW7_TP442rdwQmFfV_-xn009CDBoKHFQ9DqS73lnLxQfwI",
+      "normalized": {
+        "select": [
+          {
+            "field": "cost",
+            "display": {
+              "kind": "currency",
+              "currency": "USD",
+              "decimals": 2,
+              "notation": "compact",
+              "locale": "en-US"
+            }
+          },
+          {
+            "field": "tokens",
+            "display": {
+              "kind": "number",
+              "notation": "compact",
+              "decimals": 1
+            }
+          },
+          {
+            "field": "old"
+          },
+          {
+            "field": "cost_eur"
+          },
+          {
+            "field": "cost_any"
+          }
+        ],
+        "where": [],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0,
+        "aggregations": [
+          {
+            "id": "spend",
+            "op": "sum",
+            "groupBy": [
+              "model"
+            ],
+            "field": "cost",
+            "display": {
+              "kind": "bar-horizontal",
+              "format": {
+                "kind": "currency",
+                "decimals": 0,
+                "currency": "USD",
+                "notation": "compact"
+              }
+            }
+          },
+          {
+            "id": "tokens",
+            "op": "sum",
+            "groupBy": [],
+            "field": "tokens",
+            "display": {
+              "kind": "value",
+              "format": {
+                "kind": "number",
+                "decimals": 2,
+                "notation": "compact"
+              }
+            }
+          },
+          {
+            "id": "stray",
+            "op": "avg",
+            "groupBy": [],
+            "field": "cost",
+            "display": {
+              "kind": "value",
+              "format": {
+                "kind": "number"
+              },
+              "yFormat": {
+                "kind": "percent"
+              }
+            }
+          },
+          {
+            "id": "bad",
+            "op": "sum",
+            "groupBy": [],
+            "field": "cost",
+            "display": {
+              "kind": "value",
+              "format": {
+                "kind": "currency"
+              }
+            },
+            "diagnostics": [
+              "Invalid metric currency.",
+              "Invalid metric notation."
+            ]
+          }
+        ],
+        "itemDetails": {
+          "modes": [
+            "modal"
+          ],
+          "views": {
+            "modal": {
+              "version": 1,
+              "properties": [
+                {
+                  "id": "c",
+                  "field": "cost",
+                  "format": {
+                    "kind": "currency",
+                    "currency": "JPY",
+                    "notation": "compact"
+                  }
+                },
+                {
+                  "id": "s",
+                  "field": "cost",
+                  "format": {
+                    "kind": "currency",
+                    "currency": "GBP"
+                  }
+                },
+                {
+                  "id": "t",
+                  "field": "tokens",
+                  "format": {
+                    "kind": "number",
+                    "decimals": 1,
+                    "notation": "compact"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "packed": "{\"s\":[[\"cost\",null,{\"kind\":\"currency\",\"currency\":\"USD\",\"decimals\":2,\"notation\":\"compact\",\"locale\":\"en-US\"}],[\"tokens\",null,{\"kind\":\"number\",\"notation\":\"compact\",\"decimals\":1}],[\"old\"],[\"cost_eur\"],[\"cost_any\"]],\"g\":[{\"id\":\"spend\",\"op\":\"sum\",\"groupBy\":[\"model\"],\"field\":\"cost\",\"display\":{\"kind\":\"bar-horizontal\",\"format\":{\"kind\":\"currency\",\"decimals\":0,\"currency\":\"USD\",\"notation\":\"compact\"}}},{\"id\":\"tokens\",\"op\":\"sum\",\"groupBy\":[],\"field\":\"tokens\",\"display\":{\"kind\":\"value\",\"format\":{\"kind\":\"number\",\"decimals\":2,\"notation\":\"compact\"}}},{\"id\":\"stray\",\"op\":\"avg\",\"groupBy\":[],\"field\":\"cost\",\"display\":{\"kind\":\"value\",\"format\":{\"kind\":\"number\"},\"yFormat\":{\"kind\":\"percent\"}}},{\"id\":\"bad\",\"op\":\"sum\",\"groupBy\":[],\"field\":\"cost\",\"display\":{\"kind\":\"value\",\"format\":{\"kind\":\"currency\"}},\"diagnostics\":[\"Invalid metric currency.\",\"Invalid metric notation.\"]}],\"d\":{\"modes\":[\"modal\"],\"views\":{\"pool\":[{\"version\":1,\"properties\":[{\"id\":\"c\",\"field\":\"cost\",\"format\":{\"kind\":\"currency\",\"currency\":\"JPY\",\"notation\":\"compact\"}},{\"id\":\"s\",\"field\":\"cost\",\"format\":{\"kind\":\"currency\",\"currency\":\"GBP\"}},{\"id\":\"t\",\"field\":\"tokens\",\"format\":{\"kind\":\"number\",\"decimals\":1,\"notation\":\"compact\"}}]}],\"refs\":{\"modal\":0}}}}"
     },
     {
       "name": "item details with pooled views",
@@ -2363,6 +2862,163 @@
         }
       },
       "packed": "{\"w\":[{\"field\":\"rows\",\"op\":\">\",\"value\":\"1\"}],\"o\":[{\"field\":\"cost\",\"dir\":\"desc\"}],\"b\":{\"keys\":[\"provider\"],\"summaries\":[{\"id\":\"rows\",\"op\":\"count\"},{\"id\":\"cost\",\"op\":\"sum\",\"field\":\"cost\",\"label\":\"Cost\",\"display\":{\"kind\":\"number\",\"decimals\":2}},{\"id\":\"p50\",\"op\":\"formula\",\"expression\":\"MEDIAN([latency])\"},{\"id\":\"latest\",\"op\":\"row\",\"field\":\"model\"},{\"id\":\"open\",\"op\":\"link\",\"link\":{\"label\":{\"column\":\"provider\"},\"to\":{\"kind\":\"query\",\"target\":\"tokens\",\"base\":\"source\",\"keyFilters\":true,\"patch\":{\"id\":\"opus\",\"owns\":[\"filters\",\"order\"],\"query\":{\"where\":[{\"field\":\"model\",\"op\":\"contains\",\"value\":\"opus\"}],\"orderBy\":[{\"field\":\"cost\",\"dir\":\"desc\"}]}},\"params\":{\"2\":\"two\",\"view\":\"tokens\"}}},\"label\":\"Open\"},{\"id\":\"docs\",\"op\":\"link\",\"link\":{\"label\":\"Docs\",\"to\":{\"kind\":\"template\",\"template\":\"https://example.com/{provider}\"}}}],\"representative\":{\"orderBy\":[{\"field\":\"time\",\"dir\":\"desc\",\"nulls\":\"last\"}]},\"source\":{\"select\":[],\"where\":[{\"field\":\"provider\",\"op\":\"=\",\"value\":\"anthropic\"}],\"orderBy\":[],\"limit\":100,\"offset\":0,\"aggregations\":[{\"id\":\"n\",\"op\":\"count\",\"groupBy\":[]}]}}}"
+    },
+    {
+      "name": "grouping with calendar keys of several intervals",
+      "state": {
+        "select": [
+          {
+            "field": "called_at"
+          },
+          {
+            "field": "ended_at"
+          },
+          {
+            "field": "rows"
+          }
+        ],
+        "where": [],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0,
+        "grouping": {
+          "keys": [
+            {
+              "field": "called_at",
+              "interval": "hour",
+              "every": 6,
+              "timeZone": "Asia/Kolkata"
+            },
+            {
+              "field": "ended_at",
+              "interval": "month",
+              "every": 1
+            }
+          ],
+          "summaries": [
+            {
+              "id": "rows",
+              "op": "count"
+            }
+          ],
+          "representative": null,
+          "source": {
+            "select": [],
+            "where": [],
+            "orderBy": [],
+            "limit": 100,
+            "offset": 0
+          }
+        },
+        "aggregations": [
+          {
+            "id": "hours",
+            "op": "count",
+            "groupBy": [
+              "called_at"
+            ],
+            "dateGrouping": {
+              "field": "called_at",
+              "interval": "hour",
+              "every": 3,
+              "timeZone": "America/New_York",
+              "includeEmpty": true,
+              "range": "observed"
+            }
+          },
+          {
+            "id": "days",
+            "op": "count",
+            "groupBy": [
+              "called_at"
+            ],
+            "dateGrouping": {
+              "field": "called_at",
+              "interval": "day",
+              "every": 1,
+              "includeEmpty": false,
+              "range": "query"
+            }
+          }
+        ]
+      },
+      "token": "2d.tZLNTsMwEITfZc-WWoTEoTeQEAck7lBV1TbetFb8E9Z2oiryu7MOhRJx4sAt4x1_GY89QYTNdgsNWkt6jwl2agvk9VVwGCPsdgqO4pzAaNjAKWSOoCD0IpqQfRJx5JD7h7O4FjjQmOipzowXxAStIVshV5MC4xPxgPbClhUaiIV1qyAZR2_Bk8zuHbFpcPVC4_41cDfvbGzW9Oj6JPbEmRQw-mO1h0MUKmkoRV2Sazz_V3BB_8rToo0_Ar3neqhSBH6oxI4kTW31T53cLTuJBlfPwXaYEOo5v1jft7hAueDTCWqCmJ1DNvSZYG5nvutFO9XI1DNF8gmTGeSXPlsr2yVTI0qeEFlqklDEO56IZbF-BtbEc60irHFGLDfrtQzaNpKIdSnlAw",
+      "normalized": {
+        "select": [
+          {
+            "field": "called_at"
+          },
+          {
+            "field": "ended_at"
+          },
+          {
+            "field": "rows"
+          }
+        ],
+        "where": [],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0,
+        "grouping": {
+          "keys": [
+            {
+              "field": "called_at",
+              "interval": "hour",
+              "every": 6,
+              "timeZone": "Asia/Kolkata"
+            },
+            {
+              "field": "ended_at",
+              "interval": "month"
+            }
+          ],
+          "summaries": [
+            {
+              "id": "rows",
+              "op": "count"
+            }
+          ],
+          "representative": null,
+          "source": {
+            "select": [],
+            "where": [],
+            "orderBy": [],
+            "limit": 100,
+            "offset": 0
+          }
+        },
+        "aggregations": [
+          {
+            "id": "hours",
+            "op": "count",
+            "groupBy": [
+              "called_at"
+            ],
+            "dateGrouping": {
+              "field": "called_at",
+              "interval": "hour",
+              "every": 3,
+              "timeZone": "America/New_York",
+              "includeEmpty": true,
+              "range": "observed"
+            }
+          },
+          {
+            "id": "days",
+            "op": "count",
+            "groupBy": [
+              "called_at"
+            ],
+            "dateGrouping": {
+              "field": "called_at",
+              "interval": "day",
+              "includeEmpty": false,
+              "range": "query"
+            }
+          }
+        ]
+      },
+      "packed": "{\"s\":[[\"called_at\"],[\"ended_at\"],[\"rows\"]],\"g\":[{\"id\":\"hours\",\"op\":\"count\",\"groupBy\":[\"called_at\"],\"dateGrouping\":{\"field\":\"called_at\",\"interval\":\"hour\",\"every\":3,\"timeZone\":\"America/New_York\",\"includeEmpty\":true,\"range\":\"observed\"}},{\"id\":\"days\",\"op\":\"count\",\"groupBy\":[\"called_at\"],\"dateGrouping\":{\"field\":\"called_at\",\"interval\":\"day\",\"includeEmpty\":false,\"range\":\"query\"}}],\"b\":{\"keys\":[{\"field\":\"called_at\",\"interval\":\"hour\",\"every\":6,\"timeZone\":\"Asia/Kolkata\"},{\"field\":\"ended_at\",\"interval\":\"month\"}],\"summaries\":[{\"id\":\"rows\",\"op\":\"count\"}],\"representative\":null,\"source\":{\"select\":[],\"where\":[],\"orderBy\":[],\"limit\":100,\"offset\":0}}}"
     },
     {
       "name": "grouping with calendar keys",
@@ -6513,7 +7169,7 @@
     },
     {
       "name": "unnormalized metrics",
-      "token": "2j.eyJnIjpbeyJpZCI6ImEiLCJvcCI6InN1bSIsImZpZWxkIjoiIiwiZ3JvdXBCeSI6IngiLCJzY29wZSI6ImV2ZXJ5dGhpbmciLCJsYXlvdXQiOnsid2lkdGhSZW0iOjMsIm1pbldpZHRoUmVtIjo5fSwic29ydCI6W3sia2V5IjoidmFsdWUiLCJkaXIiOiJ1cCJ9LHsia2V5IjoiZ3JvdXA3IiwiZGlyIjpbImRlc2MiXX0sM10sImRpYWdub3N0aWNzIjpbImtlcHQiLDQsImtlcHQiXX0seyJpZCI6ImIiLCJvcCI6ImF2ZyIsImdyb3VwQnkiOlsiZzEiLDddLCJ3aW5kb3ciOiJ3ZWVrbHkiLCJkYXRlR3JvdXBpbmciOnsiZmllbGQiOiJ0In0sImRpc3BsYXkiOnsia2luZCI6MywieFNjYWxlIjoxfSwiZGlzdHJpYnV0aW9uIjpbXSwid2hlcmUiOlt7ImZpZWxkIjoieCIsIm9wIjoibm9wZSIsInZhbHVlIjoiMSJ9XX0seyJpZCI6ImMiLCJvcCI6Im1heCIsInVuc3VwcG9ydGVkT3AiOiJwOTkiLCJncm91cEJ5IjpbXSwiZGlzcGxheSI6eyJtYXhHcm91cHMiOjAsImxlZ2VuZFBvc2l0aW9uIjoibGVmdCIsImZvcm1hdCI6eyJraW5kIjoicGVyY2VudCIsInBhdHRlcm4iOiJ4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eCJ9fSwid2luZG93Ijp7InBlcmlvZHMiOiJhbGwiLCJwYXJ0aWFsIjoib21pdCJ9fSx7ImlkIjoiZCIsIm9wIjoiY291bnQiLCJncm91cEJ5IjpbInQiXSwiZGF0ZUdyb3VwaW5nIjp7ImZpZWxkIjoidCIsImludGVydmFsIjoiZGF5T2ZXZWVrIiwiaW5jbHVkZUVtcHR5IjpmYWxzZSwicmFuZ2UiOiJxdWVyeSIsIm9jY3VycmVuY2UiOnsiaW50ZXJ2YWwiOiJ3ZWVrIiwiaW5jbHVkZUVtcHR5IjoieWVzIn19fSx7ImlkIjoiZSIsIm9wIjoiY291bnQiLCJncm91cEJ5IjpbInQiXSwiZGF0ZUdyb3VwaW5nIjp7ImZpZWxkIjoidCIsImludGVydmFsIjoiaG91ck9mRGF5IiwiaW5jbHVkZUVtcHR5Ijp0cnVlLCJyYW5nZSI6InF1ZXJ5Iiwib2NjdXJyZW5jZSI6ImhvdXJseSJ9fV19",
+      "token": "2j.eyJnIjpbeyJpZCI6ImEiLCJvcCI6InN1bSIsImZpZWxkIjoiIiwiZ3JvdXBCeSI6IngiLCJzY29wZSI6ImV2ZXJ5dGhpbmciLCJsYXlvdXQiOnsid2lkdGhSZW0iOjMsIm1pbldpZHRoUmVtIjo5fSwic29ydCI6W3sia2V5IjoidmFsdWUiLCJkaXIiOiJ1cCJ9LHsia2V5IjoiZ3JvdXA3IiwiZGlyIjpbImRlc2MiXX0sM10sImRpYWdub3N0aWNzIjpbImtlcHQiLDQsImtlcHQiXX0seyJpZCI6ImIiLCJvcCI6ImF2ZyIsImdyb3VwQnkiOlsiZzEiLDddLCJ3aW5kb3ciOiJ3ZWVrbHkiLCJkYXRlR3JvdXBpbmciOnsiZmllbGQiOiJ0In0sImRpc3BsYXkiOnsia2luZCI6MywieFNjYWxlIjoxfSwiZGlzdHJpYnV0aW9uIjpbXSwid2hlcmUiOlt7ImZpZWxkIjoieCIsIm9wIjoibm9wZSIsInZhbHVlIjoiMSJ9XX0seyJpZCI6ImMiLCJvcCI6Im1heCIsInVuc3VwcG9ydGVkT3AiOiJwOTkiLCJncm91cEJ5IjpbXSwiZGlzcGxheSI6eyJtYXhHcm91cHMiOjAsImxlZ2VuZFBvc2l0aW9uIjoibGVmdCIsImNvbG9yQnkiOjcsImZvcm1hdCI6eyJraW5kIjoicGVyY2VudCIsInBhdHRlcm4iOiJ4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eCJ9fSwid2luZG93Ijp7InBlcmlvZHMiOiJhbGwiLCJwYXJ0aWFsIjoib21pdCJ9fSx7ImlkIjoiZCIsIm9wIjoiY291bnQiLCJncm91cEJ5IjpbInQiXSwiZGF0ZUdyb3VwaW5nIjp7ImZpZWxkIjoidCIsImludGVydmFsIjoiZGF5T2ZXZWVrIiwiaW5jbHVkZUVtcHR5IjpmYWxzZSwicmFuZ2UiOiJxdWVyeSIsIm9jY3VycmVuY2UiOnsiaW50ZXJ2YWwiOiJ3ZWVrIiwiaW5jbHVkZUVtcHR5IjoieWVzIn19fSx7ImlkIjoiZSIsIm9wIjoiY291bnQiLCJncm91cEJ5IjpbInQiXSwiZGF0ZUdyb3VwaW5nIjp7ImZpZWxkIjoidCIsImludGVydmFsIjoiaG91ck9mRGF5IiwiaW5jbHVkZUVtcHR5Ijp0cnVlLCJyYW5nZSI6InF1ZXJ5Iiwib2NjdXJyZW5jZSI6ImhvdXJseSJ9fSx7ImlkIjoiZiIsIm9wIjoiY291bnQiLCJncm91cEJ5IjpbInQiXSwiaW50ZXJ2YWwiOnsia2luZCI6IndhbGQiLCJsZXZlbCI6ImhpZ2gifX0seyJpZCI6ImciLCJvcCI6ImNvdW50IiwiZ3JvdXBCeSI6WyJ0Il0sImludGVydmFsIjoid2lsc29uIn1dfQ",
       "normalized": {
         "select": [],
         "where": [],
@@ -6585,6 +7241,7 @@
             },
             "diagnostics": [
               "Invalid metric display kind.",
+              "Invalid metric colorBy.",
               "Invalid metric maxGroups.",
               "Invalid metric pattern."
             ],
@@ -6624,10 +7281,33 @@
             "diagnostics": [
               "Invalid metric date grouping occurrence."
             ]
+          },
+          {
+            "id": "f",
+            "op": "count",
+            "groupBy": [
+              "t"
+            ],
+            "interval": {},
+            "diagnostics": [
+              "Invalid metric kind.",
+              "Invalid metric level.",
+              "Invalid metric interval."
+            ]
+          },
+          {
+            "id": "g",
+            "op": "count",
+            "groupBy": [
+              "t"
+            ],
+            "diagnostics": [
+              "Invalid metric interval."
+            ]
           }
         ]
       },
-      "packed": "{\"g\":[{\"id\":\"a\",\"op\":\"sum\",\"groupBy\":[],\"layout\":{\"widthRem\":9,\"heightRem\":1,\"minWidthRem\":9,\"minHeightRem\":1},\"sort\":[],\"diagnostics\":[\"Invalid metric sort.\",\"Invalid metric scope.\",\"Invalid metric dir.\",\"kept\",\"Invalid metric grouping fields or grouping budget exceeded.\",\"Invalid metric measure field.\"]},{\"id\":\"b\",\"op\":\"avg\",\"groupBy\":[\"g1\"],\"dateGrouping\":{\"field\":\"t\"},\"display\":{\"kind\":\"auto\"},\"diagnostics\":[\"Invalid metric date grouping.\",\"Invalid metric window.\",\"Invalid metric display kind.\",\"Invalid metric kind.\",\"Invalid metric xScale.\",\"Invalid metric distribution.\",\"Invalid metric filter.\",\"Invalid metric grouping fields or grouping budget exceeded.\"]},{\"id\":\"c\",\"op\":\"max\",\"groupBy\":[],\"window\":{\"partial\":\"omit\",\"periods\":\"all\"},\"display\":{\"kind\":\"auto\",\"legendPosition\":\"left\",\"format\":{\"kind\":\"percent\"}},\"diagnostics\":[\"Invalid metric display kind.\",\"Invalid metric maxGroups.\",\"Invalid metric pattern.\"],\"unsupportedOp\":\"p99\"},{\"id\":\"d\",\"op\":\"count\",\"groupBy\":[\"t\"],\"dateGrouping\":{\"field\":\"t\",\"interval\":\"dayOfWeek\",\"includeEmpty\":false,\"range\":\"query\",\"occurrence\":{}},\"diagnostics\":[\"Invalid metric date grouping occurrence.\",\"Invalid metric interval.\",\"Invalid metric includeEmpty.\"]},{\"id\":\"e\",\"op\":\"count\",\"groupBy\":[\"t\"],\"dateGrouping\":{\"field\":\"t\",\"interval\":\"hourOfDay\",\"includeEmpty\":true,\"range\":\"query\"},\"diagnostics\":[\"Invalid metric date grouping occurrence.\"]}]}"
+      "packed": "{\"g\":[{\"id\":\"a\",\"op\":\"sum\",\"groupBy\":[],\"layout\":{\"widthRem\":9,\"heightRem\":1,\"minWidthRem\":9,\"minHeightRem\":1},\"sort\":[],\"diagnostics\":[\"Invalid metric sort.\",\"Invalid metric scope.\",\"Invalid metric dir.\",\"kept\",\"Invalid metric grouping fields or grouping budget exceeded.\",\"Invalid metric measure field.\"]},{\"id\":\"b\",\"op\":\"avg\",\"groupBy\":[\"g1\"],\"dateGrouping\":{\"field\":\"t\"},\"display\":{\"kind\":\"auto\"},\"diagnostics\":[\"Invalid metric date grouping.\",\"Invalid metric window.\",\"Invalid metric display kind.\",\"Invalid metric kind.\",\"Invalid metric xScale.\",\"Invalid metric distribution.\",\"Invalid metric filter.\",\"Invalid metric grouping fields or grouping budget exceeded.\"]},{\"id\":\"c\",\"op\":\"max\",\"groupBy\":[],\"window\":{\"partial\":\"omit\",\"periods\":\"all\"},\"display\":{\"kind\":\"auto\",\"legendPosition\":\"left\",\"format\":{\"kind\":\"percent\"}},\"diagnostics\":[\"Invalid metric display kind.\",\"Invalid metric colorBy.\",\"Invalid metric maxGroups.\",\"Invalid metric pattern.\"],\"unsupportedOp\":\"p99\"},{\"id\":\"d\",\"op\":\"count\",\"groupBy\":[\"t\"],\"dateGrouping\":{\"field\":\"t\",\"interval\":\"dayOfWeek\",\"includeEmpty\":false,\"range\":\"query\",\"occurrence\":{}},\"diagnostics\":[\"Invalid metric date grouping occurrence.\",\"Invalid metric interval.\",\"Invalid metric includeEmpty.\"]},{\"id\":\"e\",\"op\":\"count\",\"groupBy\":[\"t\"],\"dateGrouping\":{\"field\":\"t\",\"interval\":\"hourOfDay\",\"includeEmpty\":true,\"range\":\"query\"},\"diagnostics\":[\"Invalid metric date grouping occurrence.\"]},{\"id\":\"f\",\"op\":\"count\",\"groupBy\":[\"t\"],\"interval\":{},\"diagnostics\":[\"Invalid metric interval.\",\"Invalid metric kind.\",\"Invalid metric level.\"]},{\"id\":\"g\",\"op\":\"count\",\"groupBy\":[\"t\"],\"diagnostics\":[\"Invalid metric interval.\"]}]}"
     },
     {
       "name": "unnormalized grouping",
@@ -6707,6 +7387,164 @@
       "packed": "{\"b\":{\"keys\":[\"k\",\"k\"],\"summaries\":[{\"id\":\"k\",\"op\":\"count\"},{\"id\":\"x\",\"op\":\"row\"},{\"id\":\"l\",\"op\":\"link\"},{\"id\":\"f\",\"op\":\"formula\"}],\"representative\":{\"orderBy\":[{\"field\":\"t\",\"dir\":[\"asc\"],\"nulls\":\"last\"}]},\"source\":{\"select\":[],\"where\":[{\"field\":\"a\",\"op\":\"=\",\"value\":\"1\"}],\"orderBy\":[],\"limit\":100,\"offset\":0},\"diagnostics\":[\"Invalid grouping: keys must list 1–20 distinct field names.\",\"Invalid grouping: summary \\\"k\\\" uses the same id as group key \\\"k\\\"; summary ids must differ from source field names.\",\"Invalid grouping: summary \\\"f\\\" needs an expression of at most 10,000 characters.\",\"Invalid grouping: summary 1 needs an id of 1–256 characters.\",\"Invalid grouping: summary 2 needs an id of 1–256 characters.\",\"Invalid grouping: summary \\\"x\\\" has unsupported op \\\"MEDIAN\\\"; use count, count_distinct, sum, avg, min, max, row, formula, or link (for a median, use op \\\"formula\\\" with expression \\\"MEDIAN([field])\\\").\",\"Invalid grouping: summary \\\"x\\\" label must be text of at most 1,000 characters.\",\"Invalid grouping: summary \\\"x\\\" display: unsupported option depth.\",\"Invalid grouping: summary \\\"op\\\" has unsupported op \\\"sum\\\"; use count, count_distinct, sum, avg, min, max, row, formula, or link.\",\"Invalid grouping: summary \\\"s\\\" has unsupported op \\\"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀\\\"; use count, count_distinct, sum, avg, min, max, row, formula, or link.\",\"Invalid grouping: each representative ordering term needs a field, dir \\\"asc\\\" or \\\"desc\\\", and optional nulls \\\"first\\\" or \\\"last\\\".\",\"Invalid grouping: only one grouping stage is supported; the source query cannot itself be grouped.\",\"Earlier problem.\",\"Invalid grouping definition.\",\"Invalid grouping: source filters contain malformed predicates or exceed the predicate budget.\"]}}"
     },
     {
+      "name": "unnormalized calendar every",
+      "token": "2j.eyJiIjp7ImtleXMiOlt7ImZpZWxkIjoiYSIsImludGVydmFsIjoiZGF5IiwiZXZlcnkiOjB9LHsiZmllbGQiOiJiIiwiaW50ZXJ2YWwiOiJkYXkiLCJldmVyeSI6MTAwMX0seyJmaWVsZCI6ImMiLCJpbnRlcnZhbCI6ImRheSIsImV2ZXJ5IjoiMiJ9LHsiZmllbGQiOiJkIiwiaW50ZXJ2YWwiOiJkYXkiLCJldmVyeSI6Mi41fSx7ImZpZWxkIjoiZSIsImludGVydmFsIjoiZGF5IiwiZXZlcnkiOjF9LHsiZmllbGQiOiJmIiwiaW50ZXJ2YWwiOiJ3ZWVrIiwiZXZlcnkiOjEwMDAsInRpbWVab25lIjoiVVRDIn0seyJmaWVsZCI6ImciLCJpbnRlcnZhbCI6ImhvdXIiLCJldmVyeSI6NX0seyJmaWVsZCI6ImgiLCJpbnRlcnZhbCI6ImhvdXIiLCJldmVyeSI6MjR9XSwic3VtbWFyaWVzIjpbeyJpZCI6Im4iLCJvcCI6ImNvdW50In1dLCJzb3VyY2UiOnt9fSwiZyI6W3siaWQiOiJhIiwib3AiOiJjb3VudCIsImdyb3VwQnkiOlsidCJdLCJkYXRlR3JvdXBpbmciOnsiZmllbGQiOiJ0IiwiaW50ZXJ2YWwiOiJob3VyIiwiZXZlcnkiOjAsImluY2x1ZGVFbXB0eSI6ZmFsc2UsInJhbmdlIjoicXVlcnkifX0seyJpZCI6ImIiLCJvcCI6ImNvdW50IiwiZ3JvdXBCeSI6WyJ0Il0sImRhdGVHcm91cGluZyI6eyJmaWVsZCI6InQiLCJpbnRlcnZhbCI6ImhvdXIiLCJldmVyeSI6IjMiLCJpbmNsdWRlRW1wdHkiOmZhbHNlLCJyYW5nZSI6InF1ZXJ5In19LHsiaWQiOiJjIiwib3AiOiJjb3VudCIsImdyb3VwQnkiOlsidCJdLCJkYXRlR3JvdXBpbmciOnsiZmllbGQiOiJ0IiwiaW50ZXJ2YWwiOiJob3VyIiwiZXZlcnkiOjEsImluY2x1ZGVFbXB0eSI6ZmFsc2UsInJhbmdlIjoicXVlcnkifX0seyJpZCI6ImQiLCJvcCI6ImNvdW50IiwiZ3JvdXBCeSI6WyJ0Il0sImRhdGVHcm91cGluZyI6eyJmaWVsZCI6InQiLCJpbnRlcnZhbCI6ImhvdXJPZkRheSIsImV2ZXJ5IjoyLCJpbmNsdWRlRW1wdHkiOmZhbHNlLCJyYW5nZSI6InF1ZXJ5In19LHsiaWQiOiJlIiwib3AiOiJjb3VudCIsImdyb3VwQnkiOlsidCJdLCJkYXRlR3JvdXBpbmciOnsiZmllbGQiOiJ0IiwiaW50ZXJ2YWwiOiJtb250aCIsImV2ZXJ5IjoyMDAwLCJpbmNsdWRlRW1wdHkiOmZhbHNlLCJyYW5nZSI6InF1ZXJ5In19LHsiaWQiOiJmIiwib3AiOiJjb3VudCIsImdyb3VwQnkiOlsidCJdLCJkYXRlR3JvdXBpbmciOnsiZmllbGQiOiJ0IiwiaW50ZXJ2YWwiOiJob3VyIiwiZXZlcnkiOjUsImluY2x1ZGVFbXB0eSI6ZmFsc2UsInJhbmdlIjoicXVlcnkifX0seyJpZCI6ImciLCJvcCI6ImNvdW50IiwiZ3JvdXBCeSI6WyJ0Il0sImRhdGVHcm91cGluZyI6eyJmaWVsZCI6InQiLCJpbnRlcnZhbCI6ImhvdXIiLCJldmVyeSI6MTIsImluY2x1ZGVFbXB0eSI6ZmFsc2UsInJhbmdlIjoicXVlcnkifX1dfQ",
+      "normalized": {
+        "select": [],
+        "where": [],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0,
+        "grouping": {
+          "keys": [
+            {
+              "field": "e",
+              "interval": "day"
+            },
+            {
+              "field": "f",
+              "interval": "week",
+              "every": 1000,
+              "timeZone": "UTC"
+            },
+            {
+              "field": "h",
+              "interval": "hour",
+              "every": 24
+            }
+          ],
+          "summaries": [
+            {
+              "id": "n",
+              "op": "count"
+            }
+          ],
+          "representative": null,
+          "source": {
+            "select": [],
+            "where": [],
+            "orderBy": [],
+            "limit": 100,
+            "offset": 0
+          },
+          "diagnostics": [
+            "Invalid grouping: key 1 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.",
+            "Invalid grouping: key 2 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.",
+            "Invalid grouping: key 3 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.",
+            "Invalid grouping: key 4 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.",
+            "Invalid grouping: key 7 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.",
+            "Invalid grouping: keys must list 1–20 distinct field names."
+          ]
+        },
+        "aggregations": [
+          {
+            "id": "a",
+            "op": "count",
+            "groupBy": [
+              "t"
+            ],
+            "dateGrouping": {
+              "field": "t",
+              "interval": "hour",
+              "includeEmpty": false,
+              "range": "query"
+            },
+            "diagnostics": [
+              "Invalid metric every."
+            ]
+          },
+          {
+            "id": "b",
+            "op": "count",
+            "groupBy": [
+              "t"
+            ],
+            "dateGrouping": {
+              "field": "t",
+              "interval": "hour",
+              "includeEmpty": false,
+              "range": "query"
+            },
+            "diagnostics": [
+              "Invalid metric every."
+            ]
+          },
+          {
+            "id": "c",
+            "op": "count",
+            "groupBy": [
+              "t"
+            ],
+            "dateGrouping": {
+              "field": "t",
+              "interval": "hour",
+              "includeEmpty": false,
+              "range": "query"
+            }
+          },
+          {
+            "id": "d",
+            "op": "count",
+            "groupBy": [
+              "t"
+            ],
+            "dateGrouping": {
+              "field": "t",
+              "interval": "hourOfDay",
+              "every": 2,
+              "includeEmpty": false,
+              "range": "query"
+            }
+          },
+          {
+            "id": "e",
+            "op": "count",
+            "groupBy": [
+              "t"
+            ],
+            "dateGrouping": {
+              "field": "t",
+              "interval": "month",
+              "every": 2000,
+              "includeEmpty": false,
+              "range": "query"
+            }
+          },
+          {
+            "id": "f",
+            "op": "count",
+            "groupBy": [
+              "t"
+            ],
+            "dateGrouping": {
+              "field": "t",
+              "interval": "hour",
+              "includeEmpty": false,
+              "range": "query"
+            },
+            "diagnostics": [
+              "Invalid metric every."
+            ]
+          },
+          {
+            "id": "g",
+            "op": "count",
+            "groupBy": [
+              "t"
+            ],
+            "dateGrouping": {
+              "field": "t",
+              "interval": "hour",
+              "every": 12,
+              "includeEmpty": false,
+              "range": "query"
+            }
+          }
+        ]
+      },
+      "packed": "{\"g\":[{\"id\":\"a\",\"op\":\"count\",\"groupBy\":[\"t\"],\"dateGrouping\":{\"field\":\"t\",\"interval\":\"hour\",\"includeEmpty\":false,\"range\":\"query\"},\"diagnostics\":[\"Invalid metric every.\"]},{\"id\":\"b\",\"op\":\"count\",\"groupBy\":[\"t\"],\"dateGrouping\":{\"field\":\"t\",\"interval\":\"hour\",\"includeEmpty\":false,\"range\":\"query\"},\"diagnostics\":[\"Invalid metric every.\"]},{\"id\":\"c\",\"op\":\"count\",\"groupBy\":[\"t\"],\"dateGrouping\":{\"field\":\"t\",\"interval\":\"hour\",\"includeEmpty\":false,\"range\":\"query\"}},{\"id\":\"d\",\"op\":\"count\",\"groupBy\":[\"t\"],\"dateGrouping\":{\"field\":\"t\",\"interval\":\"hourOfDay\",\"every\":2,\"includeEmpty\":false,\"range\":\"query\"}},{\"id\":\"e\",\"op\":\"count\",\"groupBy\":[\"t\"],\"dateGrouping\":{\"field\":\"t\",\"interval\":\"month\",\"every\":2000,\"includeEmpty\":false,\"range\":\"query\"}},{\"id\":\"f\",\"op\":\"count\",\"groupBy\":[\"t\"],\"dateGrouping\":{\"field\":\"t\",\"interval\":\"hour\",\"includeEmpty\":false,\"range\":\"query\"},\"diagnostics\":[\"Invalid metric every.\"]},{\"id\":\"g\",\"op\":\"count\",\"groupBy\":[\"t\"],\"dateGrouping\":{\"field\":\"t\",\"interval\":\"hour\",\"every\":12,\"includeEmpty\":false,\"range\":\"query\"}}],\"b\":{\"keys\":[{\"field\":\"e\",\"interval\":\"day\"},{\"field\":\"f\",\"interval\":\"week\",\"every\":1000,\"timeZone\":\"UTC\"},{\"field\":\"h\",\"interval\":\"hour\",\"every\":24}],\"summaries\":[{\"id\":\"n\",\"op\":\"count\"}],\"representative\":null,\"source\":{\"select\":[],\"where\":[],\"orderBy\":[],\"limit\":100,\"offset\":0},\"diagnostics\":[\"Invalid grouping: key 1 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 2 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 3 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 4 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 7 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: keys must list 1–20 distinct field names.\"]}}"
+    },
+    {
       "name": "unnormalized calendar group keys",
       "token": "2j.eyJiIjp7ImtleXMiOlt7ImludGVydmFsIjoid2VlayIsImZpZWxkIjoiYSIsInRpbWVab25lIjoiRXVyb3BlL0JlcmxpbiJ9LHsiZmllbGQiOiJiIiwiaW50ZXJ2YWwiOiJob3VyT2ZEYXkiLCJ0aW1lWm9uZSI6IlVUQyJ9LHsiZmllbGQiOiJjIiwiaW50ZXJ2YWwiOiJkYXkiLCJ0aW1lWm9uZSI6IiswMjowMCJ9LHsiZmllbGQiOiJkIiwiaW50ZXJ2YWwiOiJkYXkiLCJ0aW1lWm9uZSI6N30seyJmaWVsZCI6ImUiLCJpbnRlcnZhbCI6ImRheSIsInRpbWVab25lIjpudWxsfSx7ImZpZWxkIjoiIiwiaW50ZXJ2YWwiOiJkYXkifSx7ImZpZWxkIjoiYSIsImludGVydmFsIjoibW9udGgifSx7ImZpZWxkIjoiZiIsImludGVydmFsIjoieWVhciIsImV4dHJhIjp0cnVlfSxbImciXV0sInN1bW1hcmllcyI6W3siaWQiOiJhIiwib3AiOiJjb3VudCJ9LHsiaWQiOiJmIiwib3AiOiJjb3VudCJ9XSwic291cmNlIjp7fX19",
       "normalized": {
@@ -6750,18 +7588,18 @@
             "offset": 0
           },
           "diagnostics": [
-            "Invalid grouping: key 2 must be a field name or a calendar key {field, interval, timeZone} with interval hour, day, week, month or year; hour-of-day and day-of-week are metric intervals.",
-            "Invalid grouping: key 3 must be a field name or a calendar key {field, interval, timeZone} with interval hour, day, week, month or year; hour-of-day and day-of-week are metric intervals.",
-            "Invalid grouping: key 4 must be a field name or a calendar key {field, interval, timeZone} with interval hour, day, week, month or year; hour-of-day and day-of-week are metric intervals.",
-            "Invalid grouping: key 5 must be a field name or a calendar key {field, interval, timeZone} with interval hour, day, week, month or year; hour-of-day and day-of-week are metric intervals.",
-            "Invalid grouping: key 6 must be a field name or a calendar key {field, interval, timeZone} with interval hour, day, week, month or year; hour-of-day and day-of-week are metric intervals.",
+            "Invalid grouping: key 2 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.",
+            "Invalid grouping: key 3 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.",
+            "Invalid grouping: key 4 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.",
+            "Invalid grouping: key 5 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.",
+            "Invalid grouping: key 6 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.",
             "Invalid grouping: keys must list 1–20 distinct field names.",
             "Invalid grouping: summary \"a\" uses the same id as group key \"a\"; summary ids must differ from source field names.",
             "Invalid grouping: summary \"f\" uses the same id as group key \"f\"; summary ids must differ from source field names."
           ]
         }
       },
-      "packed": "{\"b\":{\"keys\":[{\"field\":\"a\",\"interval\":\"week\",\"timeZone\":\"Europe/Berlin\"},{\"field\":\"a\",\"interval\":\"month\"},{\"field\":\"f\",\"interval\":\"year\"}],\"summaries\":[{\"id\":\"a\",\"op\":\"count\"},{\"id\":\"f\",\"op\":\"count\"}],\"representative\":null,\"source\":{\"select\":[],\"where\":[],\"orderBy\":[],\"limit\":100,\"offset\":0},\"diagnostics\":[\"Invalid grouping: keys must list 1–20 distinct field names.\",\"Invalid grouping: summary \\\"a\\\" uses the same id as group key \\\"a\\\"; summary ids must differ from source field names.\",\"Invalid grouping: summary \\\"f\\\" uses the same id as group key \\\"f\\\"; summary ids must differ from source field names.\",\"Invalid grouping: key 2 must be a field name or a calendar key {field, interval, timeZone} with interval hour, day, week, month or year; hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 3 must be a field name or a calendar key {field, interval, timeZone} with interval hour, day, week, month or year; hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 4 must be a field name or a calendar key {field, interval, timeZone} with interval hour, day, week, month or year; hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 5 must be a field name or a calendar key {field, interval, timeZone} with interval hour, day, week, month or year; hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 6 must be a field name or a calendar key {field, interval, timeZone} with interval hour, day, week, month or year; hour-of-day and day-of-week are metric intervals.\"]}}"
+      "packed": "{\"b\":{\"keys\":[{\"field\":\"a\",\"interval\":\"week\",\"timeZone\":\"Europe/Berlin\"},{\"field\":\"a\",\"interval\":\"month\"},{\"field\":\"f\",\"interval\":\"year\"}],\"summaries\":[{\"id\":\"a\",\"op\":\"count\"},{\"id\":\"f\",\"op\":\"count\"}],\"representative\":null,\"source\":{\"select\":[],\"where\":[],\"orderBy\":[],\"limit\":100,\"offset\":0},\"diagnostics\":[\"Invalid grouping: keys must list 1–20 distinct field names.\",\"Invalid grouping: summary \\\"a\\\" uses the same id as group key \\\"a\\\"; summary ids must differ from source field names.\",\"Invalid grouping: summary \\\"f\\\" uses the same id as group key \\\"f\\\"; summary ids must differ from source field names.\",\"Invalid grouping: key 2 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 3 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 4 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 5 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.\",\"Invalid grouping: key 6 must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.\"]}}"
     },
     {
       "name": "unnormalized item details",

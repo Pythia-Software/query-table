@@ -1,7 +1,7 @@
 import type { MetricAxisScale } from "@pythia-software/query-table-core";
 import type { MetricBucket, MetricValueFormat, RenderingClause } from "./metricTypes";
 import { metricCycleLabel, metricScale } from "./metricChartHelpers";
-import { formatMetricOutput } from "./metricFormat";
+import { formatMetricOutput, validateMetricFormat } from "./metricFormat";
 
 const durationUnits: Record<string, number> = {
   milliseconds: 1, seconds: 1000, minutes: 60000, hours: 3600000, days: 86400000,
@@ -80,6 +80,18 @@ export function compactMetricTick(value: number, format?: MetricValueFormat, loc
     return formatMetricOutput(value, { ...format, decimals: Math.min(12, Math.max(0, small, spacing)) }, locale).text;
   }
   if (format && ["date", "time", "datetime"].includes(format.kind)) return formatMetricOutput(value, format, locale).text;
+  if (format?.kind === "currency") {
+    // An invalid code is reported as it is in values and tooltips.
+    if (validateMetricFormat(format)) return formatMetricOutput(value, format, locale).text;
+    const currency = { style: "currency", currency: format.currency! } as const;
+    // Unabbreviated fractions show whole minor units ($0.50, never $0.5).
+    if (Math.abs(value) < 1000 && !Number.isInteger(value)) {
+      const minor = new Intl.NumberFormat(locale, currency).resolvedOptions().maximumFractionDigits ?? 2;
+      const fraction = Math.min(20, Math.max(minor, resolvable ? -Math.floor(Math.log10(step!)) : 0));
+      return value.toLocaleString(locale, { ...currency, minimumFractionDigits: fraction, maximumFractionDigits: fraction });
+    }
+    return value.toLocaleString(locale, { ...currency, notation: "compact", minimumFractionDigits: 0, maximumSignificantDigits: digits(Math.abs(value)) });
+  }
   return value.toLocaleString(locale, { notation: "compact", maximumSignificantDigits: digits(Math.abs(value)) });
 }
 
@@ -122,7 +134,10 @@ export function compactCalendarLabels(points: readonly { bucket: MetricBucket; x
     return [{ ...point, date, day: dayFormatter.format(date), hour: Number(hourFormatter.format(date)) }];
   });
   const multipleDays = new Set(info.map(point => point.day)).size > 1;
-  const candidates = grouping.interval === "hour"
+  // Hourly buckets label round local hours. Buckets of several hours (8-hour
+  // starts are not all multiples of 6) label their starts, as spacing allows;
+  // a compact axis marks bucket starts like any other tick.
+  const candidates = grouping.interval === "hour" && (grouping.every ?? 1) === 1
     ? info.filter(point => point.hour % (multipleDays ? 12 : 6) === 0)
     : info;
   // Sparse observed data may contain no round-hour bucket; retain its actual hour.

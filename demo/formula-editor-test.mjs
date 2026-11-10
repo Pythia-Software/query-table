@@ -322,10 +322,9 @@ for (const [name, engine] of [
     await library
       .getByRole("combobox", { name: "Return type", exact: true })
       .selectOption("number");
-    assert.equal(await results.getByRole("option").count(), 1);
-    assert.equal(
-      await results.getByRole("option").getAttribute("aria-label"),
-      "Insert LENGTH",
+    assert.deepEqual(
+      await results.getByRole("option").evaluateAll((options) => options.map((option) => option.getAttribute("aria-label"))),
+      ["Insert LENGTH", "Insert WORD_COUNT"],
     );
     await search.fill("not-a-function");
     await library.getByText("No functions match.", { exact: false }).waitFor();

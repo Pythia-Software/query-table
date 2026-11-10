@@ -87,7 +87,9 @@ func TestSQLiteV2PoliciesAndGraph(t *testing.T) {
 }
 func TestSQLiteV2AggregateLifecycleAndBounds(t *testing.T) {
 	for _, d := range SQLiteV2Aggregates() {
-		if d.Arity != 1 {
+		// The JSON-payload reducers; qt_v2_exact_mean and qt_v2_sample_median
+		// return bare values.
+		if d.Arity != 1 || d.Name == "qt_v2_exact_mean" || d.Name == "qt_v2_sample_median" {
 			continue
 		}
 		a, b := d.New(), d.New()

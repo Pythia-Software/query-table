@@ -1,5 +1,5 @@
 import type { ComputedExecution } from "./computed";
-import { QueryError, failedMetric } from "./errors";
+import { QueryError, failedMetric, type ErrorCode } from "./errors";
 import { isComputedField } from "./computed";
 import {
   compileFormula,
@@ -35,6 +35,12 @@ import {
 } from "./query";
 import { opsForField } from "./ops";
 import { hasMetricSeries, planMetricSeries, validateMetricSeries } from "./metricSeries";
+import {
+  applyMetricInterval,
+  additiveRatioParts,
+  metricRatioParts,
+  validateMetricInterval,
+} from "./metricIntervals";
 import { applyQuery } from "./apply";
 import { prepareGrouping, withoutGrouping, type GroupedRow } from "./grouping";
 import { computedInputAllowed } from "./apply";
@@ -44,9 +50,14 @@ import {
   type AggregationResult,
   type AggregationBucket,
 } from "./encode";
-import type { MetricDiagnostic, MetricValue, MetricSort } from "./metricTypes";
+import type { MetricDiagnostic, MetricDistribution, MetricValue, MetricSort } from "./metricTypes";
 import {
   boxSummary,
+  DEFAULT_WHISKER_PROBABILITIES,
+  quantilesWithMedian,
+  validQuantileProbabilities,
+  validWhiskerProbabilities,
+  percentile,
   histogramEdges,
   histogramCounts,
 } from "./metricDistributions";
@@ -70,7 +81,33 @@ const aggregates = new Set([
   "MIN",
   "MAX",
   "MEDIAN",
+  "PERCENTILE",
 ]);
+/** Order-statistic aggregates: they need each group's sorted samples, so they
+ * cannot be merged across intervals or approximated. */
+const SAMPLED_AGGREGATES: ReadonlySet<string> = new Set([
+  "MEDIAN",
+  "PERCENTILE",
+]);
+/** The probability of a PERCENTILE call: its second argument, a numeric
+ * literal in [0, 1]. */
+export function percentileProbability(
+  node: Extract<FormulaNode, { kind: "call" }>,
+): number {
+  const p = node.args[1];
+  if (
+    !p ||
+    p.kind !== "literal" ||
+    typeof p.value !== "number" ||
+    !(p.value >= 0 && p.value <= 1)
+  )
+    throw new FormulaError(
+      "PERCENTILE needs a probability between 0 and 1 as a number literal, such as PERCENTILE([x], 0.9).",
+      p?.from ?? node.from,
+      p?.to ?? node.to,
+    );
+  return p.value;
+}
 /** Functions available only in aggregate expressions, separate from row formulas. */
 export const METRIC_FUNCTIONS: FormulaFunction[] = [
   ["COUNT", "Count rows, or non-empty values."],
@@ -83,14 +120,26 @@ export const METRIC_FUNCTIONS: FormulaFunction[] = [
     "MEDIAN",
     "Middle numeric value; averages the middle pair. Ignores empty values.",
   ],
+  [
+    "PERCENTILE",
+    "Exact percentile p (a number from 0 to 1) of numeric values, interpolated linearly between ranks. Ignores empty values.",
+  ],
 ].map(([name, description]) => ({
   name: name!,
   description: description!,
-  signature: `${name}(row expression${name === "COUNT" ? "?" : ""})`,
-  min: name === "COUNT" ? 0 : 1,
-  max: 1,
+  signature:
+    name === "PERCENTILE"
+      ? "PERCENTILE(row expression, probability)"
+      : `${name}(row expression${name === "COUNT" ? "?" : ""})`,
+  min: name === "COUNT" ? 0 : name === "PERCENTILE" ? 2 : 1,
+  max: name === "PERCENTILE" ? 2 : 1,
   result: name === "MIN" || name === "MAX" ? "branch" : "number",
-  args: ["SUM", "AVG", "MEDIAN"].includes(name!) ? ["number"] : "any",
+  args:
+    name === "PERCENTILE"
+      ? ["number", "number"]
+      : ["SUM", "AVG", "MEDIAN"].includes(name!)
+        ? ["number"]
+        : "any",
 }));
 export interface MetricPlan extends FormulaPlan {
   aggregates: Extract<FormulaNode, { kind: "call" }>[];
@@ -123,7 +172,15 @@ export function compileMetric(
           node.from,
           node.to,
         );
-      if (
+      if (node.name === "PERCENTILE") {
+        if (node.args.length !== 2)
+          throw new FormulaError(
+            "PERCENTILE requires a row expression and a probability.",
+            node.from,
+            node.to,
+          );
+        percentileProbability(node);
+      } else if (
         node.args.length > 1 ||
         (node.name !== "COUNT" && node.args.length !== 1)
       )
@@ -148,13 +205,17 @@ export function compileMetric(
               n.from,
               n.to,
             );
-          // MEDIAN is formula-only, so it is absent from the default AggOp
-          // list. Explicit field restrictions still apply to every reduction.
+          // MEDIAN and PERCENTILE are formula-only, so they are absent from
+          // the default AggOp list. Explicit field restrictions still apply
+          // to every reduction; as in the Go engines, a field that admits
+          // "median" also admits PERCENTILE.
+          const ops: readonly string[] = aggOpsForField(field);
           if (
             !isMeasurable(field) ||
             ((field.aggregate?.ops !== undefined ||
-              (node.args[0] === n && node.name !== "MEDIAN")) &&
-              !aggOpsForField(field).includes(node.name.toLowerCase() as AggOp))
+              (node.args[0] === n && !SAMPLED_AGGREGATES.has(node.name))) &&
+              !ops.includes(node.name.toLowerCase()) &&
+              !(node.name === "PERCENTILE" && ops.includes("median")))
           )
             throw new FormulaError(
               `Field ${n.name} does not allow ${node.name}.`,
@@ -171,9 +232,9 @@ export function compileMetric(
           n.args.forEach(visit);
         }
       };
-      node.args.forEach(visit);
+      node.args.slice(0, 1).forEach(visit);
       if (
-        ["SUM", "AVG", "MEDIAN"].includes(node.name) &&
+        ["SUM", "AVG", "MEDIAN", "PERCENTILE"].includes(node.name) &&
         !["number", "null"].includes(type)
       )
         throw new FormulaError(
@@ -193,9 +254,14 @@ export function compileMetric(
         );
       nodes.push(node);
       aggregateTypes.push(type);
-      return ["COUNT", "COUNT_DISTINCT", "SUM", "AVG", "MEDIAN"].includes(
-        node.name,
-      )
+      return [
+        "COUNT",
+        "COUNT_DISTINCT",
+        "SUM",
+        "AVG",
+        "MEDIAN",
+        "PERCENTILE",
+      ].includes(node.name)
         ? "number"
         : type;
     },
@@ -282,11 +348,66 @@ export function reduceMetricValues(
 ): FormulaResult {
   return reduceResults(node, results, options);
 }
+/** One group's sorted samples of an order-statistic input, or its error,
+ * shared by every MEDIAN and PERCENTILE of the same input expression. */
+type SortedSamples = { sorted: number[] } | { error: string };
+/** A position-free identity of an aggregate's input expression. */
+export function aggregateInputKey(node: FormulaNode | undefined): string {
+  if (!node) return "";
+  if (node.kind === "literal") return JSON.stringify(["literal", node.value]);
+  if (node.kind === "field") return JSON.stringify(["field", node.name]);
+  return JSON.stringify(["call", node.name, ...node.args.map(aggregateInputKey)]);
+}
+function sortedSamples(results: Iterable<FormulaResult>): SortedSamples {
+  const values: number[] = [];
+  let error: string | undefined;
+  for (const r of results) {
+    if (r.error) {
+      error ??= r.error;
+      continue;
+    }
+    if (r.value === null) continue;
+    if (typeof r.value !== "number" || !Number.isFinite(r.value))
+      throw Error("Expected a finite number.");
+    assertMetricNumber(r.value);
+    values.push(r.value);
+  }
+  return error ? { error } : { sorted: values.sort((a, b) => a - b) };
+}
+function sampledResult(
+  node: Extract<FormulaNode, { kind: "call" }>,
+  samples: SortedSamples,
+): FormulaResult {
+  if ("error" in samples) return { value: null, error: samples.error };
+  const sorted = samples.sorted;
+  if (!sorted.length) return { value: null };
+  if (node.name === "PERCENTILE")
+    return { value: percentile(sorted, percentileProbability(node)) };
+  const mid = Math.floor(sorted.length / 2);
+  const value =
+    sorted.length % 2 ? sorted[mid]! : sorted[mid - 1]! / 2 + sorted[mid]! / 2;
+  assertMetricNumber(value);
+  return { value };
+}
 function reduceResults(
   node: Extract<FormulaNode, { kind: "call" }>,
   results: Iterable<FormulaResult>,
   options: MetricReductionOptions,
+  sorted?: Map<string, SortedSamples>,
 ): FormulaResult {
+  if (SAMPLED_AGGREGATES.has(node.name))
+    try {
+      // Every MEDIAN and PERCENTILE of one input shares its sorted samples.
+      const key = aggregateInputKey(node.args[0]);
+      let samples = sorted?.get(key);
+      if (!samples) {
+        samples = sortedSamples(results);
+        sorted?.set(key, samples);
+      }
+      return sampledResult(node, samples);
+    } catch (e) {
+      return { value: null, error: e instanceof Error ? e.message : String(e) };
+    }
   try {
     if (!aggregates.has(node.name)) throw Error("Expected an aggregate node.");
     const distinct =
@@ -313,22 +434,6 @@ function reduceResults(
     if (node.name === "COUNT")
       return { value: node.args.length ? nonnull : count };
     if (!values.length) return { value: null };
-    if (node.name === "MEDIAN") {
-      const sorted = values
-        .map((value) => {
-          if (typeof value !== "number" || !Number.isFinite(value))
-            throw Error("Expected a finite number.");
-          return value;
-        })
-        .sort((a, b) => a - b);
-      const mid = Math.floor(sorted.length / 2);
-      const value =
-        sorted.length % 2
-          ? sorted[mid]!
-          : sorted[mid - 1]! / 2 + sorted[mid]! / 2;
-      assertMetricNumber(value);
-      return { value };
-    }
     if (node.name === "SUM" || node.name === "AVG") {
       let sum = 0;
       for (const v of values) {
@@ -390,8 +495,56 @@ export function hasRegex(plan: FormulaPlan): boolean {
 function distributionActive(c: AggregationClause): boolean {
   return (
     !!c.distribution &&
-    (!c.display || c.display.kind === "box" || c.display.kind === "histogram")
+    (!c.display ||
+      c.display.kind === "box" ||
+      c.display.kind === "histogram" ||
+      c.display.kind === "quantiles")
   );
+}
+/** Throws when a distribution's box, histogram or quantile options are invalid. */
+/** Options of another kind or whisker mode are inactive alternatives the
+ * editor retains (see docs/metrics.md): they are ignored, not validated, in
+ * every engine. */
+export function validateDistributionOptions(d: MetricDistribution): void {
+  if (!["box", "histogram", "quantiles"].includes(d.kind))
+    throw new FormulaError("Invalid distribution kind.");
+  if (d.whiskers !== undefined && !["minmax", "tukey", "percentile"].includes(d.whiskers))
+    throw new FormulaError("Whiskers are minmax, tukey or percentile.");
+  if (
+    d.kind === "box" &&
+    d.whiskers === "percentile" &&
+    d.whiskerProbabilities !== undefined &&
+    !validWhiskerProbabilities(d.whiskerProbabilities)
+  )
+    throw new FormulaError(
+      "Percentile whiskers need [lo, hi] with 0 ≤ lo < 0.25 and 0.75 < hi ≤ 1.",
+    );
+  if (d.kind === "quantiles" && !validQuantileProbabilities(d.probabilities))
+    throw new FormulaError(
+      "Quantiles need 1–101 strictly increasing probabilities from 0 to 1.",
+    );
+}
+/** One group's distribution and its scalar value: a box's median, a
+ * histogram's sample count, or the median of a quantile curve. */
+export function distributionBucket(
+  d: MetricDistribution,
+  values: number[],
+): {
+  distribution: NonNullable<AggregationBucket["distribution"]>;
+  value: AggregationBucket["value"];
+} {
+  if (d.kind === "quantiles") {
+    const { summary, median } = quantilesWithMedian(values, d.probabilities ?? []);
+    return { distribution: { kind: "quantiles", summary }, value: median };
+  }
+  // Whiskers and their probabilities only apply to boxes; see
+  // validateDistributionOptions.
+  const summary = boxSummary(
+    values,
+    d.whiskers,
+    d.whiskerProbabilities ?? DEFAULT_WHISKER_PROBABILITIES,
+  );
+  return { distribution: { kind: "box", summary }, value: summary?.median ?? null };
 }
 /** A box over a cyclic slot's per-occurrence values: its input is the
  * metric itself, evaluated once per occurrence. */
@@ -415,8 +568,7 @@ export function metricPlans(
     );
     if (p.type !== "number" && p.type !== "null")
       throw new FormulaError("Distribution input must be numeric.");
-    if (!["box", "histogram"].includes(c.distribution!.kind))
-      throw new FormulaError("Invalid distribution kind.");
+    validateDistributionOptions(c.distribution!);
     if (
       c.distribution!.kind === "histogram" &&
       (!Number.isInteger(c.distribution!.bins ?? 10) ||
@@ -483,10 +635,11 @@ export function validateMetric(
         );
       const { occurrence } = c.dateGrouping;
       if (occurrence) {
-        if (distributionActive(c) && c.distribution!.kind !== "box")
+        if (distributionActive(c) && c.distribution!.kind === "histogram")
           throw new FormulaError(
-            "Occurrences summarise as a mean or a box plot, not a histogram.",
+            "Occurrences summarise as a mean, a box plot or quantiles, not a histogram.",
           );
+        if (distributionActive(c)) validateDistributionOptions(c.distribution!);
         if (c.display?.kind === "scatter")
           throw new FormulaError(
             "Occurrences summarise single-value metrics, not scatters.",
@@ -526,6 +679,7 @@ export function validateMetric(
     if (c.scope !== "shownRows" && compiled.some(hasRegex))
       throw new FormulaError("Regex is unavailable for all-matching metrics.");
     validateMetricSeries(c, compiled[0]!);
+    validateMetricInterval(c, compiled[0]!);
     return [];
   } catch (e) {
     return [
@@ -533,6 +687,7 @@ export function validateMetric(
         message: e instanceof Error ? e.message : String(e),
         from: e instanceof FormulaError ? e.from : 0,
         to: e instanceof FormulaError ? e.to : 1,
+        ...(e instanceof FormulaError && e.code ? { code: e.code } : {}),
       },
     ];
   }
@@ -698,11 +853,13 @@ export interface MetricPopulationSupport {
   minCount?: boolean | undefined;
   /** A `minCount` object: distinct values or a sum of a field. */
   minCountMeasures?: boolean | undefined;
+  /** `interval`: lower and upper bounds on each bucket. */
+  intervals?: boolean | undefined;
 }
 /** A clause the executor cannot run exactly gets its own error; it is never
  * sent with `where`/`minCount` silently dropped. */
 export function metricPopulationError(
-  clause: Pick<AggregationClause, "where" | "minCount">,
+  clause: Pick<AggregationClause, "where" | "minCount" | "interval">,
   support: MetricPopulationSupport,
 ): string | undefined {
   if (clause.where?.length && !support.filters)
@@ -711,6 +868,8 @@ export function metricPopulationError(
     return "This server does not support a minimum rows per group.";
   if (metricMinCountMeasure(clause) && !support.minCountMeasures)
     return "This server does not support a minimum of distinct values or a sum per group.";
+  if (clause.interval !== undefined && !support.intervals)
+    return "This server does not support metric intervals.";
   return undefined;
 }
 export function metricDependencies(
@@ -756,6 +915,7 @@ export function metricComputationKey(
         minCount: c.minCount,
         window: c.window,
         share: c.share,
+        interval: c.interval,
         distribution: distributionActive(c) ? c.distribution : undefined,
       }))
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
@@ -1207,6 +1367,87 @@ export function sortMetricBuckets(
     return 0;
   });
 }
+type RatioParts = readonly [FormulaResult | undefined, FormulaResult | undefined];
+/** The exact Other remainder of the groups a metric's `groupLimit` omits
+ * (after `minCount`, so hidden groups are never part of it), or undefined
+ * when there is none:
+ *
+ * - a single SUM or COUNT: the sum of the omitted values (a SUM group with no
+ *   values adds nothing), when no omitted group has an error;
+ * - a ratio of SUM or COUNT parts (see `additiveRatioParts`): each part pooled
+ *   over the omitted groups and the formula evaluated on the pooled parts,
+ *   when no part has an error. An empty calendar fill-in adds 0 to each part.
+ *   With `interval`, the remainder has bounds from the pooled parts.
+ *
+ * Distinct counts, averages, extrema, medians, distributions and scatters
+ * have no remainder here (an average's could be pooled like a ratio's; it is
+ * not computed yet). Engines and hosts that read every group call this with
+ * the omitted buckets and, for a ratio, each bucket's parts; it owns every
+ * eligibility rule, distributions and scatters included. */
+export function metricOtherRemainder(
+  c: AggregationClause,
+  plan: FormulaPlan,
+  omitted: readonly AggregationBucket[],
+  parts: (bucket: AggregationBucket) => RatioParts | undefined = () => undefined,
+): AggregationBucket | undefined {
+  if (
+    !omitted.length ||
+    !("aggregates" in plan) ||
+    distributionActive(c) ||
+    c.display?.kind === "scatter"
+  )
+    return undefined;
+  const count = omitted.reduce((n, b) => n + b.count, 0);
+  const exact = (total: number) =>
+    Number.isFinite(total) && (!Number.isInteger(total) || Number.isSafeInteger(total));
+  const ast = plan.ast;
+  if (ast.kind === "call" && (ast.name === "SUM" || ast.name === "COUNT")) {
+    if (
+      !omitted.every(
+        (b) =>
+          !b.error &&
+          (typeof b.value === "number" || (ast.name === "SUM" && b.value === null)),
+      )
+    )
+      return undefined;
+    const value = omitted.reduce((total, b) => total + Number(b.value), 0);
+    return exact(value) ? { keys: [], value, count } : undefined;
+  }
+  const metric = plan as MetricPlan,
+    ratio = additiveRatioParts(metric.ast);
+  if (!ratio) return undefined;
+  const pooled = [0, 1].map((side): FormulaResult | undefined => {
+    let total = 0,
+      seen = false;
+    for (const bucket of omitted) {
+      const part = parts(bucket)?.[side] ?? (bucket.count === 0 ? { value: 0 } : undefined);
+      if (!part || part.error) return undefined;
+      if (part.value === null) continue;
+      if (typeof part.value !== "number") return undefined;
+      total += part.value;
+      seen = true;
+    }
+    const name = side ? ratio.denominator.name : ratio.numerator.name;
+    if (!exact(total)) return undefined;
+    return { value: name === "COUNT" || seen ? total : null };
+  });
+  if (!pooled[0] || !pooled[1]) return undefined;
+  const result = evaluateMetricReductions(
+    metric,
+    metric.aggregates.map((node) =>
+      node === ratio.numerator ? pooled[0]! : pooled[1]!,
+    ),
+  );
+  const other: AggregationBucket = {
+    keys: [],
+    value: result.error ? null : scalar(result.value),
+    count,
+    ...(result.error ? { error: result.error } : {}),
+  };
+  if (c.interval)
+    applyMetricInterval(other, c.interval, ratio.scale, pooled[0], pooled[1]);
+  return other;
+}
 export function evaluateMetrics<Row>(
   rows: Row[],
   q: QueryState,
@@ -1258,7 +1499,7 @@ export function evaluateMetrics<Row>(
           throw new QueryError("resource_limit", "At most 20 metrics are allowed.");
         const diagnostics = validateMetric(c, schema, options.resolveComputed);
         if (diagnostics.length)
-          throw new QueryError("invalid_metric", diagnostics.map((d) => d.message).join(" "), { metricId: c.id });
+          throw new QueryError((diagnostics[0]!.code ?? "invalid_metric") as ErrorCode, diagnostics.map((d) => d.message).join(" "), { metricId: c.id });
         const ps = metricPlans(c, schema, options.resolveComputed);
         if (ps.some(hasRegex) && !options.evaluateInput)
           throw Error(
@@ -1354,11 +1595,13 @@ export function evaluateMetrics<Row>(
                 dateTime,
                 config.interval,
                 config.timeZone,
+                config.every,
               );
               dateEnd = metricDateNext(
                 dateStart,
                 config.interval,
                 config.timeZone,
+                config.every,
               );
               // A cyclic slot is the local hour or weekday of the interval
               // its record falls in; a calendar key is the interval start.
@@ -1485,6 +1728,7 @@ export function evaluateMetrics<Row>(
                 time,
                 config.interval,
                 config.timeZone,
+                config.every,
               );
               if (!Number.isFinite(next) || next <= time)
                 throw new QueryError("resource_limit", "Date grouping exceeds calendar limits.");
@@ -1538,8 +1782,9 @@ export function evaluateMetrics<Row>(
           p: FormulaPlan,
           rs: Row[],
           inputErrors: Set<number>,
+          cache = new Map<FormulaNode, FormulaResult>(),
         ): FormulaResult => {
-          const cache = new Map<FormulaNode, FormulaResult>();
+          const sorted = new Map<string, SortedSamples>();
           return checkedMetricResult(
             formulaRuntime(p.ast, {}, (node) => {
               if (!aggregates.has(node.name)) return undefined;
@@ -1556,7 +1801,7 @@ export function evaluateMetrics<Row>(
                     yield v;
                   }
                 }
-                result = reduceResults(node, results(), options);
+                result = reduceResults(node, results(), options, sorted);
               } catch (e) {
                 result = {
                   value: null,
@@ -1569,6 +1814,17 @@ export function evaluateMetrics<Row>(
           );
         };
         const populations = new Map<AggregationBucket, number[]>();
+        // An interval and a ratio's Other remainder read the exact numerator
+        // and denominator reductions.
+        const ratio = distributionActive(c)
+          ? undefined
+          : c.interval
+            ? metricRatioParts(ps[0]!.ast)
+            : additiveRatioParts(ps[0]!.ast);
+        const ratioParts = new Map<
+          AggregationBucket,
+          [FormulaResult | undefined, FormulaResult | undefined]
+        >();
         // An object minCount measures each group with its own aggregate, with
         // the same semantics as that aggregate in a metric expression.
         const minPlan = metricMinCountPlan(c, schema, options.resolveComputed);
@@ -1605,10 +1861,27 @@ export function evaluateMetrics<Row>(
               if (ps[1]) bucket.y = empty(ps[1]);
               return bucket;
             }
-            const inputErrors = new Set<number>();
-            const x = reduce(ps[0]!, g.rows, inputErrors);
+            const inputErrors = new Set<number>(),
+              reductions = new Map<FormulaNode, FormulaResult>();
+            const x = reduce(ps[0]!, g.rows, inputErrors, reductions);
             bucket.value = scalar(x.value);
             if (x.error) bucket.error = x.error;
+            if (ratio) {
+              // Other pools both parts. A part the value's evaluation skipped
+              // is reduced on its own, with its row errors kept out of this
+              // bucket's inputErrorCount; only a limited result needs it.
+              if (c.groupLimit)
+                for (const node of [ratio.numerator, ratio.denominator])
+                  if (!reductions.has(node))
+                    reduce({ ...ps[0]!, ast: node }, g.rows, new Set(), reductions);
+              const parts: [FormulaResult | undefined, FormulaResult | undefined] = [
+                reductions.get(ratio.numerator),
+                reductions.get(ratio.denominator),
+              ];
+              ratioParts.set(bucket, parts);
+              if (c.interval)
+                applyMetricInterval(bucket, c.interval, ratio.scale, ...parts);
+            }
             if (ps[1]) {
               const y = reduce(ps[1], g.rows, inputErrors);
               bucket.y = scalar(y.value);
@@ -1632,10 +1905,10 @@ export function evaluateMetrics<Row>(
           for (const b of buckets) {
             const vs = populations.get(b)!;
             if (b.error) continue;
-            if (d.kind === "box") {
-              const summary = boxSummary(vs, d.whiskers);
-              b.distribution = { kind: "box", summary };
-              b.value = summary?.median ?? null;
+            if (d.kind !== "histogram") {
+              const { distribution, value } = distributionBucket(d, vs);
+              b.distribution = distribution;
+              b.value = value;
             } else {
               b.distribution = {
                 kind: "histogram",
@@ -1663,30 +1936,7 @@ export function evaluateMetrics<Row>(
         const groupCount = buckets.length;
         let other: AggregationBucket | undefined;
         if (c.groupLimit && buckets.length > c.groupLimit) {
-          const omitted = buckets.slice(c.groupLimit),
-            ast = ps[0]!.ast;
-          if (
-            !distributionActive(c) &&
-            ast.kind === "call" &&
-            ["SUM", "COUNT"].includes(ast.name) &&
-            omitted.every(
-              (b) =>
-                !b.error &&
-                (typeof b.value === "number" ||
-                  (ast.name === "SUM" && b.value === null)),
-            )
-          ) {
-            const value = omitted.reduce((s, b) => s + Number(b.value), 0);
-            if (
-              Number.isFinite(value) &&
-              (!Number.isInteger(value) || Number.isSafeInteger(value))
-            )
-              other = {
-                keys: [],
-                value,
-                count: omitted.reduce((s, b) => s + b.count, 0),
-              };
-          }
+          other = metricOtherRemainder(c, ps[0]!, buckets.slice(c.groupLimit), (b) => ratioParts.get(b));
           buckets = buckets.slice(0, c.groupLimit);
         }
         return {

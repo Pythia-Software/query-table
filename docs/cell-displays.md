@@ -16,8 +16,22 @@ const fields: FieldDef[] = [
   { name: "status", label: "Status", type: "enum", source: { kind: "backend" },
     display: { kind: "chip", labels: { ready: "Ready", failed: "Failed" },
       tones: { ready: "success", failed: "danger" } } },
+  { name: "cost_usd", label: "Cost", type: "number", source: { kind: "backend" },
+    display: { kind: "currency", currency: "USD" } },
+  { name: "total_tokens", label: "Tokens", type: "number", source: { kind: "backend" },
+    display: { kind: "number", notation: "compact" } },
 ];
 ```
+
+Numeric displays are `number` (`decimals`, `locale`, `notation`), `percent`
+(`decimals`, `locale`) and `currency` (an ISO 4217 `currency` code, required;
+`decimals`, defaulting to the currency's minor units; `notation`; `locale`).
+`notation: "compact"` uses the locale's compact notation (`1.2K`, `3.4M`,
+`$1.2M`) and makes `decimals` a maximum, default 1. Numeric strings are
+decoded strictly; other values show a visible format error. A numeric display
+on a field is also the default value format of SUM, AVG, MIN and MAX metrics
+over it (not of counts, expressions or shares); see
+[Metrics](metrics.md#output-formatting).
 
 These settings also work in JSON schema documents. `loadSchema` validates and
 preserves them, and TypeScript code generation includes them. Backend query
@@ -67,7 +81,7 @@ byte-for-byte unchanged, and older clients ignore the third member.
 
 `{ kind: "text", lines: n }` (1–20) wraps the text and clamps it to `n` lines
 with an ellipsis; line breaks in the value are kept, and the full text is in
-the tooltip. It takes precedence over `truncate`. `DataTable` measures every
+the tooltip while the cell actually clips it. It takes precedence over `truncate`. `DataTable` measures every
 rendered row, so clamped rows of different heights scroll, virtualize and
 re-measure after column resizes correctly. There is no unbounded wrap: one
 very long value would produce a row taller than the viewport, so use a large
@@ -91,6 +105,12 @@ carries rounded seconds into minutes/hours. Custom date patterns accept
 in [metric formatting](metrics.md); custom durations use `{h}`, `{mm}`, `{ss}`,
 `{ms}`, etc. Invalid values or format settings remain readable with an explanatory
 tooltip. Null and empty values show an em dash; zero and false are preserved.
+Hover help avoids repeating visible text: a formatted value offers its raw
+value only when formatting hides it (rounding, units, percentages; not the
+display locale's digit grouping or trailing zeros), a chip its raw key only
+when relabelled, and `truncate` or `lines` text its full value only while
+clipped. The clipped-text title is set on hover, so static or server-rendered
+markup has no `title` attribute.
 
 ## JSON inspector
 

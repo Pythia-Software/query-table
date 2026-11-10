@@ -28,6 +28,13 @@
       "include"
     ]
   },
+  "interval": {
+    "kind": [
+      "proportion",
+      "rate"
+    ],
+    "level": "number"
+  },
   "dateGrouping": {
     "field": "string",
     "interval": [
@@ -39,6 +46,7 @@
       "hourOfDay",
       "dayOfWeek"
     ],
+    "every": "positiveInteger",
     "timeZone": "string",
     "includeEmpty": "boolean",
     "range": [
@@ -73,7 +81,8 @@
       "donut",
       "scatter",
       "box",
-      "histogram"
+      "histogram",
+      "quantiles"
     ],
     "valueLabel": "string",
     "xLabel": "string",
@@ -85,9 +94,11 @@
       "bottom",
       "none"
     ],
+    "colorBy": "string",
     "maxGroups": "positiveInteger",
     "showOther": "boolean",
-    "boxMean": "boolean"
+    "boxMean": "boolean",
+    "showIntervals": "boolean"
   },
   "scale": {
     "mode": [
@@ -101,12 +112,18 @@
     "kind": [
       "number",
       "percent",
+      "currency",
       "duration",
       "date",
       "time",
       "datetime"
     ],
     "decimals": "integer",
+    "currency": "currencyCode",
+    "notation": [
+      "standard",
+      "compact"
+    ],
     "sourceUnit": [
       "milliseconds",
       "seconds",
@@ -153,14 +170,18 @@
   "distribution": {
     "kind": [
       "box",
-      "histogram"
+      "histogram",
+      "quantiles"
     ],
     "input": "string",
     "whiskers": [
       "minmax",
-      "tukey"
+      "tukey",
+      "percentile"
     ],
-    "bins": "integer"
+    "whiskerProbabilities": "numberList",
+    "bins": "integer",
+    "probabilities": "numberList"
   },
   "layout": {
     "widthRem": "integer",

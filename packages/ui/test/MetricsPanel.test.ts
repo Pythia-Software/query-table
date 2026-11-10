@@ -750,7 +750,7 @@ it("underline lists keep labels, values and bar proportions with independent vis
   expect(render({ ...clause, display: { kind: "list" } }, b)).not.toContain("qt-metric-bar-row--below");
 });
 
-it("limits only below-list labels while preserving the full label and title", () => {
+it("limits only below-list labels while preserving the full label", () => {
   const text = "A very long error signature that wraps across several lines without losing its full tooltip";
   const buckets: MetricBucket[] = [{ keys: [text], value: 5, count: 1 }];
   for (const barPosition of ["inline", "below"] as const) {
@@ -762,7 +762,8 @@ it("limits only below-list labels while preserving the full label and title", ()
       expect(label.classList.contains("qt-metric-bar-label--clamped")).toBe(limited);
       expect(label.style.webkitLineClamp).toBe(limited ? String(maxLabelLines) : "");
       expect(label.textContent).toBe(text);
-      expect(label.title).toBe(text);
+      // The same text is hover help only while it is clipped.
+      expect(label.title).toBe("");
     }
   }
 });
@@ -921,6 +922,59 @@ describe("measure display defaults", () => {
     container.remove();
   });
 });
+describe("currency and compact measure displays", () => {
+  const money: FieldDef<unknown>[] = [
+    { name: "cost", label: "Cost", type: "number", source: { kind: "backend" }, display: { kind: "currency", currency: "USD" } },
+    { name: "tokens", label: "Tokens", type: "number", source: { kind: "backend" }, display: { kind: "number", notation: "compact" } },
+    { name: "elapsed", label: "Elapsed", type: "number", source: { kind: "backend" }, render: "duration_ms" },
+    // A host renderer is a table-cell presentation; metrics keep their own labels.
+    { name: "price", label: "Price", type: "number", source: { kind: "backend" }, render: "usd" },
+    { name: "model", label: "Model", type: "text", source: { kind: "backend" } },
+  ];
+  const renderers = { ...defaultRenderers, usd: () => "HOST USD" };
+  const grouped: MetricBucket[] = [
+    { keys: ["opus"], value: 1234.5, count: 3 },
+    { keys: ["haiku"], value: 20.25, count: 2 },
+  ];
+  const card = (c: RenderingClause, b: MetricBucket[] = [{ keys: [], value: 1234.5, count: 17 }]) =>
+    renderToStaticMarkup(createElement(MetricCard, { clause: c, buckets: b, fields: money, renderers, locale: "en-US" }));
+  const sum = (field: string, display?: RenderingClause["display"], groupBy: string[] = []): RenderingClause =>
+    ({ id: "m", op: "sum", field, groupBy, ...(display ? { display } : {}) });
+
+  it("labels values, lists, chart axes, tooltips and pie totals with a declared currency", () => {
+    expect(card(sum("cost"))).toContain("$1,234.50");
+    expect(card(sum("cost", undefined, ["model"]), grouped)).toContain("$20.25");
+    for (const kind of ["bar-horizontal", "bar-vertical", "pie"] as const)
+      expect(card(sum("cost", { kind }, ["model"]), grouped), kind).toContain("$1,234.50");
+    expect(card(sum("cost", { kind: "bar-horizontal" }, ["model"]), grouped)).toMatch(/>\$[\d,]+\.\d\d<\/text>/);
+    expect(card(sum("cost", { kind: "pie" }, ["model"]), grouped)).toContain("Exact additive denominator: $1,254.75.");
+    expect(card(sum("tokens"), [{ keys: [], value: 3_412_000, count: 9 }])).toContain("3.4M");
+  });
+
+  it("keeps counts, explicit formats, NULLs and errors first, and never uses host cell renderers", () => {
+    expect(card({ ...sum("cost"), op: "count" })).not.toContain("$");
+    expect(card(sum("cost", { kind: "auto", format: { kind: "number", decimals: 1 } }))).not.toContain("$");
+    expect(card(sum("cost"), [{ keys: [], value: null, count: 0 }])).toContain("—");
+    const failed = card(sum("cost", undefined, ["model"]), [{ keys: ["opus"], value: null, count: 1, error: "Overflow" }]);
+    expect(failed).toContain("Overflow");
+    expect(failed).not.toContain("$");
+    expect(card(sum("price"))).not.toContain("HOST USD");
+    expect(card(sum("price", { kind: "bar-horizontal" }, ["model"]), grouped)).not.toContain("HOST USD");
+  });
+
+  it("labels shares as ratios, not in the measure's units", () => {
+    const shares: MetricBucket[] = [
+      { keys: ["opus"], value: 0.25, count: 3 },
+      { keys: ["haiku"], value: 0.75, count: 2 },
+    ];
+    const cost = card({ ...sum("cost", { kind: "table" }, ["model"]), share: "group0" }, shares);
+    expect(cost).not.toContain("$");
+    expect(cost).toContain("0.25");
+    const elapsed = card({ ...sum("elapsed", { kind: "table" }, ["model"]), share: "total" }, shares);
+    expect(elapsed).not.toContain("ms");
+    expect(elapsed).toContain("0.75");
+  });
+});
 describe("metric population notes", () => {
   it("states how many groups minCount hid", () => {
     const markup = renderToStaticMarkup(
@@ -970,4 +1024,13 @@ it("says what one point of a windowed or share metric is", () => {
   );
   expect(render({ ...clause, share: "total" })).toContain("Share of the total.");
   expect(render(clause)).not.toContain("trailing");
+});
+
+it("colours list swatches and bars by a saved colorBy key", () => {
+  const listClause: RenderingClause = { id: "m", op: "count", groupBy: ["repository", "family"], display: { kind: "list", colorBy: "family", list: { useGroupColors: true } } };
+  const pairs: MetricBucket[] = [{ keys: ["a", "Missing tool"], value: 3, count: 3 }, { keys: ["b", "Missing tool"], value: 2, count: 2 }, { keys: ["b", "Flaky"], value: 1, count: 1 }];
+  const host = document.createElement("div");
+  host.innerHTML = renderToStaticMarkup(createElement(MetricCard, { clause: listClause, buckets: pairs, fields, renderers: defaultRenderers, theme: { dimensions: { family: { layer: "x", overrides: [{ value: "Missing tool", color: "orange" }, { value: "Flaky", color: "teal" }] } } } }));
+  const swatches = [...host.querySelectorAll<HTMLElement>(".qt-metric-bar-label .qt-metric-swatch")].map((s) => s.style.background);
+  expect(swatches).toEqual(["orange", "orange", "teal"]);
 });

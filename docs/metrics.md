@@ -45,13 +45,15 @@ const ratio: AggregationClause = {
 };
 ```
 
-Aggregate formulas reduce row expressions and then compute once per group. `SUM([x]) / SUM([y])` is a ratio of sums, not an average of row ratios. Use `NULLIF` for an intentionally nullable denominator. Nested aggregates and bare row references outside reductions are invalid. `COUNT()`, `COUNT(expr)`, `COUNT_DISTINCT`, `SUM`, `AVG`, `MIN`, `MAX`, and `MEDIAN` retain scalar semantics. `MEDIAN` accepts numeric expressions, ignores nulls, and averages the middle two values for even populations; an empty population returns null. It is available in aggregate formulas, not the legacy `AggOp` selector. The local expression compiler also supports its documented row functions; each server profile advertises a narrower subset.
+Aggregate formulas reduce row expressions and then compute once per group. `SUM([x]) / SUM([y])` is a ratio of sums, not an average of row ratios. Use `NULLIF` for an intentionally nullable denominator. Nested aggregates and bare row references outside reductions are invalid. `COUNT()`, `COUNT(expr)`, `COUNT_DISTINCT`, `SUM`, `AVG`, `MIN`, `MAX`, and `MEDIAN` retain scalar semantics. `MEDIAN` accepts numeric expressions, ignores nulls, and averages the middle two values for even populations; an empty population returns null. `PERCENTILE(expr, p)` is the exact-linear percentile of the same population: `p` must be a number literal from 0 to 1 (`PERCENTILE([latency], 0.9)`; a field, formula or out-of-range `p` is a formula error). Sort the group's non-null samples, take position `(n-1)*p`, `lower = floor(position)` and `fraction = position - lower`, then return `(1-fraction)*a + fraction*b` for the samples `a` at `lower` and `b` at `min(lower+1, n-1)`, in IEEE double arithmetic in that order, clamped to `[a, b]`. `PERCENTILE([x], 0)` and `PERCENTILE([x], 1)` are the minimum and maximum; `PERCENTILE([x], 0.5)` equals the box median and, in the local engine and on SQLite, `MEDIAN([x])` bit for bit. DuckDB (`median`) and PostgreSQL (`percentile_cont(0.5)`) compute `MEDIAN` natively as `a + (b-a)/2`, which can differ from it in the last bit. Nulls are ignored, an empty population returns null, and an invalid sample fails the reduction as for `MEDIAN`. Several `PERCENTILE` terms over the same input share one sort per group in every engine, so `PERCENTILE([gap], 0.95) - PERCENTILE([gap], 0.5)` sorts each group once; `MEDIAN` shares that sort locally and on SQLite, while DuckDB and PostgreSQL reduce it with their native median aggregate. Both are available in aggregate formulas, not the legacy `AggOp` selector. Servers advertise `PERCENTILE` with the `metricPercentiles` capability; `toQueryRequestV3` refuses a request that needs it from a server without it. The local expression compiler also supports its documented row functions; each server profile advertises a narrower subset.
 
-`sort` is a stable multi-term order over `value`, scatter `y`, `count`, distribution `samples`, or `group0`, `group1`, etc. Each term has ascending/descending direction and optional null placement. `groupLimit` (1–10,000) applies after reductions, formulas, `minCount`, and sorting. Results expose total group count/coverage so truncated charts can be identified. An Other bucket is available only when the engine can derive an exact additive remainder; ratios are not treated as additive.
+`sort` is a stable multi-term order over `value`, scatter `y`, `count`, distribution `samples`, or `group0`, `group1`, etc. Each term has ascending/descending direction and optional null placement. `groupLimit` (1–10,000) applies after reductions, formulas, `minCount`, and sorting. Results expose total group count/coverage so truncated charts can be identified. An Other bucket (`other` on the result) is the exact remainder of the groups `groupLimit` omits; see [Other remainders](#other-remainders).
 
 Scatter stores the primary reduction in `expression` and the second in `expressionY`, with `display.kind: "scatter"`. Each typed group tuple produces one X/Y pair from the same population. Format X/Y independently through `xFormat`/`yFormat`, and label them through `xLabel`/`yLabel`.
 
-Box and histogram definitions use `distribution: { kind, input, ... }`, where `input` is a numeric **row** expression, not an aggregate formula. Box options select `whiskers: "minmax" | "tukey"`; optional `display.boxMean` shows a mean marker. Histograms use `bins` (2–30). Quartiles interpolate at `(n-1)*p`. Tukey whiskers end at observed in-fence values; both outlier tails are retained in a bounded sample with a total outlier count. Histograms derive shared equal-width edges from the full scoped population before ranking/limiting groups; the final upper bound is inclusive. Constants and empty populations have explicit results. Distribution response types are exported by core.
+Box and histogram definitions use `distribution: { kind, input, ... }`, where `input` is a numeric **row** expression, not an aggregate formula. Box options select `whiskers: "minmax" | "tukey" | "percentile"`; optional `display.boxMean` shows a mean marker. Histograms use `bins` (2–30). Quartiles interpolate at `(n-1)*p`. Tukey whiskers end at observed in-fence values; both outlier tails are retained in a bounded sample with a total outlier count. Percentile whiskers (`whiskers: "percentile"`, `whiskerProbabilities: [lo, hi]` with `0 ≤ lo < 0.25` and `0.75 < hi ≤ 1`, default `[0.1, 0.9]`) end at the exact-linear `lo` and `hi` percentiles, which are interpolated values rather than observed samples. The summary echoes them as `whiskerProbabilities`, `outlierCount` counts the samples strictly outside the whiskers and `outliers` is always empty; the chart marks only the minimum and maximum beyond them. Options of another kind or whisker mode (`whiskers` on a histogram, `whiskerProbabilities` without percentile whiskers, `probabilities` on a box) are inactive alternatives: every engine ignores them, so the editor keeps them when the chart kind changes.
+
+A quantile curve uses `distribution: { kind: "quantiles", input, probabilities }` with 1–101 strictly increasing probabilities in [0, 1] (the editor's default is 0, 0.01, …, 1). Each bucket carries `{ kind: "quantiles", summary: { n, probabilities, values } | null }`: `values[i]` is the exact-linear percentile at `probabilities[i]`, and the summary is null for a group without numeric samples. The bucket `value` (for sorting and labels) is the exact-linear median, or null. Display it with `display.kind: "quantiles"`, a cumulative chart with one line per group (x the value, y the probability). Over a cyclic slot's occurrences, a box or a quantile curve summarises the occurrence values. Servers advertise these with `boxPercentileWhiskers` and `quantileDistributions`; `toQueryRequestV3` refuses them for a server without the capability. Histograms derive shared equal-width edges from the full scoped population before ranking/limiting groups; the final upper bound is inclusive. Constants and empty populations have explicit results. Distribution response types are exported by core.
 
 Legend placement for pie, ring, and scatter is `left`, `right`, `top`, `bottom`, or `none`. List options are `showBars`, `useGroupColors`, and `showValues`. These affect presentation only. Saved inactive alternatives can be retained during editing; the computation projector sends only the active scalar, scatter, or distribution definition.
 
@@ -174,6 +176,134 @@ rows)", or "(fewer than 5 distinct Conversation values)" and "(fewer than 10
 total Calls)". `metricMinCount`, `metricMinCountMeasure` and
 `metricMinCountText` read either form.
 
+## Intervals for rates and shares
+
+A ratio metric can carry a confidence interval, so a bar of 15 turns at 40% and
+a bar of 128 turns at 4.7% no longer look equally certain:
+
+```ts
+// Share of turns with an event, with a Wilson 95% interval per group.
+const turnsWithEvent: AggregationClause = {
+  id: "turn-share", op: "count", groupBy: ["prompt_length"],
+  expression: "COUNT_DISTINCT(IF([events]>0,[turn_id],NULL)) / NULLIF(COUNT_DISTINCT([turn_id]), 0)",
+  interval: { kind: "proportion" },
+  display: { kind: "bar-horizontal", format: { kind: "percent", decimals: 1 } },
+};
+// Events per 1,000 messages read, with an exact Poisson 90% interval.
+const eventRate: AggregationClause = {
+  id: "per-thousand", op: "count", groupBy: ["model"],
+  expression: "SUM([events]) / NULLIF(COUNT_DISTINCT([message_id]) / 1000, 0)",
+  interval: { kind: "rate", level: 0.9 },
+};
+```
+
+Every bucket with a numeric value then has `lower` and `upper`, in the value's
+own units: after any constant scaling such as `/1000` or `100*`. `level` is
+0.5 to 0.9999 and defaults to 0.95; levels outside that range would round the
+quantile probabilities to 0 or 1.
+
+An interval is an annotation: turning it on never changes a bucket's value,
+error, ranking, `minCount`, `groupLimit` or Other remainder.
+
+- **The metric must be a ratio.** The expression is one SUM, COUNT or
+  COUNT_DISTINCT (the numerator) over another (the denominator), multiplied or
+  divided only by positive number literals, with `NULLIF(x, 0)` allowed around
+  either part and parentheses anywhere: `A/B`, `A/NULLIF(B,0)`,
+  `100*A/B`, `A/(B/1000)` and `A/NULLIF(B/1000,0)` all qualify. Any other shape
+  (an AVG, a difference, a third aggregate, a negative or zero constant, a
+  plain `op`/`field` metric), an unknown kind or a level out of range is a
+  clause error with the `metric_interval` code in every engine. Write a mean of
+  a 0/1 flag as
+  `SUM([flag]) / COUNT([flag])` to give it an interval.
+- **`proportion`** is a share of units that have a property: the numerator
+  counts some of the units the denominator counts (0 ≤ numerator ≤
+  denominator). The interval is the Wilson score interval for numerator
+  successes in denominator trials. It is 0 at the bottom when the numerator is
+  0 and 1 at the top when every unit counts.
+- **`rate`** is a count over an exposure. The interval is the exact (Garwood)
+  Poisson interval for the numerator count, divided by the denominator: the
+  gamma quantiles at (1 − level)/2 with shape numerator and at (1 + level)/2 with
+  shape numerator + 1. A zero count has a lower bound of 0.
+- **Exact parts.** Bounds come from the exact numerator and denominator each
+  engine already reduces for the value, never from the rounded value. A group
+  with an error, or without a value (a zero denominator under `NULLIF`, an
+  empty calendar interval), has no interval; an error always takes precedence.
+  A zero denominator without `NULLIF` is the usual division error.
+- **Counts only.** The numerator counts events or units, so it must be a
+  nonnegative integer; a proportion's denominator must be an integer at least
+  as large, while a rate's exposure may be fractional. A group whose parts are
+  outside this domain keeps its value and gets `intervalError:
+  "interval_domain"` instead of bounds, so a wrong kind is visible without
+  changing the chart. This rejects the common misuse, a SUM of amounts such as
+  revenue or durations, but the engine cannot know units: `proportion` on a
+  share is meaningful only when the SUM counts units.
+- **Totals and Other.** A grand total (`groupBy: []`) is one bucket like any
+  other. Groups hidden by `minCount` have no bucket. When `groupLimit` omits
+  groups of a ratio whose parts are SUM or COUNT, the Other remainder pools
+  each part and carries bounds from the pooled parts (see
+  [Other remainders](#other-remainders)); COUNT_DISTINCT parts have none.
+- **Windows and shares.** A window total pools each part over the window
+  before the interval is computed, so a 7-day point's interval covers its 7
+  days of counts; a mean per interval has no interval. A share
+  (`share: "total"` or `"group0"`) is a proportion of its total: use
+  `kind: "proportion"`, and the interval is computed from the bucket's sum or
+  count and the total it is divided by. These are planned on the client from
+  plain metrics like the window or share itself, so the server needs no
+  interval support for them. Occurrence means, distributions and scatters
+  refuse an interval.
+
+**What the intervals assume.** Both methods treat the counted units as
+independent: Bernoulli trials for Wilson, Poisson events for Garwood. They
+describe sampling noise under that assumption only. Clustered or over-dispersed
+data makes them too narrow: events that cluster within a message (a rate of
+`SUM([events]) / COUNT_DISTINCT([message_id])`), or turns that cluster within
+sessions or users (a share of turns). `kind` names the quantity and picks the
+method today; a later optional `method` (Jeffreys, Clopper–Pearson, an
+over-dispersed rate) can be added without changing these defaults.
+
+Executors advertise support as `queryCapabilities.metricIntervals`. The local
+engine, DuckDB, and the Go SQLite and PostgreSQL executors (`QueryDatasetV3`)
+all compute intervals and return the same bounds; the shared cases are in
+`schema/fixtures/metric-intervals.json`. `toQueryRequestV3` refuses a clause
+with an interval when a server does not advertise it, and the metric executor
+gives that clause its own error, so a host on an older server sees an
+explicit "does not support metric intervals" rather than bars without them.
+`metricRatioParts`, `metricIntervalBounds` and `applyMetricInterval` are
+exported for hosts that compute their own buckets.
+
+## Other remainders
+
+When `groupLimit` omits groups, the result's `other` bucket (no keys) is
+their exact remainder, in every engine:
+
+- **A single SUM or COUNT**: the sum of the omitted values. A SUM group with no
+  values adds nothing; an omitted group with an error means there is no
+  remainder.
+- **A ratio of SUM or COUNT parts** (the shapes an interval accepts, such as
+  `SUM([failures]) / NULLIF(SUM([calls]), 0)` or `100 * COUNT() / SUM([n])`):
+  each part is summed over the omitted groups and the formula is evaluated on
+  the pooled parts, so Other is the remainder's own rate, not an average of
+  the omitted rates. The expression's own semantics apply to the pooled parts:
+  a pooled denominator of 0 gives no value under `NULLIF(denominator, 0)` and a
+  division error without it, and `NULLIF(ratio, 0)` nulls only a zero result. An error in a part means there is no
+  remainder. With `interval`, Other has `lower` and `upper` from the pooled
+  parts.
+
+`count` is the omitted groups' rows. Groups hidden by `minCount` are never part
+of Other, and empty calendar fill-ins add nothing. Other is not computed for
+distinct counts (including a ratio with a COUNT_DISTINCT part, which do not add
+across groups), averages (whose remainder could be pooled like a ratio's;
+not computed yet), extrema, medians, distributions, scatters, or windowed and
+share results. The local engine, DuckDB and the Go SQLite and PostgreSQL
+executors compute it. Nothing in a request depends on it and there is no
+capability flag: clients key off whether `other` is present. A limited result
+without it (`groupCount` larger than the buckets) has no remainder the
+executor could compute. The UI pools additive metrics into Other rows and
+slices itself, and a list with `showOther` shows a ratio's returned `other`
+(with its interval) when the display drops no further groups;
+`metricOtherRemainder` is exported for hosts that rank and limit buckets
+themselves.
+
 ## Population scope
 
 - `allMatching` (default): all rows matching the query filters, excluding the table limit/offset.
@@ -274,8 +404,8 @@ for the underlying records, or `null` when no exact query exists:
   `= ""`. Local filters treat NULL and empty text alike for both operators, so
   with `clientRows` either drill returns both groups; the bundled backend
   distinguishes them.
-- A date-grouped key adds `>= start` and `< next`, using the clause's interval
-  and timezone (`metricDateNext`), encoded as ISO instants (`…Z`). Filters
+- A date-grouped key adds `>= start` and `< next`, using the clause's interval,
+  `every` and timezone (`metricDateNext`), encoded as ISO instants (`…Z`). Filters
   compare instants, so a date-only source value is read as UTC midnight; group
   date-only columns in UTC to keep drilldown on the same day.
 - An hour-of-day or day-of-week slot selects its occurrences inside the date
@@ -322,7 +452,20 @@ Hosts own authorization, endpoint implementation, execution budgets, cancellatio
 
 ## Output formatting
 
-`format`, `xFormat`, and `yFormat` use `MetricValueFormat`. Output types are `number`, `percent`, `duration`, `date`, `time`, or `datetime`. Formatting changes labels, tooltips, and table cells; reductions and sorts retain original typed values.
+`format`, `xFormat`, and `yFormat` use `MetricValueFormat`. Output types are `number`, `percent`, `currency`, `duration`, `date`, `time`, or `datetime`. Formatting changes labels, tooltips, and table cells; reductions and sorts retain original typed values.
+
+Currency needs an ISO 4217 code: `{ kind: "currency", currency: "USD" }` shows `$1,234.50`, using the currency's own minor units (`¥1,235`) unless `decimals` is set. Number and currency also take `notation: "compact"`, the locale's compact notation for large amounts and token totals: `{ kind: "number", notation: "compact" }` shows `1.2K` and `3.4M` in English and `1,2 Mio.` in German, and compact currency shows `$1.2M`. With compact notation `decimals` is a maximum (default 1) rather than an exact count. A currency format without a valid code shows **Invalid format** with the reason rather than guessing a currency. The metric editor offers Currency under Output type, with its code, and a Compact checkbox for Number and Currency; leaving Decimals empty (Auto) keeps the currency's own digits or compact's single digit. The formats travel in links, saved queries and the Go link codec like the other formats; link normalisation keeps `currency` only on currency formats and `notation` only on number and currency formats, and drops the default `notation: "standard"`.
+
+A numeric metric's value is labelled by the first of these that applies:
+
+1. NULL is `—`; a value or group error shows the error.
+2. An explicit `display.format` on the metric (including for counts).
+3. An expression metric, whose units may differ from any field, uses the card's shared decimals.
+4. COUNT and COUNT_DISTINCT are integer counts.
+5. If the metric is in the measure's units, the measure field's numeric `display` (`number` with `decimals` or compact notation, `percent`, `currency` or `duration`) becomes its default format. Shares (`share`) are ratios and a box or histogram over another input measures something else, so neither takes the measure's display (or its `duration_ms`/`byte_size` renderer).
+6. Otherwise the card's shared decimals. Values (not chart labels) of a measure rendered with the built-in `duration_ms` or `byte_size` keys use that renderer; other renderers, including host-registered keys, are table-cell presentations and are not used for metrics.
+
+Steps 2 and 5 apply wherever the value appears: scalar values, lists, tables and pivots, chart value axes, bar and slice labels, tooltips, box statistics and pie totals. To show a money or token measure the same way everywhere, declare `display: { kind: "currency", currency: "USD" }` or `display: { kind: "number", notation: "compact" }` on the field; table cells keep a registered `render`, which resolves before `display`.
 
 Duration units are milliseconds (default), seconds, minutes, hours, or days. Human style turns 84,000 seconds into `23h20m`; long and clock styles are also available. Custom patterns use `{d}`, `{h}`, `{hh}`, `{m}`, `{mm}`, `{s}`, `{ss}`, `{ms}`. Hours are total hours unless the pattern includes `{d}`.
 
@@ -344,7 +487,46 @@ const metricTheme: MetricTheme = {
 };
 ```
 
-Use the same instance-scoped theme on QueryBuilder and MetricsPanel. Typed dimension/value identities keep Linux the same color across charts and distinguish numeric `1` from string `"1"`. A stable domain gives explicit palette order; unknown values hash deterministically. `overrides: [{ value, color }]` pins individual assignments, and `identity` lets equivalent field names share an identity. No global registry or data-arrival order affects colors. Finite palettes may reuse colors; use domains/overrides when uniqueness matters. Marks grouped by several keys (pie, donut, bar, box, histogram, list) are colored by their whole key, using the first field's layer: two keys drawn in one chart take different colors while the palette has room, and otherwise a key's color depends only on the theme and its values. Scatter charts color by their first key, which names the series. Line charts color by their second key.
+Use the same instance-scoped theme on QueryBuilder and MetricsPanel. Typed dimension/value identities keep Linux the same color across charts and distinguish numeric `1` from string `"1"`. A stable domain gives explicit palette order; unknown values hash deterministically. `overrides: [{ value, color }]` pins individual assignments, and `identity` lets equivalent field names share an identity. No global registry or data-arrival order affects colors. Finite palettes may reuse colors; use domains/overrides when uniqueness matters. Marks grouped by several keys (pie, donut, bar, box, list) are colored by their whole key, using the first field's layer: two keys drawn in one chart take different colors while the palette has room, and otherwise a key's color depends only on the theme and its values. Scatter charts color by their first key, which names the series. Line charts color by their second key.
+
+To color bars, boxes and list rows grouped by several keys by one of their keys
+instead, name it in `colorBy`. A group then takes that key's color: its
+`overrides`, `domain` slot or NULL color, so one kind keeps its color on every
+bar. Values with neither take the next color no other value of the key uses in
+the same chart while the palette has room (by typed value, not arrival order),
+so give the key a `domain` or `overrides` when its colors must also match across
+charts. A key matches by field name or by its dimension's `identity`:
+
+```ts
+const metricTheme: MetricTheme = {
+  layers: [{ id: "kinds", colors: ["#3979c3", "#288577", "#9864b4"] }],
+  dimensions: {
+    family: { layer: "kinds", overrides: [{ value: "Missing tool", color: "var(--event-friction)" }] },
+  },
+  colorBy: "family", // or a priority list: ["family", "platform"]
+};
+```
+
+The theme's `colorBy` is the host default: it applies to every chart whose
+`groupBy` contains a listed field; with a list, the first listed field present
+wins. A chart can choose its own key with `display.colorBy`, which takes
+precedence and is saved with the chart in query links and saved views. The
+metric editor offers it as **Colour by** for bar, box and list charts grouped by
+two or more keys, with **Whole group (theme default)** clearing it:
+
+```ts
+{ id: "events", op: "count", groupBy: ["repository_name", "family"],
+  display: { kind: "bar-horizontal", colorBy: "family" } }
+```
+
+A saved `display.colorBy` that names a key the chart no longer groups by is
+kept but ignored: the chart falls back to the theme's key, or to whole-group
+colors, without an error. Key colors apply only to marks that carry their own
+label. Pie and ring slices, which are told apart by color alone, keep
+whole-group colors under either setting (histograms take a single grouping key).
+Other groupings, single keys, scatter and line charts are unaffected. Legends list each whole key with the color drawn for it, so
+several entries can share a color; hover cards and the Other bucket are
+unchanged. Neither setting is sent to the server.
 
 CSS tokens cover accent, text, muted, grid, surface, other, null, and error. `MetricClassNames` exposes root/card/title/plot/axis/grid/legend/mark slots. `MetricCard` can render standalone with a clause and result/buckets; `MetricsEditor` can be opened directly with `{ api, fields, onClose, initialMetricId?, theme?, locale? }`. Palette information belongs to the caller and is not serialized into shared query data.
 
@@ -425,12 +607,129 @@ today. The excluded rows leave the metric, so they never appear as a short
 first or last bucket, and completion does not refill those intervals as empty.
 When no interval is whole the result has no buckets.
 
+### Buckets of several intervals
+
+`every` (an integer 1–1,000; omitted means 1; for hours one of 1, 2, 3, 4, 6,
+8, 12 or 24) groups several calendar intervals into one bucket, such as 3-, 6-
+or 12-hour periods, fortnights or quarters:
+
+```ts
+dateGrouping: { field: "at", interval: "hour", every: 6, timeZone: "America/New_York",
+  includeEmpty: true, range: "query" }
+```
+
+A bucket is keyed by its start instant, as one interval is. Anchors are fixed,
+independent of the query range, so the same rows always fall in the same
+buckets and results stay cache-stable:
+
+- **Hours.** `every` must divide a day: 1, 2, 3, 4, 6, 8, 12 or 24. Buckets
+  start at local wall-clock hours that are multiples of `every` within each
+  local day in the grouping zone: 00:00, 06:00, 12:00 and 18:00 for
+  `every: 6`, also in a half-hour zone such as Asia/Kolkata. The restriction
+  keeps hour buckets aligned to local days, so changing `timeZone` reshapes
+  every hour count the same way. Any other count is refused (`date_grouping`
+  for a metric, `grouping` for a group key, and a diagnostic in links); use
+  `interval: "day"` with `every` for longer spans. Elapsed-hour blocks (such
+  as 5-hour periods counted from the epoch) could be added later as an explicit
+  opt-in if a host needs them; accepting more values then is
+  backward-compatible. A daylight-saving change makes its bucket longer or
+  shorter: both occurrences of a repeated hour fall in the same bucket, and a
+  bucket whose start hour is skipped starts at the transition, as hourly
+  floors do. Buckets always partition the timeline: in the rare zone whose
+  fall-back repeat contains a bucket boundary (the two-hour repeat of
+  Antarctica/Troll with `every: 2`), the instants after the later bucket's
+  start belong to that bucket.
+- **Days.** Groups of `every` local calendar dates counted from 1970-01-01
+  (the local date's day number, floor-divided by `every`).
+- **Weeks.** Groups of `every` Monday weeks counted from the week of Monday
+  1969-12-29.
+- **Months.** Groups of `every` months counted from January 1970, so 3, 4 and 6
+  give quarters, thirds and halves of the year starting in January.
+- **Years.** Groups of `every` years counted from 1970.
+
+Everything that works on intervals works on buckets: `includeEmpty` fills every
+bucket of the range; `range: "query"`, `"observed"` and `"custom"` round their
+bounds to whole buckets, and `partialIntervals: "exclude"` treats a bucket the
+date bounds cut, or that has not ended, as partial; a window's `periods` count
+buckets; shares, `sort`, `groupLimit` and `minCount` are unchanged; and
+`inspectBucketQuery` selects the bucket's `[start, next)` range. Hour-of-day
+and day-of-week slots, and their per-occurrence statistics, are single hours or
+days and refuse `every` above 1 with a `date_grouping` diagnostic. Links and
+saved state leave out `every: 1`. Charts label a bucket with its range in the
+grouping zone: `Jul 04 09:00–12:00 -04:00` for hours, `Jan 01–Jan 03` for days
+and weeks (the last day included), `Apr–Jun 2026` for months and `2020–2029`
+for years. Metric settings offer an **Every** count beside Date interval (a
+choice of 1, 2, 3, 4, 6, 8, 12 or 24 for hours), hidden for slots and reset to
+1 when the interval changes.
+
+`metricDateFloor(time, interval, timeZone, every)` and `metricDateNext(time,
+interval, timeZone, every)` expose the calendar; they throw a `RangeError`
+for an `every` that is not an integer 1–1,000, or that does not divide 24 for
+hours (`METRIC_HOUR_EVERY` lists those counts). Go hosts use
+`CalendarBucket(instant, interval, every, timeZone)`, which returns a
+bucket's start (its key) and the next bucket's start, so they can label or
+drill into buckets without reimplementing the anchors. In Go, `Every: 0` is
+the omitted value (one interval); an explicit `"every": 0` on the wire is
+refused, as the schema and the TypeScript engine refuse it. A server executes `every`
+above 1 when its handshake sets `QueryCapabilitiesV3.calendarEvery`;
+otherwise `toQueryRequestV3` reports a `capability_unsupported` diagnostic for
+that metric. Query Table's Go executor (SQLite and PostgreSQL) and DuckDB
+adapter advertise it.
+
 Calendar metrics execute on the v3 backend, locally on datasets already in
 memory, or over committed shown rows. Legacy v1/v2 server execution rejects date
 grouping explicitly. An unsupported server operation never triggers a population
 download. Settings are
 serialized with the query and participate in metric computation identity.
 
+### Drawing intervals
+
+When buckets carry `lower` and `upper` (a metric with `interval`), vertical and
+horizontal bars draw an error-bar whisker with end caps on each bar that has
+finite bounds. Bars never stack (a bucket with several keys is one bar), so
+every bounded bar gets its own whisker. Line charts shade a low-opacity band in
+the series colour beneath the line, breaking it wherever a point has no bounds;
+a bounded point between gaps is drawn as a whisker. The value axis extends to
+the drawn bounds, so nothing is clipped by inferred extents. Explicit axis
+bounds still clip: a whisker cut by the axis, or a nonpositive lower bound on a
+logarithmic axis, runs to the plot edge without a cap and is never shifted.
+Whiskers are drawn in the text colour over a wider halo in the surface colour,
+so they stay legible over dark bars; `.qt-metric-interval` and
+`.qt-metric-interval-halo` can restyle them.
+
+Hover text, tooltips and each mark's accessible label add the interval on its
+own line, for example `95% interval 2.2%–9.8%`: the level as a percent (up to
+four decimals, so no accepted level reads as 100%), and the bounds in the
+metric's value format. A bucket with `intervalError: "interval_domain"` reads
+`No interval: needs whole counts, at most the total` (a proportion) or
+`No interval: needs a whole, nonnegative count` (a rate). Lists and tables put
+the text in the value's title and in visually hidden text read with the value.
+A single value shows it beside its row count, as in
+`95% interval 2.2%–9.8% · 128 rows`. Compact axis labels and legends never
+include it. `display.showIntervals: false` hides whiskers, bands and the
+single-value line; hover and screen-reader text remain.
+
+A list with `display.showOther` shows a ratio's `other` remainder as returned
+by the engine, including its interval, when the display drops no further groups
+(`maxGroups` is unset or keeps every returned group). Ratios cannot be pooled
+from displayed values, so a list that truncates groups itself shows no Other.
+
+Host-rendered views can use the same reading: `metricBucketInterval(bucket)`
+returns finite, ordered bounds of a bucket without an error, and
+`metricIntervalText(clause, bucket, format, { locale, label })` returns the
+hover line, with `label` replacing the word "interval".
+`formatMetricIntervalLevel(level, locale)` formats a level.
+
+In the metrics editor, **Confidence interval** (after Window & share) sets
+`interval.kind` to None, Proportion (Wilson) or Rate (Poisson), and a 90%, 95%
+or 99% **Confidence level**; 95% is stored by omitting `level`. A kind that
+`validateMetricInterval` rejects for the metric, such as Rate on a share, is
+disabled with the reason as its tooltip, and the section is hidden while no
+interval is set and no kind applies (for example a plain count). A chosen
+interval that has become invalid stays selected and its reason is shown in
+the section. Bar and line displays add **Show interval whiskers and bands**,
+bound to `display.showIntervals`. Turning the interval off, or choosing a box,
+histogram or scatter display, removes the interval and its display setting.
 
 ### Windows, running values and shares
 
@@ -460,8 +759,9 @@ const modelShare: AggregationClause = {
   interval so far with `"all"`. Aggregates are rebuilt from per-interval
   parts: SUM, COUNT, MIN and MAX merge, and AVG is SUM / COUNT of its input, so
   `SUM([a]) / SUM([b])` pools its parts instead of averaging each interval's
-  ratio. COUNT_DISTINCT and MEDIAN cannot be merged across intervals and are
-  refused, because one value can occur in several intervals.
+  ratio. COUNT_DISTINCT, MEDIAN and PERCENTILE cannot be merged across
+  intervals and are refused: one value can occur in several intervals, and an
+  order statistic needs the window's own sorted samples.
 - **Mean per interval** (`reduce: "mean"`). The mean of the per-interval
   values of a single SUM, COUNT or COUNT_DISTINCT; empty intervals count as 0.
   For a distinct count this is the mean of daily counts, so a user active on
@@ -531,6 +831,9 @@ const byHour: AggregationClause = {
   as for calendar intervals; use occurrences below.
 - **Whole intervals.** `partialIntervals: "exclude"` keeps only the whole hours
   (`hourOfDay`) or days (`dayOfWeek`) inside the date bounds.
+- **One hour or day per slot.** `every` above 1 is refused with a
+  `date_grouping` diagnostic, also with `occurrence`; see
+  [Buckets of several intervals](#buckets-of-several-intervals).
 - **Engines.** The local engine (`evaluateMetrics`, `applyAggregations`), the
   v3 executor of the Go module (SQLite and PostgreSQL) and DuckDB compute
   slots, and their buckets match for the same rows. Servers advertise
@@ -562,7 +865,7 @@ const typicalWeekday: AggregationClause = {
 - **Occurrences.** `occurrence.interval` is one calendar `"day"` or `"hour"`
   of the slot (`hourOfDay` occurs hourly, so it needs `"hour"`). The metric is
   evaluated once per occurrence, with any expression: counts, sums, distinct
-  counts, ratios and medians.
+  counts, ratios, medians and percentiles.
 - **Whole occurrences only.** Occurrences the date bounds cut short, and the
   occurrence still in progress, are left out, using the same boundary as
   `partialIntervals: "exclude"`. "Last 30 days" opened at 14:00 drops the

@@ -2,6 +2,333 @@
 
 ## Unreleased
 
+### Fixed
+
+- `QueryDatasetV3.SourcePlan` now plans a `distinct` request over its
+  `source.where` population and includes the target: a base target in
+  `BaseFields` (read through its raw binding, as execution does, so numeric
+  bindings without `ExpressionNumeric` stay supported), a computed target in
+  the projection with its transitive base inputs. Hosts that stage only the
+  planned base fields previously got no values for a distinct-only request over
+  an otherwise unselected field. Related changes for distinct requests:
+  - an unfilterable target is rejected while planning, as it already was
+    during execution;
+  - a computed target missing from `expectedRevisions` is rejected with
+    `definition_changed` while planning, rather than only during execution;
+  - the response's `execution.fields` now includes a computed target's
+    capability (it was empty).
+
+### Documentation
+
+- The SQLite guide no longer suggests setting and restoring
+  `PRAGMA temp_store` per request. Choose the storage mode once per connection
+  and commit successful requests: changing `temp_store` or rolling back TEMP
+  DDL makes the connection re-parse its whole schema.
+- Screen fitting no longer treats a wrapping host link as an unshrinkable
+  one-line control. Control cells are now floored at their min-content width,
+  laid out with the cell's own CSS (including `classNames.cell`): content a
+  host renderer lets wrap, such as
+  `<span style="white-space: normal"><a href>long title</a></span>` clamped to
+  two lines, needs only its longest unbreakable word, so the column fits and
+  the title wraps as it did in 0.9.6. Since 0.9.7 such a column took its
+  longest title on one line as its floor, and the table scrolled horizontally
+  at every desktop width. Host buttons inside a wrapping wrapper or a
+  `flex-wrap` bar may now wrap or stack as well. The library's Detail buttons,
+  JSON previews and links, nowrap host controls and `SelectConfig.minWidth`
+  keep their minimums. A wrapping link whose label is one unbreakable token
+  (a URL or path) still floors at the whole token.
+### Added
+
+- `MetricTheme.colorBy` names group keys (one, or a priority list, matched by
+  field name or dimension `identity`) whose value colours bars, boxes and list
+  rows grouped by several keys. A bar grouped by `repository_name` and
+  `family` with `colorBy: "family"` takes that dimension's override, domain
+  slot or NULL colour, so one kind keeps its colour across repositories; other
+  values take the next colour no other value of the key uses in that chart.
+  Without it, or when a grouping has no listed key, whole tuples keep their
+  hashed colours. Pie and ring slices, told apart by colour alone, always keep
+  whole-tuple colours. Legends show the colour drawn for each key; hover cards
+  and Other are unchanged. See
+  [Caller palettes and styling](docs/metrics.md#caller-palettes-and-styling).
+- A metric's `display.colorBy` saves the colouring key with the chart. It takes
+  precedence over the theme's `colorBy`, travels in query links (TypeScript and
+  Go codecs) and saved views, and is set with the metric editor's **Colour by**
+  control, shown for bar, box and list charts grouped by two or more keys. A saved key the chart
+  no longer groups by is ignored (the theme's key or whole-group colours apply).
+### Added
+
+- Calendar buckets of several intervals: an optional `every` (1–1,000; omitted
+  means 1) on a metric's `dateGrouping` and on calendar group keys, for 3-, 6-
+  or 12-hour periods, N-day buckets, fortnights, quarters and so on. Buckets
+  are keyed by their start and anchored independently of the query range:
+  hours accept only counts dividing a day (1, 2, 3, 4, 6, 8, 12 or 24, so
+  buckets stay aligned to local days; elapsed-hour blocks could be an opt-in
+  later) and start at local multiples of `every` within each local day (a DST
+  change lengthens or shortens its bucket; both occurrences of a repeated hour
+  share one; buckets always partition the timeline), days count local dates
+  from 1970-01-01, weeks from Monday 1969-12-29, months from
+  January 1970 and years from 1970. `includeEmpty`,
+  query/observed/custom ranges, `partialIntervals: "exclude"`, windows (which
+  count buckets) and drilldown (`[start, next)`) work on whole buckets.
+  Hour-of-day and day-of-week slots refuse `every` above 1. The local engine,
+  DuckDB and the Go executor (SQLite, including the compact boundary path, and
+  PostgreSQL) produce identical keys; `schema/fixtures/calendar-every.json`
+  checks the TypeScript and Go calendars against each other. Servers advertise
+  the new `QueryCapabilitiesV3.calendarEvery`, and `toQueryRequestV3` reports a
+  `capability_unsupported` diagnostic without it. Links and saved state
+  round-trip `every` in TypeScript and Go and leave out `every: 1`.
+  `metricDateFloor` and `metricDateNext` take `every` as an optional fourth
+  argument (a `RangeError` unless it is an integer 1–1,000 that divides 24 for
+  hours; `METRIC_HOUR_EVERY` lists those), and Go hosts get
+  `CalendarBucket` for a bucket's start and end. Go refuses an explicit
+  `"every": 0` on the wire. The metric editor offers an **Every** count beside
+  Date interval and the grouping key chip a small count control (the divisors
+  of 24 for hours), both hidden for slots and reset to 1 when the interval
+  changes; charts label hour buckets
+  "Jul 04 09:00–12:00 -04:00" (both offsets across a DST change) and day
+  buckets "Jan 01–Jan 03". See
+  [Buckets of several intervals](docs/metrics.md#buckets-of-several-intervals).
+### Changed
+
+- Icon-only buttons whose purpose is not obvious have native hover tooltips:
+  JSON tree toggles say "Expand" or "Collapse" as their state changes; column
+  and property editor arrows say "Move up" and "Move down"; picker back arrows
+  say "Back to fields" and "Back to columns"; reorder handles say "Reorder";
+  and the metric actions menu says "Metric actions". Accessible names, state and
+  keyboard behaviour are unchanged; screen readers may announce the tooltip as
+  the button's description. Close buttons keep no tooltip.
+- Tooltips no longer repeat visible text. Number and other formatted cells
+  offer the raw value only when formatting hides it: not for the cell locale's
+  digit grouping or trailing zeros (`1.234.567`, `42.00`). Chips offer their
+  raw key only when relabelled. `truncate` and `lines` text, valid JSON
+  previews, grouped column labels, compact metric axis labels, compact legend
+  labels and list-bar labels offer their full text only while clipped, or
+  always when the full label differs from the visible one. JSON parse errors
+  and other explanations remain.
+- As a result, the public `truncate` renderer and `truncate`/`lines` cell
+  displays no longer render a `title` attribute up front: it is set on hover
+  while the text is clipped, so static and server-rendered markup carries none.
+  Hosts whose tests or scrapers find cells by `title` need another selector.
+- Unavailable field picker items (`.qt-picker-item--disabled`) use the default
+  arrow cursor instead of `not-allowed` and no longer highlight on hover; they
+  stay disabled and dimmed.
+### Added
+
+- Currency and compact number formats. `MetricValueFormat`, `CellDisplay` and
+  property formats accept `{ kind: "currency", currency: "USD", decimals? }`
+  (`$1,234.50`, using the currency's own minor units unless `decimals` is set),
+  and number and currency accept `notation: "compact"` (`1.2K`, `3.4M`,
+  `$1.2M`, following the locale; `decimals` is then a maximum, default 1).
+  The metric editor offers Currency under Output type and a Compact checkbox,
+  with Auto decimals. The formats round-trip through links and saved queries,
+  and the Go link codec and `schema/query-table.schema.json` accept them; link
+  normalisation drops `currency` and `notation` where they do not apply, and
+  the default `notation: "standard"`. A currency without a valid ISO 4217
+  code shows a visible format error. A field's `currency` or compact `number`
+  display is also the default format of metrics over it, in values, chart
+  axes, tooltips and totals. See
+  [Output formatting](docs/metrics.md#output-formatting).
+
+### Fixed
+
+- Share metrics (`share: "total" | "group0"`) and distributions over another
+  input no longer take the measure field's display or its `duration_ms` /
+  `byte_size` renderer: a share over a duration field was labelled in
+  milliseconds. They use the card's decimals unless the metric sets a format.
+### Added
+
+- Other remainders in every engine, and for ratios. When `groupLimit` omits
+  groups, DuckDB and the Go SQLite and PostgreSQL executors now return
+  `other` like the local engine: the sum of a single SUM or COUNT, and for a
+  ratio of SUM or COUNT parts (such as `SUM([failures])/NULLIF(SUM([calls]),0)`)
+  the formula evaluated on the parts pooled over the omitted groups, with
+  interval bounds when the metric has `interval`. Groups hidden by `minCount`
+  are never part of it; distinct counts and averages still have none.
+  Clients key off whether `other` is present. Go pools the omitted
+  groups with window aggregates in the same statement, and DuckDB reports
+  limited results as `coverage: "exact"` like the other engines. The local
+  engine's remainder is `metricOtherRemainder`. See
+  [Other remainders](docs/metrics.md#other-remainders).
+- Confidence intervals for ratio metrics. `interval: { kind: "proportion" }`
+  (Wilson score) or `{ kind: "rate" }` (exact Garwood Poisson), with an
+  optional `level` (default 0.95), returns `lower` and `upper` on every bucket
+  of a metric that is a ratio of two SUM, COUNT or COUNT_DISTINCT aggregates,
+  such as `SUM([events])/NULLIF(COUNT_DISTINCT([message_id])/1000,0)`. Bounds
+  come from each group's exact numerator and denominator and are scaled like
+  the value. An interval never changes a value, ranking or Other remainder:
+  parts that are not counts (negative or fractional, or a proportion's
+  numerator above its denominator) set `intervalError: "interval_domain"`
+  instead of bounds. Other shapes, unknown kinds and levels outside 0.5–0.9999
+  are a clause error with the new `metric_interval` code in every engine.
+  Windows pool the parts first and shares take a proportion interval of their
+  total. Both methods assume independent units. The local engine computes
+  intervals; DuckDB and the Go SQLite and PostgreSQL executors compute
+  the same bounds and advertise `queryCapabilities.metricIntervals`, and
+  `toQueryRequestV3` refuses an interval a server does not advertise. Shared
+  cases, including the Pharos evidence (6 of 128, 8 of 52 and 6 of 15 turns),
+  are in `schema/fixtures/metric-intervals.json`. See
+  [Intervals for rates and shares](docs/metrics.md#intervals-for-rates-and-shares).
+- Metric charts draw intervals: an error-bar whisker on each vertical or
+  horizontal bar with `lower`/`upper` bounds and a shaded band beneath each
+  line series, breaking where a point has none. Value axes include the bounds;
+  explicit and logarithmic axes clamp them without shifting; whiskers have a
+  surface-coloured halo. Tooltips and mark labels add `95% interval 2.2%–9.8%`
+  in the metric's value format, or `No interval: …` for an `intervalError`.
+  Lists and tables carry it as a title and as screen-reader text; a single
+  value shows it beside its row count. `display.showIntervals: false` hides
+  whiskers, bands and the single-value line. Lists with `showOther` show a
+  ratio's returned `other` remainder, with its interval. `metricBucketInterval`,
+  `metricIntervalText` (with a replaceable `label`) and
+  `formatMetricIntervalLevel` are exported for host-rendered views. See
+  [Drawing intervals](docs/metrics.md#drawing-intervals).
+- The metrics editor's **Confidence interval** settings choose None,
+  Proportion (Wilson) or Rate (Poisson) with a 90/95/99% level, and toggle
+  whiskers and bands. Kinds that validation rejects for the metric are
+  disabled with the reason, and the section is hidden while none applies.
+### Added
+
+- The Go SQLite and PostgreSQL expression profiles run the text functions
+  `LENGTH`, `TRIM`, `LTRIM`, `RTRIM`, two-argument `CONTAINS`, `STARTS_WITH`
+  and `ENDS_WITH`, and `ARRAY_LENGTH(SPLIT(text, separator))`, inside
+  aggregates, computed definitions, distribution inputs and grouped formula
+  summaries, so a metric such as `SUM(LENGTH([text]))` or a per-conversation
+  word count no longer fails with `arity`. Results match the browser runtime:
+  `LENGTH` counts code points, the trims remove JavaScript's white space set,
+  `SPLIT` counts like `String.prototype.split` (an empty separator splits
+  UTF-16 code units; more than 10,000 parts is the per-row error
+  `array_range`), and missing text stays NULL rather than empty. A text array
+  is accepted only inside `ARRAY_LENGTH`; other text functions are refused
+  (`unsupported_function`). A formula text operand above 100,000 UTF-8 bytes
+  remains `text_range` on the server (the browser bounds 100,000 UTF-16 code
+  units), and makes that row's whole group an error, except as described
+  under Changed.
+- New formula function `WORD_COUNT(text)` in the browser, DuckDB, Go SQLite
+  and Go PostgreSQL: the number of runs of characters between white space (the
+  set `TRIM` removes), with no element bound. Unlike
+  `ARRAY_LENGTH(SPLIT(TRIM(text), " "))` it treats line breaks and repeated
+  spaces as one separator and does not fail with `array_range` on long text.
+- Both profiles also run `LOWER`, `UPPER` and the `ignoreCase` argument of
+  `CONTAINS`, `STARTS_WITH` and `ENDS_WITH` (both sides lower-cased). These
+  favor the common case over exact parity: SQLite uses Go's simple Unicode
+  case mapping and PostgreSQL uses `lower()`/`upper()` under the database's
+  default collation (a `C` default maps only ASCII), so a few characters differ
+  from JavaScript, such as `UPPER("ß")`, final sigma and `İ`. ASCII, Latin-1,
+  basic Greek and Cyrillic letters agree; see
+  [Case mapping](docs/backend-metrics.md#case-mapping).
+- The SQLite profile runs `REGEX_TEST`, `REGEX_EXTRACT` and `REGEX_REPLACE`
+  with literal JavaScript patterns, translated to RE2 only when the meaning is
+  identical; other patterns are refused with `unsupported_regex`. PostgreSQL
+  refuses formula regex. `RegexAggregateExpressions` stays false.
+- **SQLite hosts must register the complete current `SQLiteV2Functions()`
+  list**, which adds `qt_v2_lower`, `qt_v2_upper`, `qt_v2_length`,
+  `qt_v2_word_count`, `qt_v2_split_count`, `qt_v2_regex_test`, `qt_v2_regex_extract`,
+  `qt_v2_regex_replace` and `qt_v2_regex_replace_error`.
+- Shared fixtures `schema/fixtures/text-functions.json` (local engine, DuckDB,
+  Go SQLite, Go PostgreSQL) and `schema/fixtures/formula-regex.json` (browser
+  regex results against the server translation). See
+  [Text and array functions](docs/backend-metrics.md#text-and-array-functions).
+
+### Changed
+
+- Counting functions read text in full. A source text field passed directly to
+  `LENGTH`, `WORD_COUNT` or two-argument `CONTAINS`, `STARTS_WITH` or
+  `ENDS_WITH` is no longer subject to the 100,000-character formula text input
+  bound, in the browser runtime, DuckDB (which had no bound), Go SQLite and Go
+  PostgreSQL. `SUM(LENGTH([text]))` and `SUM(WORD_COUNT([text]))` therefore
+  count very long messages instead of failing their whole group. These
+  functions return a number or a boolean without copying the text. The bound
+  still applies to every other use of a text field, including a text-producing
+  argument (`LENGTH(TRIM([text]))` fails with `text_range` as before),
+  `ignoreCase` matching and `ARRAY_LENGTH(SPLIT(...))`. Storage-type, UTF-8 and
+  host staging limits are unchanged. See
+  [Text and array functions](docs/backend-metrics.md#text-and-array-functions).
+
+### Fixed
+
+- DuckDB `TRIM`, `LTRIM` and `RTRIM` remove the JavaScript white space set
+  (DuckDB's own trim kept tabs and line breaks), and `SPLIT` with an empty
+  separator follows `String.prototype.split` (`SPLIT("", "")` is empty; text
+  with a supplementary character is an error rather than a different count,
+  except in `ARRAY_LENGTH`, which counts UTF-16 code units). `SPLIT` results
+  above 10,000 elements are an error, as in the browser.
+- DuckDB `CONTAINS`, `STARTS_WITH` and `ENDS_WITH` return NULL for a NULL
+  `ignoreCase` argument, as in the browser, instead of comparing exactly.
+- Go server diagnostics name an unknown function `unsupported_function`
+  instead of `arity`.
+### Added
+
+- Box whiskers at percentiles: `distribution.whiskers: "percentile"` with
+  `whiskerProbabilities: [lo, hi]` (`0 ≤ lo < 0.25`, `0.75 < hi ≤ 1`, default
+  `[0.1, 0.9]`). The whiskers are the exact-linear percentiles, echoed on the
+  summary as `whiskerProbabilities`; `outlierCount` counts the samples beyond
+  them and `outliers` is empty (the chart marks the minimum and maximum). The
+  box chart and its tooltip draw and label them, and the metric editor offers
+  them. Options of another distribution kind or whisker mode are ignored by
+  every engine, as before for `whiskers` on a histogram.
+- A `quantiles` distribution: `{ kind: "quantiles", input, probabilities }`
+  with 1–101 strictly increasing probabilities. Buckets carry
+  `{ kind: "quantiles", summary: { n, probabilities, values } | null }` and the
+  median as their value. `display.kind: "quantiles"` draws a cumulative curve
+  per group; the editor offers it as "Quantile curve" with 101 points by
+  default. Implemented locally, in DuckDB, Go SQLite (ranked samples) and Go
+  PostgreSQL. New capabilities `boxPercentileWhiskers` and
+  `quantileDistributions`; `toQueryRequestV3` refuses either for a server
+  without it. Query links keep the new options (`numberList` metric option).
+  SQLite sorts groups of up to 100,000 samples in memory
+  (`qt_v2_box_percentile`, `qt_v2_quantiles_samples`) and ranks larger ones;
+  it adds `qt_v2_quantile_ranks` and `qt_v2_quantiles_summary` to
+  `SQLiteV2Functions()` and those aggregates and `qt_v2_rank_samples` to
+  `SQLiteV2Aggregates()`.
+- DuckDB box buckets now report the median as their `value`, like the other
+  engines (it was null).
+
+- `PERCENTILE(expr, p)` in aggregate formulas and grouped formula summaries:
+  the exact-linear percentile of a group's non-null numeric samples, with `p`
+  a number literal from 0 to 1 (`PERCENTILE([latency], 0.9)`). Position
+  `(n-1)*p`, then `(1-f)*a+f*b` in IEEE double arithmetic, clamped to the two
+  samples, exactly like box quartiles; an empty population is null. Every
+  engine implements it: the local evaluator, DuckDB (from the sorted sample
+  list; `quantile_cont` interpolates in a different order), Go SQLite (sorted
+  in memory per group within a process-wide budget, ranked in SQL beyond it)
+  and Go PostgreSQL (sorted `array_agg`, not `percentile_cont`). Several
+  `PERCENTILE` terms over one input share one sort per group (and `MEDIAN`
+  with them locally and on SQLite). A field whose explicit aggregate
+  operations admit `median` admits PERCENTILE in every engine. Like MEDIAN it is refused in window totals and works per
+  occurrence. Servers advertise it with the new `metricPercentiles`
+  capability; `toQueryRequestV3` refuses a request that needs it from a server
+  without it. The formula editor lists it with the aggregate functions.
+
+### Changed
+
+- SQLite MEDIAN and box quartiles no longer fail above 100,000 samples per
+  group. Groups are still sorted in memory, at the same cost, within one
+  process-wide budget of 8,388,608 retained samples (64 MiB); a group that does
+  not fit overflows its in-memory aggregate and the same statement ranks it in
+  SQL, reading only the samples at the needed ranks (Tukey boxes count each
+  tail natively and read their endpoints and at most 20 outliers by rank).
+  Results, error precedence and validation are unchanged and identical on both
+  paths, and MEDIAN metrics still share cached and fused reductions. The box
+  mean is now the exact, order-independent sum divided by the count (it was a
+  Neumaier sum of the sorted samples, which can differ in the last bit).
+  SQLite's default `MaxSamplesPerGroup` is now 10,000,000, a CPU and
+  temporary-space bound for ungrouped requests (staged groups never reach it);
+  its count probe runs only when the counted population exceeds it. An
+  explicit `MaxSamplesPerGroup` is still enforced. PostgreSQL keeps its 100,000
+  default, now named `DefaultMaxSamplesPerGroup` (`SQLiteMaxMedianSamples` is
+  deprecated). See
+  [Ranked percentiles](docs/backend-sqlite.md#ranked-percentiles).
+- The direct in-memory distribution scan of ungrouped SQLite requests admits
+  metrics in request order while it retains at most 1,000,000 samples; the
+  other metrics use their compiled plans instead of failing.
+- `SQLiteV2Functions()` adds `qt_v2_quantile`, `qt_v2_midpoint`,
+  `qt_v2_box_fence` and `qt_v2_box_summary`, and `SQLiteV2Aggregates()` adds
+  `qt_v2_sample_median`, `qt_v2_box_minmax`, `qt_v2_box_tukey`, `qt_v2_exact_mean` and
+  `qt_v2_ranked_values`. These helpers are private to the compiler and may
+  change in any release: register them only through the descriptor lists, from
+  the same build on every connection (hosts that do need no change).
+  `qt_v2_median` and `qt_v2_box` stay registered but are no longer called by
+  compiled plans, and `SQLiteMaxBoxSamples` is deprecated.
+
 ## 1.0.4 — 2026-11-10
 
 ### Changed

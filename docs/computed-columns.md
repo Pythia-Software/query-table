@@ -134,7 +134,7 @@ Supported infix operators are `+ - * / %`, `= != <> < <= > >=`, `AND OR NOT`, `I
 
 | Category | Functions |
 | --- | --- |
-| Text | LEFT, RIGHT, SUBSTRING, LENGTH, LOWER, UPPER, TRIM, LTRIM, RTRIM, REPLACE, LPAD, RPAD, SPLIT_PART, CONCAT, CONCAT_WS, URL_ENCODE |
+| Text | LEFT, RIGHT, SUBSTRING, LENGTH, WORD_COUNT, LOWER, UPPER, TRIM, LTRIM, RTRIM, REPLACE, LPAD, RPAD, SPLIT_PART, CONCAT, CONCAT_WS, URL_ENCODE |
 | Matching | CONTAINS, STARTS_WITH, ENDS_WITH, REGEX_TEST, REGEX_EXTRACT, REGEX_REPLACE |
 | Numbers | ABS, ROUND, FLOOR, CEIL, TRUNC, POWER, SQRT, CLAMP, LEAST, GREATEST |
 | Conditions | IF, IFS, SWITCH, COALESCE, NULLIF, IS_NULL, IS_EMPTY, IFERROR |
@@ -152,9 +152,11 @@ Rules worth knowing:
 - `IF`, `IFS`, `SWITCH`, `COALESCE`, and `IFERROR` evaluate lazily. Invalid conversions, division by zero, and invalid arguments produce per-cell errors. `IFERROR` catches expression errors, not worker termination/timeouts.
 - `CONCAT_WS` skips null arguments. `IS_EMPTY` accepts null, empty text, or an empty array.
 - Text slicing counts Unicode code points (not grapheme clusters); positions are one-based. Negative lengths/indices are errors. Out-of-range split parts/array elements are null.
-- `URL_ENCODE` percent-encodes the UTF-8 bytes of its text, keeping only RFC 3986 unreserved characters (letters, digits, `-`, `.`, `_`, `~`). It matches DuckDB's `url_encode`. The Go SQLite/PostgreSQL server profile does not execute text functions, so it rejects `URL_ENCODE` as it rejects `LENGTH`.
+- `URL_ENCODE` percent-encodes the UTF-8 bytes of its text, keeping only RFC 3986 unreserved characters (letters, digits, `-`, `.`, `_`, `~`). It matches DuckDB's `url_encode`. The Go SQLite/PostgreSQL server profile does not execute it.
+- `LENGTH` counts code points. `WORD_COUNT` counts runs of characters between white space (any of the characters `TRIM` removes), with no limit on the count. `TRIM`, `LTRIM` and `RTRIM` remove JavaScript white space and line terminators. `SPLIT` follows `String.prototype.split`: `SPLIT("", ",")` is one empty part and an empty separator splits UTF-16 code units; an array of more than 10,000 parts is an error.
 - Literal text matching is case-sensitive unless its optional third argument is true.
 - Regex uses native JavaScript Unicode semantics. Optional flags are `i`, `m`, and `s`; extraction group defaults to 0, the entire match. No match returns null. Replacement replaces all matches and supports `$$`, `$&`, and numbered captures. Prefix/suffix substitutions are unsupported.
+- The Go SQLite and PostgreSQL servers also run `LENGTH`, `WORD_COUNT`, `LOWER`, `UPPER`, `TRIM`, `LTRIM`, `RTRIM`, `CONTAINS`/`STARTS_WITH`/`ENDS_WITH` and `ARRAY_LENGTH(SPLIT(...))`, and SQLite runs a subset of regex patterns; see [Text and array functions](backend-metrics.md#text-and-array-functions). Server `LOWER`/`UPPER` (and `ignoreCase`) differ from the browser on a few characters such as `ß` and final sigma, and PostgreSQL's depend on the database's default collation.
 - Dates use ISO date-only strings or ISO timestamps with explicit timezone. They are normalized to UTC. Date addition clamps month/year overflow to the last valid day. Weeks start Monday. `DATE_DIFF` measures elapsed whole units (week through millisecond), not calendar-boundary counts. Formatting tokens are `YYYY MM DD HH mm ss`.
 - `ROUND` uses JavaScript's `Math.round` tie behavior (toward positive infinity), with -15 through 15 decimal places. This is display arithmetic, not decimal financial arithmetic.
 
@@ -166,7 +168,7 @@ Formulas are select-only in both local and server modes. Reserved computed IDs a
 
 Parsing/type checking happen in TypeScript core; evaluation runs in a dedicated browser worker. The default worker contains only the bundled interpreter implementation—formula source is data, never `eval` or `new Function`. Inputs are resolved through the field schema and serialized separately from raw rows. Computed output is rendered as text, never HTML. Raw rows are unchanged.
 
-Budgets include 10,000 source characters, 2,000 tokens, depth 50, 5,000 runtime operations per row, 100,000 output text characters, 10,000 array elements, 2,000 regex-pattern characters, and a 16-million-character input payload per evaluated sample. Workers process 200-row chunks with a two-second watchdog per chunk and a 30-second total evaluation budget. A blocked regex is terminated by the owning thread, not an in-worker timer. These bounds report errors; they do not silently truncate computed values.
+Budgets include 10,000 source characters, 2,000 tokens, depth 50, 5,000 runtime operations per row, 100,000 text characters per field input and per text result, 10,000 array elements, 2,000 regex-pattern characters, and a 16-million-character input payload per evaluated sample. A text field passed directly to `LENGTH`, `WORD_COUNT` or two-argument `CONTAINS`/`STARTS_WITH`/`ENDS_WITH` is read in full, without the 100,000-character input bound; those functions return a number or boolean without copying the text. Any other argument expression, such as `LENGTH(TRIM([text]))`, keeps the bound (see [Text and array functions](backend-metrics.md#text-and-array-functions)). Workers process 200-row chunks with a two-second watchdog per chunk and a 30-second total evaluation budget. A blocked regex is terminated by the owning thread, not an in-worker timer. These bounds report errors; they do not silently truncate computed values.
 
 The default worker needs `worker-src blob:` under CSP. If that is not appropriate, supply `formulaWorkerFactory: () => new Worker(...)` with a host-built worker. Its message protocol is `{ ast, inputs }` in and `FormulaResult[]` out; import `formulaRuntime` from core in the worker and map it over inputs. A worker failure is surfaced explicitly; the UI never falls back to executing regex on the main thread.
 

@@ -58,7 +58,7 @@ func sqliteIntegerReduction(ctx context.Context, q metricRequest, specs []AggSpe
 	var collect func(*exprNode) bool
 	collect = func(n *exprNode) bool {
 		op := strings.ToLower(n.op)
-		if !aggOpKnown(op) && op != "median" {
+		if !aggOpKnown(op) && !sampledOp(op) {
 			if op == "field" {
 				return false
 			}

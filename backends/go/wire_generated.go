@@ -26,6 +26,10 @@ type OrderBy struct {
 type MetricDateGrouping struct {
 	Field    string `json:"field"`
 	Interval string `json:"interval"`
+	// Calendar intervals only: buckets of this many intervals, anchored as
+	// CalendarGroupKey.every describes; omitted is 1. Hours accept only 1, 2, 3,
+	// 4, 6, 8, 12 or 24; cycles refuse values above 1.
+	Every int `json:"every,omitempty"`
 	// IANA identifier; omitted is UTC.
 	TimeZone string `json:"timeZone,omitempty"`
 	// Add a bucket for every interval of the range.
@@ -47,13 +51,18 @@ type MetricSort struct {
 	Nulls string `json:"nulls,omitempty"`
 }
 
-// MetricDistribution: A box or histogram over `input` per group instead of a
-// scalar value.
+// MetricDistribution: A box, histogram or quantile curve over `input` per group
+// instead of a scalar value.
 type MetricDistribution struct {
 	Kind     string `json:"kind"`
 	Input    string `json:"input"`
 	Whiskers string `json:"whiskers,omitempty"`
-	Bins     int    `json:"bins,omitempty"`
+	// Box whiskers at these exact-linear percentiles [lo, hi] with whiskers
+	// "percentile": 0 <= lo < 0.25 and 0.75 < hi <= 1. Default [0.1, 0.9].
+	WhiskerProbabilities []float64 `json:"whiskerProbabilities,omitempty"`
+	Bins                 int       `json:"bins,omitempty"`
+	// Quantiles: 1–101 strictly increasing probabilities in [0, 1].
+	Probabilities []float64 `json:"probabilities,omitempty"`
 }
 
 type MetricMinCountDistinct struct {
@@ -64,6 +73,28 @@ type MetricMinCountDistinct struct {
 type MetricMinCountSum struct {
 	Min int    `json:"min"`
 	Sum string `json:"sum"`
+}
+
+// MetricInterval: A confidence interval around a ratio metric, returned as
+// lower and upper on every bucket. The metric must be a ratio of two additive
+// aggregates, numerator over denominator (SUM, COUNT or COUNT_DISTINCT),
+// optionally scaled by constants and with NULLIF(denominator, 0): for example
+// COUNT_DISTINCT(IF([events]>0,[turn_id],NULL))/COUNT_DISTINCT([turn_id]) or
+// SUM([events])/NULLIF(COUNT_DISTINCT([message_id])/1000,0). proportion: a
+// share of units (0 <= numerator <= denominator), Wilson score interval. rate:
+// a count over an exposure, the exact (Garwood) Poisson interval on the
+// numerator divided by the exposure. Bounds use the exact numerator and
+// denominator of each bucket and are in the metric's units, after its constant
+// scale. An interval is an annotation: it never changes a bucket's value,
+// error, ranking or the result's other buckets. Parts outside the kind's domain
+// (a negative or non-integer numerator; for a proportion, a non-integer
+// denominator or a numerator above it) give the bucket intervalError
+// interval_domain instead of bounds. Both methods assume independent units;
+// clustered or over-dispersed counts make the intervals too narrow.
+type MetricInterval struct {
+	Kind string `json:"kind"`
+	// Confidence level, 0.5 to 0.9999; omitted is 0.95.
+	Level *float64 `json:"level,omitempty"`
 }
 
 // AggSpec: One metric as sent: an AggregationClause without its presentation
@@ -88,6 +119,9 @@ type AggSpec struct {
 	// The metric's own predicate, ANDed with the table WHERE.
 	Where    []WhereTerm    `json:"where,omitempty"`
 	MinCount MetricMinCount `json:"minCount,omitzero"`
+	// Return lower and upper bounds on every bucket; see MetricInterval. Servers
+	// advertise it as metricIntervals.
+	Interval *MetricInterval `json:"interval,omitempty"`
 }
 
 // CalendarGroupKey: A grouping key that buckets a datetime field by calendar
@@ -95,6 +129,11 @@ type AggSpec struct {
 type CalendarGroupKey struct {
 	Field    string `json:"field"`
 	Interval string `json:"interval"`
+	// Buckets of this many intervals; omitted is 1. Anchors are fixed: hours must
+	// divide a day (1, 2, 3, 4, 6, 8, 12 or 24) and start at local multiples of
+	// every within each day, days count local dates from 1970-01-01, weeks from
+	// Monday 1969-12-29, months from January 1970 and years from 1970.
+	Every int `json:"every,omitempty"`
 	// IANA identifier; omitted is UTC.
 	TimeZone string `json:"timeZone,omitempty"`
 }
@@ -146,13 +185,25 @@ type QueryCapabilitiesV3 struct {
 	MetricMinCount bool `json:"metricMinCount"`
 	// Also executes an object minCount.
 	MetricMinCountMeasures bool `json:"metricMinCountMeasures"`
-	Version                int  `json:"version"`
-	GroupedRows            bool `json:"groupedRows"`
-	CalendarGrouping       bool `json:"calendarGrouping"`
+	// Executes MetricSpec.interval (proportion and rate) and returns lower and
+	// upper bounds.
+	MetricIntervals bool `json:"metricIntervals"`
+	// Executes PERCENTILE(expr, p) in metric and summary formulas.
+	MetricPercentiles bool `json:"metricPercentiles"`
+	// Executes box whiskers "percentile" with whiskerProbabilities.
+	BoxPercentileWhiskers bool `json:"boxPercentileWhiskers"`
+	// Executes the "quantiles" distribution.
+	QuantileDistributions bool `json:"quantileDistributions"`
+	Version               int  `json:"version"`
+	GroupedRows           bool `json:"groupedRows"`
+	CalendarGrouping      bool `json:"calendarGrouping"`
 	// Executes the hourOfDay and dayOfWeek intervals.
 	CalendarCycles bool `json:"calendarCycles"`
 	// Executes calendar grouping keys.
-	CalendarGroupKeys     bool   `json:"calendarGroupKeys"`
+	CalendarGroupKeys bool `json:"calendarGroupKeys"`
+	// Executes multi-interval buckets: MetricDateGrouping.every and
+	// CalendarGroupKey.every.
+	CalendarEvery         bool   `json:"calendarEvery"`
 	ComputedSourceFilters bool   `json:"computedSourceFilters"`
 	Regex                 bool   `json:"regex"`
 	MaxRows               int    `json:"maxRows"`
@@ -202,7 +253,10 @@ type MetricBoxSummary struct {
 	Outliers     WireList[float64] `json:"outliers"`
 	OutlierCount int64             `json:"outlierCount"`
 	Whiskers     string            `json:"whiskers"`
-	Method       string            `json:"method"`
+	// The [lo, hi] probabilities of percentile whiskers; present only when
+	// whiskers is "percentile".
+	WhiskerProbabilities []float64 `json:"whiskerProbabilities,omitempty"`
+	Method               string    `json:"method"`
 }
 
 type MetricBoxDistribution struct {
@@ -218,6 +272,19 @@ type MetricHistogramDistribution struct {
 	Edges  WireList[float64] `json:"edges"`
 	Counts WireList[int64]   `json:"counts"`
 	N      int64             `json:"n"`
+}
+
+type MetricQuantilesSummary struct {
+	N             int64             `json:"n"`
+	Probabilities WireList[float64] `json:"probabilities"`
+	// The exact-linear percentile at each probability.
+	Values WireList[float64] `json:"values"`
+}
+
+type MetricQuantilesDistribution struct {
+	Kind string `json:"kind"`
+	// null when the group has no numeric samples.
+	Summary *MetricQuantilesSummary `json:"summary"`
 }
 
 // MetricBucket: One group of a metric result. `keys` has one entry per groupBy
@@ -238,9 +305,20 @@ type MetricBucket struct {
 	// The scatter y value.
 	Y      *any   `json:"y,omitempty"`
 	YError string `json:"yError,omitempty"`
+	// The interval's lower bound (MetricSpec.interval), in the value's units.
+	// Present only with upper, when the value is a number.
+	Lower *float64 `json:"lower,omitempty"`
+	// The interval's upper bound.
+	Upper *float64 `json:"upper,omitempty"`
+	// Why a bucket with a numeric value has no interval: interval_domain when its
+	// parts are outside the interval kind's domain. The value is unchanged.
+	IntervalError string `json:"intervalError,omitempty"`
 	// A measured minCount's value for calendar filtering; never serialized.
 	minMeasure      any
 	minMeasureError bool
+	// A ratio's numerator and denominator, for the Other remainder of calendar metrics; never serialized.
+	ratioParts     [2]any
+	ratioPartError bool
 }
 
 // MetricResult: One metric's result, in request order.
@@ -259,8 +337,10 @@ type MetricResult struct {
 	ErrorCode ErrorCode `json:"errorCode,omitempty"`
 	// Groups removed by minCount; present whenever it is set.
 	HiddenGroups *int64 `json:"hiddenGroups,omitempty"`
-	// The exact omitted additive quantity beyond groupLimit, when an executor
-	// computes it.
+	// The exact remainder of the groups beyond groupLimit (hidden groups
+	// excluded): the sum of a single SUM or COUNT, or a ratio of SUM or COUNT
+	// parts evaluated on the pooled parts, with its interval. Absent when the
+	// executor does not compute one: clients key off its presence.
 	Other *MetricBucket `json:"other,omitempty"`
 }
 
@@ -438,7 +518,8 @@ const (
 	ErrorCodeSort ErrorCode = "sort"
 	// Text ordering needs a collation this profile does not provide.
 	ErrorCodeCollationRequired ErrorCode = "collation_required"
-	// Regex filtering or sorting is outside this server profile.
+	// Regex filtering, sorting or a formula regex pattern is outside this server
+	// profile.
 	ErrorCodeUnsupportedRegex ErrorCode = "unsupported_regex"
 	// A text value cannot be represented (for example NUL or an unpaired
 	// surrogate).
@@ -502,6 +583,9 @@ const (
 	ErrorCodeMinCountField ErrorCode = "min_count_field"
 	// minCount cannot be combined with a distribution.
 	ErrorCodeMinCountDistribution ErrorCode = "min_count_distribution"
+	// An interval needs a single-value ratio of two additive aggregates (SUM,
+	// COUNT or COUNT_DISTINCT), scaled by positive constants.
+	ErrorCodeMetricInterval ErrorCode = "metric_interval"
 	// The field cannot be a group key (for a computed field: not in the host's
 	// grouping allowlist).
 	ErrorCodeGroupDisabled ErrorCode = "group_disabled"
@@ -656,6 +740,7 @@ func ErrorCodes() []ErrorCode {
 		ErrorCodeMinCountGrouping,
 		ErrorCodeMinCountField,
 		ErrorCodeMinCountDistribution,
+		ErrorCodeMetricInterval,
 		ErrorCodeGroupDisabled,
 		ErrorCodeGrouping,
 		ErrorCodeRepresentative,

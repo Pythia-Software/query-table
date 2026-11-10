@@ -277,6 +277,113 @@
       "name": "minCount requires a grouping field",
       "metric": { "id": "m", "op": "count", "groupBy": [], "minCount": 2 },
       "expected": { "error": true }
+    },
+    {
+      "name": "PERCENTILE interpolates between ranks, ignores nulls and keeps singletons",
+      "metric": { "id": "m", "op": "count", "groupBy": ["kind"], "expression": "PERCENTILE([ms], 0.9)" },
+      "expected": {
+        "groupCount": 5,
+        "buckets": [
+          { "keys": ["dns"], "count": 1, "value": 999 },
+          { "keys": ["timeout"], "count": 6, "value": 366 },
+          { "keys": ["auth"], "count": 4, "value": 64 },
+          { "keys": [null], "count": 1, "value": 60 },
+          { "keys": ["disk"], "count": 2, "value": 31.2 }
+        ]
+      }
+    },
+    {
+      "name": "PERCENTILE at 0 and 1 are the extremes of odd, even and singleton groups",
+      "metric": { "id": "m", "op": "count", "groupBy": ["kind"], "expression": "PERCENTILE([ms], 1) - PERCENTILE([ms], 0)", "sort": [{ "key": "group0", "dir": "asc" }] },
+      "expected": {
+        "groupCount": 5,
+        "buckets": [
+          { "keys": ["auth"], "count": 4, "value": 50 },
+          { "keys": ["disk"], "count": 2, "value": 18 },
+          { "keys": ["dns"], "count": 1, "value": 0 },
+          { "keys": ["timeout"], "count": 6, "value": 330 },
+          { "keys": [null], "count": 1, "value": 0 }
+        ]
+      }
+    },
+    {
+      "name": "PERCENTILE of negative duplicates uses IEEE (1-f)*a+f*b",
+      "metric": { "id": "m", "op": "count", "groupBy": [], "expression": "PERCENTILE(0 - [calls], 0.25) * 1000 + PERCENTILE([calls], 0.95)" },
+      "expected": { "groupCount": 1, "buckets": [{ "keys": [], "count": 14, "value": -3238.25 }] }
+    },
+    {
+      "name": "PERCENTILE of a group without samples is null",
+      "metric": { "id": "m", "op": "count", "groupBy": ["status"], "expression": "PERCENTILE([ms], 0.1)" },
+      "expected": {
+        "groupCount": 3,
+        "buckets": [
+          { "keys": ["error"], "count": 9, "value": 46.6 },
+          { "keys": ["ok"], "count": 4, "value": 16.5 },
+          { "keys": [null], "count": 1, "value": null }
+        ]
+      }
+    },
+    {
+      "name": "PERCENTILE needs a probability literal in [0, 1]",
+      "metric": { "id": "m", "op": "count", "groupBy": ["kind"], "expression": "PERCENTILE([ms], 1.5)" },
+      "expected": { "error": true }
+    },
+    {
+      "name": "PERCENTILE refuses a row expression as its probability",
+      "metric": { "id": "m", "op": "count", "groupBy": ["kind"], "expression": "PERCENTILE([ms], [calls])" },
+      "expected": { "error": true }
+    },
+    {
+      "name": "percentile whiskers interpolate and count the samples beyond them",
+      "metric": {
+        "id": "m", "op": "count", "groupBy": ["kind"], "sort": [{ "key": "group0", "dir": "asc" }],
+        "distribution": { "kind": "box", "input": "[ms]", "whiskers": "percentile", "whiskerProbabilities": [0.1, 0.9] }
+      },
+      "expected": {
+        "groupCount": 5,
+        "buckets": [
+          { "keys": ["auth"], "count": 4, "value": 37.5, "summary": { "n": 4, "low": 21.5, "high": 64, "outlierCount": 2, "outliers": [], "whiskers": "percentile", "whiskerProbabilities": [0.1, 0.9] } },
+          { "keys": ["disk"], "count": 2, "value": 24, "summary": { "n": 2, "low": 16.8, "high": 31.2, "outlierCount": 2, "outliers": [], "whiskers": "percentile" } },
+          { "keys": ["dns"], "count": 1, "value": 999, "summary": { "n": 1, "low": 999, "high": 999, "outlierCount": 0, "outliers": [], "whiskers": "percentile" } },
+          { "keys": ["timeout"], "count": 6, "value": 120, "summary": { "n": 5, "low": 84, "high": 366, "outlierCount": 2, "outliers": [], "whiskers": "percentile" } },
+          { "keys": [null], "count": 1, "value": 60, "summary": { "n": 1, "low": 60, "high": 60, "outlierCount": 0, "outliers": [], "whiskers": "percentile" } }
+        ]
+      }
+    },
+    {
+      "name": "quantiles interpolate each probability; the value is the median",
+      "metric": {
+        "id": "m", "op": "count", "groupBy": ["status"],
+        "distribution": { "kind": "quantiles", "input": "[ms]", "probabilities": [0, 0.25, 0.9, 1] }
+      },
+      "expected": {
+        "groupCount": 3,
+        "buckets": [
+          { "keys": ["error"], "count": 9, "value": 90, "summary": { "n": 9, "probabilities": [0, 0.25, 0.9, 1], "values": [33, 60, 527.8000000000002, 999] } },
+          { "keys": ["ok"], "count": 4, "value": 22.5, "summary": { "n": 4, "probabilities": [0, 0.25, 0.9, 1], "values": [15, 18.75, 63.50000000000001, 80] } },
+          { "keys": [null], "count": 1, "value": null, "summary": null }
+        ]
+      }
+    },
+    {
+      "name": "options of another distribution kind are ignored",
+      "metric": {
+        "id": "m", "op": "count", "groupBy": ["status"],
+        "distribution": { "kind": "quantiles", "input": "[ms]", "probabilities": [0.5], "whiskers": "percentile", "whiskerProbabilities": [0.4, 0.6], "bins": 7 }
+      },
+      "expected": {
+        "groupCount": 3,
+        "buckets": [
+          { "keys": ["error"], "count": 9, "value": 90, "summary": { "n": 9, "probabilities": [0.5], "values": [90] } },
+          { "keys": ["ok"], "count": 4, "value": 22.5, "summary": { "n": 4, "probabilities": [0.5], "values": [22.5] } },
+          { "keys": [null], "count": 1, "value": null, "summary": null }
+        ]
+      }
+    },
+    {
+      "name": "quantiles need strictly increasing probabilities",
+      "metric": { "id": "m", "op": "count", "groupBy": ["kind"], "distribution": { "kind": "quantiles", "input": "[ms]", "probabilities": [0.5, 0.5] } },
+      "expected": { "error": true }
     }
   ]
 }

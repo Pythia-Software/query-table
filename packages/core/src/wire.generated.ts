@@ -52,6 +52,8 @@ export type MetricScope = "allMatching" | "shownRows";
 export interface WireMetricDateGrouping {
   field: string;
   interval: "hour" | "day" | "week" | "month" | "year" | "hourOfDay" | "dayOfWeek";
+  /** Calendar intervals only: buckets of this many intervals, anchored as CalendarGroupKey.every describes; omitted is 1. Hours accept only 1, 2, 3, 4, 6, 8, 12 or 24; cycles refuse values above 1. */
+  every?: number;
   /** IANA identifier; omitted is UTC. */
   timeZone?: string;
   /** Add a bucket for every interval of the range. */
@@ -72,12 +74,16 @@ export interface WireMetricSort {
   nulls?: "first" | "last";
 }
 
-/** A box or histogram over `input` per group instead of a scalar value. */
+/** A box, histogram or quantile curve over `input` per group instead of a scalar value. */
 export interface MetricDistribution {
-  kind: "box" | "histogram";
+  kind: "box" | "histogram" | "quantiles";
   input: string;
-  whiskers?: "minmax" | "tukey";
+  whiskers?: "minmax" | "tukey" | "percentile";
+  /** Box whiskers at these exact-linear percentiles [lo, hi] with whiskers "percentile": 0 <= lo < 0.25 and 0.75 < hi <= 1. Default [0.1, 0.9]. */
+  whiskerProbabilities?: number[];
   bins?: number;
+  /** Quantiles: 1–101 strictly increasing probabilities in [0, 1]. */
+  probabilities?: number[];
 }
 
 export interface MetricMinCountDistinct {
@@ -92,6 +98,13 @@ export interface MetricMinCountSum {
 
 /** Drop small groups before sorting, groupLimit and Other: a number counts rows; an object counts a field's distinct non-null values or sums a numeric field. Removed groups are reported as hiddenGroups. */
 export type MetricMinCount = number | MetricMinCountDistinct | MetricMinCountSum;
+
+/** A confidence interval around a ratio metric, returned as lower and upper on every bucket. The metric must be a ratio of two additive aggregates, numerator over denominator (SUM, COUNT or COUNT_DISTINCT), optionally scaled by constants and with NULLIF(denominator, 0): for example COUNT_DISTINCT(IF([events]>0,[turn_id],NULL))/COUNT_DISTINCT([turn_id]) or SUM([events])/NULLIF(COUNT_DISTINCT([message_id])/1000,0). proportion: a share of units (0 <= numerator <= denominator), Wilson score interval. rate: a count over an exposure, the exact (Garwood) Poisson interval on the numerator divided by the exposure. Bounds use the exact numerator and denominator of each bucket and are in the metric's units, after its constant scale. An interval is an annotation: it never changes a bucket's value, error, ranking or the result's other buckets. Parts outside the kind's domain (a negative or non-integer numerator; for a proportion, a non-integer denominator or a numerator above it) give the bucket intervalError interval_domain instead of bounds. Both methods assume independent units; clustered or over-dispersed counts make the intervals too narrow. */
+export interface MetricInterval {
+  kind: "proportion" | "rate";
+  /** Confidence level, 0.5 to 0.9999; omitted is 0.95. */
+  level?: number;
+}
 
 /** One metric as sent: an AggregationClause without its presentation (label, layout, display other than scatter, window, share). */
 export interface MetricSpecV3 {
@@ -114,12 +127,16 @@ export interface MetricSpecV3 {
   /** The metric's own predicate, ANDed with the table WHERE. */
   where?: WireWhereTerm[];
   minCount?: MetricMinCount;
+  /** Return lower and upper bounds on every bucket; see MetricInterval. Servers advertise it as metricIntervals. */
+  interval?: MetricInterval;
 }
 
 /** A grouping key that buckets a datetime field by calendar interval, keyed by the interval's start instant. Weeks start on Monday. */
 export interface CalendarGroupKey {
   field: string;
   interval: "hour" | "day" | "week" | "month" | "year";
+  /** Buckets of this many intervals; omitted is 1. Anchors are fixed: hours must divide a day (1, 2, 3, 4, 6, 8, 12 or 24) and start at local multiples of every within each day, days count local dates from 1970-01-01, weeks from Monday 1969-12-29, months from January 1970 and years from 1970. */
+  every?: number;
   /** IANA identifier; omitted is UTC. */
   timeZone?: string;
 }
@@ -171,6 +188,14 @@ export interface QueryCapabilitiesV3 {
   metricMinCount?: boolean;
   /** Also executes an object minCount. */
   metricMinCountMeasures?: boolean;
+  /** Executes MetricSpec.interval (proportion and rate) and returns lower and upper bounds. */
+  metricIntervals?: boolean;
+  /** Executes PERCENTILE(expr, p) in metric and summary formulas. */
+  metricPercentiles?: boolean;
+  /** Executes box whiskers "percentile" with whiskerProbabilities. */
+  boxPercentileWhiskers?: boolean;
+  /** Executes the "quantiles" distribution. */
+  quantileDistributions?: boolean;
   version: 3;
   groupedRows: boolean;
   calendarGrouping: boolean;
@@ -178,6 +203,8 @@ export interface QueryCapabilitiesV3 {
   calendarCycles?: boolean;
   /** Executes calendar grouping keys. */
   calendarGroupKeys?: boolean;
+  /** Executes multi-interval buckets: MetricDateGrouping.every and CalendarGroupKey.every. */
+  calendarEvery?: boolean;
   computedSourceFilters: boolean;
   regex: boolean;
   maxRows: number;
@@ -224,7 +251,9 @@ export interface MetricBoxSummary {
   high: number;
   outliers: number[];
   outlierCount: number;
-  whiskers: "minmax" | "tukey";
+  whiskers: "minmax" | "tukey" | "percentile";
+  /** The [lo, hi] probabilities of percentile whiskers; present only when whiskers is "percentile". */
+  whiskerProbabilities?: number[];
   method: "exact-linear";
 }
 
@@ -242,7 +271,20 @@ export interface MetricHistogramDistribution {
   n: number;
 }
 
-export type MetricDistributionResult = MetricBoxDistribution | MetricHistogramDistribution;
+export interface MetricQuantilesSummary {
+  n: number;
+  probabilities: number[];
+  /** The exact-linear percentile at each probability. */
+  values: number[];
+}
+
+export interface MetricQuantilesDistribution {
+  kind: "quantiles";
+  /** null when the group has no numeric samples. */
+  summary: MetricQuantilesSummary | null;
+}
+
+export type MetricDistributionResult = MetricBoxDistribution | MetricHistogramDistribution | MetricQuantilesDistribution;
 
 /** One group of a metric result. `keys` has one entry per groupBy field ([] for a grand total); a null key is the NULL bucket. */
 export interface MetricBucketV3 {
@@ -260,6 +302,12 @@ export interface MetricBucketV3 {
   /** The scatter y value. */
   y?: MetricValue;
   yError?: string;
+  /** The interval's lower bound (MetricSpec.interval), in the value's units. Present only with upper, when the value is a number. */
+  lower?: number;
+  /** The interval's upper bound. */
+  upper?: number;
+  /** Why a bucket with a numeric value has no interval: interval_domain when its parts are outside the interval kind's domain. The value is unchanged. */
+  intervalError?: string;
 }
 
 /** One metric's result, in request order. */
@@ -277,7 +325,7 @@ export interface MetricResultV3 {
   errorCode?: ErrorCode | (string & {});
   /** Groups removed by minCount; present whenever it is set. */
   hiddenGroups?: number;
-  /** The exact omitted additive quantity beyond groupLimit, when an executor computes it. */
+  /** The exact remainder of the groups beyond groupLimit (hidden groups excluded): the sum of a single SUM or COUNT, or a ratio of SUM or COUNT parts evaluated on the pooled parts, with its interval. Absent when the executor does not compute one: clients key off its presence. */
   other?: MetricBucketV3;
 }
 
@@ -419,6 +467,7 @@ export const ERROR_CODES = [
   "min_count_grouping",
   "min_count_field",
   "min_count_distribution",
+  "metric_interval",
   "group_disabled",
   "grouping",
   "representative",

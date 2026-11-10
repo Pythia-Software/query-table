@@ -21,7 +21,7 @@ describe("function discovery", () => {
     expect(names("left")[0]).toBe("LEFT");
   });
   it("keeps concept and return-type filtering independent", () => {
-    expect(names("", "strings", "number")).toEqual(["LENGTH"]);
+    expect(names("", "strings", "number")).toEqual(["LENGTH", "WORD_COUNT"]);
     expect(names("count", "arrays", "number")).toEqual(["ARRAY_LENGTH"]);
     expect(names("", "dates", "text")).toEqual(["FORMAT_DATE"]);
     expect(names("", "logic", "branch")).toContain("COALESCE");

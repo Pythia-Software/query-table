@@ -7,6 +7,11 @@ import type {
 } from "./metricTypes";
 import { metricTimestamp, formatMetricOutput } from "./metricFormat";
 import { metricTupleKey } from "./metricColors";
+import {
+  DEFAULT_METRIC_INTERVAL_LEVEL,
+  METRIC_INTERVAL_DOMAIN,
+  metricDateNext,
+} from "@pythia-software/query-table-core";
 /** A cyclic slot's label: "09:00" for an hour of the day and the locale's
  * weekday ("Mon", or "Monday" in detail) for an ISO day of the week. */
 export function metricCycleLabel(
@@ -33,7 +38,60 @@ export function metricCycleLabel(
 const cyclic = (clause?: RenderingClause) =>
   clause?.dateGrouping?.interval === "hourOfDay" ||
   clause?.dateGrouping?.interval === "dayOfWeek";
-/** Calendar group labels must describe the same local dates as the computation. */
+/** Whether a calendar grouping buckets several intervals (`every` > 1). */
+const multiple = (clause?: RenderingClause) =>
+  !cyclic(clause) && (clause?.dateGrouping?.every ?? 1) > 1;
+/** A bucket of several calendar intervals, from its start to the next
+ * bucket's start in the grouping zone: "Mar 08 09:00–12:00 -05:00" for hours (both offsets across a DST change),
+ * "Mar 08–Mar 10" for days and weeks (the last day included), "Jan–Mar 2026"
+ * for months and "2020–2029" for years. In detail, both full instants. */
+export function metricEveryLabel(
+  value: MetricValue | undefined,
+  clause: RenderingClause | undefined,
+  locale?: string,
+  detailed = false,
+): string | undefined {
+  const grouping = clause?.dateGrouping;
+  if (!grouping || !multiple(clause) || typeof value !== "string") return undefined;
+  const start = Date.parse(value);
+  if (!Number.isFinite(start)) return undefined;
+  const timeZone = grouping.timeZone ?? "UTC";
+  let next: number;
+  try {
+    next = metricDateNext(start, grouping.interval, timeZone, grouping.every);
+  } catch {
+    return undefined;
+  }
+  if (!Number.isFinite(next) || next <= start) return undefined;
+  const date = (time: number, pattern: string) =>
+    formatMetricOutput(
+      new Date(time).toISOString(),
+      { kind: "date", style: "custom", pattern, sourceUnit: "iso", timeZone },
+      locale,
+    ).text;
+  if (detailed)
+    return `${date(start, "YYYY-MM-DD HH:mm Z")} – ${date(next, "YYYY-MM-DD HH:mm Z")}`;
+  // The last day, month or year the bucket includes.
+  const last = next - 1;
+  switch (grouping.interval) {
+    case "hour":
+      // A bucket across a DST change shows both offsets.
+      return date(start, "Z") === date(next, "Z")
+        ? `${date(start, "MMM DD HH:mm")}–${date(next, "HH:mm Z")}`
+        : `${date(start, "MMM DD HH:mm Z")}–${date(next, "HH:mm Z")}`;
+    case "month":
+      return date(start, "YYYY") === date(last, "YYYY")
+        ? `${date(start, "MMM")}–${date(last, "MMM YYYY")}`
+        : `${date(start, "MMM YYYY")}–${date(last, "MMM YYYY")}`;
+    case "year":
+      return `${date(start, "YYYY")}–${date(last, "YYYY")}`;
+    default:
+      return `${date(start, "MMM DD")}–${date(last, "MMM DD")}`;
+  }
+}
+/** Calendar group labels must describe the same local dates as the computation.
+ * Buckets of several intervals have no single-date format: they are labelled
+ * as ranges by metricGroupKeyLabel. */
 export function metricDateGroupFormat(
   clause: RenderingClause,
 ): MetricValueFormat | undefined {
@@ -41,7 +99,7 @@ export function metricDateGroupFormat(
   // Scatter/histogram X formats survive display changes, but describe the
   // measure axis. Only explicit calendar grouping gives them date-key meaning.
   // Cyclic slots are numbers, labelled by metricGroupKeyLabel.
-  if (!grouping || cyclic(clause)) return undefined;
+  if (!grouping || cyclic(clause) || multiple(clause)) return undefined;
   const format = clause.display?.xFormat;
   return {
     kind: "date",
@@ -75,6 +133,8 @@ export function metricGroupKeyLabel(
       metricCycleLabel(value, clause.dateGrouping.interval, locale, detailed) ??
       String(value)
     );
+  if (multiple(clause))
+    return metricEveryLabel(value, clause, locale, detailed) ?? String(value);
   const format = detailed
     ? {
         kind: "datetime" as const,
@@ -238,6 +298,15 @@ export function metricDisplayBuckets(clause: RenderingClause, buckets: MetricBuc
   const head = buckets.slice(0, limit), tail = buckets.slice(limit);
   const all = other ? [...buckets, other] : buckets;
   const list = clause.display?.kind === "list" || ((clause.display?.kind ?? "auto") === "auto" && clause.groupBy.length === 1);
+  // A ratio's remainder cannot be pooled from displayed values, but engines
+  // pool its parts into `other` (with an interval when one is set). Show that
+  // row as returned when the display drops no further groups.
+  if (list && clause.display?.showOther && other && !tail.length && !partial
+    && !additiveMetric(clause) && !other.error && finiteMetricNumber(other.value)) {
+    const row: MetricBucket = { ...other, keys: ["Other (combined remainder)"] };
+    otherBuckets.add(row);
+    return [...head, row];
+  }
   if (!list || !clause.display?.showOther || !additiveMetric(clause) || partial
     || (groupCount !== undefined && groupCount > buckets.length && !other)
     || all.some(b => b.error || !finiteMetricNumber(b.value) || b.value < 0)) return head;
@@ -317,6 +386,141 @@ export function metricScale(
     baseline: log ? min : Math.max(min, Math.min(max, 0)),
     omitted: values.length - valid.length,
   };
+}
+
+/** A bucket's confidence interval (`clause.interval`), when it has finite,
+ * ordered bounds and no error. The supported reading of `lower`/`upper`. */
+export function metricBucketInterval(
+  b: Pick<MetricBucket, "lower" | "upper" | "error">,
+): { lower: number; upper: number } | undefined {
+  const { lower, upper } = b;
+  return !b.error && finiteMetricNumber(lower) && finiteMetricNumber(upper) && lower <= upper
+    ? { lower, upper }
+    : undefined;
+}
+
+/** The interval a chart draws as a whisker or band: none when the display
+ * turns intervals off. Hover text names the interval either way. */
+export function metricDrawnInterval(
+  clause: RenderingClause,
+  b: MetricBucket,
+): { lower: number; upper: number } | undefined {
+  return clause.display?.showIntervals === false ? undefined : metricBucketInterval(b);
+}
+
+/** The values a bar or line value axis spans: each drawable value and its
+ * drawn bounds, so whiskers and bands are never clipped by inferred extents.
+ * A log axis takes only positive bounds; a nonpositive bound is clamped to
+ * the axis when drawn (see metricIntervalSpan), never counted as an omitted
+ * value or shifted. */
+export function metricValueAxisValues(
+  clause: RenderingClause,
+  buckets: readonly MetricBucket[],
+  log = false,
+): number[] {
+  const out: number[] = [];
+  for (const b of buckets) {
+    if (b.error || !finiteMetricNumber(b.value)) continue;
+    out.push(b.value);
+    const interval = metricDrawnInterval(clause, b);
+    if (!interval || (log && b.value <= 0)) continue;
+    for (const bound of [interval.lower, interval.upper])
+      if (!log || bound > 0) out.push(bound);
+  }
+  return out;
+}
+
+/** The part of an interval inside an axis domain `[min, max]`, in data units.
+ * An end clamped to the domain (an explicit axis bound, or a nonpositive lower
+ * bound on a log axis) has no cap, so an open end reads as "continues beyond".
+ * Undefined when nothing of the interval is inside the domain. */
+export function metricIntervalSpan(
+  interval: { lower: number; upper: number },
+  min: number,
+  max: number,
+): { low: number; high: number; lowCap: boolean; highCap: boolean } | undefined {
+  if (!(interval.upper >= min) || !(interval.lower <= max) || !(min < max)) return undefined;
+  return {
+    low: Math.max(min, interval.lower),
+    high: Math.min(max, interval.upper),
+    lowCap: interval.lower >= min,
+    highCap: interval.upper <= max,
+  };
+}
+
+export interface MetricIntervalTextOptions {
+  locale?: string | undefined;
+  /** The word for the interval, for hosts that localize (default "interval"). */
+  label?: string | undefined;
+}
+
+/** Hover and accessible text for a bucket's interval, e.g.
+ * "95% interval 2.2%–9.8%": the clause's level as a percent and the bounds in
+ * `format`, which should be the metric's own value format. A bucket whose
+ * parts are outside the interval kind's domain (`intervalError`) reads
+ * "No interval: …". Undefined when the bucket has neither. */
+export function metricIntervalText(
+  clause: Pick<RenderingClause, "interval">,
+  b: MetricBucket,
+  format: (value: number) => string,
+  options: MetricIntervalTextOptions = {},
+): string | undefined {
+  const label = options.label ?? "interval";
+  const interval = metricBucketInterval(b);
+  if (interval)
+    return `${metricIntervalLevelText(clause, options.locale)} ${label} ${format(interval.lower)}–${format(interval.upper)}`;
+  if (!b.intervalError || b.error) return undefined;
+  const reason =
+    b.intervalError !== METRIC_INTERVAL_DOMAIN
+      ? b.intervalError
+      : clause.interval?.kind === "rate"
+        ? "needs a whole, nonnegative count"
+        : "needs whole counts, at most the total";
+  return `No ${label}: ${reason}`;
+}
+
+/** An interval level as a percent: "95%", "99.99%". Up to four decimals, so
+ * no accepted level rounds to 100%. */
+export function formatMetricIntervalLevel(level: number, locale?: string): string {
+  return new Intl.NumberFormat(locale, {
+    style: "percent",
+    maximumFractionDigits: 4,
+  }).format(level);
+}
+
+/** A clause's interval level as a percent, "95%" by default. */
+export function metricIntervalLevelText(
+  clause: Pick<RenderingClause, "interval">,
+  locale?: string,
+): string {
+  return formatMetricIntervalLevel(clause.interval?.level ?? DEFAULT_METRIC_INTERVAL_LEVEL, locale);
+}
+
+/** A line series' interval band as one SVG path: an area over each run of
+ * consecutive points with bounds, broken where a point has none. A run of one
+ * point has no area and is returned in `singles`, to draw as a whisker. */
+export function metricBandPath<P extends { x: number; high: number; low: number }>(
+  points: ReadonlyArray<P | null>,
+): { d: string; singles: P[] } {
+  let d = "";
+  const singles: P[] = [];
+  let run: P[] = [];
+  const close = () => {
+    if (run.length === 1) singles.push(run[0]!);
+    else if (run.length > 1)
+      d += `M${run.map((p) => `${p.x},${p.high}`).join(" L")} L${run
+        .slice()
+        .reverse()
+        .map((p) => `${p.x},${p.low}`)
+        .join(" L")} Z `;
+    run = [];
+  };
+  for (const point of points) {
+    if (point) run.push(point);
+    else close();
+  }
+  close();
+  return { d: d.trim(), singles };
 }
 
 /** Interpolated quartiles can exceed observed Tukey inliers in sparse samples.

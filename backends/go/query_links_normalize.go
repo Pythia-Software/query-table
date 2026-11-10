@@ -467,9 +467,14 @@ const (
 	optionInteger
 	optionPositiveInteger
 	optionNumber
+	// optionNumberList is an array of 1–101 finite numbers (the quantile
+	// probability bound, maxQuantileProbabilities).
+	optionNumberList
 	// optionMinCount is a positive integer, or a metricMinCountOptions object
 	// with min and exactly one of distinct and sum.
 	optionMinCount
+	// optionCurrencyCode is a three-letter upper-case ISO 4217 code.
+	optionCurrencyCode
 )
 
 type optionSpec struct {
@@ -500,9 +505,14 @@ var (
 		enumOption("reduce", "total", "mean"),
 		enumOption("partial", "omit", "include"),
 	}
+	metricIntervalOptions = []optionSpec{
+		enumOption("kind", "proportion", "rate"),
+		{key: "level", kind: optionNumber},
+	}
 	metricDateOptions = []optionSpec{
 		{key: "field", kind: optionString},
 		enumOption("interval", "hour", "day", "week", "month", "year", "hourOfDay", "dayOfWeek"),
+		{key: "every", kind: optionPositiveInteger},
 		{key: "timeZone", kind: optionString},
 		{key: "includeEmpty", kind: optionBoolean},
 		enumOption("range", "query", "observed", "custom"),
@@ -516,14 +526,16 @@ var (
 	}
 	metricDisplayOptions = []optionSpec{
 		enumOption("kind", "auto", "value", "table", "list", "bar-horizontal", "bar-vertical", "line", "pie", "donut",
-			"scatter", "box", "histogram"),
+			"scatter", "box", "histogram", "quantiles"),
 		{key: "valueLabel", kind: optionString},
 		{key: "xLabel", kind: optionString},
 		{key: "yLabel", kind: optionString},
 		enumOption("legendPosition", "left", "right", "top", "bottom", "none"),
+		{key: "colorBy", kind: optionString},
 		{key: "maxGroups", kind: optionPositiveInteger},
 		{key: "showOther", kind: optionBoolean},
 		{key: "boxMean", kind: optionBoolean},
+		{key: "showIntervals", kind: optionBoolean},
 	}
 	metricScaleOptions = []optionSpec{
 		enumOption("mode", "linear", "log"),
@@ -531,8 +543,10 @@ var (
 		{key: "max", kind: optionNumber},
 	}
 	metricFormatOptions = []optionSpec{
-		enumOption("kind", "number", "percent", "duration", "date", "time", "datetime"),
+		enumOption("kind", "number", "percent", "currency", "duration", "date", "time", "datetime"),
 		{key: "decimals", kind: optionInteger},
+		{key: "currency", kind: optionCurrencyCode},
+		enumOption("notation", "standard", "compact"),
 		enumOption("sourceUnit", "milliseconds", "seconds", "minutes", "hours", "days", "iso", "epochSeconds",
 			"epochMilliseconds", "secondsOfDay", "millisecondsOfDay"),
 		enumOption("style", "human", "long", "clock", "custom", "iso"),
@@ -552,10 +566,12 @@ var (
 		enumOption("columnDir", "asc", "desc"),
 	}
 	metricDistributionOptions = []optionSpec{
-		enumOption("kind", "box", "histogram"),
+		enumOption("kind", "box", "histogram", "quantiles"),
 		{key: "input", kind: optionString},
-		enumOption("whiskers", "minmax", "tukey"),
+		enumOption("whiskers", "minmax", "tukey", "percentile"),
+		{key: "whiskerProbabilities", kind: optionNumberList},
 		{key: "bins", kind: optionInteger},
+		{key: "probabilities", kind: optionNumberList},
 	}
 	metricLayoutOptions = []optionSpec{
 		{key: "widthRem", kind: optionInteger},
@@ -590,8 +606,15 @@ func (m *metricNormalizer) copy(input *jsValue, specs []optionSpec) *jsValue {
 			ok = v.isString() && jsLength(v.s) <= 10000
 		case optionNumber:
 			ok = jsIsFinite(v)
+		case optionNumberList:
+			ok = v.isArray() && len(v.a) >= 1 && len(v.a) <= maxQuantileProbabilities
+			for _, x := range v.a {
+				ok = ok && jsIsFinite(x)
+			}
 		case optionBoolean:
 			ok = v.kind == jsBool
+		case optionCurrencyCode:
+			ok = v.isString() && propertyCurrency.MatchString(v.s)
 		case optionInteger, optionPositiveInteger:
 			min := 0.0
 			if spec.kind == optionPositiveInteger {
@@ -627,6 +650,17 @@ func normalizeLinkMetricOptions(raw *jsValue) *jsValue {
 			m.diagnostics = append(m.diagnostics, "Invalid metric window.")
 		}
 	}
+	if interval := raw.get("interval"); interval != nil {
+		if interval.isRecord() {
+			i := m.copy(interval, metricIntervalOptions)
+			if !i.get("kind").truthy() {
+				m.diagnostics = append(m.diagnostics, "Invalid metric interval.")
+			}
+			out.set("interval", i)
+		} else {
+			m.diagnostics = append(m.diagnostics, "Invalid metric interval.")
+		}
+	}
 	if dateGrouping := raw.get("dateGrouping"); dateGrouping != nil {
 		if dateGrouping.isRecord() {
 			d := m.copy(dateGrouping, metricDateOptions)
@@ -635,6 +669,15 @@ func normalizeLinkMetricOptions(raw *jsValue) *jsValue {
 			if !field.isString() || field.s == "" || jsLength(field.s) > 256 || !d.get("interval").truthy() ||
 				includeEmpty == nil || includeEmpty.kind != jsBool || !d.get("range").truthy() {
 				m.diagnostics = append(m.diagnostics, "Invalid metric date grouping.")
+			}
+			// Hour buckets must divide a day.
+			if every, interval := d.get("every"), d.get("interval"); every != nil && interval.isString() && interval.s == "hour" && !calendarHourEvery(int(every.n)) {
+				d.del("every")
+				m.diagnostics = append(m.diagnostics, "Invalid metric every.")
+			}
+			// One interval per bucket is the default and is left out.
+			if every := d.get("every"); every != nil && every.n == 1 {
+				d.del("every")
 			}
 			if occurrence := dateGrouping.get("occurrence"); occurrence.isRecord() {
 				o := m.copy(occurrence, metricOccurrenceOptions)
@@ -666,7 +709,20 @@ func normalizeLinkMetricOptions(raw *jsValue) *jsValue {
 			}
 			for _, key := range []string{"format", "xFormat", "yFormat"} {
 				if format := display.get(key); format.isRecord() {
-					d.set(key, m.copy(format, metricFormatOptions))
+					f := m.copy(format, metricFormatOptions)
+					// Canonical links: currency and notation only where they
+					// apply, and no default notation.
+					kind := ""
+					if k := f.get("kind"); k != nil {
+						kind = k.s // copy kept only an allowed kind string
+					}
+					if kind != "currency" {
+						f.del("currency")
+					}
+					if notation := f.get("notation"); notation != nil && ((kind != "number" && kind != "currency") || notation.s == "standard") {
+						f.del("notation")
+					}
+					d.set(key, f)
 				}
 			}
 			if list := display.get("list"); list.isRecord() {
@@ -785,10 +841,20 @@ var cellDisplayOptions = func() map[string]map[string]displayRule {
 			"pattern":    {kind: "string"},
 			"decimals":   displayRange(0, 20),
 		},
-		"number":  numbers,
+		"number": {
+			"decimals": displayRange(0, 20),
+			"locale":   {kind: "string"},
+			"notation": displayEnum("standard", "compact"),
+		},
 		"percent": numbers,
-		"chip":    {"labels": {kind: "labels"}, "tones": {kind: "tones"}},
-		"text":    {"truncate": {kind: "boolean"}, "lines": displayRange(1, 20)},
+		"currency": {
+			"decimals": displayRange(0, 20),
+			"locale":   {kind: "string"},
+			"currency": {kind: "currencyCode"},
+			"notation": displayEnum("standard", "compact"),
+		},
+		"chip": {"labels": {kind: "labels"}, "tones": {kind: "tones"}},
+		"text": {"truncate": {kind: "boolean"}, "lines": displayRange(1, 20)},
 	}
 }()
 
@@ -836,6 +902,10 @@ func parseLinkCellDisplay(raw *jsValue, context string) (*jsValue, string) {
 					return fail("invalid " + key + " map")
 				}
 			}
+		case "currencyCode":
+			if !value.isString() || !propertyCurrency.MatchString(value.s) {
+				return fail(key + " must be an ISO 4217 code such as USD")
+			}
 		case "string":
 			if !value.isString() {
 				return fail(key + " must be string")
@@ -848,6 +918,9 @@ func parseLinkCellDisplay(raw *jsValue, context string) (*jsValue, string) {
 		if key == "pattern" && jsLength(value.s) > 160 {
 			return fail("pattern must be at most 160 characters")
 		}
+	}
+	if kind.s == "currency" && raw.get("currency") == nil {
+		return fail("currency is required")
 	}
 	out := raw.spread()
 	for _, key := range []string{"labels", "tones"} {
@@ -910,13 +983,19 @@ func normalizeLinkPropertyFormat(input *jsValue) *jsValue {
 		return out
 	}
 	if kind.isString() && kind.s == "currency" {
-		currency := input.get("currency")
+		currency, notation := input.get("currency"), input.get("notation")
 		if !currency.isString() || !propertyCurrency.MatchString(currency.s) {
+			return nil
+		}
+		if notation != nil && !(notation.isString() && (notation.s == "standard" || notation.s == "compact")) {
 			return nil
 		}
 		out := jsObj().set("kind", kind).set("currency", currency)
 		if validPropertyDecimals(decimals) {
 			out.set("decimals", decimals)
+		}
+		if notation != nil && notation.s == "compact" {
+			out.set("notation", notation)
 		}
 		return out
 	}
@@ -938,6 +1017,10 @@ func normalizeLinkPropertyFormat(input *jsValue) *jsValue {
 	if timeZone != nil && !propertyString(timeZone, 256) {
 		return nil
 	}
+	notation := input.get("notation")
+	if notation != nil && (kind.s != "number" || !notation.isString() || (notation.s != "standard" && notation.s != "compact")) {
+		return nil
+	}
 	out := jsObj().set("kind", kind)
 	if validPropertyDecimals(decimals) {
 		out.set("decimals", decimals)
@@ -953,6 +1036,9 @@ func normalizeLinkPropertyFormat(input *jsValue) *jsValue {
 	}
 	if propertyString(timeZone, 256) {
 		out.set("timeZone", timeZone)
+	}
+	if notation != nil && notation.s == "compact" {
+		out.set("notation", notation)
 	}
 	return out
 }
@@ -1120,17 +1206,22 @@ func normalizeLinkGrouping(value *jsValue, links bool) *jsValue {
 			}
 			// A calendar key: the timezone's validity is checked with the schema.
 			field, fieldOK := boundedJSString(key.get("field"), linkMaxFieldName)
-			interval, zone := key.get("interval"), key.get("timeZone")
+			interval, zone, every := key.get("interval"), key.get("timeZone"), key.get("every")
 			if fieldOK && interval.isString() && includesString(groupKeyIntervals, interval.s) &&
+				(every == nil || (jsIsSafeInteger(every) && every.n >= 1 && every.n <= MaxCalendarEvery && (interval.s != "hour" || calendarHourEvery(int(every.n))))) &&
 				(zone == nil || (zone.isString() && zone.s != "" && jsLength(zone.s) <= 80 && !strings.HasPrefix(zone.s, "+") && !strings.HasPrefix(zone.s, "-"))) {
 				keys = append(keys, field)
 				calendar := jsObj().set("field", jsStr(field)).set("interval", jsStr(interval.s))
+				// One interval per bucket is the default and is left out.
+				if every != nil && every.n != 1 {
+					calendar.set("every", every)
+				}
 				if zone != nil {
 					calendar.set("timeZone", jsStr(zone.s))
 				}
 				normalizedKeys.a = append(normalizedKeys.a, calendar)
 			} else {
-				fail("key " + strconv.Itoa(index+1) + " must be a field name or a calendar key {field, interval, timeZone} with interval hour, day, week, month or year; hour-of-day and day-of-week are metric intervals.")
+				fail("key " + strconv.Itoa(index+1) + " must be a field name or a calendar key {field, interval, every, timeZone} with interval hour, day, week, month or year and every 1–1000 (1, 2, 3, 4, 6, 8, 12 or 24 for hours); hour-of-day and day-of-week are metric intervals.")
 			}
 		}
 	}

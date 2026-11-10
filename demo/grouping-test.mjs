@@ -283,6 +283,7 @@ try {
   const popoverRect = await popover.boundingBox();
   assert.ok(Math.abs(triggerRect.x - popoverRect.x) < 2);
   assert.ok(popoverRect.y >= triggerRect.y + triggerRect.height);
+  assert.equal(await button("Back to fields").getAttribute("title"), "Back to fields");
   await button("Back to fields").click();
   assert.equal(await page.getByLabel("Search fields").inputValue(), "Dura");
   await page.getByLabel("Search fields").press("Escape");

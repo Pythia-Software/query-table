@@ -23,6 +23,11 @@ for (const engine of [chromium, webkit]) {
     const add = library.getByRole("button", { name: "Add property", exact: true });
     const scroller = library.locator(".qt-property-editor-scroll");
     const originalCount = await library.locator(".qt-property-pick").count();
+    // Icon-only row actions name themselves on hover.
+    const row = library.locator(".qt-reorder-item").nth(1);
+    assert.equal(await row.locator(".qt-reorder-handle").getAttribute("title"), "Reorder");
+    assert.equal(await row.getByRole("button", { name: /^Move .+ up$/ }).getAttribute("title"), "Move up");
+    assert.equal(await row.getByRole("button", { name: /^Move .+ down$/ }).getAttribute("title"), "Move down");
     const initialColumns = await editor.locator(".qt-property-workspace").evaluate((el) => getComputedStyle(el).gridTemplateColumns);
     assert.equal(await panels.evaluate((el) => !!el.closest("header")), true);
     assert.ok(await library.locator(".qt-reorder-item").first().evaluate((el) => el.getBoundingClientRect().height <= 44));

@@ -130,6 +130,10 @@ export type {
 } from "./wire.generated";
 export {
   METRIC_FUNCTIONS,
+  aggregateInputKey,
+  percentileProbability,
+  validateDistributionOptions,
+  distributionBucket,
   compileMetric,
   metricAggregatePlans,
   reduceMetricValues,
@@ -151,11 +155,13 @@ export {
   compareMetricValues,
   sortMetricBuckets,
   evaluateMetrics,
+  metricOtherRemainder,
 } from "./metrics";
 export type { MetricPlan, MetricReductionOptions, MetricPopulationSupport, MetricEvaluationOptions } from "./metrics";
 export * from "./metricDistributions";
 export * from "./metricDates";
 export * from "./metricSeries";
+export * from "./metricIntervals";
 export * from "./properties";
 export * from "./propertyStorage";
 export * from "./grouping";

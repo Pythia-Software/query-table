@@ -117,7 +117,9 @@ func newRowMetrics(ctx context.Context, q metricRequest, s Schema, o PlanOptions
 // rowMetricShape reads one compiled metric's operation and bindings.
 func rowMetricShape(spec AggSpec, s Schema, bound func(string, FieldSpec) bool) (rowMetricSpec, error) {
 	m := rowMetricSpec{spec: spec, reduction: -1, threshold: -1}
-	if spec.Scope == "shownRows" || spec.DateGrouping != nil || spec.ExpressionY != "" {
+	// Intervals need a ratio's parts, which this single-aggregate reducer
+	// does not return; refuse them explicitly rather than drop the bounds.
+	if spec.Scope == "shownRows" || spec.DateGrouping != nil || spec.ExpressionY != "" || spec.Interval != nil {
 		return m, fmt.Errorf("%w: metric %s shape", errRowsUnsupported, spec.ID)
 	}
 	expression := metricExpression(spec)
@@ -625,15 +627,26 @@ func (r *rowMetricReduction) distribution(m *rowMetricSpec, h *rowHistogram) Met
 		b.Error = r.err
 		return b
 	}
-	if len(r.samples) > SQLiteMaxBoxSamples {
-		b.Error = "resource_limit"
-		return b
-	}
 	if !r.sorted {
 		sort.Float64s(r.samples)
 		r.sorted = true
 	}
-	value, code, box := distributionBox(r.samples, m.spec.Distribution.Whiskers)
+	var (
+		value  *float64
+		code   string
+		result MetricDistributionResult
+	)
+	if d := m.spec.Distribution; d.Kind == "quantiles" {
+		var quantiles *MetricQuantilesDistribution
+		value, code, quantiles = quantilesPayload(int64(len(r.samples)), d.Probabilities, func(rank int64) (float64, bool) {
+			return r.samples[rank-1], true
+		})
+		result = quantiles
+	} else {
+		var box *MetricBoxDistribution
+		value, code, box = distributionBox(r.samples, d.Whiskers, whiskerProbabilities(d))
+		result = box
+	}
 	if code != "" {
 		b.Error = code
 		return b
@@ -641,7 +654,7 @@ func (r *rowMetricReduction) distribution(m *rowMetricSpec, h *rowHistogram) Met
 	if value != nil {
 		b.Value = *value
 	}
-	b.Distribution = box
+	b.Distribution = result
 	return b
 }
 

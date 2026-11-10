@@ -440,7 +440,7 @@ func (d QueryDatasetV3) keyCalendarGroups(ctx context.Context, tx *sql.Tx, table
 		if _, err = tx.ExecContext(ctx, "ALTER TABLE "+queryIdent(table)+" ADD COLUMN "+queryIdent(bucket)+" "+d.valueType("datetime")); err != nil {
 			return err
 		}
-		if err = d.keyCalendarColumn(ctx, tx, table, alias, bucket, d.valueType("datetime"), interval.Interval, loc); err != nil {
+		if err = d.keyCalendarColumn(ctx, tx, table, alias, bucket, d.valueType("datetime"), interval.Interval, interval.Every, loc); err != nil {
 			return err
 		}
 		field := staged.Fields[key]
@@ -531,8 +531,8 @@ func (d QueryDatasetV3) stageGroups(ctx context.Context, tx *sql.Tx, table strin
 	identity.typedValue = d.Dialect == "sqlite"
 	result.Fields[GroupIdentityField] = identity
 	for _, summary := range g.Summaries {
-		if sampledExpression(metricExpression(summarySpec(summary, g.Keys))) {
-			limit, _ := d.sampleLimit()
+		// The staged population is at most the population budget.
+		if limit, _ := d.sampleLimit(); limit < d.populationBudget() && sampledExpression(metricExpression(summarySpec(summary, g.Keys))) {
 			var excessive int64
 			if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+queryIdent(table)+" WHERE count>"+d.param(1), limit).Scan(&excessive); err != nil {
 				return result, err

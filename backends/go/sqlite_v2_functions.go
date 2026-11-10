@@ -25,9 +25,16 @@ type SQLiteAggregateDescriptor struct {
 	New   func() SQLiteAggregateFunction
 }
 
-// SQLiteMaxMedianSamples bounds exact MEDIAN memory per group. Larger inputs
-// return resource_limit rather than an approximate or truncated result.
-const SQLiteMaxMedianSamples = 100000
+// DefaultMaxSamplesPerGroup is PostgreSQL's default MaxSamplesPerGroup.
+// SQLite defaults to the dataset's population budget instead.
+const DefaultMaxSamplesPerGroup = 100000
+
+// SQLiteMaxMedianSamples bounds the qt_v2_median aggregate, which compiled
+// plans no longer call; it still returns resource_limit above it rather than
+// an approximate or truncated result.
+//
+// Deprecated: use DefaultMaxSamplesPerGroup, PostgreSQL's default budget.
+const SQLiteMaxMedianSamples = DefaultMaxSamplesPerGroup
 
 // maxFormulaTextBytes bounds text formula operands in both dialects. Plain
 // projected, filtered and sorted text values are not rejected by length.
@@ -95,7 +102,8 @@ func SQLiteV2Functions() []SQLiteScalarFunction {
 			return call(a)
 		}}
 	}
-	return append(sqliteDistributionFunctions(), []SQLiteScalarFunction{
+	functions := append(append(sqliteDistributionFunctions(), sqliteRankedFunctions()...), sqliteTextFunctions()...)
+	return append(functions, []SQLiteScalarFunction{
 		fn("qt_v2_datetime_value", 2, func(a []driver.Value) (driver.Value, error) {
 			format, ok := a[1].(string)
 			if !ok {
