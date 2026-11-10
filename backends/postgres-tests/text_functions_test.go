@@ -153,21 +153,25 @@ func TestPostgresTextFunctionFixture(t *testing.T) {
 	})
 }
 
-// The array bound and empty-separator counting at sizes the fixture omits.
+// The array bound, empty-separator counting and WORD_COUNT at sizes the
+// fixture omits.
 func TestPostgresTextFunctionBounds(t *testing.T) {
 	db, d, _, now := setupTextFunctions(t)
 	if _, err := db.Exec("DELETE FROM messages"); err != nil {
 		t.Fatal(err)
 	}
-	for id, text := range map[string]string{"spaces": strings.Repeat(" ", 9999), "many": strings.Repeat(" ", 10000), "emoji": strings.Repeat("\U0001F600", 5000), "emoji2": strings.Repeat("\U0001F600", 5001)} {
+	for id, text := range map[string]string{"spaces": strings.Repeat(" ", 9999), "many": strings.Repeat(" ", 10000), "emoji": strings.Repeat("\U0001F600", 5000), "emoji2": strings.Repeat("\U0001F600", 5001), "words": strings.Repeat("w\n\u3000", 20000)} {
 		if _, err := db.Exec("INSERT INTO messages VALUES($1,'c','user',$2)", id, text); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for expression, want := range map[string]map[string]any{
-		`SUM(ARRAY_LENGTH(SPLIT([text], " ")))`: {"spaces": 10000.0, "many": "array_range", "emoji": 1.0, "emoji2": 1.0},
-		`SUM(ARRAY_LENGTH(SPLIT([text], "")))`:  {"spaces": 9999.0, "many": 10000.0, "emoji": 10000.0, "emoji2": "array_range"},
-		`SUM(LENGTH(TRIM([text])))`:             {"spaces": 0.0, "many": 0.0, "emoji": 5000.0, "emoji2": 5001.0},
+		`SUM(ARRAY_LENGTH(SPLIT([text], " ")))`: {"spaces": 10000.0, "many": "array_range", "emoji": 1.0, "emoji2": 1.0, "words": 1.0},
+		`SUM(ARRAY_LENGTH(SPLIT([text], "")))`:  {"spaces": 9999.0, "many": 10000.0, "emoji": 10000.0, "emoji2": "array_range", "words": "array_range"},
+		`SUM(LENGTH(TRIM([text])))`:             {"spaces": 0.0, "many": 0.0, "emoji": 5000.0, "emoji2": 5001.0, "words": 59998.0},
+		// WORD_COUNT has no array bound: 20,000 words separated by line breaks
+		// and ideographic spaces.
+		`SUM(WORD_COUNT([text]))`: {"spaces": 0.0, "many": 0.0, "emoji": 1.0, "emoji2": 1.0, "words": 20000.0},
 	} {
 		q := qt.QueryRequestV3{Version: 3, Profile: qt.ServerExpressionProfile, Now: now.UnixMilli(), Metrics: []qt.AggSpec{{ID: "m", Op: "count", Expression: expression, GroupBy: []string{"id"}}},
 			Source: qt.WireQuery{Limit: 100}, Result: qt.WireQuery{Limit: 100}}

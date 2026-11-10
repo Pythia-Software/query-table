@@ -13,17 +13,18 @@ import (
 //     terminator set (jsWhitespace), not the engine's own notion of space.
 //   - CONTAINS, STARTS_WITH and ENDS_WITH are exact, case-sensitive substring
 //     tests; an empty search text matches.
+//   - WORD_COUNT counts maximal runs of characters outside jsWhitespace, with
+//     no bound on the count.
+//   - ARRAY_LENGTH(SPLIT(text, separator)) is the count of
+//     text.split(separator): an empty separator splits UTF-16 code units, an
+//     empty text gives one element, and more than 10,000 elements is the
+//     browser's array_range error. The server has no array values; it compiles
+//     this shape from the syntax tree (splitCountNode) and refuses any other
+//     SPLIT or ARRAY_LENGTH with unsupported_type.
 //
 // LOWER, UPPER and the ignoreCase argument are the exception: they use each
 // engine's case mapping and differ from JavaScript on a few characters
-// (caseMapped).
-//   - SPLIT(text, separator) has the count of text.split(separator): an
-//     empty separator splits UTF-16 code units, an empty text gives one
-//     element. More than 10,000 elements is the array_range error.
-//
-// A text array is not a SQL value here: it is represented by its element
-// count, and ARRAY_LENGTH is its only consumer. Every other use of an array
-// is refused with unsupported_type. NULL arguments return NULL.
+// (caseMapped). NULL arguments return NULL.
 
 // maxFormulaArrayElements is the browser's array result bound.
 const maxFormulaArrayElements = 10000
@@ -45,9 +46,7 @@ func (b *planBuilder) text(v ValueSQL) string {
 func (b *planBuilder) textOperation(op string, a []ValueSQL, e string) (string, string, string, error) {
 	for i, x := range a {
 		want := "text"
-		if op == "ARRAY_LENGTH" {
-			want = "textarray"
-		} else if i == 2 {
+		if i == 2 {
 			want = "bool" // ignoreCase
 		}
 		if err := requireType(x, want); err != nil {
@@ -84,7 +83,18 @@ func (b *planBuilder) textOperation(op string, a []ValueSQL, e string) (string, 
 		// gives NULL.
 		folded := b.textMatch(op, b.caseMapped("LOWER", x), b.caseMapped("LOWER", y))
 		return "CASE WHEN " + a[2].Value + " IS NULL THEN NULL WHEN " + a[2].Value + " THEN " + folded + " ELSE " + exact + " END", e, "bool", nil
-	case "SPLIT":
+	case "WORD_COUNT":
+		if b.sqlite {
+			count := b.emit("qt_v2_word_count("+sqliteBytes(x)+")", e, "number")
+			return count.Value, count.Error, "number", nil
+		}
+		// Split the trimmed text on runs of the same set; the pattern lists
+		// the characters explicitly, so no locale class is involved.
+		ws := b.param(jsWhitespace, "text")
+		trimmed := "btrim(" + x + "," + ws + ")"
+		count := b.emit("(CASE WHEN "+trimmed+"='' THEN 0 ELSE array_length(regexp_split_to_array("+trimmed+","+b.param("["+jsWhitespace+"]+", "text")+"),1) END)::double precision", e, "number")
+		return count.Value, count.Error, "number", nil
+	case splitCountOp:
 		var count ValueSQL
 		if b.sqlite {
 			count = b.emit("qt_v2_split_count("+sqliteBytes(x)+","+sqliteBytes(y)+")", e, "number")
@@ -95,9 +105,7 @@ func (b *planBuilder) textOperation(op string, a []ValueSQL, e string) (string, 
 			supplementary := "char_length(regexp_replace(" + x + "," + b.param(`[^\U00010000-\U0010FFFF]`, "text") + ",'','g'))"
 			count = b.emit("(CASE WHEN "+y+"='' THEN char_length("+x+")+"+supplementary+" ELSE (char_length("+x+")-char_length(replace("+x+","+y+",'')))/char_length("+y+")+1 END)::double precision", e, "number")
 		}
-		return count.Value, "COALESCE(" + count.Error + ",CASE WHEN " + count.Value + ">" + strconv.Itoa(maxFormulaArrayElements) + " THEN " + b.errorLiteral("array_range") + " END)", "textarray", nil
-	case "ARRAY_LENGTH":
-		return a[0].Value, e, "number", nil
+		return count.Value, "COALESCE(" + count.Error + ",CASE WHEN " + count.Value + ">" + strconv.Itoa(maxFormulaArrayElements) + " THEN " + b.errorLiteral("array_range") + " END)", "number", nil
 	}
 	return "", "", "", diagnostic(ErrorCodeUnsupportedFunction, "function/operator "+op+" is outside the server profile")
 }
@@ -112,11 +120,13 @@ func (b *planBuilder) textMatch(op, x, y string) string {
 		}
 		return "(strpos(" + x + "," + y + ")>0)"
 	case "STARTS_WITH":
-		// The first occurrence is at the start exactly when text starts with it.
+		// Compare only the prefix, without scanning the rest of the text.
 		if b.sqlite {
-			return "(instr(" + x + "," + y + ")=1)"
+			// Byte prefixes of valid UTF-8 are code point prefixes.
+			bx, by := "CAST("+x+" AS BLOB)", "CAST("+y+" AS BLOB)"
+			return "CASE WHEN " + x + " IS NULL OR " + y + " IS NULL THEN NULL ELSE substr(" + bx + ",1,length(" + by + "))=" + by + " END"
 		}
-		return "(strpos(" + x + "," + y + ")=1)"
+		return "(left(" + x + ",char_length(" + y + "))=" + y + ` COLLATE "C")`
 	}
 	if b.sqlite {
 		// Byte suffixes of valid UTF-8 are code point suffixes.

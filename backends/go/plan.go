@@ -524,17 +524,7 @@ func requireType(v ValueSQL, t string) error {
 	return nil
 }
 
-// row compiles a scalar row expression. Text arrays exist only as the
-// operand of ARRAY_LENGTH, so a row value is never an array.
-func (b *planBuilder) row(n *exprNode) (ValueSQL, error) {
-	v, err := b.rowValue(n)
-	if err == nil && v.Type == "textarray" {
-		return ValueSQL{}, textArrayRefusal()
-	}
-	return v, err
-}
-
-func (b *planBuilder) rowValue(n *exprNode) (result ValueSQL, err error) {
+func (b *planBuilder) row(n *exprNode) (result ValueSQL, err error) {
 	key := expressionKey(n)
 	if cached, ok := b.rowMemo[key]; ok {
 		return cached, nil
@@ -573,15 +563,31 @@ func (b *planBuilder) rowValue(n *exprNode) (result ValueSQL, err error) {
 	if formulaRegexFunction(n.op) {
 		return b.regex(n)
 	}
+	op, operands := splitCountNode(n)
 	args := []ValueSQL{}
-	for _, a := range n.args {
-		v, e := b.rowValue(a)
+	for _, a := range operands {
+		v, e := b.row(a)
 		if e != nil {
 			return v, e
 		}
 		args = append(args, v)
 	}
-	return b.operation(n.op, args)
+	return b.operation(op, args)
+}
+
+// splitCountOp is the compiler-internal operation for ARRAY_LENGTH(SPLIT(text,
+// separator)). The server has no array values: it matches this shape in the
+// syntax tree and compiles the element count directly. The name cannot be
+// parsed from formula source.
+const splitCountOp = "ARRAY_LENGTH(SPLIT)"
+
+// splitCountNode returns the operation and operands of n, rewriting
+// ARRAY_LENGTH(SPLIT(text, separator)) to splitCountOp.
+func splitCountNode(n *exprNode) (string, []*exprNode) {
+	if n.op == "ARRAY_LENGTH" && len(n.args) == 1 && n.args[0].op == "SPLIT" {
+		return splitCountOp, n.args[0].args
+	}
+	return n.op, n.args
 }
 
 // serverOperations are the row operators and functions both server dialects
@@ -591,17 +597,19 @@ var serverOperations = map[string]bool{
 	"=": true, "!=": true, "<>": true, "<": true, ">": true, "<=": true, ">=": true,
 	"+": true, "-": true, "*": true, "/": true, "unary+": true, "unary-": true, "ABS": true,
 	"LENGTH": true, "LOWER": true, "UPPER": true, "TRIM": true, "LTRIM": true, "RTRIM": true, "CONTAINS": true, "STARTS_WITH": true, "ENDS_WITH": true,
-	"SPLIT": true, "ARRAY_LENGTH": true,
+	"WORD_COUNT": true, splitCountOp: true,
 }
 
 func (b *planBuilder) operation(op string, a []ValueSQL) (ValueSQL, error) {
 	if len(b.stages) > 500 {
 		return ValueSQL{}, diagnostic(ErrorCodeStageLimit, "SQL stage budget exceeded")
 	}
-	for _, v := range a {
-		if v.Type == "textarray" && op != "ARRAY_LENGTH" {
-			return ValueSQL{}, textArrayRefusal()
-		}
+	if op == "ARRAY_LENGTH" && len(a) == 1 && a[0].Type != "null" {
+		return ValueSQL{}, diagnostic(ErrorCodeTypeError, "expected textarray, got "+a[0].Type)
+	}
+	if op == "SPLIT" || op == "ARRAY_LENGTH" {
+		// Any array other than the operand of ARRAY_LENGTH(SPLIT(...)).
+		return ValueSQL{}, textArrayRefusal()
 	}
 	if !serverOperations[op] {
 		return ValueSQL{}, diagnostic(ErrorCodeUnsupportedFunction, "function/operator "+op+" is outside the server profile")
@@ -610,7 +618,7 @@ func (b *planBuilder) operation(op string, a []ValueSQL) (ValueSQL, error) {
 	switch op {
 	case "IF":
 		arity = 3
-	case "ABS", "IS_NULL", "unary+", "unary-", "unaryNOT", "LENGTH", "LOWER", "UPPER", "TRIM", "LTRIM", "RTRIM", "ARRAY_LENGTH":
+	case "ABS", "IS_NULL", "unary+", "unary-", "unaryNOT", "LENGTH", "LOWER", "UPPER", "TRIM", "LTRIM", "RTRIM", "WORD_COUNT":
 		arity = 1
 	case "CONTAINS", "STARTS_WITH", "ENDS_WITH":
 		// The optional third argument is ignoreCase.
@@ -738,7 +746,7 @@ func (b *planBuilder) operation(op string, a []ValueSQL) (ValueSQL, error) {
 		default:
 			v = l + " " + op + " (" + a[1].Value + ")::text::numeric"
 		}
-	case "LENGTH", "LOWER", "UPPER", "TRIM", "LTRIM", "RTRIM", "CONTAINS", "STARTS_WITH", "ENDS_WITH", "SPLIT", "ARRAY_LENGTH":
+	case "LENGTH", "LOWER", "UPPER", "TRIM", "LTRIM", "RTRIM", "CONTAINS", "STARTS_WITH", "ENDS_WITH", "WORD_COUNT", splitCountOp:
 		var err error
 		if v, e, t, err = b.textOperation(op, a, e); err != nil {
 			return ValueSQL{}, err

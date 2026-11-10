@@ -91,6 +91,15 @@ export const FORMULA_FUNCTIONS: FormulaFunction[] = [
     "text",
   ]),
   f(
+    "WORD_COUNT",
+    "WORD_COUNT(text)",
+    "Count runs of characters between white space (spaces, tabs, line breaks).",
+    1,
+    1,
+    "number",
+    ["text"],
+  ),
+  f(
     "URL_ENCODE",
     "URL_ENCODE(text)",
     "Percent-encode UTF-8 text for a URL. Only letters, digits and - . _ ~ are kept.",
@@ -1018,6 +1027,10 @@ export function formulaRuntime(
       }
       case "LENGTH":
         out = Array.from(str(a)).length;
+        break;
+      case "WORD_COUNT":
+        // \s with the u flag is the white space and line terminator set TRIM removes.
+        out = str(a).match(/\S+/gu)?.length ?? 0;
         break;
       case "URL_ENCODE":
         // RFC 3986 unreserved characters only, matching DuckDB's url_encode.

@@ -270,7 +270,11 @@ func TestTextFunctionRefusalsV3(t *testing.T) {
 		`COUNT(SPLIT([text], " "))`:                                           qt.ErrorCodeUnsupportedType,
 		`SUM(ARRAY_LENGTH(IF(TRUE, SPLIT([text], " "), SPLIT([text], ","))))`: qt.ErrorCodeUnsupportedType,
 		`SUM(ARRAY_LENGTH([text]))`:                                           qt.ErrorCodeTypeError,
+		`SUM(ARRAY_LENGTH(SPLIT([text])))`:                                    qt.ErrorCodeArity,
+		`IF(TRUE, SPLIT(MAX([text]), " "), SPLIT(MAX([text]), ","))`:          qt.ErrorCodeUnsupportedType,
+		`SPLIT(MAX([text]), " ")`:                                             qt.ErrorCodeUnsupportedType,
 		`SUM(LENGTH([text], 1))`:                                              qt.ErrorCodeArity,
+		`SUM(WORD_COUNT([text], " "))`:                                        qt.ErrorCodeArity,
 	} {
 		c := textFunctionCase{Metric: qt.AggSpec{ID: "m", Op: "count", Expression: expression, Scope: "shownRows"}, OrderBy: []qt.OrderBy{{Field: "id", Dir: "asc"}}}
 		out, err := d.Execute(context.Background(), db, textFunctionRequest(c, qt.SQLiteExpressionProfile, now), qt.PlanOptions{})
@@ -279,6 +283,46 @@ func TestTextFunctionRefusalsV3(t *testing.T) {
 		}
 		if out.Metrics[0].ErrorCode != code {
 			t.Errorf("%s: got %q (%s), want %q", expression, out.Metrics[0].ErrorCode, out.Metrics[0].Error, code)
+		}
+	}
+}
+
+// WORD_COUNT has no array bound, unlike ARRAY_LENGTH(SPLIT(...)), and the
+// split count also compiles outside an aggregate.
+func TestTextWordCountV3(t *testing.T) {
+	db, _, now := setupTextFunctions(t)
+	if _, err := db.Exec("DELETE FROM messages"); err != nil {
+		t.Fatal(err)
+	}
+	rows := map[string]string{"words": strings.Repeat("w\n\u3000", 20000), "nul": "a\x00b c", "mixed": " a\tb\u00a0c\u2028d\u0085e "}
+	for id, text := range rows {
+		if _, err := db.Exec("INSERT INTO messages VALUES(?,?,?,?)", id, "c", "user", text); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d := qt.QueryDatasetV3{Schema: textFunctionSchema(), SourceSQL: "SELECT * FROM messages", Dialect: "sqlite", Scope: "one", Dataset: "messages"}
+	for expression, want := range map[string]map[string]any{
+		"SUM(WORD_COUNT([text]))":                 {"words": 20000.0, "nul": 2.0, "mixed": 4.0},
+		`SUM(ARRAY_LENGTH(SPLIT([text], " ")))`:   {"words": 1.0, "nul": 2.0, "mixed": 3.0},
+		`ARRAY_LENGTH(SPLIT(MAX([text]), "\n"))`:  {"words": "array_range", "nul": 1.0, "mixed": 1.0},
+		`ARRAY_LENGTH(SPLIT(MAX([text]), "\t"))`:  {"words": 1.0, "nul": 1.0, "mixed": 2.0},
+		`SUM(ARRAY_LENGTH(SPLIT([text], "\n")))`:  {"words": "array_range", "nul": 1.0, "mixed": 1.0},
+		"WORD_COUNT(MAX([text])) - COUNT([text])": {"words": 19999.0, "nul": 1.0, "mixed": 3.0},
+	} {
+		c := textFunctionCase{Metric: qt.AggSpec{ID: "m", Op: "count", Expression: expression, GroupBy: []string{"id"}}}
+		out, err := d.Execute(context.Background(), db, textFunctionRequest(c, qt.SQLiteExpressionProfile, now), qt.PlanOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]any{}
+		for _, b := range out.Metrics[0].Buckets {
+			got[b.Keys[0].(string)] = b.Value
+			if b.Error != "" {
+				got[b.Keys[0].(string)] = b.Error
+			}
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s:\ngot  %v\nwant %v (%s)", expression, got, want, out.Metrics[0].Error)
 		}
 	}
 }

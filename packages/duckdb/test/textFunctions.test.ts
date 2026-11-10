@@ -105,7 +105,7 @@ describe("shared text function fixture (DuckDB)", () => {
 
 describe("DuckDB text functions match the browser", () => {
   beforeAll(async () => {
-    const rows: [string, string][] = [["spaces", " ".repeat(9999)], ["many", " ".repeat(10000)], ["emoji", String.fromCodePoint(0x1f600)]];
+    const rows: [string, string][] = [["spaces", " ".repeat(9999)], ["many", " ".repeat(10000)], ["emoji", String.fromCodePoint(0x1f600)], ["words", ("w\n" + String.fromCharCode(0x3000)).repeat(20000)]];
     for (const [id, text] of rows) await native.run("INSERT INTO messages VALUES ($1,'bounds','user',$2)", [id, text] as never[]);
   });
   const metric = async (expression: string, id?: string) => {
@@ -129,6 +129,11 @@ describe("DuckDB text functions match the browser", () => {
     expect(await metric('MIN(ARRAY_LENGTH(SPLIT([text], " ")))', "spaces")).toBe(10000);
     expect(await metric('MIN(ARRAY_LENGTH(SPLIT([text], " ")))', "many")).toMatch(/Array result is too large/);
     expect(await metric('MIN(IF(IS_EMPTY(SPLIT([text], " ")), 1, 0))', "many")).toMatch(/Array result is too large/);
+  });
+  it("counts words without the array bound", async () => {
+    expect(await metric("MIN(WORD_COUNT([text]))", "words")).toBe(20000);
+    expect(await metric('MIN(ARRAY_LENGTH(SPLIT([text], "\\n")))', "words")).toMatch(/Array result is too large/);
+    expect(await metric("MIN(WORD_COUNT([text]))", "spaces")).toBe(0);
   });
   it("counts an empty-separator split in UTF-16 code units", async () => {
     expect(await metric('MIN(ARRAY_LENGTH(SPLIT([text], "")))', "emoji")).toBe(2);

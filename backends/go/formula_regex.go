@@ -680,6 +680,20 @@ func extractFormulaRegex(re *regexp.Regexp, value string, group int) (string, bo
 	return value[m[2*group]:m[2*group+1]], true
 }
 
+// wordFormulaCount is WORD_COUNT: maximal runs of characters outside the
+// ECMAScript white space set, as text.match(/\S+/gu).length.
+func wordFormulaCount(value string) int {
+	count, inWord := 0, false
+	for _, r := range value {
+		space := strings.ContainsRune(jsWhitespace, r)
+		if !space && !inWord {
+			count++
+		}
+		inWord = !space
+	}
+	return count
+}
+
 // splitFormulaCount is the element count of JavaScript's text.split(sep):
 // an empty separator yields UTF-16 code units.
 func splitFormulaCount(value, separator string) int {

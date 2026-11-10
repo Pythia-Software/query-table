@@ -49,6 +49,8 @@ const JS_WHITESPACE = String.fromCharCode(
 /** Supplementary code points: two UTF-16 code units each (RE2 syntax). */
 const SUPPLEMENTARY = String.raw`[\x{10000}-\x{10FFFF}]`;
 const NOT_SUPPLEMENTARY = String.raw`[^\x{10000}-\x{10FFFF}]`;
+/** WORD_COUNT's words: runs outside JS_WHITESPACE (RE2 syntax). */
+const WORD = `[^${[...JS_WHITESPACE].map((c) => `\\x{${c.codePointAt(0)!.toString(16)}}`).join("")}]+`;
 const MAX_ARRAY_ELEMENTS = 10000;
 const arrayBound = (list: string) =>
   `(CASE WHEN len(${list}) > ${MAX_ARRAY_ELEMENTS} THEN error('Array result is too large.') ELSE ${list} END)`;
@@ -297,6 +299,8 @@ export class SQLBuilder {
       return arrayBound(
         `(CASE WHEN ${a} IS NULL OR ${b} IS NULL THEN NULL WHEN ${b} <> '' THEN string_split(${a}, ${b}) WHEN regexp_matches(${a}, ${this.bind(SUPPLEMENTARY)}) THEN error('SPLIT with an empty separator cannot represent a supplementary character in the qt-duckdb-v1 profile.') WHEN ${a} = '' THEN CAST([] AS VARCHAR[]) ELSE string_split(${a}, '') END)`,
       );
+    if (name === "WORD_COUNT")
+      return `CAST(len(regexp_extract_all(${a}, ${this.bind(WORD)})) AS DOUBLE)`;
     if (name === "TRIM" || name === "LTRIM" || name === "RTRIM")
       return `${name.toLowerCase()}(${a}, ${this.bind(JS_WHITESPACE)})`;
     if (name === "JOIN") return `array_to_string(${a}, ${b})`;

@@ -674,6 +674,76 @@
       }
     },
     {
+      "name": "WORD_COUNT counts runs between any white space; empty text has none",
+      "metric": {
+        "id": "m",
+        "op": "count",
+        "expression": "SUM(WORD_COUNT([text]))",
+        "groupBy": [
+          "id"
+        ],
+        "sort": [
+          {
+            "key": "group0",
+            "dir": "asc",
+            "nulls": "last"
+          }
+        ]
+      },
+      "expected": {
+        "groupCount": 14,
+        "buckets": [
+          { "keys": ["m01"], "count": 1, "value": 2 },
+          { "keys": ["m02"], "count": 1, "value": 2 },
+          { "keys": ["m03"], "count": 1, "value": 1 },
+          { "keys": ["m04"], "count": 1, "value": 3 },
+          { "keys": ["m05"], "count": 1, "value": 2 },
+          { "keys": ["m06"], "count": 1, "value": 0 },
+          { "keys": ["m07"], "count": 1, "value": null },
+          { "keys": ["m08"], "count": 1, "value": 2 },
+          { "keys": ["m09"], "count": 1, "value": 1 },
+          { "keys": ["m10"], "count": 1, "value": null },
+          { "keys": ["m11"], "count": 1, "value": 1 },
+          { "keys": ["m12"], "count": 1, "value": 1 },
+          { "keys": ["m13"], "count": 1, "value": 3 },
+          { "keys": ["m14"], "count": 1, "value": 7 }
+        ]
+      }
+    },
+    {
+      "name": "scatter of characters against WORD_COUNT words per conversation",
+      "metric": {
+        "id": "m",
+        "op": "count",
+        "expression": "SUM(LENGTH([text]))",
+        "groupBy": [
+          "conversation_id"
+        ],
+        "sort": [
+          {
+            "key": "group0",
+            "dir": "asc",
+            "nulls": "last"
+          }
+        ],
+        "expressionY": "SUM(WORD_COUNT([text]))",
+        "display": {
+          "kind": "scatter"
+        }
+      },
+      "expected": {
+        "groupCount": 6,
+        "buckets": [
+          { "keys": ["c1"], "count": 3, "value": 31, "y": 5 },
+          { "keys": ["c2"], "count": 4, "value": 26, "y": 6 },
+          { "keys": ["c3"], "count": 3, "value": 19, "y": 3 },
+          { "keys": ["c4"], "count": 2, "value": 5, "y": 3 },
+          { "keys": ["c5"], "count": 1, "value": 35, "y": 7 },
+          { "keys": [null], "count": 1, "value": 4, "y": 1 }
+        ]
+      }
+    },
+    {
       "name": "LOWER maps ASCII, Latin-1, Greek and Cyrillic letters; CJK and emoji are unchanged",
       "metric": {
         "id": "m",
@@ -1062,6 +1132,11 @@
           "expression": "SUM(ARRAY_LENGTH(SPLIT(TRIM([text]), \" \")))"
         },
         {
+          "id": "word_count",
+          "op": "formula",
+          "expression": "SUM(WORD_COUNT([text]))"
+        },
+        {
           "id": "messages",
           "op": "count"
         }
@@ -1079,36 +1154,42 @@
         "conversation_id": "c1",
         "characters": 31,
         "words": 5,
+        "word_count": 5,
         "messages": 3
       },
       {
         "conversation_id": "c2",
         "characters": 21,
         "words": 5,
+        "word_count": 5,
         "messages": 3
       },
       {
         "conversation_id": "c3",
         "characters": 13,
         "words": 1,
+        "word_count": 2,
         "messages": 2
       },
       {
         "conversation_id": "c4",
         "characters": 5,
         "words": 3,
+        "word_count": 3,
         "messages": 2
       },
       {
         "conversation_id": "c5",
         "characters": 35,
         "words": 7,
+        "word_count": 7,
         "messages": 1
       },
       {
         "conversation_id": null,
         "characters": 4,
         "words": 1,
+        "word_count": 1,
         "messages": 1
       }
     ]

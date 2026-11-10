@@ -115,6 +115,13 @@ func sqliteTextFunctions() []SQLiteScalarFunction {
 			}
 			return int64(utf8.RuneCountInString(value)), nil
 		}),
+		fn("qt_v2_word_count", 1, func(a []driver.Value) (driver.Value, error) {
+			value, err := text(a[0])
+			if err != nil {
+				return nil, err
+			}
+			return int64(wordFormulaCount(value)), nil
+		}),
 		fn("qt_v2_split_count", 2, func(a []driver.Value) (driver.Value, error) {
 			value, err := text(a[0])
 			if err != nil {

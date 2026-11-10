@@ -83,6 +83,14 @@ func TestFormulaRegexMatchesBrowserFixture(t *testing.T) {
 	}
 }
 
+func TestFormulaWordCountMatchesWhitespaceRuns(t *testing.T) {
+	for value, want := range map[string]int{"": 0, " \t\n": 0, "a": 1, "a  b\nc": 3, "\u00a0a\u2028b\u3000": 2, "a\u0085b\u180ec": 1, "\ufeffx\u200by": 1} {
+		if got := wordFormulaCount(value); got != want {
+			t.Errorf("WORD_COUNT(%q): got %d, want %d", value, got, want)
+		}
+	}
+}
+
 func TestFormulaSplitCountMatchesStringSplit(t *testing.T) {
 	for _, c := range []struct {
 		value, separator string

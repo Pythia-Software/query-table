@@ -15,7 +15,14 @@
   UTF-16 code units; more than 10,000 parts is the per-row error
   `array_range`), and missing text stays NULL rather than empty. A text array
   is accepted only inside `ARRAY_LENGTH`; other text functions are refused
-  (`unsupported_function`).
+  (`unsupported_function`). A formula text operand above 100,000 UTF-8 bytes
+  remains `text_range` on the server (the browser bounds 100,000 UTF-16 code
+  units), and makes that row's whole group an error.
+- New formula function `WORD_COUNT(text)` in the browser, DuckDB, Go SQLite
+  and Go PostgreSQL: the number of runs of characters between white space (the
+  set `TRIM` removes), with no element bound. Unlike
+  `ARRAY_LENGTH(SPLIT(TRIM(text), " "))` it treats line breaks and repeated
+  spaces as one separator and does not fail with `array_range` on long text.
 - Both profiles also run `LOWER`, `UPPER` and the `ignoreCase` argument of
   `CONTAINS`, `STARTS_WITH` and `ENDS_WITH` (both sides lower-cased). These
   favor the common case over exact parity: SQLite uses Go's simple Unicode
@@ -30,7 +37,7 @@
   refuses formula regex. `RegexAggregateExpressions` stays false.
 - **SQLite hosts must register the complete current `SQLiteV2Functions()`
   list**, which adds `qt_v2_lower`, `qt_v2_upper`, `qt_v2_length`,
-  `qt_v2_split_count`, `qt_v2_regex_test`, `qt_v2_regex_extract`,
+  `qt_v2_word_count`, `qt_v2_split_count`, `qt_v2_regex_test`, `qt_v2_regex_extract`,
   `qt_v2_regex_replace` and `qt_v2_regex_replace_error`.
 - Shared fixtures `schema/fixtures/text-functions.json` (local engine, DuckDB,
   Go SQLite, Go PostgreSQL) and `schema/fixtures/formula-regex.json` (browser
