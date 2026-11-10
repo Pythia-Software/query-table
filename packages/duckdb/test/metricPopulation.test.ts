@@ -27,6 +27,12 @@ const fixture = JSON.parse(
 ) as { now: string; schema: FieldSchema; rows: Row[]; cases: Case[] };
 const now = Date.parse(fixture.now);
 
+/** Only the distribution summary fields the fixture states. */
+function projectSummary(distribution: unknown, want: unknown) {
+  const summary = (distribution as { summary?: Record<string, unknown> | null } | undefined)?.summary;
+  if (!summary || !want || typeof want !== "object") return null;
+  return Object.fromEntries(Object.keys(want).map((key) => [key, summary[key]]));
+}
 /** Same projection as the core fixture test. DuckDB does not report
  * processedRows, so that optional assertion is skipped when absent. */
 function project(entry: AggregationResultEntry, expected: Case["expected"]) {
@@ -44,6 +50,7 @@ function project(entry: AggregationResultEntry, expected: Case["expected"]) {
         count: Number(bucket.count),
         ...("value" in want ? { value: bucket.value } : {}),
         ...(want.box && box ? { box: { n: box.n, min: box.min, q1: box.q1, median: box.median, q3: box.q3, max: box.max } } : {}),
+        ...("summary" in want ? { summary: projectSummary(bucket.distribution, want.summary) } : {}),
         ...(want.histogram && histogram ? { histogram: { edges: histogram.edges, counts: histogram.counts, n: histogram.n } } : {}),
       };
     }),
@@ -82,16 +89,16 @@ afterAll(() => native?.closeSync());
 describe("shared metric population fixture (DuckDB)", () => {
   for (const c of fixture.cases)
     it(c.name, async () => {
-      // Refused cases (an ungrouped minCount, an invalid formula) are
-      // client-side QueryErrors as well; build their request without
-      // minCount and with a plain count, then put them back, so the backend's
-      // own validation is exercised. Every other case goes through the client.
+      // Refused cases (an ungrouped minCount, an invalid formula or
+      // distribution) are client-side QueryErrors as well; build their request
+      // without them, then put them back, so the backend's own validation is
+      // exercised. Every other case goes through the client.
       const query = queryFor(c);
       const refused = "error" in c.expected;
-      const request = toQueryRequestV3(refused ? { ...query, aggregations: query.aggregations!.map(({ minCount: _minCount, expression: _expression, ...clause }) => clause) } : query,
+      const request = toQueryRequestV3(refused ? { ...query, aggregations: query.aggregations!.map(({ minCount: _minCount, expression: _expression, distribution: _distribution, ...clause }) => clause) } : query,
         fixture.schema, backend.capabilities, undefined, { now, rows: false });
-      const { minCount, expression } = query.aggregations![0]!;
-      const result = await backend.execute(refused ? { ...request, metrics: [{ ...request.metrics[0]!, ...(minCount !== undefined ? { minCount } : {}), ...(expression !== undefined ? { expression } : {}) }] } : request);
+      const { minCount, expression, distribution } = query.aggregations![0]!;
+      const result = await backend.execute(refused ? { ...request, metrics: [{ ...request.metrics[0]!, ...(minCount !== undefined ? { minCount } : {}), ...(expression !== undefined ? { expression } : {}), ...(distribution !== undefined ? { distribution } : {}) }] } : request);
       const entry = result.metrics[0]!;
       expect(project(entry, c.expected), entry.error).toEqual(c.expected);
     });

@@ -9,7 +9,7 @@ import {
   validateMetric,
   isSelectable,
   isFilterable,
-  boxSummary,
+  distributionBucket,
   histogramEdges,
   histogramCounts,
   compareMetricValues,
@@ -214,6 +214,8 @@ export class DuckDBBackend {
       metricMinCount: true,
       metricMinCountMeasures: true,
       metricPercentiles: true,
+      boxPercentileWhiskers: true,
+      quantileDistributions: true,
       maxRows: positive(options.maxRows, 10000, 10000),
       maxGroups: positive(options.maxGroups, 10000, 10000),
       maxPopulation: positive(options.maxPopulation, 250000, 10000000),
@@ -715,7 +717,7 @@ export class DuckDBBackend {
       groups = keys.length ? `GROUP BY ${keys.join(", ")}` : "";
     const distribution =
       clause.distribution &&
-      ["box", "histogram"].includes(clause.display?.kind ?? "")
+      ["box", "histogram", "quantiles"].includes(clause.display?.kind ?? "")
         ? clause.distribution
         : undefined;
     const expression = distribution
@@ -785,18 +787,16 @@ export class DuckDBBackend {
         ...(distribution
           ? {
               nullCount: (row.count as number) - samples.length,
-              distribution:
-                distribution.kind === "box"
-                  ? {
-                      kind: "box" as const,
-                      summary: boxSummary(samples, distribution.whiskers),
-                    }
-                  : {
+              ...(distribution.kind === "histogram"
+                ? {
+                    distribution: {
                       kind: "histogram" as const,
                       n: samples.length,
                       edges,
                       counts: histogramCounts(samples, edges),
                     },
+                  }
+                : distributionBucket(distribution, samples)),
             }
           : {}),
       };
@@ -886,9 +886,9 @@ export class DuckDBBackend {
           term.key.startsWith("group")
             ? (bucket.keys[Number(term.key.slice(5))] ?? null)
             : term.key === "samples"
-              ? bucket.distribution?.kind === "box"
-                ? (bucket.distribution.summary?.n ?? 0)
-                : (bucket.distribution?.n ?? 0)
+              ? bucket.distribution?.kind === "histogram"
+                ? bucket.distribution.n
+                : (bucket.distribution?.summary?.n ?? 0)
               : ((bucket as unknown as Record<string, MetricValue>)[term.key] ??
                 null);
         const av = value(a),

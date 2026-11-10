@@ -54,7 +54,7 @@ export function distributionProblem(value: unknown): string | undefined {
       s.outlierCount < s.outliers.length ||
       s.outlierCount > s.n ||
       s.method !== "exact-linear" ||
-      !["minmax", "tukey"].includes(String(s.whiskers))
+      !["minmax", "tukey", "percentile"].includes(String(s.whiskers))
     )
       return bad;
     const [min, q1, median, q3, max, mean, low, high] = stats as number[];
@@ -78,6 +78,25 @@ export function distributionProblem(value: unknown): string | undefined {
         high! <= max!
       ) ||
       s.outliers.some((v) => v < min! || v > max!)
+    )
+      return bad;
+    return undefined;
+  }
+  if (d.kind === "quantiles") {
+    if (d.summary === null) return undefined;
+    if (!d.summary || typeof d.summary !== "object") return bad;
+    const s = d.summary as Record<string, unknown>;
+    if (
+      !count(s.n) ||
+      s.n === 0 ||
+      !numbers(s.probabilities) ||
+      !numbers(s.values) ||
+      !s.probabilities.length ||
+      s.probabilities.length !== s.values.length ||
+      s.probabilities.some(
+        (p, i, ps) => p < 0 || p > 1 || (i > 0 && p <= ps[i - 1]!),
+      ) ||
+      s.values.some((v, i, vs) => i > 0 && v < vs[i - 1]!)
     )
       return bad;
     return undefined;

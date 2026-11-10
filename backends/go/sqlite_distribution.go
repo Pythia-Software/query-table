@@ -1,6 +1,7 @@
 package querytable
 
 import (
+	"cmp"
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
@@ -15,6 +16,8 @@ type MetricDistributionResult interface{ metricDistributionResult() }
 func (*MetricBoxDistribution) metricDistributionResult() {}
 
 func (*MetricHistogramDistribution) metricDistributionResult() {}
+
+func (*MetricQuantilesDistribution) metricDistributionResult() {}
 
 // UnmarshalJSON reads the distribution union by its kind and keeps a
 // present null y, so a decoded result re-encodes unchanged.
@@ -52,6 +55,8 @@ func (b *MetricBucket) UnmarshalJSON(data []byte) error {
 		target = &MetricBoxDistribution{}
 	case "histogram":
 		target = &MetricHistogramDistribution{}
+	case "quantiles":
+		target = &MetricQuantilesDistribution{}
 	default:
 		return fmt.Errorf("unknown distribution kind %q", head.Kind)
 	}
@@ -166,6 +171,7 @@ func sqliteDistributionAggregates() []SQLiteAggregateDescriptor {
 		{Name: "qt_v2_box", Arity: 2, New: func() SQLiteAggregateFunction { return &sqliteBoxAggregate{} }},
 		{Name: "qt_v2_histogram", Arity: 2, New: func() SQLiteAggregateFunction { return &sqliteHistogramAggregate{} }},
 		{Name: "qt_v2_ranked_values", Arity: 2, New: func() SQLiteAggregateFunction { return &sqliteRankedValuesAggregate{} }},
+		{Name: "qt_v2_rank_samples", Arity: 2, New: func() SQLiteAggregateFunction { return &sqliteRankSamplesAggregate{} }},
 	}, sqliteRankedAggregates()...)
 }
 
@@ -279,7 +285,7 @@ func (a *sqliteBoxAggregate) Value() (driver.Value, error) {
 		return sqliteDistributionJSON(nil, a.err, nil)
 	}
 	sort.Float64s(a.samples)
-	value, code, box := distributionBox(a.samples, a.whiskers)
+	value, code, box := distributionBox(a.samples, a.whiskers, [2]float64{})
 	if box == nil {
 		return sqliteDistributionJSON(nil, code, nil)
 	}
@@ -288,7 +294,7 @@ func (a *sqliteBoxAggregate) Value() (driver.Value, error) {
 
 // distributionBox summarizes sorted, validated samples: the median value and
 // box, or an error code. An empty population has no value and no summary.
-func distributionBox(samples []float64, mode string) (*float64, string, *MetricBoxDistribution) {
+func distributionBox(samples []float64, mode string, percentiles [2]float64) (*float64, string, *MetricBoxDistribution) {
 	n := len(samples)
 	parts := boxParts{n: int64(n)}
 	if n == 0 {
@@ -298,6 +304,18 @@ func distributionBox(samples []float64, mode string) (*float64, string, *MetricB
 	for i, p := range []float64{0.25, 0.5, 0.75} {
 		lower := exactLinearIndex(parts.n, p)
 		parts.quartiles[i] = [2]float64{samples[lower], samples[min(lower+1, parts.n-1)]}
+	}
+	if mode == "percentile" {
+		var e1, e2 string
+		parts.low, e1 = sqlitePercentile(samples, percentiles[0])
+		parts.high, e2 = sqlitePercentile(samples, percentiles[1])
+		parts.whiskerError = cmp.Or(e1, e2)
+		parts.probabilities = []float64{percentiles[0], percentiles[1]}
+		if parts.whiskerError == "" {
+			first := sort.Search(n, func(i int) bool { return samples[i] >= parts.low })
+			end := sort.Search(n, func(i int) bool { return samples[i] > parts.high })
+			parts.outlierCount = int64(first + n - end)
+		}
 	}
 	if mode == "tukey" {
 		q1, e1 := sqlitePercentile(samples, 0.25)
@@ -411,31 +429,53 @@ func (a *sqliteHistogramAggregate) Value() (driver.Value, error) {
 // tail counts outside the fences, the samples at the in-fence endpoint ranks
 // and at most maxRankedOutliers outliers. Only the ranked relation is as large
 // as the population; every other stage has one row per group.
-func (b *planBuilder) sqliteBox(population string, groupCols, inventory []string, by, mode string) {
+func (b *planBuilder) sqliteBox(population string, groupCols, inventory []string, by, mode string, percentiles [2]float64) {
 	modeParam := b.param(mode, "text")
 	// A group that fits in memory is summarised by qt_v2_box_minmax or
 	// qt_v2_box_tukey in this one pass, exactly as the ranked stages below
 	// would. Only the sample crosses into Go per row.
-	b.stage("SELECT " + strings.Join(append(inventory, "MIN(sample_error) AS input_error", "qt_v2_box_"+mode+"(sample) AS memory"), ",") + " FROM " + population + by)
+	memory := "qt_v2_box_" + mode + "(sample)"
+	if mode == "percentile" {
+		memory = "qt_v2_box_percentile(sample," + b.param(percentiles[0], "double precision") + "," + b.param(percentiles[1], "double precision") + ")"
+	}
+	b.stage("SELECT " + strings.Join(append(inventory, "MIN(sample_error) AS input_error", memory+" AS memory"), ",") + " FROM " + population + by)
 	stats := b.rel
 	// The ranked stages read only populations with an overflowing group; the
 	// ranking is stored because several stages read it.
 	gate := "EXISTS (SELECT 1 FROM " + stats + " WHERE memory IS '" + rankedOverflow + "')"
 	ranked := b.sqliteRankedStage(population, "sample", groupCols, groupCols, true, gate)
-	picks := []rankedSample{}
-	// The quartiles, then the extrema at ranks 1 and n.
-	for _, p := range []float64{0.25, 0.5, 0.75, 0, 1} {
-		ranks, _ := b.quantileRanks(p)
-		picks = append(picks, ranks)
+	// The quartiles, the extrema at ranks 1 and n, then percentile whiskers.
+	probabilities := []float64{0.25, 0.5, 0.75, 0, 1}
+	if mode == "percentile" {
+		probabilities = append(probabilities, percentiles[0], percentiles[1])
+	}
+	picks, params, columns := []rankedSample{}, []string{}, []string{}
+	for i, p := range probabilities {
+		ranks, param := b.quantileRanks(p)
+		picks, params = append(picks, ranks), append(params, param)
+		columns = append(columns, fmt.Sprintf("k.pick%d_lo,k.pick%d_hi", i, i))
 	}
 	picked := b.sqlitePickStage(ranked, stats, "samples", groupCols, picks)
 	// The mean is distributionMean: a correctly rounded sum, so any visitation
 	// order matches the in-memory aggregate.
 	b.stage("SELECT " + strings.Join(append(qualified("r", groupCols), "qt_v2_exact_mean(r.sample) AS mean"), ",") + " FROM " + ranked + " AS r" + groupedBy("r", groupCols))
 	means := b.rel
-	b.stage("SELECT s.*,k.pick0_lo,k.pick0_hi,k.pick1_lo,k.pick1_hi,k.pick2_lo,k.pick2_hi,k.pick3_lo AS min,k.pick4_lo AS max,m.mean FROM " + stats + " AS s LEFT JOIN " + picked + " AS k ON " + keysMatch("s", "k", groupCols) + " LEFT JOIN " + means + " AS m ON " + keysMatch("s", "m", groupCols))
+	b.stage("SELECT s.*," + strings.Join(columns, ",") + ",k.pick3_lo AS min,k.pick4_lo AS max,m.mean FROM " + stats + " AS s LEFT JOIN " + picked + " AS k ON " + keysMatch("s", "k", groupCols) + " LEFT JOIN " + means + " AS m ON " + keysMatch("s", "m", groupCols))
 	quartiles := "pick0_lo,pick0_hi,pick1_lo,pick1_hi,pick2_lo,pick2_hi"
 	tukey := "NULL,NULL,0,NULL"
+	if mode == "percentile" {
+		// Interpolated whiskers (REAL, or a TEXT error code), then a native
+		// count of the samples beyond them.
+		overflowed := "memory IS '" + rankedOverflow + "'"
+		b.stage("SELECT *,CASE WHEN " + overflowed + " THEN qt_v2_quantile(samples," + params[5] + ",pick5_lo,pick5_hi) END AS low,CASE WHEN " + overflowed + " THEN qt_v2_quantile(samples," + params[6] + ",pick6_lo,pick6_hi) END AS high FROM " + b.rel)
+		whiskered := b.rel
+		valid := "typeof(w.low)<>'text' AND typeof(w.high)<>'text'"
+		b.stage("SELECT " + strings.Join(append(qualified("r", groupCols), "COUNT(*) AS outside"), ",") + " FROM " + ranked + " AS r CROSS JOIN " + whiskered + " AS w ON " + keysMatch("r", "w", groupCols) + " WHERE " + valid + " AND (r.sample<w.low OR r.sample>w.high)" + groupedBy("r", groupCols))
+		outside := b.rel
+		b.stage("SELECT w.*,COALESCE(t.outside,0) AS outside FROM " + whiskered + " AS w LEFT JOIN " + outside + " AS t ON " + keysMatch("w", "t", groupCols))
+		probabilities, _ := json.Marshal(percentiles)
+		tukey = "low,high,outside," + b.param(string(probabilities), "text")
+	}
 	if mode == "tukey" {
 		overflowed := "memory IS '" + rankedOverflow + "'"
 		b.stage("SELECT *,CASE WHEN " + overflowed + " THEN qt_v2_box_fence(samples,pick0_lo,pick0_hi,pick2_lo,pick2_hi,0) END AS low_fence,CASE WHEN " + overflowed + " THEN qt_v2_box_fence(samples,pick0_lo,pick0_hi,pick2_lo,pick2_hi,1) END AS high_fence FROM " + b.rel)
@@ -460,6 +500,25 @@ func (b *planBuilder) sqliteBox(population string, groupCols, inventory []string
 	b.stage("SELECT " + strings.Join(append(append([]string{}, groupCols...), "count", "samples", "null_count", "input_error_count", "input_error", "CASE WHEN memory IS '"+rankedOverflow+"' THEN qt_v2_box_summary("+modeParam+",samples,min,max,mean,"+quartiles+","+tukey+") ELSE memory END AS payload"), ",") + " FROM " + b.rel)
 }
 
+// sqliteQuantiles stages each group's quantile payload: the sample count, the
+// ranks every probability (and the median) needs, and the samples at those
+// ranks, joined by rank so each ranked sample probes one small index.
+func (b *planBuilder) sqliteQuantiles(population string, groupCols, inventory []string, by string, probabilities []float64) {
+	encoded, _ := json.Marshal(probabilities)
+	param := b.param(string(encoded), "text")
+	// A group that fits in memory is summarised in this pass; only a larger
+	// one is ranked (see sqliteBox).
+	b.stage("SELECT " + strings.Join(append(inventory, "MIN(sample_error) AS input_error", "qt_v2_quantiles_samples(sample,"+param+") AS memory"), ",") + " FROM " + population + by)
+	stats := b.rel
+	overflowed := "memory IS '" + rankedOverflow + "'"
+	ranked := b.sqliteRankedStage(population, "sample", groupCols, groupCols, false, "EXISTS (SELECT 1 FROM "+stats+" WHERE "+overflowed+")")
+	b.stage("SELECT " + strings.Join(append(qualified("s", groupCols), "CAST(j.value AS INTEGER) AS rank"), ",") + " FROM " + stats + " AS s CROSS JOIN json_each(qt_v2_quantile_ranks(s.samples," + param + ")) AS j WHERE s." + overflowed)
+	needed := b.rel
+	b.stage("SELECT " + strings.Join(append(qualified("r", groupCols), "qt_v2_rank_samples(r.rn,r.sample) AS ranked"), ",") + " FROM " + ranked + " AS r CROSS JOIN " + needed + " AS k ON " + keysMatch("r", "k", groupCols) + " AND r.rn=k.rank" + groupedBy("r", groupCols))
+	picked := b.rel
+	b.stage("SELECT " + strings.Join(append(qualified("s", groupCols), "s.count", "s.samples", "s.null_count", "s.input_error_count", "s.input_error", "CASE WHEN s."+overflowed+" THEN qt_v2_quantiles_summary(s.samples,"+param+",k.ranked) ELSE s.memory END AS payload"), ",") + " FROM " + stats + " AS s LEFT JOIN " + picked + " AS k ON " + keysMatch("s", "k", groupCols))
+}
+
 func groupedBy(alias string, groupCols []string) string {
 	if len(groupCols) == 0 {
 		return ""
@@ -469,21 +528,9 @@ func groupedBy(alias string, groupCols []string) string {
 
 func (b *planBuilder) sqliteDistribution(spec AggSpec, groups []ValueSQL, scope string) (SQLPlan, error) {
 	d := spec.Distribution
-	if d.Kind != "box" && d.Kind != "histogram" {
-		return SQLPlan{}, diagnostic(ErrorCodeDistribution, "unknown distribution kind")
-	}
-	if d.Kind == "histogram" && len(groups) > 1 {
-		return SQLPlan{}, diagnostic(ErrorCodeDistribution, "histograms support at most one grouping key")
-	}
-	if d.Whiskers != "" && d.Whiskers != "minmax" && d.Whiskers != "tukey" {
-		return SQLPlan{}, diagnostic(ErrorCodeDistribution, "unknown whisker mode")
-	}
-	bins := d.Bins
-	if bins == 0 {
-		bins = 10
-	}
-	if bins < 2 || bins > 30 {
-		return SQLPlan{}, diagnostic(ErrorCodeDistribution, "histogram bins must be 2–30")
+	bins, err := validateDistribution(d, len(groups))
+	if err != nil {
+		return SQLPlan{}, err
 	}
 	if spec.ExpressionY != "" || spec.Display != nil && spec.Display.Kind == "scatter" {
 		return SQLPlan{}, diagnostic(ErrorCodeDistribution, "distributions cannot be paired metrics")
@@ -526,7 +573,9 @@ func (b *planBuilder) sqliteDistribution(spec AggSpec, groups []ValueSQL, scope 
 		if mode == "" {
 			mode = "minmax"
 		}
-		b.sqliteBox(population, groupCols, inventory, by, mode)
+		b.sqliteBox(population, groupCols, inventory, by, mode, whiskerProbabilities(d))
+	} else if d.Kind == "quantiles" {
+		b.sqliteQuantiles(population, groupCols, inventory, by, d.Probabilities)
 	} else {
 		b.stage("SELECT qt_v2_histogram_edges(MIN(sample),MAX(sample)," + b.param(bins, "integer") + ") AS edges,MIN(sample_error) AS input_error FROM " + population)
 		b.stage("SELECT edges,COALESCE(input_error,json_extract(edges,'$.error')) AS extent_error FROM " + b.rel)

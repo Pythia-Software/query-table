@@ -467,6 +467,9 @@ const (
 	optionInteger
 	optionPositiveInteger
 	optionNumber
+	// optionNumberList is an array of 1–101 finite numbers (the quantile
+	// probability bound, maxQuantileProbabilities).
+	optionNumberList
 	// optionMinCount is a positive integer, or a metricMinCountOptions object
 	// with min and exactly one of distinct and sum.
 	optionMinCount
@@ -516,7 +519,7 @@ var (
 	}
 	metricDisplayOptions = []optionSpec{
 		enumOption("kind", "auto", "value", "table", "list", "bar-horizontal", "bar-vertical", "line", "pie", "donut",
-			"scatter", "box", "histogram"),
+			"scatter", "box", "histogram", "quantiles"),
 		{key: "valueLabel", kind: optionString},
 		{key: "xLabel", kind: optionString},
 		{key: "yLabel", kind: optionString},
@@ -552,10 +555,12 @@ var (
 		enumOption("columnDir", "asc", "desc"),
 	}
 	metricDistributionOptions = []optionSpec{
-		enumOption("kind", "box", "histogram"),
+		enumOption("kind", "box", "histogram", "quantiles"),
 		{key: "input", kind: optionString},
-		enumOption("whiskers", "minmax", "tukey"),
+		enumOption("whiskers", "minmax", "tukey", "percentile"),
+		{key: "whiskerProbabilities", kind: optionNumberList},
 		{key: "bins", kind: optionInteger},
+		{key: "probabilities", kind: optionNumberList},
 	}
 	metricLayoutOptions = []optionSpec{
 		{key: "widthRem", kind: optionInteger},
@@ -590,6 +595,11 @@ func (m *metricNormalizer) copy(input *jsValue, specs []optionSpec) *jsValue {
 			ok = v.isString() && jsLength(v.s) <= 10000
 		case optionNumber:
 			ok = jsIsFinite(v)
+		case optionNumberList:
+			ok = v.isArray() && len(v.a) >= 1 && len(v.a) <= maxQuantileProbabilities
+			for _, x := range v.a {
+				ok = ok && jsIsFinite(x)
+			}
 		case optionBoolean:
 			ok = v.kind == jsBool
 		case optionInteger, optionPositiveInteger:

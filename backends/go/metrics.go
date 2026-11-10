@@ -611,7 +611,8 @@ func (b *planBuilder) aggregatePolicy(n *exprNode, op string, seen map[string]bo
 			return diagnostic(ErrorCodeUnknownField, n.text)
 		}
 		if f.AggregateOps != nil {
-			if (op == "box" || op == "histogram") && len(f.AggregateOps) > 0 {
+			// Distributions are not scalar ops: any admitted op admits them.
+			if distributionKinds[op] && len(f.AggregateOps) > 0 {
 				return nil
 			}
 			allowed := false

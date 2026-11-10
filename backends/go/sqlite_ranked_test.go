@@ -153,8 +153,9 @@ func TestBoxSummaryFunctionMatchesSortedBox(t *testing.T) {
 		}
 		sort.Float64s(samples)
 		n := int64(len(samples))
-		for _, mode := range []string{"minmax", "tukey"} {
-			value, code, box := distributionBox(samples, mode)
+		for _, mode := range []string{"minmax", "tukey", "percentile"} {
+			percentiles := [2]float64{0.1, 0.9}
+			value, code, box := distributionBox(samples, mode, percentiles)
 			want, _ := sqliteDistributionJSON(value, code, box)
 			args := []driver.Value{mode, n, samples[0], samples[n-1], distributionMean(samples)}
 			for _, p := range []float64{0.25, 0.5, 0.75} {
@@ -165,6 +166,16 @@ func TestBoxSummaryFunctionMatchesSortedBox(t *testing.T) {
 				s := box.Summary
 				text, _ := json.Marshal([]float64(s.Outliers))
 				args = append(args, s.Low, s.High, s.OutlierCount, string(text))
+			} else if mode == "percentile" {
+				low, _ := sqlitePercentile(samples, percentiles[0])
+				high, _ := sqlitePercentile(samples, percentiles[1])
+				outside := int64(0)
+				for _, v := range samples {
+					if v < low || v > high {
+						outside++
+					}
+				}
+				args = append(args, low, high, outside, "[0.1,0.9]")
 			} else {
 				args = append(args, nil, nil, int64(0), nil)
 			}
@@ -253,6 +264,83 @@ func TestRankedLeavesShareOneRanking(t *testing.T) {
 			var diag *PlanDiagnostic
 			if !errors.As(err, &diag) || diag.Code != code {
 				t.Fatal(expression, sqlite, err)
+			}
+		}
+	}
+}
+
+func TestQuantilesPayloadReadsOnlyItsRanks(t *testing.T) {
+	samples := []float64{-5, 0, 0, 2, 7.5, 9, 40}
+	probabilities := []float64{0, 0.1, 0.5, 0.95, 1}
+	ranks := quantileRankList(int64(len(samples)), probabilities)
+	if !reflect.DeepEqual(ranks, []int64{1, 2, 4, 5, 6, 7}) {
+		t.Fatal(ranks)
+	}
+	read := map[int64]bool{}
+	value, code, d := quantilesPayload(int64(len(samples)), probabilities, func(rank int64) (float64, bool) {
+		read[rank] = true
+		return samples[rank-1], true
+	})
+	if code != "" || *value != 2 || len(read) != len(ranks) {
+		t.Fatal(code, value, read)
+	}
+	for i, p := range probabilities {
+		if want, _ := sqlitePercentile(samples, p); d.Summary.Values[i] != want {
+			t.Fatal(p, d.Summary.Values[i], want)
+		}
+	}
+	if value, code, d := quantilesPayload(0, probabilities, nil); value != nil || code != "" || d.Summary != nil {
+		t.Fatal(value, code, d)
+	}
+	ranksFn := rankedFunction(t, "qt_v2_quantile_ranks")
+	if got := must(ranksFn(int64(7), "[0,0.1,0.5,0.95,1]")); got != "[1,2,4,5,6,7]" {
+		t.Fatal(got)
+	}
+	for _, bad := range []string{"[]", "[0.5,0.5]", "[1.5]", "x"} {
+		if _, err := ranksFn(int64(7), bad); err == nil {
+			t.Fatal("accepted", bad)
+		}
+	}
+}
+
+func TestValidateDistributionOptions(t *testing.T) {
+	for _, d := range []MetricDistribution{
+		{Kind: "box", Input: "[n]", Whiskers: "percentile", WhiskerProbabilities: []float64{0.25, 0.9}},
+		{Kind: "box", Input: "[n]", Whiskers: "percentile", WhiskerProbabilities: []float64{0.1, 0.75}},
+		{Kind: "box", Input: "[n]", Whiskers: "percentile", WhiskerProbabilities: []float64{0.1}},
+		{Kind: "box", Input: "[n]", Whiskers: "other"},
+		{Kind: "quantiles", Input: "[n]"},
+		{Kind: "quantiles", Input: "[n]", Probabilities: []float64{0.2, 0.1}},
+	} {
+		if _, err := validateDistribution(&d, 1); err == nil {
+			t.Fatalf("accepted %+v", d)
+		}
+	}
+	// Options of another kind or whisker mode are inactive and ignored.
+	for _, d := range []MetricDistribution{
+		{Kind: "box", Input: "[n]", Whiskers: "percentile"},
+		{Kind: "box", Input: "[n]", Whiskers: "percentile", WhiskerProbabilities: []float64{0, 1}},
+		{Kind: "quantiles", Input: "[n]", Probabilities: []float64{0, 0.5, 1}},
+		{Kind: "box", Input: "[n]", Whiskers: "tukey", WhiskerProbabilities: []float64{0.5, 0.5}, Probabilities: []float64{0.5, 0.2}},
+		{Kind: "histogram", Input: "[n]", Whiskers: "tukey"},
+		{Kind: "quantiles", Input: "[n]", Whiskers: "percentile", WhiskerProbabilities: []float64{0.1, 0.9}, Probabilities: []float64{0.5}},
+	} {
+		if _, err := validateDistribution(&d, 1); err != nil {
+			t.Fatal(d, err)
+		}
+	}
+}
+
+// Distributions are not scalar aggregate ops: a field with an explicit op
+// allowlist admits every kind, as it admits boxes and histograms.
+func TestDistributionKindsIgnoreAggregateOps(t *testing.T) {
+	s := sqliteTestSchema()
+	s.Fields["n"] = FieldSpec{Name: "n", Kind: FieldNumber, Expr: "r.n", ExpressionNumeric: true, Sortable: true, AggregateOps: []string{"avg"}}
+	for _, kind := range []string{"box", "histogram", "quantiles"} {
+		for _, sqlite := range []bool{true, false} {
+			spec := AggSpec{ID: "d", Op: "count", Distribution: &MetricDistribution{Kind: kind, Input: "[n]", Probabilities: []float64{0.5}}}
+			if _, err := compileMetricOutputs(context.Background(), metricRequest{Version: 2}, spec, s, PlanOptions{SourceSQL: "SELECT * FROM fixture"}, sqlite, nil); err != nil {
+				t.Fatal(kind, sqlite, err)
 			}
 		}
 	}

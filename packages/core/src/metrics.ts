@@ -44,9 +44,13 @@ import {
   type AggregationResult,
   type AggregationBucket,
 } from "./encode";
-import type { MetricDiagnostic, MetricValue, MetricSort } from "./metricTypes";
+import type { MetricDiagnostic, MetricDistribution, MetricValue, MetricSort } from "./metricTypes";
 import {
   boxSummary,
+  DEFAULT_WHISKER_PROBABILITIES,
+  quantilesWithMedian,
+  validQuantileProbabilities,
+  validWhiskerProbabilities,
   percentile,
   histogramEdges,
   histogramCounts,
@@ -485,8 +489,56 @@ export function hasRegex(plan: FormulaPlan): boolean {
 function distributionActive(c: AggregationClause): boolean {
   return (
     !!c.distribution &&
-    (!c.display || c.display.kind === "box" || c.display.kind === "histogram")
+    (!c.display ||
+      c.display.kind === "box" ||
+      c.display.kind === "histogram" ||
+      c.display.kind === "quantiles")
   );
+}
+/** Throws when a distribution's box, histogram or quantile options are invalid. */
+/** Options of another kind or whisker mode are inactive alternatives the
+ * editor retains (see docs/metrics.md): they are ignored, not validated, in
+ * every engine. */
+export function validateDistributionOptions(d: MetricDistribution): void {
+  if (!["box", "histogram", "quantiles"].includes(d.kind))
+    throw new FormulaError("Invalid distribution kind.");
+  if (d.whiskers !== undefined && !["minmax", "tukey", "percentile"].includes(d.whiskers))
+    throw new FormulaError("Whiskers are minmax, tukey or percentile.");
+  if (
+    d.kind === "box" &&
+    d.whiskers === "percentile" &&
+    d.whiskerProbabilities !== undefined &&
+    !validWhiskerProbabilities(d.whiskerProbabilities)
+  )
+    throw new FormulaError(
+      "Percentile whiskers need [lo, hi] with 0 ≤ lo < 0.25 and 0.75 < hi ≤ 1.",
+    );
+  if (d.kind === "quantiles" && !validQuantileProbabilities(d.probabilities))
+    throw new FormulaError(
+      "Quantiles need 1–101 strictly increasing probabilities from 0 to 1.",
+    );
+}
+/** One group's distribution and its scalar value: a box's median, a
+ * histogram's sample count, or the median of a quantile curve. */
+export function distributionBucket(
+  d: MetricDistribution,
+  values: number[],
+): {
+  distribution: NonNullable<AggregationBucket["distribution"]>;
+  value: AggregationBucket["value"];
+} {
+  if (d.kind === "quantiles") {
+    const { summary, median } = quantilesWithMedian(values, d.probabilities ?? []);
+    return { distribution: { kind: "quantiles", summary }, value: median };
+  }
+  // Whiskers and their probabilities only apply to boxes; see
+  // validateDistributionOptions.
+  const summary = boxSummary(
+    values,
+    d.whiskers,
+    d.whiskerProbabilities ?? DEFAULT_WHISKER_PROBABILITIES,
+  );
+  return { distribution: { kind: "box", summary }, value: summary?.median ?? null };
 }
 /** A box over a cyclic slot's per-occurrence values: its input is the
  * metric itself, evaluated once per occurrence. */
@@ -510,8 +562,7 @@ export function metricPlans(
     );
     if (p.type !== "number" && p.type !== "null")
       throw new FormulaError("Distribution input must be numeric.");
-    if (!["box", "histogram"].includes(c.distribution!.kind))
-      throw new FormulaError("Invalid distribution kind.");
+    validateDistributionOptions(c.distribution!);
     if (
       c.distribution!.kind === "histogram" &&
       (!Number.isInteger(c.distribution!.bins ?? 10) ||
@@ -578,10 +629,11 @@ export function validateMetric(
         );
       const { occurrence } = c.dateGrouping;
       if (occurrence) {
-        if (distributionActive(c) && c.distribution!.kind !== "box")
+        if (distributionActive(c) && c.distribution!.kind === "histogram")
           throw new FormulaError(
-            "Occurrences summarise as a mean or a box plot, not a histogram.",
+            "Occurrences summarise as a mean, a box plot or quantiles, not a histogram.",
           );
+        if (distributionActive(c)) validateDistributionOptions(c.distribution!);
         if (c.display?.kind === "scatter")
           throw new FormulaError(
             "Occurrences summarise single-value metrics, not scatters.",
@@ -1728,10 +1780,10 @@ export function evaluateMetrics<Row>(
           for (const b of buckets) {
             const vs = populations.get(b)!;
             if (b.error) continue;
-            if (d.kind === "box") {
-              const summary = boxSummary(vs, d.whiskers);
-              b.distribution = { kind: "box", summary };
-              b.value = summary?.median ?? null;
+            if (d.kind !== "histogram") {
+              const { distribution, value } = distributionBucket(d, vs);
+              b.distribution = distribution;
+              b.value = value;
             } else {
               b.distribution = {
                 kind: "histogram",

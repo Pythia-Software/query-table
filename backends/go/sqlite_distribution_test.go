@@ -103,7 +103,7 @@ func TestBoxMeanClampsBeforeValidation(t *testing.T) {
 	for i := range samples {
 		samples[i] = 1e-300
 	}
-	value, code, box := distributionBox(samples, "minmax")
+	value, code, box := distributionBox(samples, "minmax", [2]float64{})
 	if code != "" || value == nil || box.Summary.Mean != 1e-300 {
 		t.Fatal(code, box)
 	}

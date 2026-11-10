@@ -4,6 +4,31 @@
 
 ### Added
 
+- Box whiskers at percentiles: `distribution.whiskers: "percentile"` with
+  `whiskerProbabilities: [lo, hi]` (`0 ≤ lo < 0.25`, `0.75 < hi ≤ 1`, default
+  `[0.1, 0.9]`). The whiskers are the exact-linear percentiles, echoed on the
+  summary as `whiskerProbabilities`; `outlierCount` counts the samples beyond
+  them and `outliers` is empty (the chart marks the minimum and maximum). The
+  box chart and its tooltip draw and label them, and the metric editor offers
+  them. Options of another distribution kind or whisker mode are ignored by
+  every engine, as before for `whiskers` on a histogram.
+- A `quantiles` distribution: `{ kind: "quantiles", input, probabilities }`
+  with 1–101 strictly increasing probabilities. Buckets carry
+  `{ kind: "quantiles", summary: { n, probabilities, values } | null }` and the
+  median as their value. `display.kind: "quantiles"` draws a cumulative curve
+  per group; the editor offers it as "Quantile curve" with 101 points by
+  default. Implemented locally, in DuckDB, Go SQLite (ranked samples) and Go
+  PostgreSQL. New capabilities `boxPercentileWhiskers` and
+  `quantileDistributions`; `toQueryRequestV3` refuses either for a server
+  without it. Query links keep the new options (`numberList` metric option).
+  SQLite sorts groups of up to 100,000 samples in memory
+  (`qt_v2_box_percentile`, `qt_v2_quantiles_samples`) and ranks larger ones;
+  it adds `qt_v2_quantile_ranks` and `qt_v2_quantiles_summary` to
+  `SQLiteV2Functions()` and those aggregates and `qt_v2_rank_samples` to
+  `SQLiteV2Aggregates()`.
+- DuckDB box buckets now report the median as their `value`, like the other
+  engines (it was null).
+
 - `PERCENTILE(expr, p)` in aggregate formulas and grouped formula summaries:
   the exact-linear percentile of a group's non-null numeric samples, with `p`
   a number literal from 0 to 1 (`PERCENTILE([latency], 0.9)`). Position
