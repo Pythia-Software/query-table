@@ -2,41 +2,8 @@
 
 ## Unreleased
 
-### Fixed
+## 1.0.5 — 2026-11-10
 
-- `QueryDatasetV3.SourcePlan` now plans a `distinct` request over its
-  `source.where` population and includes the target: a base target in
-  `BaseFields` (read through its raw binding, as execution does, so numeric
-  bindings without `ExpressionNumeric` stay supported), a computed target in
-  the projection with its transitive base inputs. Hosts that stage only the
-  planned base fields previously got no values for a distinct-only request over
-  an otherwise unselected field. Related changes for distinct requests:
-  - an unfilterable target is rejected while planning, as it already was
-    during execution;
-  - a computed target missing from `expectedRevisions` is rejected with
-    `definition_changed` while planning, rather than only during execution;
-  - the response's `execution.fields` now includes a computed target's
-    capability (it was empty).
-
-### Documentation
-
-- The SQLite guide no longer suggests setting and restoring
-  `PRAGMA temp_store` per request. Choose the storage mode once per connection
-  and commit successful requests: changing `temp_store` or rolling back TEMP
-  DDL makes the connection re-parse its whole schema.
-- Screen fitting no longer treats a wrapping host link as an unshrinkable
-  one-line control. Control cells are now floored at their min-content width,
-  laid out with the cell's own CSS (including `classNames.cell`): content a
-  host renderer lets wrap, such as
-  `<span style="white-space: normal"><a href>long title</a></span>` clamped to
-  two lines, needs only its longest unbreakable word, so the column fits and
-  the title wraps as it did in 0.9.6. Since 0.9.7 such a column took its
-  longest title on one line as its floor, and the table scrolled horizontally
-  at every desktop width. Host buttons inside a wrapping wrapper or a
-  `flex-wrap` bar may now wrap or stack as well. The library's Detail buttons,
-  JSON previews and links, nowrap host controls and `SelectConfig.minWidth`
-  keep their minimums. A wrapping link whose label is one unbreakable token
-  (a URL or path) still floors at the whole token.
 ### Added
 
 - `MetricTheme.colorBy` names group keys (one, or a priority list, matched by
@@ -55,7 +22,6 @@
   Go codecs) and saved views, and is set with the metric editor's **Colour by**
   control, shown for bar, box and list charts grouped by two or more keys. A saved key the chart
   no longer groups by is ignored (the theme's key or whole-group colours apply).
-### Added
 
 - Calendar buckets of several intervals: an optional `every` (1–1,000; omitted
   means 1) on a metric's `dateGrouping` and on calendar group keys, for 3-, 6-
@@ -88,31 +54,6 @@
   "Jul 04 09:00–12:00 -04:00" (both offsets across a DST change) and day
   buckets "Jan 01–Jan 03". See
   [Buckets of several intervals](docs/metrics.md#buckets-of-several-intervals).
-### Changed
-
-- Icon-only buttons whose purpose is not obvious have native hover tooltips:
-  JSON tree toggles say "Expand" or "Collapse" as their state changes; column
-  and property editor arrows say "Move up" and "Move down"; picker back arrows
-  say "Back to fields" and "Back to columns"; reorder handles say "Reorder";
-  and the metric actions menu says "Metric actions". Accessible names, state and
-  keyboard behaviour are unchanged; screen readers may announce the tooltip as
-  the button's description. Close buttons keep no tooltip.
-- Tooltips no longer repeat visible text. Number and other formatted cells
-  offer the raw value only when formatting hides it: not for the cell locale's
-  digit grouping or trailing zeros (`1.234.567`, `42.00`). Chips offer their
-  raw key only when relabelled. `truncate` and `lines` text, valid JSON
-  previews, grouped column labels, compact metric axis labels, compact legend
-  labels and list-bar labels offer their full text only while clipped, or
-  always when the full label differs from the visible one. JSON parse errors
-  and other explanations remain.
-- As a result, the public `truncate` renderer and `truncate`/`lines` cell
-  displays no longer render a `title` attribute up front: it is set on hover
-  while the text is clipped, so static and server-rendered markup carries none.
-  Hosts whose tests or scrapers find cells by `title` need another selector.
-- Unavailable field picker items (`.qt-picker-item--disabled`) use the default
-  arrow cursor instead of `not-allowed` and no longer highlight on hover; they
-  stay disabled and dimmed.
-### Added
 
 - Currency and compact number formats. `MetricValueFormat`, `CellDisplay` and
   property formats accept `{ kind: "currency", currency: "USD", decimals? }`
@@ -128,14 +69,6 @@
   display is also the default format of metrics over it, in values, chart
   axes, tooltips and totals. See
   [Output formatting](docs/metrics.md#output-formatting).
-
-### Fixed
-
-- Share metrics (`share: "total" | "group0"`) and distributions over another
-  input no longer take the measure field's display or its `duration_ms` /
-  `byte_size` renderer: a share over a duration field was labelled in
-  milliseconds. They use the card's decimals unless the metric sets a format.
-### Added
 
 - Other remainders in every engine, and for ratios. When `groupLimit` omits
   groups, DuckDB and the Go SQLite and PostgreSQL executors now return
@@ -185,7 +118,6 @@
   Proportion (Wilson) or Rate (Poisson) with a 90/95/99% level, and toggle
   whiskers and bands. Kinds that validation rejects for the metric are
   disabled with the reason, and the section is hidden while none applies.
-### Added
 
 - The Go SQLite and PostgreSQL expression profiles run the text functions
   `LENGTH`, `TRIM`, `LTRIM`, `RTRIM`, two-argument `CONTAINS`, `STARTS_WITH`
@@ -227,35 +159,6 @@
   Go SQLite, Go PostgreSQL) and `schema/fixtures/formula-regex.json` (browser
   regex results against the server translation). See
   [Text and array functions](docs/backend-metrics.md#text-and-array-functions).
-
-### Changed
-
-- Counting functions read text in full. A source text field passed directly to
-  `LENGTH`, `WORD_COUNT` or two-argument `CONTAINS`, `STARTS_WITH` or
-  `ENDS_WITH` is no longer subject to the 100,000-character formula text input
-  bound, in the browser runtime, DuckDB (which had no bound), Go SQLite and Go
-  PostgreSQL. `SUM(LENGTH([text]))` and `SUM(WORD_COUNT([text]))` therefore
-  count very long messages instead of failing their whole group. These
-  functions return a number or a boolean without copying the text. The bound
-  still applies to every other use of a text field, including a text-producing
-  argument (`LENGTH(TRIM([text]))` fails with `text_range` as before),
-  `ignoreCase` matching and `ARRAY_LENGTH(SPLIT(...))`. Storage-type, UTF-8 and
-  host staging limits are unchanged. See
-  [Text and array functions](docs/backend-metrics.md#text-and-array-functions).
-
-### Fixed
-
-- DuckDB `TRIM`, `LTRIM` and `RTRIM` remove the JavaScript white space set
-  (DuckDB's own trim kept tabs and line breaks), and `SPLIT` with an empty
-  separator follows `String.prototype.split` (`SPLIT("", "")` is empty; text
-  with a supplementary character is an error rather than a different count,
-  except in `ARRAY_LENGTH`, which counts UTF-16 code units). `SPLIT` results
-  above 10,000 elements are an error, as in the browser.
-- DuckDB `CONTAINS`, `STARTS_WITH` and `ENDS_WITH` return NULL for a NULL
-  `ignoreCase` argument, as in the browser, instead of comparing exactly.
-- Go server diagnostics name an unknown function `unsupported_function`
-  instead of `arity`.
-### Added
 
 - Box whiskers at percentiles: `distribution.whiskers: "percentile"` with
   `whiskerProbabilities: [lo, hi]` (`0 ≤ lo < 0.25`, `0.75 < hi ≤ 1`, default
@@ -300,6 +203,42 @@
 
 ### Changed
 
+- Icon-only buttons whose purpose is not obvious have native hover tooltips:
+  JSON tree toggles say "Expand" or "Collapse" as their state changes; column
+  and property editor arrows say "Move up" and "Move down"; picker back arrows
+  say "Back to fields" and "Back to columns"; reorder handles say "Reorder";
+  and the metric actions menu says "Metric actions". Accessible names, state and
+  keyboard behaviour are unchanged; screen readers may announce the tooltip as
+  the button's description. Close buttons keep no tooltip.
+- Tooltips no longer repeat visible text. Number and other formatted cells
+  offer the raw value only when formatting hides it: not for the cell locale's
+  digit grouping or trailing zeros (`1.234.567`, `42.00`). Chips offer their
+  raw key only when relabelled. `truncate` and `lines` text, valid JSON
+  previews, grouped column labels, compact metric axis labels, compact legend
+  labels and list-bar labels offer their full text only while clipped, or
+  always when the full label differs from the visible one. JSON parse errors
+  and other explanations remain.
+- As a result, the public `truncate` renderer and `truncate`/`lines` cell
+  displays no longer render a `title` attribute up front: it is set on hover
+  while the text is clipped, so static and server-rendered markup carries none.
+  Hosts whose tests or scrapers find cells by `title` need another selector.
+- Unavailable field picker items (`.qt-picker-item--disabled`) use the default
+  arrow cursor instead of `not-allowed` and no longer highlight on hover; they
+  stay disabled and dimmed.
+
+- Counting functions read text in full. A source text field passed directly to
+  `LENGTH`, `WORD_COUNT` or two-argument `CONTAINS`, `STARTS_WITH` or
+  `ENDS_WITH` is no longer subject to the 100,000-character formula text input
+  bound, in the browser runtime, DuckDB (which had no bound), Go SQLite and Go
+  PostgreSQL. `SUM(LENGTH([text]))` and `SUM(WORD_COUNT([text]))` therefore
+  count very long messages instead of failing their whole group. These
+  functions return a number or a boolean without copying the text. The bound
+  still applies to every other use of a text field, including a text-producing
+  argument (`LENGTH(TRIM([text]))` fails with `text_range` as before),
+  `ignoreCase` matching and `ARRAY_LENGTH(SPLIT(...))`. Storage-type, UTF-8 and
+  host staging limits are unchanged. See
+  [Text and array functions](docs/backend-metrics.md#text-and-array-functions).
+
 - SQLite MEDIAN and box quartiles no longer fail above 100,000 samples per
   group. Groups are still sorted in memory, at the same cost, within one
   process-wide budget of 8,388,608 retained samples (64 MiB); a group that does
@@ -328,6 +267,58 @@
   the same build on every connection (hosts that do need no change).
   `qt_v2_median` and `qt_v2_box` stay registered but are no longer called by
   compiled plans, and `SQLiteMaxBoxSamples` is deprecated.
+
+### Fixed
+
+- `QueryDatasetV3.SourcePlan` now plans a `distinct` request over its
+  `source.where` population and includes the target: a base target in
+  `BaseFields` (read through its raw binding, as execution does, so numeric
+  bindings without `ExpressionNumeric` stay supported), a computed target in
+  the projection with its transitive base inputs. Hosts that stage only the
+  planned base fields previously got no values for a distinct-only request over
+  an otherwise unselected field. Related changes for distinct requests:
+  - an unfilterable target is rejected while planning, as it already was
+    during execution;
+  - a computed target missing from `expectedRevisions` is rejected with
+    `definition_changed` while planning, rather than only during execution;
+  - the response's `execution.fields` now includes a computed target's
+    capability (it was empty).
+
+- Share metrics (`share: "total" | "group0"`) and distributions over another
+  input no longer take the measure field's display or its `duration_ms` /
+  `byte_size` renderer: a share over a duration field was labelled in
+  milliseconds. They use the card's decimals unless the metric sets a format.
+
+- DuckDB `TRIM`, `LTRIM` and `RTRIM` remove the JavaScript white space set
+  (DuckDB's own trim kept tabs and line breaks), and `SPLIT` with an empty
+  separator follows `String.prototype.split` (`SPLIT("", "")` is empty; text
+  with a supplementary character is an error rather than a different count,
+  except in `ARRAY_LENGTH`, which counts UTF-16 code units). `SPLIT` results
+  above 10,000 elements are an error, as in the browser.
+- DuckDB `CONTAINS`, `STARTS_WITH` and `ENDS_WITH` return NULL for a NULL
+  `ignoreCase` argument, as in the browser, instead of comparing exactly.
+- Go server diagnostics name an unknown function `unsupported_function`
+  instead of `arity`.
+
+### Documentation
+
+- The SQLite guide no longer suggests setting and restoring
+  `PRAGMA temp_store` per request. Choose the storage mode once per connection
+  and commit successful requests: changing `temp_store` or rolling back TEMP
+  DDL makes the connection re-parse its whole schema.
+- Screen fitting no longer treats a wrapping host link as an unshrinkable
+  one-line control. Control cells are now floored at their min-content width,
+  laid out with the cell's own CSS (including `classNames.cell`): content a
+  host renderer lets wrap, such as
+  `<span style="white-space: normal"><a href>long title</a></span>` clamped to
+  two lines, needs only its longest unbreakable word, so the column fits and
+  the title wraps as it did in 0.9.6. Since 0.9.7 such a column took its
+  longest title on one line as its floor, and the table scrolled horizontally
+  at every desktop width. Host buttons inside a wrapping wrapper or a
+  `flex-wrap` bar may now wrap or stack as well. The library's Detail buttons,
+  JSON previews and links, nowrap host controls and `SelectConfig.minWidth`
+  keep their minimums. A wrapping link whose label is one unbreakable token
+  (a URL or path) still floors at the whole token.
 
 ## 1.0.4 — 2026-11-10
 
