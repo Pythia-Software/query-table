@@ -117,4 +117,14 @@ describe("SelectColumn.display", () => {
     expect(() => parseCellDisplay({ kind: "text", lines: 21 })).toThrow(/lines must be an integer from 1 to 20/);
     expect(() => parseCellDisplay({ kind: "text", lines: 1.5 })).toThrow(/lines/);
   });
+
+  it("validates currency and compact displays", () => {
+    const currency = { kind: "currency", currency: "USD", decimals: 2, notation: "compact", locale: "en-US" };
+    expect(parseCellDisplay(currency)).toEqual(currency);
+    expect(parseCellDisplay({ kind: "compact", decimals: 1 })).toEqual({ kind: "compact", decimals: 1 });
+    expect(() => parseCellDisplay({ kind: "currency" })).toThrow(/currency is required/);
+    expect(() => parseCellDisplay({ kind: "currency", currency: "usd" })).toThrow(/ISO 4217/);
+    expect(() => parseCellDisplay({ kind: "currency", currency: "USD", notation: "short" })).toThrow(/unsupported notation/);
+    expect(() => parseCellDisplay({ kind: "compact", currency: "USD" })).toThrow(/unsupported option currency/);
+  });
 });

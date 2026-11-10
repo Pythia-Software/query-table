@@ -71,6 +71,7 @@
                 "currency",
                 "number",
                 "percent",
+                "compact",
                 "duration",
                 "date",
                 "time",
@@ -85,6 +86,12 @@
             "currency": {
               "type": "string",
               "pattern": "^[A-Z]{3}$"
+            },
+            "notation": {
+              "enum": [
+                "standard",
+                "compact"
+              ]
             },
             "sourceUnit": {
               "enum": [
@@ -498,13 +505,47 @@
             "kind": {
               "enum": [
                 "number",
-                "percent"
+                "percent",
+                "compact"
               ]
             },
             "decimals": {
               "type": "integer",
               "minimum": 0,
               "maximum": 20
+            },
+            "locale": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "currency"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "currency"
+              ]
+            },
+            "currency": {
+              "type": "string",
+              "pattern": "^[A-Z]{3}$"
+            },
+            "decimals": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 20
+            },
+            "notation": {
+              "enum": [
+                "standard",
+                "compact"
+              ]
             },
             "locale": {
               "type": "string"

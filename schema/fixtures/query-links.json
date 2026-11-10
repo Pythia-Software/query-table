@@ -1787,6 +1787,249 @@
       "packed": "{\"g\":[{\"id\":\"all\",\"op\":\"avg\",\"groupBy\":[\"provider\"],\"field\":\"latency\",\"label\":\"Latency\",\"expression\":\"AVG([latency])\",\"expressionY\":\"AVG([cost])\",\"scope\":\"allMatching\",\"groupLimit\":5,\"minCount\":3,\"share\":\"total\",\"window\":{\"reduce\":\"total\",\"partial\":\"include\",\"periods\":3},\"dateGrouping\":{\"field\":\"time\",\"interval\":\"week\",\"timeZone\":\"Europe/Paris\",\"includeEmpty\":false,\"range\":\"custom\",\"start\":\"2026-01-01\",\"end\":\"2026-02-01\",\"partialIntervals\":\"include\"},\"display\":{\"kind\":\"scatter\",\"valueLabel\":\"V\",\"xLabel\":\"X\",\"yLabel\":\"Y\",\"legendPosition\":\"bottom\",\"maxGroups\":8,\"showOther\":true,\"boxMean\":false,\"xScale\":{\"mode\":\"linear\",\"min\":-1.5,\"max\":10},\"yScale\":{\"mode\":\"log\",\"min\":0.001,\"max\":1000000},\"format\":{\"kind\":\"duration\",\"decimals\":1,\"sourceUnit\":\"seconds\",\"style\":\"clock\",\"pattern\":\"hh:mm\",\"timeZone\":\"UTC\"},\"xFormat\":{\"kind\":\"datetime\",\"sourceUnit\":\"epochMilliseconds\",\"style\":\"iso\",\"timeZone\":\"America/New_York\"},\"yFormat\":{\"kind\":\"percent\",\"decimals\":2},\"list\":{\"showBars\":false,\"useGroupColors\":true,\"showValues\":true,\"barPosition\":\"below\",\"maxLabelLines\":2},\"pivot\":{\"swap\":false,\"rowDir\":\"desc\",\"columnDir\":\"asc\"}},\"distribution\":{\"kind\":\"box\",\"input\":\"latency\",\"whiskers\":\"tukey\",\"bins\":0},\"layout\":{\"widthRem\":20,\"heightRem\":14,\"minWidthRem\":12,\"minHeightRem\":14},\"sort\":[{\"key\":\"group0\",\"dir\":\"asc\",\"nulls\":\"first\"},{\"key\":\"count\",\"dir\":\"desc\",\"nulls\":\"last\"}],\"diagnostics\":[\"Carried over.\"]}]}"
     },
     {
+      "name": "currency and compact formats",
+      "state": {
+        "select": [
+          {
+            "field": "cost",
+            "display": {
+              "kind": "currency",
+              "currency": "USD",
+              "decimals": 2,
+              "notation": "compact",
+              "locale": "en-US"
+            }
+          },
+          {
+            "field": "tokens",
+            "display": {
+              "kind": "compact",
+              "decimals": 1
+            }
+          },
+          {
+            "field": "cost_eur",
+            "display": {
+              "kind": "currency",
+              "currency": "eur"
+            }
+          },
+          {
+            "field": "cost_any",
+            "display": {
+              "kind": "currency"
+            }
+          }
+        ],
+        "where": [],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0,
+        "aggregations": [
+          {
+            "id": "spend",
+            "op": "sum",
+            "field": "cost",
+            "groupBy": [
+              "model"
+            ],
+            "display": {
+              "kind": "bar-horizontal",
+              "format": {
+                "kind": "currency",
+                "currency": "USD",
+                "decimals": 0,
+                "notation": "compact"
+              }
+            }
+          },
+          {
+            "id": "tokens",
+            "op": "sum",
+            "field": "tokens",
+            "groupBy": [],
+            "display": {
+              "kind": "value",
+              "format": {
+                "kind": "compact",
+                "decimals": 2
+              }
+            }
+          },
+          {
+            "id": "bad",
+            "op": "sum",
+            "field": "cost",
+            "groupBy": [],
+            "display": {
+              "kind": "value",
+              "format": {
+                "kind": "currency",
+                "currency": "usd",
+                "notation": "short"
+              }
+            }
+          }
+        ],
+        "itemDetails": {
+          "modes": [
+            "modal"
+          ],
+          "views": {
+            "modal": {
+              "version": 1,
+              "properties": [
+                {
+                  "id": "c",
+                  "field": "cost",
+                  "format": {
+                    "kind": "currency",
+                    "currency": "JPY",
+                    "notation": "compact"
+                  }
+                },
+                {
+                  "id": "s",
+                  "field": "cost",
+                  "format": {
+                    "kind": "currency",
+                    "currency": "GBP",
+                    "notation": "standard"
+                  }
+                },
+                {
+                  "id": "t",
+                  "field": "tokens",
+                  "format": {
+                    "kind": "compact",
+                    "decimals": 1
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "token": "2d.nVJBbsIwEPwK2rNBwDFHVKlqT0iIQxVFlXEMtXC8luNQ0Sh_79o0IYWkQr3Z653Z2RnXUEKSpiCw9MBMpTWr4ahMDgmIyjlpxBnY9ZjAdvNEhVwKVXBN4CUDg557hSZgsLBcEBVoFFxLKkkz3W6gyVgKHo_SlHdzOsyVdRH7g6p3WTnoLtycIcsYHEh1DSrASyuJhgHacKkKOh4cVnZFalMoMJea8LBXUl-mhU0hV6XVnFo6GTvuph_o1BcazzW17NEV3Pc6eoZclc4H3BkwpGka2jgKbl0YVtyT2jXeiz1xXclBjQNmLnvDd3zUq0dMGp_bekCjCMcPhiiUCL8LXgzBVD4ppHdKTNrWGfHcPLXGzSCjDwBEXMcEIw0dKBcqn5T8pEoNFlHHj3CSrox-LxhYh1Y6ryLoZ2sRJP_e7a90e4G-rt_GAm0tDQn9j_x5te7xROBt9A8FvGia6JeT--jLxalkTrk33w",
+      "normalized": {
+        "select": [
+          {
+            "field": "cost",
+            "display": {
+              "kind": "currency",
+              "currency": "USD",
+              "decimals": 2,
+              "notation": "compact",
+              "locale": "en-US"
+            }
+          },
+          {
+            "field": "tokens",
+            "display": {
+              "kind": "compact",
+              "decimals": 1
+            }
+          },
+          {
+            "field": "cost_eur"
+          },
+          {
+            "field": "cost_any"
+          }
+        ],
+        "where": [],
+        "orderBy": [],
+        "limit": 100,
+        "offset": 0,
+        "aggregations": [
+          {
+            "id": "spend",
+            "op": "sum",
+            "groupBy": [
+              "model"
+            ],
+            "field": "cost",
+            "display": {
+              "kind": "bar-horizontal",
+              "format": {
+                "kind": "currency",
+                "decimals": 0,
+                "currency": "USD",
+                "notation": "compact"
+              }
+            }
+          },
+          {
+            "id": "tokens",
+            "op": "sum",
+            "groupBy": [],
+            "field": "tokens",
+            "display": {
+              "kind": "value",
+              "format": {
+                "kind": "compact",
+                "decimals": 2
+              }
+            }
+          },
+          {
+            "id": "bad",
+            "op": "sum",
+            "groupBy": [],
+            "field": "cost",
+            "display": {
+              "kind": "value",
+              "format": {
+                "kind": "currency"
+              }
+            },
+            "diagnostics": [
+              "Invalid metric currency.",
+              "Invalid metric notation."
+            ]
+          }
+        ],
+        "itemDetails": {
+          "modes": [
+            "modal"
+          ],
+          "views": {
+            "modal": {
+              "version": 1,
+              "properties": [
+                {
+                  "id": "c",
+                  "field": "cost",
+                  "format": {
+                    "kind": "currency",
+                    "currency": "JPY",
+                    "notation": "compact"
+                  }
+                },
+                {
+                  "id": "s",
+                  "field": "cost",
+                  "format": {
+                    "kind": "currency",
+                    "currency": "GBP"
+                  }
+                },
+                {
+                  "id": "t",
+                  "field": "tokens",
+                  "format": {
+                    "kind": "compact",
+                    "decimals": 1
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "packed": "{\"s\":[[\"cost\",null,{\"kind\":\"currency\",\"currency\":\"USD\",\"decimals\":2,\"notation\":\"compact\",\"locale\":\"en-US\"}],[\"tokens\",null,{\"kind\":\"compact\",\"decimals\":1}],[\"cost_eur\"],[\"cost_any\"]],\"g\":[{\"id\":\"spend\",\"op\":\"sum\",\"groupBy\":[\"model\"],\"field\":\"cost\",\"display\":{\"kind\":\"bar-horizontal\",\"format\":{\"kind\":\"currency\",\"decimals\":0,\"currency\":\"USD\",\"notation\":\"compact\"}}},{\"id\":\"tokens\",\"op\":\"sum\",\"groupBy\":[],\"field\":\"tokens\",\"display\":{\"kind\":\"value\",\"format\":{\"kind\":\"compact\",\"decimals\":2}}},{\"id\":\"bad\",\"op\":\"sum\",\"groupBy\":[],\"field\":\"cost\",\"display\":{\"kind\":\"value\",\"format\":{\"kind\":\"currency\"}},\"diagnostics\":[\"Invalid metric currency.\",\"Invalid metric notation.\"]}],\"d\":{\"modes\":[\"modal\"],\"views\":{\"pool\":[{\"version\":1,\"properties\":[{\"id\":\"c\",\"field\":\"cost\",\"format\":{\"kind\":\"currency\",\"currency\":\"JPY\",\"notation\":\"compact\"}},{\"id\":\"s\",\"field\":\"cost\",\"format\":{\"kind\":\"currency\",\"currency\":\"GBP\"}},{\"id\":\"t\",\"field\":\"tokens\",\"format\":{\"kind\":\"compact\",\"decimals\":1}}]}],\"refs\":{\"modal\":0}}}}"
+    },
+    {
       "name": "item details with pooled views",
       "state": {
         "select": [],

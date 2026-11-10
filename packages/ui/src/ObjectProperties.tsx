@@ -92,18 +92,7 @@ export function formatPropertyValue(
       case "currency": {
         if (typeof value !== "number" || !Number.isFinite(value))
           throw Error("Expected a finite currency amount.");
-        return {
-          text: new Intl.NumberFormat(locale, {
-            style: "currency",
-            currency: format.currency,
-            ...(format.decimals !== undefined
-              ? {
-                  minimumFractionDigits: format.decimals,
-                  maximumFractionDigits: format.decimals,
-                }
-              : {}),
-          }).format(value),
-        };
+        return formatMetricOutput(value, format, locale);
       }
       case "relative": {
         const { date } = metricTimestamp(value as MetricValue, {

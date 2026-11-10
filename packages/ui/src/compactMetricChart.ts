@@ -1,7 +1,7 @@
 import type { MetricAxisScale } from "@pythia-software/query-table-core";
 import type { MetricBucket, MetricValueFormat, RenderingClause } from "./metricTypes";
 import { metricCycleLabel, metricScale } from "./metricChartHelpers";
-import { formatMetricOutput } from "./metricFormat";
+import { formatMetricOutput, validateMetricFormat } from "./metricFormat";
 
 const durationUnits: Record<string, number> = {
   milliseconds: 1, seconds: 1000, minutes: 60000, hours: 3600000, days: 86400000,
@@ -80,6 +80,8 @@ export function compactMetricTick(value: number, format?: MetricValueFormat, loc
     return formatMetricOutput(value, { ...format, decimals: Math.min(12, Math.max(0, small, spacing)) }, locale).text;
   }
   if (format && ["date", "time", "datetime"].includes(format.kind)) return formatMetricOutput(value, format, locale).text;
+  if (format?.kind === "currency" && !validateMetricFormat(format))
+    return value.toLocaleString(locale, { style: "currency", currency: format.currency!, notation: "compact", minimumFractionDigits: 0, maximumSignificantDigits: digits(Math.abs(value)) });
   return value.toLocaleString(locale, { notation: "compact", maximumSignificantDigits: digits(Math.abs(value)) });
 }
 

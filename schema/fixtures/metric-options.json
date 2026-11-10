@@ -101,12 +101,19 @@
     "kind": [
       "number",
       "percent",
+      "currency",
+      "compact",
       "duration",
       "date",
       "time",
       "datetime"
     ],
     "decimals": "integer",
+    "currency": "currencyCode",
+    "notation": [
+      "standard",
+      "compact"
+    ],
     "sourceUnit": [
       "milliseconds",
       "seconds",

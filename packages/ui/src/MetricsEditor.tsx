@@ -3287,7 +3287,7 @@ function MetricFormatControls({
   format: MetricValueFormat;
   onChange: (format: MetricValueFormat) => void;
 }) {
-  const temporal = !["number", "percent"].includes(format.kind),
+  const temporal = !["number", "percent", "currency", "compact"].includes(format.kind),
     duration = format.kind === "duration";
   const patch = (values: Partial<MetricValueFormat>) =>
     onChange({ ...format, ...values });
@@ -3323,21 +3323,29 @@ function MetricFormatControls({
         <select
           aria-label="Metric output type"
           value={format.kind}
-          onChange={(e) =>
-            onChange({
-              kind: e.target.value as MetricValueFormat["kind"],
-              decimals: format.decimals ?? 0,
-              sourceUnit:
-                e.target.value === "duration" ? "milliseconds" : "iso",
-              style: "human",
-              timeZone: "UTC",
-            })
-          }
+          onChange={(e) => {
+            const kind = e.target.value as MetricValueFormat["kind"];
+            onChange(
+              kind === "currency"
+                ? { kind, currency: format.currency ?? "USD", decimals: 2 }
+                : kind === "compact"
+                  ? { kind, decimals: 1 }
+                  : {
+                      kind,
+                      decimals: format.decimals ?? 0,
+                      sourceUnit: kind === "duration" ? "milliseconds" : "iso",
+                      style: "human",
+                      timeZone: "UTC",
+                    },
+            );
+          }}
         >
           {(
             [
               "number",
               "percent",
+              "currency",
+              "compact",
               "duration",
               "date",
               "time",
@@ -3349,6 +3357,8 @@ function MetricFormatControls({
                 {
                   number: "Number",
                   percent: "Percent",
+                  currency: "Currency",
+                  compact: "Compact number",
                   duration: "Duration",
                   date: "Date",
                   time: "Time",
@@ -3374,6 +3384,33 @@ function MetricFormatControls({
             }}
           />
         </label>
+      )}
+      {format.kind === "currency" && (
+        <>
+          <label>
+            Currency
+            <input
+              aria-label="Metric currency code"
+              maxLength={3}
+              pattern="[A-Z]{3}"
+              placeholder="USD"
+              value={format.currency ?? ""}
+              onChange={(e) => patch({ currency: e.target.value.toUpperCase() })}
+            />
+          </label>
+          <label className="qt-metric-format-check">
+            <input
+              type="checkbox"
+              aria-label="Compact currency"
+              checked={format.notation === "compact"}
+              onChange={(e) => {
+                const { notation: _notation, ...rest } = format;
+                onChange(e.target.checked ? { ...rest, notation: "compact" } : rest);
+              }}
+            />
+            Compact ($1.2M)
+          </label>
+        </>
       )}
       {temporal && (
         <div className="qt-metric-temporal-controls">
@@ -3482,7 +3519,9 @@ function MetricFormatControls({
                     ? "14:30:00"
                     : format.kind === "duration"
                       ? 83400
-                      : 0.875
+                      : format.kind === "currency" || format.kind === "compact"
+                        ? 1234567.89
+                        : 0.875
                 : sample,
               format,
               locale,

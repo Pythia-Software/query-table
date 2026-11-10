@@ -67,6 +67,41 @@ it("allows Apply on controllers without optional preview or replace methods", as
   }
 });
 
+it("edits currency and compact output formats and applies them to the metric", async () => {
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const setQuery = vi.fn();
+  const clause: AggregationClause = { id: "m", op: "sum", field: "cost", groupBy: [], display: { kind: "value" } };
+  const api = { aggregations: { clauses: [clause] }, setQuery, rows: [], total: 0, query: { where: [] } } as unknown as QueryTableApi<unknown>;
+  const fields: FieldDef<unknown>[] = [{ name: "cost", label: "Cost", type: "number", source: { kind: "backend" } }];
+  const select = (label: string, value: string) => {
+    const element = host.querySelector<HTMLSelectElement>(`[aria-label="${label}"]`)!;
+    act(() => {
+      element.value = value;
+      element.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  };
+  const example = () => host.querySelector(".qt-metric-format-example strong")?.textContent;
+  try {
+    await act(async () => root.render(createElement(MetricsEditor, { api, fields, onClose: vi.fn(), locale: "en-US" })));
+    select("Metric output type", "compact");
+    expect(example()).toBe("1.2M");
+    select("Metric output type", "currency");
+    expect(host.querySelector<HTMLInputElement>('[aria-label="Metric currency code"]')?.value).toBe("USD");
+    expect(example()).toBe("$1,234,567.89");
+    editInput(host.querySelector('[aria-label="Metric currency code"]')!, "eur");
+    act(() => host.querySelector<HTMLInputElement>('[aria-label="Compact currency"]')!.click());
+    expect(example()).toBe("€1.23M");
+    act(() => [...host.querySelectorAll("button")].find((b) => b.textContent === "Apply metrics")!.click());
+    expect(setQuery.mock.calls[0]![0]({ where: [] }).aggregations[0].display.format)
+      .toEqual({ kind: "currency", currency: "EUR", decimals: 2, notation: "compact" });
+  } finally {
+    act(() => root.unmount());
+    host.remove();
+  }
+});
+
 it("preserves intermediate numeric and name typing and commits bounded sizes and histogram bins on blur", async () => {
   vi.useFakeTimers();
   const host = document.createElement("div");

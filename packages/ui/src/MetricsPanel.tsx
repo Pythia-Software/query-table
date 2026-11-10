@@ -15,7 +15,7 @@ import {
 // sense (so AVG(total_ms) reads "3.2s", not "3200"), falling back to a locale
 // number. Counts are always plain integers.
 
-import { useState, useMemo, type HTMLAttributes, type ReactNode } from "react";
+import { Fragment, isValidElement, useState, useMemo, type HTMLAttributes, type ReactNode } from "react";
 import { EMPTY_QUERY, metricMinCountText } from "@pythia-software/query-table-core";
 import type { AggOp, FieldDef } from "@pythia-software/query-table-core";
 import type { AggregationsApi } from "@pythia-software/query-table-react";
@@ -46,7 +46,7 @@ import type {
   MetricValue,
   MetricRenderResult,
 } from "./metricTypes";
-import { resolveRenderer, type RenderRegistry } from "./renderers";
+import { defaultRenderers, resolveRenderer, type CellRenderer, type RenderRegistry } from "./renderers";
 
 export interface MetricsPanelProps<Row> {
   /** Enables quick editing using the transactional metrics editor. */
@@ -230,6 +230,17 @@ export function MetricCard<Row>({
   const keyedLimit = metricKeyedLimit(clause);
   const groupLabels = clause.groupBy.map((g) => byName.get(g)?.label ?? g);
   const decimals = cardDecimals(buckets);
+  // A numeric measure's registered renderer labels its values when no format
+  // applies: never counts or expressions (other units), and only for a box or
+  // histogram over the measure itself.
+  const valueRenderer =
+    clause.display?.format || clause.expression || clause.op === "count" || clause.op === "count_distinct"
+      || (clause.distribution && clause.distribution.input !== clause.field)
+      ? undefined
+      : numericMetricRenderer(measure, renderers);
+  const valueText = valueRenderer && measure
+    ? (v: number) => renderedText(callRenderer(valueRenderer, measure, v))
+    : undefined;
   const fmt = (v: MetricValue): ReactNode => {
     if (clause.display?.format) {
       const out = formatMetricOutput(v, clause.display.format, locale);
@@ -248,7 +259,7 @@ export function MetricCard<Row>({
         typeof v === "number" ? { kind: "number", decimals } : undefined,
         locale,
       ).text;
-    return formatMetricValue(v, clause.op, measure, renderers, decimals);
+    return formatMetricValue(v, clause.op, measure, renderers, valueRenderer, decimals);
   };
   // Hosts receive the clause they defined, not one with a derived default format.
   const inspect = onInspect ? (b: AggregationBucket) => onInspect(b, sourceClause) : undefined;
@@ -310,6 +321,7 @@ export function MetricCard<Row>({
         locale={locale}
         classNames={classNames}
         onInspect={inspect}
+        valueText={valueText}
       />
     );
   else if (kind === "value" || (kind === "auto" && clause.groupBy.length === 0))
@@ -769,19 +781,52 @@ function metricTitle<Row>(
 }
 
 // Default renderers that map a number to a unit-formatted string (and so already
-// bound their own decimals). Any OTHER renderer (text/link/pill/number) is skipped
-// for numeric aggregates — it would stringify the raw float — in favor of the
-// card's shared decimal formatting.
+// bound their own decimals). The other built-in keys (text/number/pills/...)
+// are generic: they would stringify the raw float, so numeric aggregates over
+// them use the card's shared decimal formatting, even when a host overrides
+// that key. Any host-registered key is the measure's own presentation.
 const UNIT_RENDER_KEYS: ReadonlySet<string> = new Set([
   "duration_ms",
   "byte_size",
 ]);
+
+/** The renderer registered for a numeric measure's values, if it has one that
+ * is not a generic built-in (see UNIT_RENDER_KEYS). */
+export function numericMetricRenderer<Row>(
+  measure: FieldDef<Row> | undefined,
+  renderers: RenderRegistry<Row> | undefined,
+): CellRenderer<Row> | undefined {
+  const key = typeof measure?.render === "string" ? measure.render : undefined;
+  if (!key || !renderers || !Object.prototype.hasOwnProperty.call(renderers, key)) return undefined;
+  if (Object.prototype.hasOwnProperty.call(defaultRenderers, key) && !UNIT_RENDER_KEYS.has(key)) return undefined;
+  return renderers[key];
+}
+
+/** Plain text of rendered output: strings and numbers inside host elements
+ * and fragments. Components cannot be read without rendering them, so their
+ * output (and empty output) gives undefined. */
+export function renderedText(node: ReactNode): string | undefined {
+  const read = (n: ReactNode): string | undefined => {
+    if (n == null || typeof n === "boolean") return "";
+    if (typeof n === "string" || typeof n === "number") return String(n);
+    if (Array.isArray(n)) {
+      const parts = n.map(read);
+      return parts.every((p) => p !== undefined) ? parts.join("") : undefined;
+    }
+    if (isValidElement(n) && (typeof n.type === "string" || n.type === Fragment))
+      return read((n.props as { children?: ReactNode }).children);
+    return undefined;
+  };
+  const text = read(node)?.trim();
+  return text ? text : undefined;
+}
 
 function formatMetricValue<Row>(
   value: MetricValue,
   op: AggOp,
   measure: FieldDef<Row> | undefined,
   renderers: RenderRegistry<Row> | undefined,
+  valueRenderer: CellRenderer<Row> | undefined,
   decimals: number,
 ): ReactNode {
   if (value == null) return <span className="qt-muted">—</span>;
@@ -790,32 +835,28 @@ function formatMetricValue<Row>(
     return typeof value === "number" ? formatNumber(value, 0) : String(value);
   }
   if (typeof value === "number") {
-    const key =
-      typeof measure?.render === "string" ? measure.render : undefined;
-    if (key && UNIT_RENDER_KEYS.has(key) && measure && renderers) {
-      const node = tryRender(measure, renderers, value);
+    if (valueRenderer && measure) {
+      const node = callRenderer(valueRenderer, measure, value);
       if (node != null) return node;
     }
     return formatNumber(value, decimals);
   }
   // min/max over text or datetime → the column's renderer, else the raw string.
   if (measure && renderers) {
-    const node = tryRender(measure, renderers, value);
+    const node = callRenderer(resolveRenderer(measure, renderers), measure, value);
     if (node != null) return node;
   }
   return String(value);
 }
 
-function tryRender<Row>(
+/** A renderer's output for one aggregate value; null when it is empty or throws. */
+function callRenderer<Row>(
+  renderer: CellRenderer<Row>,
   measure: FieldDef<Row>,
-  renderers: RenderRegistry<Row>,
   value: number | string | boolean,
 ): ReactNode | null {
   try {
-    const node = resolveRenderer(
-      measure,
-      renderers,
-    )({
+    const node = renderer({
       value: value as never,
       row: {} as Row,
       field: measure,

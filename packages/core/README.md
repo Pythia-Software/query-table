@@ -129,6 +129,6 @@ with tolerances. The host must enforce the negotiated profile and execution budg
 ## Cell presentation
 
 `FieldDef.display` accepts the serializable `CellDisplay` union for JSON, temporal,
-duration, numeric, text, and chip presentation. It is independent of `FieldType`
+duration, numeric (number, percent, currency, compact), text, and chip presentation. It is independent of `FieldType`
 and backend query capabilities. `loadSchema` validates display options, and
 codegen preserves them in frontend schemas. See the [cell display guide](../../docs/cell-displays.md).

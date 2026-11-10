@@ -322,7 +322,21 @@ Hosts own authorization, endpoint implementation, execution budgets, cancellatio
 
 ## Output formatting
 
-`format`, `xFormat`, and `yFormat` use `MetricValueFormat`. Output types are `number`, `percent`, `duration`, `date`, `time`, or `datetime`. Formatting changes labels, tooltips, and table cells; reductions and sorts retain original typed values.
+`format`, `xFormat`, and `yFormat` use `MetricValueFormat`. Output types are `number`, `percent`, `currency`, `compact`, `duration`, `date`, `time`, or `datetime`. Formatting changes labels, tooltips, and table cells; reductions and sorts retain original typed values.
+
+Currency needs an ISO 4217 code: `{ kind: "currency", currency: "USD" }` shows `$1,234.50`, using the currency's minor units unless `decimals` is set; `notation: "compact"` abbreviates to `$1.2M` (at most `decimals` fraction digits, default 1). `{ kind: "compact" }` uses the locale's compact notation for large counts or token totals, `1.2K` and `3.4M` in English and `1,2 Mio.` in German, again with at most `decimals` fraction digits (default 1). A currency format without a valid code shows **Invalid format** with the reason rather than guessing a currency. The metric editor offers both under Output type, with the currency code and a Compact option; the formats travel in links, saved queries and the Go link codec like the other formats.
+
+A numeric metric's value is labelled by the first of these that applies:
+
+1. NULL is `—`; a value or group error shows the error.
+2. An explicit `display.format` on the metric (including for counts).
+3. An expression metric, whose units may differ from any field, uses the card's shared decimals.
+4. COUNT and COUNT_DISTINCT are integer counts.
+5. The measure field's numeric `display` (`number` with `decimals`, `percent`, `currency`, `compact` or `duration`) becomes the default format.
+6. The measure field's registered renderer: a `render` key the host registered (for example `render: "usd"`), or the built-in `duration_ms` and `byte_size`. Other built-in keys (`number`, `text`, ...) are generic, so they are not used even when the host overrides them, and neither are inline `render` functions.
+7. Otherwise the card's shared decimals.
+
+Steps 2, 5 and 6 apply wherever the value appears: scalar values, lists, tables and pivots, chart value axes, bar and slice labels, tooltips, box statistics and pie totals. Charts label SVG text, so they use the renderer's text: strings and numbers inside plain elements (`<span>$1.20</span>`) and fragments. A renderer that returns a component keeps its rendered output in values, lists and tables, while charts fall back to the default number labels. Prefer a declared `currency` or `compact` display (or an explicit metric format) when the same label should appear everywhere.
 
 Duration units are milliseconds (default), seconds, minutes, hours, or days. Human style turns 84,000 seconds into `23h20m`; long and clock styles are also available. Custom patterns use `{d}`, `{h}`, `{hh}`, `{m}`, `{mm}`, `{s}`, `{ss}`, `{ms}`. Hours are total hours unless the pattern includes `{d}`.
 

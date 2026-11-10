@@ -2,8 +2,9 @@ import type { AggregationClause } from "./query";
 
 /** How normalizeMetricOptions validates one option: an allowed value list or a
  *  type. "minCount" is a positive integer, or an object read with the
- *  `minCount` table that has `min` and exactly one of `distinct` and `sum`. */
-export type MetricOptionSpec = readonly string[] | "string" | "boolean" | "integer" | "positiveInteger" | "number" | "minCount";
+ *  `minCount` table that has `min` and exactly one of `distinct` and `sum`.
+ *  "currencyCode" is a three-letter upper-case ISO 4217 code. */
+export type MetricOptionSpec = readonly string[] | "string" | "boolean" | "integer" | "positiveInteger" | "number" | "minCount" | "currencyCode";
 
 /** The option tables normalizeMetricOptions copies from, in output order. Other
  *  implementations of query links (the Go module) are checked against this
@@ -77,8 +78,10 @@ export const METRIC_OPTION_SPECS = {
     max: "number",
   },
   format: {
-    kind: ["number", "percent", "duration", "date", "time", "datetime"],
+    kind: ["number", "percent", "currency", "compact", "duration", "date", "time", "datetime"],
     decimals: "integer",
+    currency: "currencyCode",
+    notation: ["standard", "compact"],
     sourceUnit: [
       "milliseconds",
       "seconds",
@@ -163,6 +166,8 @@ export function normalizeMetricOptions(
             ? typeof v === "number" && Number.isFinite(v)
             : spec === "boolean"
               ? typeof v === "boolean"
+              : spec === "currencyCode"
+                ? typeof v === "string" && /^[A-Z]{3}$/.test(v)
               : spec === "integer" || spec === "positiveInteger"
                 ? typeof v === "number" &&
                   Number.isSafeInteger(v) &&

@@ -16,8 +16,21 @@ const fields: FieldDef[] = [
   { name: "status", label: "Status", type: "enum", source: { kind: "backend" },
     display: { kind: "chip", labels: { ready: "Ready", failed: "Failed" },
       tones: { ready: "success", failed: "danger" } } },
+  { name: "cost_usd", label: "Cost", type: "number", source: { kind: "backend" },
+    display: { kind: "currency", currency: "USD" } },
+  { name: "total_tokens", label: "Tokens", type: "number", source: { kind: "backend" },
+    display: { kind: "compact" } },
 ];
 ```
+
+Numeric displays are `number` and `percent` (`decimals`, `locale`),
+`currency` (an ISO 4217 `currency` code, required; `decimals`, defaulting to
+the currency's minor units; `notation: "compact"` for `$1.2M`; `locale`) and
+`compact` (locale compact notation such as `1.2K` and `3.4M`, at most
+`decimals` fraction digits, default 1; `locale`). Numeric strings are decoded
+strictly; other values show a visible format error. A numeric display on a
+field is also the default value format of SUM, AVG, MIN and MAX metrics over
+it; see [Metrics](metrics.md#output-formatting).
 
 These settings also work in JSON schema documents. `loadSchema` validates and
 preserves them, and TypeScript code generation includes them. Backend query

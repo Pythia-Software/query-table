@@ -470,6 +470,8 @@ const (
 	// optionMinCount is a positive integer, or a metricMinCountOptions object
 	// with min and exactly one of distinct and sum.
 	optionMinCount
+	// optionCurrencyCode is a three-letter upper-case ISO 4217 code.
+	optionCurrencyCode
 )
 
 type optionSpec struct {
@@ -531,8 +533,10 @@ var (
 		{key: "max", kind: optionNumber},
 	}
 	metricFormatOptions = []optionSpec{
-		enumOption("kind", "number", "percent", "duration", "date", "time", "datetime"),
+		enumOption("kind", "number", "percent", "currency", "compact", "duration", "date", "time", "datetime"),
 		{key: "decimals", kind: optionInteger},
+		{key: "currency", kind: optionCurrencyCode},
+		enumOption("notation", "standard", "compact"),
 		enumOption("sourceUnit", "milliseconds", "seconds", "minutes", "hours", "days", "iso", "epochSeconds",
 			"epochMilliseconds", "secondsOfDay", "millisecondsOfDay"),
 		enumOption("style", "human", "long", "clock", "custom", "iso"),
@@ -592,6 +596,8 @@ func (m *metricNormalizer) copy(input *jsValue, specs []optionSpec) *jsValue {
 			ok = jsIsFinite(v)
 		case optionBoolean:
 			ok = v.kind == jsBool
+		case optionCurrencyCode:
+			ok = v.isString() && propertyCurrency.MatchString(v.s)
 		case optionInteger, optionPositiveInteger:
 			min := 0.0
 			if spec.kind == optionPositiveInteger {
@@ -787,8 +793,15 @@ var cellDisplayOptions = func() map[string]map[string]displayRule {
 		},
 		"number":  numbers,
 		"percent": numbers,
-		"chip":    {"labels": {kind: "labels"}, "tones": {kind: "tones"}},
-		"text":    {"truncate": {kind: "boolean"}, "lines": displayRange(1, 20)},
+		"compact": numbers,
+		"currency": {
+			"decimals": displayRange(0, 20),
+			"locale":   {kind: "string"},
+			"currency": {kind: "currencyCode"},
+			"notation": displayEnum("standard", "compact"),
+		},
+		"chip": {"labels": {kind: "labels"}, "tones": {kind: "tones"}},
+		"text": {"truncate": {kind: "boolean"}, "lines": displayRange(1, 20)},
 	}
 }()
 
@@ -836,6 +849,10 @@ func parseLinkCellDisplay(raw *jsValue, context string) (*jsValue, string) {
 					return fail("invalid " + key + " map")
 				}
 			}
+		case "currencyCode":
+			if !value.isString() || !propertyCurrency.MatchString(value.s) {
+				return fail(key + " must be an ISO 4217 code such as USD")
+			}
 		case "string":
 			if !value.isString() {
 				return fail(key + " must be string")
@@ -848,6 +865,9 @@ func parseLinkCellDisplay(raw *jsValue, context string) (*jsValue, string) {
 		if key == "pattern" && jsLength(value.s) > 160 {
 			return fail("pattern must be at most 160 characters")
 		}
+	}
+	if kind.s == "currency" && raw.get("currency") == nil {
+		return fail("currency is required")
 	}
 	out := raw.spread()
 	for _, key := range []string{"labels", "tones"} {
@@ -871,7 +891,7 @@ func validPropertyDecimals(v *jsValue) bool {
 
 var (
 	propertySimpleKinds  = stringSet("text", "code", "boolean", "chips")
-	propertyMetricKinds  = stringSet("number", "percent", "duration", "date", "time", "datetime")
+	propertyMetricKinds  = stringSet("number", "percent", "compact", "duration", "date", "time", "datetime")
 	propertyRelativeUnit = stringSet("iso", "epochSeconds", "epochMilliseconds")
 	propertySourceUnits  = stringSet("milliseconds", "seconds", "minutes", "hours", "days", "iso", "epochSeconds",
 		"epochMilliseconds", "secondsOfDay", "millisecondsOfDay")
@@ -910,13 +930,19 @@ func normalizeLinkPropertyFormat(input *jsValue) *jsValue {
 		return out
 	}
 	if kind.isString() && kind.s == "currency" {
-		currency := input.get("currency")
+		currency, notation := input.get("currency"), input.get("notation")
 		if !currency.isString() || !propertyCurrency.MatchString(currency.s) {
+			return nil
+		}
+		if notation != nil && !(notation.isString() && (notation.s == "standard" || notation.s == "compact")) {
 			return nil
 		}
 		out := jsObj().set("kind", kind).set("currency", currency)
 		if validPropertyDecimals(decimals) {
 			out.set("decimals", decimals)
+		}
+		if notation != nil && notation.s == "compact" {
+			out.set("notation", notation)
 		}
 		return out
 	}

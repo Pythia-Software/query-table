@@ -49,6 +49,10 @@ interface ChartProps {
   locale?: string | undefined;
   classNames?: MetricClassNames | undefined;
   onInspect?: ((bucket: MetricBucket) => void) | undefined;
+  /** Labels a numeric measured value (axis ticks, value labels, tooltips and
+   * totals) when `display.format` is unset; undefined keeps the default
+   * number label. MetricCard derives it from the measure's renderer. */
+  valueText?: ((value: number) => string | undefined) | undefined;
 }
 function usePlotSize() {
   const ref = useRef<HTMLDivElement>(null);
@@ -78,6 +82,7 @@ export function MetricChart({
   locale,
   classNames,
   onInspect,
+  valueText,
 }: ChartProps): ReactNode {
   const { ref, width: W, height: H } = usePlotSize(),
     tooltipId = useId(),
@@ -96,6 +101,12 @@ export function MetricChart({
     compact ? compactMetricTick(v, format, locale, compactTickStep(ticks)) : format
       ? fmt(v, format)
       : v.toLocaleString(locale, { maximumSignificantDigits: 8 });
+  // The measured value's own labels: its declared format, else the host
+  // renderer's text, else the default number label.
+  const hostText = (v: MetricValue | undefined) =>
+    !display.format && valueText && typeof v === "number" && Number.isFinite(v) ? valueText(v) : undefined;
+  const valueFmt = (v: MetricValue | undefined) => hostText(v) ?? fmt(v, display.format);
+  const valueTick = (v: number, ticks: readonly number[] = []) => hostText(v) ?? tickFmt(v, display.format, ticks);
   const percent = (ratio: number) =>
     formatMetricOutput(
       ratio,
@@ -117,7 +128,7 @@ export function MetricChart({
   const groupLabel = (b: MetricBucket) => metricGroupLabel(b, clause, locale);
   const groupFormat = metricDateGroupFormat(clause);
   const detail = (b: MetricBucket) =>
-    `${metricGroupLabel(b, clause, locale, true)}\n${b.error ?? fmt(b.value, kind === "scatter" ? display.xFormat : display.format)}${kind === "scatter" ? ` / ${b.yError ?? fmt(b.y, display.yFormat)}` : ""}\n${b.count.toLocaleString(locale)} rows`;
+    `${metricGroupLabel(b, clause, locale, true)}\n${b.error ?? (kind === "scatter" ? fmt(b.value, display.xFormat) : valueFmt(b.value))}${kind === "scatter" ? ` / ${b.yError ?? fmt(b.y, display.yFormat)}` : ""}\n${b.count.toLocaleString(locale)} rows`;
   const interaction = (
     b: MetricBucket,
     label = detail(b),
@@ -266,7 +277,7 @@ export function MetricChart({
       const end = angle,
         large = end - start > Math.PI ? 1 : 0,
         color = s.other ? colors.token("other") : shade(s.bucket),
-        label = `${s.other ? "Other (combined remainder)" : groupLabel(s.bucket)}: ${fmt(s.value, display.format)} (${percent(s.value / pie.total)} of ${fmt(pie.total, display.format)})`;
+        label = `${s.other ? "Other (combined remainder)" : groupLabel(s.bucket)}: ${valueFmt(s.value)} (${percent(s.value / pie.total)} of ${valueFmt(pie.total)})`;
       return (
         <g key={i} {...interaction(s.bucket, label, !s.other, color)}>
           {s.value === pie.total ? (
@@ -293,11 +304,11 @@ export function MetricChart({
     });
     legend = pie.slices.map((s, i) => ({
       key: String(i),
-      label: compact ? (s.other ? "Other" : groupLabel(s.bucket)) : `${s.other ? "Other (remainder)" : groupLabel(s.bucket)} · ${fmt(s.value, display.format)} · ${percent(s.value / pie.total)}`,
-      ...(compact ? { value: fmt(s.value, display.format), share: percent(s.value / pie.total) } : {}),
+      label: compact ? (s.other ? "Other" : groupLabel(s.bucket)) : `${s.other ? "Other (remainder)" : groupLabel(s.bucket)} · ${valueFmt(s.value)} · ${percent(s.value / pie.total)}`,
+      ...(compact ? { value: valueFmt(s.value), share: percent(s.value / pie.total) } : {}),
       color: s.other ? colors.token("other") : shade(s.bucket),
     }));
-    note = `Exact additive denominator: ${fmt(pie.total, display.format)}. ${display.showOther === false ? "Hidden remainder retains its share of the full denominator." : "Other combines remaining groups."} Hover a slice for its value.`;
+    note = `Exact additive denominator: ${valueFmt(pie.total)}. ${display.showOther === false ? "Hidden remainder retains its share of the full denominator." : "Other combines remaining groups."} Hover a slice for its value.`;
   } else if (compactBox) {
     const step = 30, visible = buckets.slice(0, Math.max(1, Math.floor(plotH / step)));
     const summaries = visible.flatMap(b => !b.error && b.distribution?.kind === "box" && b.distribution.summary ? [b.distribution.summary] : []);
@@ -305,19 +316,19 @@ export function MetricChart({
     const x = (v: number) => left + axis.fraction(v) * plotW;
     axes = axis.ticks.map((v, i) => <g key={i} className="qt-metric-box-axis-tick">
       {grid(x(v), top, x(v), bottom)}
-      {text(x(v), bottom + 16, tickFmt(v, display.format, axis.ticks), i === 0 ? "start" : i === axis.ticks.length - 1 ? "end" : "middle")}
+      {text(x(v), bottom + 16, valueTick(v, axis.ticks), i === 0 ? "start" : i === axis.ticks.length - 1 ? "end" : "middle")}
     </g>);
     marks = visible.map((b, i) => {
       const s = b.distribution?.kind === "box" ? b.distribution.summary : null;
       const y = top + i * step + 22, color = shade(b);
-      const median = s ? `Median ${fmt(s.median, display.format)}` : "";
+      const median = s ? `Median ${valueFmt(s.median)}` : "";
       const fullLabel = groupLabel(b);
       const chars = Math.max(4, Math.floor((plotW - median.length * 5.5 - 12) / 5.5));
       const shortLabel = fullLabel.length > chars ? `${fullLabel.slice(0, chars - 1)}…` : fullLabel;
       const whisker = s ? metricBoxWhiskers(s) : null;
       const outliers = s ? metricBoxOutliers(s) : [];
       const detailLabel = s
-        ? `${fullLabel}\nMin ${fmt(s.min, display.format)} · Q1 ${fmt(s.q1, display.format)} · Median ${fmt(s.median, display.format)} · Q3 ${fmt(s.q3, display.format)} · Max ${fmt(s.max, display.format)} · Mean ${fmt(s.mean, display.format)}\nObserved whiskers ${fmt(s.low, display.format)} – ${fmt(s.high, display.format)}${s.low > s.q1 || s.high < s.q3 ? "\nInterpolated quartile extends beyond observed inliers; whisker meets the box edge." : ""}\n${s.n} samples · ${b.nullCount ?? 0} NULL · ${s.outlierCount} outliers (${outliers.length} retained markers). Shared ${display.xScale?.mode === "log" ? "logarithmic" : "linear"} axis.`
+        ? `${fullLabel}\nMin ${valueFmt(s.min)} · Q1 ${valueFmt(s.q1)} · Median ${valueFmt(s.median)} · Q3 ${valueFmt(s.q3)} · Max ${valueFmt(s.max)} · Mean ${valueFmt(s.mean)}\nObserved whiskers ${valueFmt(s.low)} – ${valueFmt(s.high)}${s.low > s.q1 || s.high < s.q3 ? "\nInterpolated quartile extends beyond observed inliers; whisker meets the box edge." : ""}\n${s.n} samples · ${b.nullCount ?? 0} NULL · ${s.outlierCount} outliers (${outliers.length} retained markers). Shared ${display.xScale?.mode === "log" ? "logarithmic" : "linear"} axis.`
         : detail(b);
       return <g key={i} className="qt-metric-box-row">
         <text x={left} y={y - 12} textAnchor="start" className="qt-metric-axis qt-metric-box-label"><title>{fullLabel}</title>{shortLabel}</text>
@@ -351,7 +362,7 @@ export function MetricChart({
     axes = axis.ticks.map((v, i) => (
       <g key={i}>
         {grid(x(v), top, x(v), bottom)}
-        {text(x(v), bottom + 18, tickFmt(v, display.format, axis.ticks))}
+        {text(x(v), bottom + 18, valueTick(v, axis.ticks))}
       </g>
     ));
     marks = visible.map((b, i) => {
@@ -360,7 +371,7 @@ export function MetricChart({
         color = shade(b);
       const whisker = s ? metricBoxWhiskers(s) : null, outliers = s ? metricBoxOutliers(s) : [];
       const label = s
-        ? `${groupLabel(b)}\nMin ${fmt(s.min, display.format)} · Q1 ${fmt(s.q1, display.format)} · Median ${fmt(s.median, display.format)} · Q3 ${fmt(s.q3, display.format)} · Max ${fmt(s.max, display.format)} · Mean ${fmt(s.mean, display.format)}\nObserved whiskers ${fmt(s.low, display.format)} – ${fmt(s.high, display.format)}${s.low > s.q1 || s.high < s.q3 ? "\nInterpolated quartile extends beyond observed inliers; whisker meets the box edge." : ""}\n${s.n} samples · ${b.nullCount ?? 0} NULL · ${s.outlierCount} outliers (${outliers.length} retained markers)`
+        ? `${groupLabel(b)}\nMin ${valueFmt(s.min)} · Q1 ${valueFmt(s.q1)} · Median ${valueFmt(s.median)} · Q3 ${valueFmt(s.q3)} · Max ${valueFmt(s.max)} · Mean ${valueFmt(s.mean)}\nObserved whiskers ${valueFmt(s.low)} – ${valueFmt(s.high)}${s.low > s.q1 || s.high < s.q3 ? "\nInterpolated quartile extends beyond observed inliers; whisker meets the box edge." : ""}\n${s.n} samples · ${b.nullCount ?? 0} NULL · ${s.outlierCount} outliers (${outliers.length} retained markers)`
         : detail(b);
       return (
         <g key={i}>
@@ -806,8 +817,8 @@ export function MetricChart({
           ? grid(x(v), top, x(v), bottom)
           : grid(left, y(v), right, y(v))}
         {horizontal
-          ? text(x(v), bottom + 18, compact ? tickFmt(v, display.format, axis.ticks) : fmt(v, display.format))
-          : text(left - 7, y(v) + 4, tickFmt(v, display.format, axis.ticks), "end")}
+          ? text(x(v), bottom + 18, compact ? valueTick(v, axis.ticks) : valueFmt(v))
+          : text(left - 7, y(v) + 4, valueTick(v, axis.ticks), "end")}
       </g>
     ));
     axes = (

@@ -231,4 +231,49 @@ describe("metricFormatFromMeasure", () => {
     expect(metricFormatFromMeasure(avg, { display: { kind: "text" } })).toBeUndefined();
     expect(metricFormatFromMeasure({ ...avg, op: "count" }, { display: { kind: "percent" } })).toBeUndefined();
   });
+  it("maps currency and compact cell displays without their cell locale", () => {
+    expect(metricFormatFromMeasure(avg, { display: { kind: "currency", currency: "EUR", notation: "compact", locale: "de-DE" } }))
+      .toEqual({ kind: "currency", currency: "EUR", notation: "compact" });
+    expect(metricFormatFromMeasure(avg, { display: { kind: "currency", currency: "USD", decimals: 0 } }))
+      .toEqual({ kind: "currency", currency: "USD", decimals: 0 });
+    expect(metricFormatFromMeasure(avg, { display: { kind: "compact", decimals: 2 } })).toEqual({ kind: "compact", decimals: 2 });
+    expect(metricFormatFromMeasure({ ...avg, op: "count_distinct" }, { display: { kind: "compact" } })).toBeUndefined();
+    expect(metricFormatFromMeasure({ ...avg, expression: "SUM([x])/2" }, { display: { kind: "currency", currency: "USD" } })).toBeUndefined();
+  });
+});
+
+describe("currency and compact output", () => {
+  it.each([
+    [1234.5, { kind: "currency", currency: "USD" }, "en-US", "$1,234.50"],
+    [1234.5, { kind: "currency", currency: "USD", decimals: 0 }, "en-US", "$1,235"],
+    [1234.5, { kind: "currency", currency: "JPY" }, "en-US", "¥1,235"],
+    [1234567, { kind: "currency", currency: "USD", notation: "compact" }, "en-US", "$1.2M"],
+    [1234567, { kind: "currency", currency: "USD", notation: "compact", decimals: 2 }, "en-US", "$1.23M"],
+    [-0.004, { kind: "currency", currency: "USD" }, "en-US", "$0.00"],
+    ["12.5", { kind: "currency", currency: "USD" }, "en-US", "$12.50"],
+    [1234, { kind: "compact" }, "en-US", "1.2K"],
+    [3_400_000, { kind: "compact" }, "en-US", "3.4M"],
+    [3_456_789, { kind: "compact", decimals: 2 }, "en-US", "3.46M"],
+    [999, { kind: "compact" }, "en-US", "999"],
+    [12.345, { kind: "compact" }, "en-US", "12.3"],
+    [3_000_000, { kind: "compact" }, "en-US", "3M"],
+    [-1500, { kind: "compact", decimals: 0 }, "en-US", "-2K"],
+  ] as const)("formats %s as %j in %s", (value, f, locale, expected) => {
+    expect(format(value, f, locale).text).toBe(expected);
+  });
+  it("follows the locale's compact notation and currency placement", () => {
+    expect(format(1234567, { kind: "compact" }, "de-DE").text).toBe(new Intl.NumberFormat("de-DE", { notation: "compact", maximumFractionDigits: 1 }).format(1234567));
+    expect(format(1234.5, { kind: "currency", currency: "EUR" }, "de-DE").text).toBe("1.234,50 €");
+  });
+  it("reports a missing or malformed currency code and non-numeric input instead of guessing", () => {
+    expect(validateMetricFormat({ kind: "currency" })).toMatch(/ISO 4217/);
+    expect(validateMetricFormat({ kind: "currency", currency: "usd" })).toMatch(/ISO 4217/);
+    expect(validateMetricFormat({ kind: "currency", currency: "USD" })).toBeUndefined();
+    expect(validateMetricFormat({ kind: "compact", decimals: 21 })).toMatch(/Decimals/);
+    const missing = format(5, { kind: "currency" }, "en-US");
+    expect(missing).toMatchObject({ text: "Invalid format", raw: 5 });
+    expect(missing.error).toMatch(/ISO 4217/);
+    expect(format("five", { kind: "compact" }, "en-US")).toMatchObject({ text: "Invalid format", raw: "five" });
+    expect(format(null, { kind: "currency", currency: "USD" }).text).toBe("—");
+  });
 });

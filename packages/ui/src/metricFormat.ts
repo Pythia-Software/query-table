@@ -42,7 +42,12 @@ export function validateMetricFormat(
       format.decimals > 20)
   )
     return "Decimals must be an integer from 0 to 20.";
-  if (format.kind === "number" || format.kind === "percent") return;
+  if (format.kind === "number" || format.kind === "percent" || format.kind === "compact") return;
+  if (format.kind === "currency") {
+    if (typeof format.currency !== "string" || !/^[A-Z]{3}$/.test(format.currency))
+      return "Enter a three-letter ISO 4217 currency code, such as USD.";
+    return;
+  }
   const duration = format.kind === "duration",
     unit = format.sourceUnit ?? (duration ? "milliseconds" : "iso");
   if (
@@ -370,6 +375,24 @@ function calendarText(
           };
   return new Intl.DateTimeFormat(locale, { ...options, timeZone }).format(date);
 }
+/** `Intl.NumberFormat` options for the numeric output kinds (number, percent,
+ * currency, compact). Compact output shows at most `decimals` fraction digits
+ * (default 1); the others show exactly `decimals`, and currency without
+ * `decimals` uses the currency's own minor units. */
+export function metricNumberOptions(format: MetricValueFormat): Intl.NumberFormatOptions {
+  const compact = format.kind === "compact" || (format.kind === "currency" && format.notation === "compact");
+  const digits: Intl.NumberFormatOptions = compact
+    ? { notation: "compact", minimumFractionDigits: 0, maximumFractionDigits: format.decimals ?? 1 }
+    : format.kind === "currency" && format.decimals === undefined
+      ? {}
+      : { minimumFractionDigits: format.decimals ?? 0, maximumFractionDigits: format.decimals ?? 0 };
+  return {
+    ...(format.kind === "currency"
+      ? { style: "currency", currency: format.currency }
+      : { style: format.kind === "percent" ? "percent" : "decimal" }),
+    ...digits,
+  };
+}
 export function formatMetricOutput(
   value: MetricValue | undefined,
   format?: MetricValueFormat,
@@ -394,13 +417,11 @@ export function formatMetricOutput(
         ? durationText(value, format, locale)
         : ["date", "time", "datetime"].includes(format.kind)
           ? calendarText(value, format, locale)
-          : typeof value === "number"
-            ? numberText(value, locale, {
-                style: format.kind === "percent" ? "percent" : "decimal",
-                minimumFractionDigits: format.decimals ?? 0,
-                maximumFractionDigits: format.decimals ?? 0,
-              })
-            : String(value);
+          : format.kind === "currency" || format.kind === "compact"
+            ? numberText(numeric(value), locale, metricNumberOptions(format))
+            : typeof value === "number"
+              ? numberText(value, locale, metricNumberOptions(format))
+              : String(value);
     return { text, raw: value };
   } catch (error) {
     return {
@@ -436,5 +457,14 @@ export function metricFormatFromMeasure(
     const { kind: _kind, ...options } = display;
     return { kind: "duration", ...options };
   }
+  if (display.kind === "currency")
+    return {
+      kind: "currency",
+      currency: display.currency,
+      ...(display.decimals !== undefined ? { decimals: display.decimals } : {}),
+      ...(display.notation ? { notation: display.notation } : {}),
+    };
+  if (display.kind === "compact")
+    return { kind: "compact", ...(display.decimals !== undefined ? { decimals: display.decimals } : {}) };
   return undefined;
 }

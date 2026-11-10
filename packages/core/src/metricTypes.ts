@@ -57,9 +57,19 @@ export type MetricShare = "total" | "group0";
 export type MetricMinCountOf =
   | (MetricMinCountDistinct & { sum?: never })
   | (MetricMinCountSum & { distinct?: never });
+/** How a metric value is labelled. `currency` needs an ISO 4217 `currency`
+ * code; `compact` abbreviates large numbers with the locale's compact notation
+ * (1.2K, 3.4M). Formatting never changes the computed values. */
 export interface MetricValueFormat {
-  kind: "number" | "percent" | "duration" | "date" | "time" | "datetime";
+  kind: "number" | "percent" | "currency" | "compact" | "duration" | "date" | "time" | "datetime";
+  /** Fraction digits (0–20). Number, percent and standard currency show
+   * exactly this many (currency defaults to the currency's own digits);
+   * compact output shows at most this many (default 1). */
   decimals?: number;
+  /** Currency only: an ISO 4217 code such as "USD". */
+  currency?: string;
+  /** Currency only: "compact" abbreviates large amounts ($1.2M). */
+  notation?: "standard" | "compact";
   sourceUnit?:
     | "milliseconds"
     | "seconds"

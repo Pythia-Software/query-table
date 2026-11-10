@@ -58,6 +58,15 @@ for (const [engineName, engine] of [["Chromium", chromium], ["WebKit", webkit]])
       await page.keyboard.press("Enter");
       assert.equal(await page.locator("[data-inspected]").textContent(), "Inspected 2026-10-02 / Bash", `${where}: keyboard`);
 
+      // Numeric measure formats: a host renderer labels axes and tooltips,
+      // currency/compact formats label values and ticks.
+      const shown = chart => labels.filter(label => label.chart === chart).map(label => label.shown);
+      assert.ok(shown("spend").filter(text => /^\$[\d,]+(\.\d\d)?$/.test(text)).length >= 2, `${where}: spend axis uses the usd renderer (${shown("spend")})`);
+      assert.match(await page.locator("[data-chart=spend] .qt-metric-mark").first().getAttribute("aria-label"), /\$1,834\.50/, `${where}: spend tooltip`);
+      assert.equal((await page.locator("[data-chart=total] .qt-metric-big-value").textContent()).trim(), "$2.8M", `${where}: compact currency value`);
+      for (const chart of ["tokens", "tokens-compact"])
+        assert.ok(shown(chart).some(text => /^\d+(\.\d)?[KM]$/.test(text)), `${where}: ${chart} ticks are compact (${shown(chart)})`);
+
       assert.deepEqual(errors, [], `${where}: no page errors`);
       await page.screenshot({ path: new URL(`${engineName.toLowerCase()}-${width}.png`, screenshots).pathname, fullPage: true });
       await page.close();
