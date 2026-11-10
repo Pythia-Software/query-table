@@ -27,12 +27,26 @@ type textFunctionFixture struct {
 	Now              string             `json:"now"`
 	Rows             []map[string]any   `json:"rows"`
 	Cases            []textFunctionCase `json:"cases"`
-	GroupedSummaries struct {
-		Where    []qt.WhereTerm        `json:"where"`
-		Grouping qt.GroupingDefinition `json:"grouping"`
-		OrderBy  []qt.OrderBy          `json:"orderBy"`
-		Expected []map[string]any      `json:"expected"`
-	} `json:"groupedSummaries"`
+	GroupedSummaries textGrouped        `json:"groupedSummaries"`
+	LargeText        struct {
+		Rows             []map[string]any   `json:"rows"`
+		Cases            []textFunctionCase `json:"cases"`
+		GroupedSummaries textGrouped        `json:"groupedSummaries"`
+	} `json:"largeText"`
+}
+type textGrouped struct {
+	Where    []qt.WhereTerm        `json:"where"`
+	Grouping qt.GroupingDefinition `json:"grouping"`
+	OrderBy  []qt.OrderBy          `json:"orderBy"`
+	Expected []map[string]any      `json:"expected"`
+}
+
+// fixtureText expands the fixture's {"repeat": s, "times": n} text.
+func fixtureText(v any) any {
+	if spec, ok := v.(map[string]any); ok {
+		return strings.Repeat(spec["repeat"].(string), int(spec["times"].(float64)))
+	}
+	return v
 }
 
 func loadTextFunctionFixture(t *testing.T) (textFunctionFixture, time.Time) {
@@ -88,8 +102,7 @@ func textFunctionRequest(c textFunctionCase, profile string, now time.Time) qt.Q
 		Source: qt.WireQuery{Limit: 100}, Result: qt.WireQuery{OrderBy: c.OrderBy, Limit: 100}}
 }
 
-func textFunctionGroupedRequest(f textFunctionFixture, profile string, now time.Time) qt.QueryRequestV3 {
-	g := f.GroupedSummaries
+func textFunctionGroupedRequest(g textGrouped, profile string, now time.Time) qt.QueryRequestV3 {
 	grouping := g.Grouping
 	selected := append([]string{}, grouping.Keys...)
 	for _, s := range grouping.Summaries {
@@ -172,11 +185,60 @@ func TestTextFunctionFixtureV3(t *testing.T) {
 	}
 	t.Run("grouped summaries", func(t *testing.T) {
 		d := qt.QueryDatasetV3{Schema: textFunctionSchema(), SourceSQL: "SELECT * FROM messages", Dialect: "sqlite", Scope: "one", Dataset: "messages"}
-		out, err := d.Execute(context.Background(), db, textFunctionGroupedRequest(f, qt.SQLiteExpressionProfile, now), qt.PlanOptions{})
+		out, err := d.Execute(context.Background(), db, textFunctionGroupedRequest(f.GroupedSummaries, qt.SQLiteExpressionProfile, now), qt.PlanOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
 		want := f.GroupedSummaries.Expected
+		if got := projectTextRows(t, out.Rows, want); !reflect.DeepEqual(got, want) {
+			t.Fatalf("got  %v\nwant %v", got, want)
+		}
+	})
+}
+
+// Messages above the formula text bound: counting functions read a direct
+// text field in full; text-producing arguments and ignoreCase keep the bound.
+func TestTextFunctionLargeTextV3(t *testing.T) {
+	db, f, now := setupTextFunctions(t)
+	if _, err := db.Exec("DELETE FROM messages"); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range f.LargeText.Rows {
+		if _, err := db.Exec("INSERT INTO messages VALUES(?,?,?,?)", r["id"], r["conversation_id"], r["role"], fixtureText(r["text"])); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, d := range []qt.QueryDatasetV3{
+		{Schema: textFunctionSchema(), SourceSQL: "SELECT * FROM messages", Dialect: "sqlite", Scope: "one", Dataset: "messages"},
+		qt.TestOnlyStageUngrouped(qt.QueryDatasetV3{Schema: textFunctionSchema(), SourceSQL: "SELECT * FROM messages", Dialect: "sqlite", Scope: "one", Dataset: "messages"}),
+	} {
+		for _, c := range f.LargeText.Cases {
+			t.Run(c.Name, func(t *testing.T) {
+				out, err := d.Execute(context.Background(), db, textFunctionRequest(c, qt.SQLiteExpressionProfile, now), qt.PlanOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if out.Metrics[0].Error != "" {
+					t.Fatalf("%s: %s", out.Metrics[0].ErrorCode, out.Metrics[0].Error)
+				}
+				if got := projectTextMetric(t, out.Metrics[0], c.Expected); !reflect.DeepEqual(got, c.Expected) {
+					t.Fatalf("got  %v\nwant %v", got, c.Expected)
+				}
+				for _, b := range out.Metrics[0].Buckets {
+					if b.Error != "" && b.Error != "text_range" {
+						t.Fatalf("bucket error %q, want text_range", b.Error)
+					}
+				}
+			})
+		}
+	}
+	t.Run("grouped summaries", func(t *testing.T) {
+		d := qt.QueryDatasetV3{Schema: textFunctionSchema(), SourceSQL: "SELECT * FROM messages", Dialect: "sqlite", Scope: "one", Dataset: "messages"}
+		out, err := d.Execute(context.Background(), db, textFunctionGroupedRequest(f.LargeText.GroupedSummaries, qt.SQLiteExpressionProfile, now), qt.PlanOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := f.LargeText.GroupedSummaries.Expected
 		if got := projectTextRows(t, out.Rows, want); !reflect.DeepEqual(got, want) {
 			t.Fatalf("got  %v\nwant %v", got, want)
 		}

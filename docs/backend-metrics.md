@@ -88,7 +88,21 @@ NULL arguments return NULL, and a missing text stays distinct from an empty one:
 
 For word counts prefer `WORD_COUNT([text])` to `ARRAY_LENGTH(SPLIT(TRIM([text]), " "))`. The split counts `"a\nb"` as one word and `"a  b"` as three, and fails with `array_range` for any message of more than 10,000 space-separated parts, which turns that message's whole group into an error. Both remain subject to the formula text bound below.
 
-**Text operand bound.** A text field read by a formula fails with the per-row error `text_range` above 100,000 UTF-8 bytes on the server. The browser's bound is 100,000 UTF-16 code units, so text of mostly 3-byte characters (CJK) between about 33,000 and 100,000 characters fails only on the server. Either way, one oversized message makes `SUM(LENGTH([text]))` or `SUM(WORD_COUNT([text]))` an error for its whole group, and IFERROR is not in the server profile. Raw agent transcripts often contain such messages (long tool output, pasted documents): restrict the population (for example by role), or expect error buckets for those groups.
+**Text operand bound.** A text field read by a formula fails with the per-row error `text_range` above 100,000 UTF-8 bytes on the server. The browser's bound is 100,000 UTF-16 code units, so text of mostly 3-byte characters (CJK) between about 33,000 and 100,000 characters fails only on the server. DuckDB applies no formula text bound.
+
+**Counting functions read text in full.** The bound exists because text-producing functions copy and transform their input. It does not apply where a source text field is the *direct* argument of a function that reads it once and returns a number or a boolean without copying it:
+
+- `LENGTH([field])` and `WORD_COUNT([field])`;
+- `CONTAINS`, `STARTS_WITH` and `ENDS_WITH` in their two-argument, case-sensitive form (either argument may be the field).
+
+This holds in every engine (browser runtime, DuckDB, Go SQLite and Go PostgreSQL), so `SUM(LENGTH([text]))` and `SUM(WORD_COUNT([text]))` count a 150,000-character message instead of failing its group. Storage-type and UTF-8 checks still apply, and so do the host's population and staging budgets (`MaxPopulation`, `MaxStagingBytes`). The bound still applies to:
+
+- any other argument expression. In `LENGTH(TRIM([text]))` or `WORD_COUNT(LOWER([text]))` the field is read by `TRIM`/`LOWER`, which keep the bound, so the count fails with `text_range` like its argument. A computed column reference is an expression too;
+- the three-argument `CONTAINS`/`STARTS_WITH`/`ENDS_WITH`, including `ignoreCase` `FALSE`, because the browser lower-cases (copies) the text when the flag is true;
+- `ARRAY_LENGTH(SPLIT(...))`. The browser builds the array and bounds its total size, and DuckDB builds it too, so `SPLIT` keeps both the input bound and the 10,000-element bound;
+- every other use of a text field: comparisons, `IS_NULL`, `COALESCE`, `MIN`/`MAX`, `COUNT_DISTINCT` and the text functions.
+
+The fixture's `largeText` section checks these cases in all four engines.
 
 SQLite uses native `length`, `trim`/`ltrim`/`rtrim` with the explicit character set, `instr` and byte-prefix/suffix comparisons; NUL-containing text, `WORD_COUNT`, `SPLIT` counts, case mapping and the regex functions use the registered `qt_v2_*` descriptors from `SQLiteV2Functions()`, which receive text as BLOBs so a driver cannot cut it at a NUL. PostgreSQL uses `char_length`, `btrim`/`ltrim`/`rtrim` with the same set, `strpos`, `left`, `right`, `replace`, and `regexp_split_to_array` over a bracket of the TRIM set's characters for `WORD_COUNT`; the empty-separator count adds one for each supplementary code point.
 
