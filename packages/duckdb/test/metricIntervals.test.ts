@@ -60,7 +60,7 @@ describe("shared metric interval fixture (DuckDB)", () => {
   for (const c of fixture.cases) {
     // DuckDB fails a whole metric on a division by zero rather than one
     // bucket, with or without an interval.
-    const divides = c.expected.buckets?.some((bucket) => "error" in bucket && bucket.keys[0] === "orphan");
+    const divides = c.expected.buckets?.some((bucket) => "error" in bucket && (bucket.keys as unknown[])[0] === "orphan");
     it.skipIf(c.localOnly || divides)(c.name, async () => {
       // Send invalid intervals too, so the backend's own validation runs.
       const { interval, ...plain } = c.metric;

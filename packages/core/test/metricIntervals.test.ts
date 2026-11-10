@@ -2,7 +2,10 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   EMPTY_QUERY,
+  applyAggregations,
   compileMetric,
+  metricComputationKey,
+  metricPopulationError,
   evaluateMetrics,
   gammaQuantile,
   metricIntervalBounds,
@@ -109,6 +112,40 @@ describe("local engine", () => {
       ["300+", 6 / 15, expect.closeTo(0.198245, 5), expect.closeTo(0.642532, 5)],
       ["31-100", 6 / 128, expect.closeTo(0.021658, 5), expect.closeTo(0.098498, 5)],
     ]);
+  });
+  it("pools a window's parts before its interval", () => {
+    const days = ["2026-03-01", "2026-03-02", "2026-03-03"];
+    const daily: Row[] = days.flatMap((day, d) =>
+      Array.from({ length: 10 }, (_, i) => ({ id: `${day}-${i}`, at: `${day}T12:00:00.000Z`, events: i < d + 1 ? 1 : 0 })),
+    );
+    const timed: FieldSchema<Row> = {
+      ...schema,
+      fields: [...schema.fields, { name: "at", label: "At", type: "datetime", source: { kind: "backend" }, aggregate: { groupable: true } }],
+    };
+    const clause: AggregationClause = {
+      id: "w", op: "count", expression: "SUM([events])/NULLIF(COUNT()/1000,0)", groupBy: ["at"],
+      dateGrouping: { field: "at", interval: "day", includeEmpty: true, range: "observed" },
+      window: { periods: 2 }, interval: { kind: "rate" },
+    };
+    const [metric] = evaluateMetrics(daily, { ...EMPTY_QUERY, aggregations: [clause] }, timed).metrics;
+    expect(metric!.error).toBeUndefined();
+    const [first, second, third] = metric!.buckets;
+    // The first point has no full window, so no value and no interval.
+    expect(first).not.toHaveProperty("lower");
+    expect(first!.value).toBeNull();
+    // Days 2 and 3: (2 + 3) events over 20 rows, per 1,000.
+    const pooled = metricIntervalBounds({ kind: "rate" }, 5, 20 / 1000);
+    expect(third).toMatchObject({ value: 250, ...pooled });
+    expect(second).toMatchObject({ value: 150, ...metricIntervalBounds({ kind: "rate" }, 3, 20 / 1000) });
+    expect(validateMetric({ ...clause, window: { periods: 2, reduce: "mean" } }, timed)[0]?.message).toMatch(/mean per interval|single SUM/);
+  });
+  it("routes interval clauses away from the legacy engine and keys caches on them", () => {
+    const { interval: _interval, ...plain } = share;
+    expect(metricComputationKey([share])).not.toBe(metricComputationKey([plain]));
+    const legacy: AggregationClause = { id: "legacy", op: "count", groupBy: ["bucket"], interval: { kind: "rate" } };
+    expect(applyAggregations(rows, { ...EMPTY_QUERY, aggregations: [legacy] }, schema).metrics[0]!.error).toMatch(/ratio/);
+    expect(metricPopulationError(share, { intervals: false })).toMatch(/metric intervals/);
+    expect(metricPopulationError(share, { intervals: true })).toBeUndefined();
   });
   it("refuses a server without the capability", () => {
     const capabilities: QueryCapabilitiesV3 = { version: 3, groupedRows: true, calendarGrouping: true, computedSourceFilters: false, regex: false, maxRows: 100, maxGroups: 100, maxPopulation: 1000, profile: "p" };

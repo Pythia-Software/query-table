@@ -159,6 +159,7 @@ async function localMetrics<Row>(
       c.groupLimit !== undefined ||
       c.where !== undefined ||
       c.minCount !== undefined ||
+      c.interval !== undefined ||
       hasMetricSeries(c),
   );
   if (

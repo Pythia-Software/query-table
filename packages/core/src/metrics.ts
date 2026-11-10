@@ -767,6 +767,7 @@ export function metricComputationKey(
         minCount: c.minCount,
         window: c.window,
         share: c.share,
+        interval: c.interval,
         distribution: distributionActive(c) ? c.distribution : undefined,
       }))
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
