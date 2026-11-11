@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.8 — 2026-11-11
+
 ### Performance
 
 - SQLite shared metric reads accept numeric group keys, preserving numeric

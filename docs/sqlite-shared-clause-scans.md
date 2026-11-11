@@ -4,7 +4,7 @@ The Go V3 executor can answer an eligible metric-only request with one streamed
 read of its authorized SQLite source. The read supplies `total` and
 `sourceTotal`, as well as every clause. Automatic stored-source sharing is
 available in 1.0.7 without host API or request changes. Numeric keys and the
-optional deterministic-source assertion below extend it in the next release.
+optional deterministic-source assertion below extend it in 1.0.8.
 
 ## Eligible requests
 
@@ -47,7 +47,7 @@ retain SQL's exact floating accumulation behavior for the Other bucket.
 
 ## Deterministic host sources and calendar bindings
 
-Numeric keys and the following host option are new after 1.0.7. A Go host may
+Numeric keys and the following host option are available in 1.0.8. A Go host may
 set `QueryDatasetV3.SQLiteSharedMetricsSource = true` to certify that its
 `SourceSQL`, schema bindings and predicate relations are deterministic and
 side-effect-free within the authorized transaction. This allows eligible
