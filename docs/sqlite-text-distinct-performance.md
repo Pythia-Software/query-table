@@ -20,13 +20,17 @@ five population-sized typed CTE stages across the two metrics, validating both
 the value and error projection of every consumed text field. The two distinct
 counts also need independent grouping sorts and distinct sets.
 
-The new path materializes one narrow raw projection, then one TEMP input table
+The new path retains the compiler's source-projection and filter boundaries,
+including window bindings evaluated before result or metric filters. It
+materializes one narrow raw projection, then one TEMP input table
 with one validation error sidecar per field. Both metrics read that table, using
 `CASE` to null invalid values and grouping by the value/error pair just as the
 ordinary compiler does. The compiler's original post-reduction stages still
 handle bucket diagnostics, minimum counts, ordering, limits and group budgets.
 No counts are approximated, rolled up from family totals or cached across
-requests.
+requests. Top-N, sort and minimum-count variants also reuse a bounded grouped
+reduction over that input. Existing fusion of different aggregate leaves stays
+on its original path, avoiding duplicated grouping in mixed aggregate batches.
 
 Only independently compiled, bare text/enum `COUNT_DISTINCT` metrics over the
 same all-matching population and identical metric filters are eligible. There
@@ -58,7 +62,8 @@ go test -run '^$' -bench '^BenchmarkLabelTrend$' -benchtime=4x -count=1 -benchme
 go tool pprof -top -tagfocus=phase=executor /tmp/label-trend.cpu
 go tool pprof -top -alloc_space /tmp/label-trend.mem
 QT_LABEL_MESSAGES=2000 go test -run '^$' -bench '^BenchmarkLabelTrend$' \
-  -benchtime=4x -count=1 -benchmem
+  -benchtime=50x -count=1 -benchmem
+go test -run '^$' -bench '^BenchmarkLabelTrendMixed$' -benchtime=4x -benchmem
 ```
 
 For a before/after comparison, copy only `label_trend_benchmark_test.go` and the
@@ -72,7 +77,8 @@ alternative implementation. The selective case retains 21,604 observations.
 
 Go's benchmark calibration runs a separate one-iteration fixture before the
 final four-iteration fixture. Report the first execution of the final fixture
-and the median of its subsequent three executions separately. Process CPU is
+and the median of its subsequent three executions separately. Small fixtures
+use 50 final executions and the subsequent 49 for the median. Process CPU is
 also logged per execution. CPU profiles label executor work separately from
 fixture generation and native references. Allocation profiles cover the whole
 benchmark process, while `B/op`/`allocs/op` exclude setup and verification.
@@ -92,31 +98,33 @@ The driver, fixture and benchmark source are identical between them.
 | Workload | Version | First wall / CPU | Subsequent median wall / CPU |
 | --- | --- | --- | --- |
 | 972,298 observations | 1.0.5 | 11.480 / 8.384 s | 9.154 / 7.847 s |
-| 972,298 observations | 1.0.6 | 6.294 / 4.977 s | 5.052 / 4.875 s |
+| 972,298 observations | 1.0.6 | 5.287 / 5.013 s | 5.805 / 4.965 s |
 | Selective: 21,604 observations | 1.0.5 | 3.354 / 2.437 s | 2.789 / 2.400 s |
-| Selective: 21,604 observations | 1.0.6 | 1.340 / 1.432 s | 1.632 / 1.502 s |
-| Small: 4,000 observations | 1.0.5 | 34.370 / 35.679 ms | 33.970 / 35.677 ms |
-| Small: 4,000 observations | 1.0.6 | 19.330 / 20.813 ms | 19.248 / 20.505 ms |
-| Small selective: 88 observations | 1.0.5 | 10.746 / 11.865 ms | 10.350 / 11.327 ms |
-| Small selective: 88 observations | 1.0.6 | 11.914 / 10.019 ms | 7.346 / 8.333 ms |
+| Selective: 21,604 observations | 1.0.6 | 1.633 / 1.557 s | 1.577 / 1.511 s |
+| Small: 4,000 observations | 1.0.5 | 38.309 / 37.950 ms | 32.655 / 34.701 ms |
+| Small: 4,000 observations | 1.0.6 | 22.793 / 22.587 ms | 30.425 / 28.811 ms |
+| Small selective: 88 observations | 1.0.5 | 18.954 / 19.189 ms | 18.478 / 15.036 ms |
+| Small selective: 88 observations | 1.0.6 | 8.807 / 7.851 ms | 13.102 / 8.610 ms |
 
-The full subsequent median improved **44.8% in wall time** and **37.9% in
-process CPU time**. The selective medians improved 41.5% and 37.4%, respectively.
-CPU sums all threads and can exceed wall time for a short execution.
+The full subsequent median improved **36.6% in wall time** and **36.7% in
+process CPU time**. The selective medians improved 43.5% and 37.0%, respectively.
+CPU sums all threads and can exceed wall time for a short execution. Small
+fixtures use 50 final executions (first plus 49 subsequent), reducing timing
+noise in these short requests.
 
 Full-fixture final repetitions (seconds, first followed by three subsequent):
 
-- v1.0.5 wall: `11.480326, 10.534630, 9.153607, 8.557882`;
+- v1.0.5 wall: `11.480326, 10.534629, 9.153607, 8.557882`;
   CPU: `8.384422, 7.960275, 7.846690, 7.733341`.
-- v1.0.6 wall: `6.293647, 4.843321, 6.764285, 5.052175`;
-  CPU: `4.977323, 4.813112, 4.931125, 4.874981`.
+- v1.0.6 wall: `5.286675, 5.804986, 5.292302, 6.988664`;
+  CPU: `5.012976, 5.054127, 4.964856, 4.923413`.
 - Selective v1.0.5 wall: `3.354033, 2.789358, 3.083750, 2.278834`;
   CPU: `2.437179, 2.399938, 2.453371, 2.272924`.
-- Selective v1.0.6 wall: `1.339683, 1.351995, 1.631974, 1.740283`;
-  CPU: `1.432476, 1.432417, 1.501920, 1.541321`.
+- Selective v1.0.6 wall: `1.632555, 1.576803, 1.505825, 1.924052`;
+  CPU: `1.557066, 1.510969, 1.494391, 1.624944`.
 
 The final full-fixture native references took 3.648 / 1.975 s in the baseline
-process and 2.113 / 1.281 s in the candidate process (day/family, then day).
+process and 2.458 / 1.433 s in the candidate process (day/family, then day).
 They illustrate machine variation and the remaining grouping/distinct work;
 these raw statements do not provide equivalent diagnostics or execution budgets.
 
@@ -125,8 +133,8 @@ these raw statements do not provide equivalent diagnostics or execution budgets.
 | Authorized-source reads, including population count | 3 | 2 |
 | Datetime scalar calls | 5,833,788 | 3,889,192 |
 | Text field checks | 9,722,980 | 2,916,894 |
-| Allocated Go bytes (`B/op`) | 1,184,933,902 | 538,559,818 |
-| Go allocations (`allocs/op`) | 62,239,420 | 27,235,819 |
+| Allocated Go bytes (`B/op`) | 1,184,933,902 | 538,593,822 |
+| Go allocations (`allocs/op`) | 62,239,420 | 27,235,967 |
 
 Allocated bytes fell 54.5%; text checks fell 70%. The selective fixture also
 reduces checks from 216,040 to 64,812. The callback counters and single-evaluation
@@ -135,19 +143,27 @@ test establish reduced work independently of wall time.
 The labeled CPU profiles include five full and five selective executions
 (calibration plus final repetitions), excluding source generation and native
 references when filtered with `-tagfocus=phase=executor`. In that selection,
-SQLite's `_sqlite3MemMalloc` flat samples fell from 17.45 s to 6.38 s, while
-`_sqlite3VdbeExec` cumulative samples fell from 38.50 s to 24.89 s. Input
+SQLite's `_sqlite3MemMalloc` flat samples fell from 17.45 s to 6.55 s, while
+`_sqlite3VdbeExec` cumulative samples fell from 38.50 s to 25.35 s. Input
 materialization and driver callback allocation were reduced; grouping sorts
-and independent distinct sets remain. The initial allocation profiles likewise
+and independent distinct sets remain. Initial allocation profiles likewise
 located most Go allocation in modernc scalar argument/string conversion and
 datetime formatting, motivating fewer validations and source filters rather
 than changes to distinct-count semantics.
 
+A second benchmark uses 40,000 observations, 18 different top-N/sort consumers
+and a day-only denominator. The initial implementation (`81c84c6`) repeated
+19 reductions: first 1.041 s; subsequent 1.192, 1.145 and 1.379 s (median
+1.192 s). The corrected implementation executes two reductions: first 0.232 s;
+subsequent 0.216, 0.204 and 0.354 s (median 0.216 s). Every returned bucket
+matches the native reference. Minimum-count variants and mixed aggregate
+fusion are checked separately by regression tests.
+
 Raw benchmark logs, CPU profiles and their text summaries are attached to the
 [v1.0.6 release](https://github.com/Pythia-Software/query-table/releases/tag/v1.0.6).
-An initial profiled run had worse candidate wall time under contention, despite
-lower CPU work/allocations. The serial repeat above adds per-execution CPU
-measurements rather than treating that noisy first run as a stable speedup.
+Preliminary profiled runs had widely varying wall time under contention,
+despite lower CPU work and allocations. The table above uses the corrected
+implementation and serial repetitions with per-execution CPU measurements.
 
 The full fixture returned 360 day/family buckets and 90 day buckets with exact
 agreement against both native references. Focused parity tests additionally
@@ -156,3 +172,7 @@ collation, NULL/empty text and grouping keys, empty/scalar populations, corrupt
 storage/UTF-8/oversized operands, inherited field errors, source arguments,
 source/metric filters, scopes, reordered grouping lists, minimum counts, group
 limits, rollback, partial CTAS failure, cancellation and stale revisions.
+Regression tests also cover window-derived bindings with both filter scopes,
+18 distinct top-N/sort/minimum-count consumers plus a denominator, and mixed
+COUNT/COUNT_DISTINCT aggregate fusion. The first two regressions fail on the
+initial optimization commit (`81c84c6`) and pass on the release implementation.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql/driver"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -120,7 +121,7 @@ func TestTextDistinctBatchParity(t *testing.T) {
 			if !reflect.DeepEqual([]qt.MetricResult(got.Metrics), want) {
 				t.Fatalf("batch differs\ngot: %#v\nwant: %#v", got.Metrics, want)
 			}
-			if log.count(" AS WITH qt_text_distinct_input") == 0 {
+			if scenario != "different-fields" && log.count(" AS WITH qt_text_distinct_input") == 0 {
 				t.Fatal("shared text input not exercised")
 			}
 			assertNoReductions(t, tx)
@@ -310,6 +311,150 @@ func TestTextDistinctCancellationDuringInput(t *testing.T) {
 	}
 	if metricProbeCalls.Load() <= 4 {
 		t.Fatal("input not exercised")
+	}
+	assertNoReductions(t, tx)
+}
+
+func TestTextDistinctWindowProjectionBoundary(t *testing.T) {
+	for _, metricFilter := range []bool{false, true} {
+		t.Run(map[bool]string{false: "result-filter", true: "metric-filter"}[metricFilter], func(t *testing.T) {
+			log := &statementLog{}
+			db := hookedDB(t, log, labelTrendRows)
+			_, d, q := labelTrendFixture(t, 1)
+			f := d.Schema.Fields["family"]
+			f.Expr = "printf('%d', row_number() OVER (ORDER BY r.id))"
+			d.Schema.Fields["family"] = f
+			where := qt.WhereTerm{Field: "id", Op: "!=", Value: "1"}
+			if metricFilter {
+				for i := range q.Metrics {
+					q.Metrics[i].Where = []qt.WhereTerm{where}
+				}
+			} else {
+				q.Result.Where = append(q.Result.Where, where)
+			}
+			want := []qt.MetricResult{}
+			for _, spec := range q.Metrics {
+				single := q
+				single.Metrics = []qt.AggSpec{spec}
+				out, err := d.Execute(context.Background(), db, single, qt.PlanOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				want = append(want, out.Metrics[0])
+			}
+			log.reset(nil)
+			tx, err := db.Begin()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback()
+			got, err := d.ExecuteIn(context.Background(), tx, q, qt.PlanOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual([]qt.MetricResult(got.Metrics), want) {
+				t.Fatalf("filter moved across window projection: got %s; want %s", mustJSON(t, got.Metrics), mustJSON(t, want))
+			}
+			if log.count(" AS WITH qt_text_distinct_input") != 1 {
+				t.Fatal("shared input not exercised")
+			}
+			assertNoReductions(t, tx)
+		})
+	}
+}
+
+func TestTextDistinctMixedBatchReductionReuse(t *testing.T) {
+	log := &statementLog{}
+	db := hookedDB(t, log, labelTrendRows)
+	_, d, q := labelTrendFixture(t, 1)
+	detail, denominator := q.Metrics[0], q.Metrics[1]
+	q.Metrics = nil
+	for i := 0; i < 18; i++ {
+		spec := detail
+		spec.ID = fmt.Sprintf("variant-%d", i)
+		spec.GroupLimit = i%5 + 1
+		spec.Sort = []qt.MetricSort{{Key: "value", Dir: []string{"asc", "desc"}[i%2]}}
+		spec.MinCount = qt.MetricMinCount{Min: i % 3}
+		q.Metrics = append(q.Metrics, spec)
+	}
+	q.Metrics = append(q.Metrics, denominator)
+	want := []qt.MetricResult{}
+	for _, spec := range q.Metrics {
+		single := q
+		single.Metrics = []qt.AggSpec{spec}
+		out, err := d.Execute(context.Background(), db, single, qt.PlanOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want = append(want, out.Metrics[0])
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	log.reset(nil)
+	got, err := d.ExecuteIn(context.Background(), tx, q, qt.PlanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual([]qt.MetricResult(got.Metrics), want) {
+		t.Fatal("reduction consumers changed")
+	}
+	if n := log.count("COUNT(DISTINCT"); n != 2 {
+		t.Fatalf("executed %d distinct reductions, want 2", n)
+	}
+	if log.count(" AS WITH qt_text_distinct_input") != 1 {
+		t.Fatal("shared input not exercised")
+	}
+	assertNoReductions(t, tx)
+	limited := d
+	limited.MaxGroups = 1
+	failed, err := limited.ExecuteIn(context.Background(), tx, q, qt.PlanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, metric := range failed.Metrics {
+		if metric.ErrorCode != qt.ErrorCodeResourceLimit {
+			t.Fatal("shared grouped cache bypassed budget", metric)
+		}
+	}
+	assertNoReductions(t, tx)
+}
+
+func TestTextDistinctPreservesMixedAggregateFusion(t *testing.T) {
+	log := &statementLog{}
+	db := hookedDB(t, log, labelTrendRows)
+	_, d, q := labelTrendFixture(t, 1)
+	q.Metrics = append(q.Metrics, qt.AggSpec{ID: "present", Op: "count", Field: "message_id", GroupBy: []string{"day", "family"}})
+	want := []qt.MetricResult{}
+	for _, spec := range q.Metrics {
+		single := q
+		single.Metrics = []qt.AggSpec{spec}
+		out, err := d.Execute(context.Background(), db, single, qt.PlanOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want = append(want, out.Metrics[0])
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	log.reset(nil)
+	got, err := d.ExecuteIn(context.Background(), tx, q, qt.PlanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual([]qt.MetricResult(got.Metrics), want) {
+		t.Fatal("mixed aggregate fusion changed results")
+	}
+	if n := log.count("COUNT(DISTINCT"); n != 2 {
+		t.Fatalf("mixed aggregate fusion repeated distinct reductions: %d", n)
+	}
+	if log.count(" AS WITH qt_text_distinct_input") != 0 {
+		t.Fatal("existing mixed aggregate fusion was replaced")
 	}
 	assertNoReductions(t, tx)
 }

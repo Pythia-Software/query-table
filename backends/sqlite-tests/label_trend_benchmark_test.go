@@ -166,3 +166,51 @@ func BenchmarkLabelTrend(b *testing.B) {
 		})
 	}
 }
+
+// Eighteen top-N/sort consumers of one reduction plus an independent day-only
+// denominator. This catches repeated expensive grouping within a mixed batch.
+func BenchmarkLabelTrendMixed(b *testing.B) {
+	db, d, q := labelTrendFixture(b, 20000)
+	want := labelTrendNative(b, db, q)
+	detail, denominator := q.Metrics[0], q.Metrics[1]
+	q.Metrics = nil
+	for i := 0; i < 18; i++ {
+		spec := detail
+		spec.ID = fmt.Sprintf("variant-%d", i)
+		spec.GroupLimit = i + 1
+		spec.Sort = []qt.MetricSort{{Key: "value", Dir: []string{"asc", "desc"}[i%2]}}
+		q.Metrics = append(q.Metrics, spec)
+	}
+	q.Metrics = append(q.Metrics, denominator)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		start := time.Now()
+		got, err := d.Execute(context.Background(), db, q, qt.PlanOptions{})
+		elapsed := time.Since(start)
+		b.StopTimer()
+		if err != nil {
+			b.Fatal(err)
+		}
+		if got.Total != 40000 || len(got.Metrics) != 19 {
+			b.Fatal("wrong population or metric count")
+		}
+		for j, m := range got.Metrics {
+			ref := want[0]
+			if j == 18 {
+				ref = want[1]
+			}
+			if m.Error != "" || m.GroupCount != int64(len(ref)) || len(m.Buckets) == 0 {
+				b.Fatal("incorrect mixed result", m)
+			}
+			for _, bucket := range m.Buckets {
+				key, _ := json.Marshal(bucket.Keys)
+				n, ok := ref[string(key)]
+				if !ok || bucket.Error != "" || bucket.Value != float64(n) {
+					b.Fatal("mixed bucket differs from native", bucket)
+				}
+			}
+		}
+		b.Logf("execution %d: %s (40000 observations, 19 metrics)", i+1, elapsed)
+		b.StartTimer()
+	}
+}

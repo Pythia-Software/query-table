@@ -31,7 +31,7 @@ type sqliteTextDistinctMetric struct {
 	expression string
 }
 
-func (c *sqliteReductionCache) addTextDistinct(batch metricBatchPlan, q metricRequest, s Schema, o PlanOptions) {
+func (c *sqliteReductionCache) addTextDistinct(ctx context.Context, batch metricBatchPlan, q metricRequest, s Schema, o PlanOptions) {
 	specs := map[string]AggSpec{}
 	for _, spec := range q.Metrics {
 		specs[spec.ID] = spec
@@ -44,6 +44,23 @@ func (c *sqliteReductionCache) addTextDistinct(batch metricBatchPlan, q metricRe
 	}
 	for _, p := range batch.Metrics {
 		spec := specs[p.ID]
+		// Preserve existing fusion when one grouped reduction supplies several
+		// different aggregate leaves (including non-distinct siblings). Sharing
+		// only this member's input would otherwise repeat the fused grouping.
+		if f := c.fusions[sqliteFusionKey(p)]; f != nil && len(f.reductions) > 1 {
+			continue
+		}
+		if f := c.cross[sqliteReductionKey(p)]; f != nil {
+			leaves := 0
+			for _, identity := range f.plan.reduction.keys {
+				if strings.HasPrefix(identity, "value\x00") {
+					leaves++
+				}
+			}
+			if leaves > 1 {
+				continue
+			}
+		}
 		if p.reduction == nil || p.Scope != "allMatching" || spec.ExpressionY != "" || spec.Distribution != nil || spec.MinCount.Measure() != "" {
 			continue
 		}
@@ -96,38 +113,43 @@ func (c *sqliteReductionCache) addTextDistinct(batch metricBatchPlan, q metricRe
 		if len(names) > 128 {
 			continue
 		}
-		where := append(append([]WhereTerm{}, q.Where...), specs[members[0].ID].Where...)
-		filter, _, err := compileSQLiteWhere(where, s, sqliteOptions{Now: o.Now}, o.relations)
+		// Use the ordinary compiler's source projection and separate filter
+		// stages. Moving predicates into the binding SELECT would change window
+		// values (and bindings over aggregate sources) before grouping them.
+		builder, err := newPlanDialect(ctx, s, o, true)
 		if err != nil {
 			continue
 		}
-		input := &sqliteTextDistinctInput{key: "text-input\x00" + key, fields: map[string]ValueSQL{}, args: append(append([]any{}, o.SourceArgs...), filter.Args...)}
+		if err = builder.filter(q.Where); err != nil {
+			continue
+		}
+		if err = builder.filter(specs[members[0].ID].Where); err != nil {
+			continue
+		}
+		input := &sqliteTextDistinctInput{key: "text-input\x00" + key, fields: map[string]ValueSQL{}}
 		raw, checked := []string{}, []string{}
 		for i, name := range names {
 			alias := fmt.Sprintf("t%d", i)
-			f := s.Fields[name]
+			v := builder.raw[name]
 			// Unary + removes inherited affinity: CTAS must preserve invalid storage
 			// classes for the ordinary typed diagnostics instead of coercing them.
-			raw = append(raw, "+("+f.Expr+") AS "+alias)
+			raw = append(raw, "+("+v.Value+") AS "+alias)
 			inherited := "NULL"
-			if f.ValueErrorExpr != "" {
+			if v.Error != "NULL" {
 				inherited = alias + "_inherited"
-				raw = append(raw, f.ValueErrorExpr+" AS "+inherited)
+				raw = append(raw, v.Error+" AS "+inherited)
 			}
 			errorAlias := alias + "_error"
 			checked = append(checked, alias, "COALESCE("+inherited+",qt_v2_field_error("+alias+",'text')) AS "+errorAlias)
 			input.fields[name] = ValueSQL{Value: "CASE WHEN " + errorAlias + " IS NULL THEN " + alias + " END COLLATE BINARY", Error: errorAlias, Type: "text"}
 		}
-		pred := ""
-		if filter.SQL != "" {
-			pred = " WHERE " + sqliteNumberParameters(filter.SQL, len(o.SourceArgs))
-		}
-		rawSQL := "SELECT " + strings.Join(raw, ",") + " FROM (" + o.SourceSQL + ") AS r" + pred
+		rawPlan := builder.finish("SELECT "+strings.Join(raw, ",")+" FROM "+builder.rel, "allMatching", nil)
+		input.args = rawPlan.Args
 		rawName := "qt_text_distinct_input"
-		for strings.Contains(strings.ToLower(rawSQL), rawName) {
+		for strings.Contains(strings.ToLower(rawPlan.SQL), rawName) {
 			rawName += "_"
 		}
-		input.sql = "WITH " + rawName + " AS MATERIALIZED (" + rawSQL + ") SELECT " + strings.Join(checked, ",") + " FROM " + rawName
+		input.sql = "WITH " + rawName + " AS MATERIALIZED (" + rawPlan.SQL + ") SELECT " + strings.Join(checked, ",") + " FROM " + rawName
 		for _, p := range members {
 			c.textDistinct[sqliteReductionKey(p)] = sqliteTextDistinctMetric{input: input, field: nodes[p.ID].args[0].text, groups: specs[p.ID].GroupBy, expression: expressionKey(nodes[p.ID])}
 		}
@@ -170,5 +192,15 @@ func (c *sqliteReductionCache) textDistinctPlan(ctx context.Context, tx *sql.Tx,
 	if len(by) > 0 {
 		statement += " GROUP BY " + strings.Join(by, ",")
 	}
-	return sqliteReplaceStage(p, p.SQLiteReductionStage, statement)
+	prepared, err := sqliteReplaceStage(p, p.SQLiteReductionStage, statement)
+	if err != nil {
+		return p, err
+	}
+	key := sqliteReductionKey(p)
+	if c.shared[key] {
+		// Sort, top-N and minCount variants share this bounded reduction too,
+		// rather than repeating GROUP BY/COUNT(DISTINCT) over the shared input.
+		return c.reuseStage(ctx, tx, prepared, p.SQLiteReductionStage, "text-reduction\x00"+key)
+	}
+	return prepared, nil
 }
