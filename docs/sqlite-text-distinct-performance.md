@@ -20,6 +20,14 @@ five population-sized typed CTE stages across the two metrics, validating both
 the value and error projection of every consumed text field. The two distinct
 counts also need independent grouping sorts and distinct sets.
 
+Homogeneous text-distinct batches prefer this SQL path over speculative
+streamed reduction. An integration probe of the separately merged streaming
+planner read 698,330 observations before its 128 MiB retained-state guard
+declined, then repeated execution through SQL. It made 5,285,852 datetime calls
+and allocated 847,076,016 Go bytes in that run. Selecting the shared SQL input
+directly avoids that discarded scan. Mixed dashboard clauses continue to use
+the streamed planner when eligible.
+
 The new path retains the compiler's source-projection and filter boundaries,
 including window bindings evaluated before result or metric filters. It
 materializes one narrow raw projection, then one TEMP input table

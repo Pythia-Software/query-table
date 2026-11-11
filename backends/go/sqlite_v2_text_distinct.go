@@ -31,6 +31,68 @@ type sqliteTextDistinctMetric struct {
 	expression string
 }
 
+// Homogeneous text-distinct grouping sets use SQLite's shared input instead of
+// speculative Go hash sets. Large distinct populations can exceed the streamed
+// reducer's retained-state bound and otherwise pay for a discarded source scan.
+func sqliteTextDistinctPreferSQL(q QueryRequestV3, s Schema) bool {
+	if len(q.Metrics) < 2 || !sqliteTextDistinctFilters(q.Result.Where) {
+		return false
+	}
+	groups := map[string]bool{}
+	var expression, predicates string
+	for i, spec := range q.Metrics {
+		n, ok := sqliteTextDistinctExpression(spec, s)
+		if !ok {
+			return false
+		}
+		where, _ := json.Marshal(spec.Where)
+		key := expressionKey(n)
+		if i == 0 {
+			expression, predicates = key, string(where)
+		}
+		if key != expression || string(where) != predicates {
+			return false
+		}
+		by, _ := json.Marshal(spec.GroupBy)
+		groups[string(by)] = true
+	}
+	return len(groups) > 1
+}
+
+func sqliteTextDistinctFilters(where []WhereTerm) bool {
+	for _, term := range where {
+		for _, predicate := range term.Predicates() {
+			if strings.HasPrefix(predicate.Field, "@computed/") {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func sqliteTextDistinctExpression(spec AggSpec, s Schema) (*exprNode, bool) {
+	if spec.Scope != "" && spec.Scope != "allMatching" || spec.ExpressionY != "" || spec.Distribution != nil || spec.DateGrouping != nil || spec.MinCount.Measure() != "" || !sqliteTextDistinctFilters(spec.Where) {
+		return nil, false
+	}
+	n, err := parseExpression(metricExpression(spec))
+	if err != nil || !strings.EqualFold(n.op, "count_distinct") || len(n.args) != 1 || n.args[0].op != "field" {
+		return nil, false
+	}
+	eligible := func(name string) bool {
+		f, ok := s.Fields[name]
+		return ok && (f.Kind == FieldText || f.Kind == FieldEnum) && !f.typedValue && !strings.HasPrefix(name, "@computed/")
+	}
+	if !eligible(n.args[0].text) {
+		return nil, false
+	}
+	for _, name := range spec.GroupBy {
+		if !eligible(name) {
+			return nil, false
+		}
+	}
+	return n, true
+}
+
 func (c *sqliteReductionCache) addTextDistinct(ctx context.Context, batch metricBatchPlan, q metricRequest, s Schema, o PlanOptions) {
 	specs := map[string]AggSpec{}
 	for _, spec := range q.Metrics {
@@ -38,9 +100,8 @@ func (c *sqliteReductionCache) addTextDistinct(ctx context.Context, batch metric
 	}
 	groups := map[string][]metricSQLPlan{}
 	nodes := map[string]*exprNode{}
-	eligible := func(name string) bool {
-		f, ok := s.Fields[name]
-		return ok && (f.Kind == FieldText || f.Kind == FieldEnum) && !f.typedValue && !strings.HasPrefix(name, "@computed/")
+	if !sqliteTextDistinctFilters(q.Where) {
+		return
 	}
 	for _, p := range batch.Metrics {
 		spec := specs[p.ID]
@@ -61,25 +122,10 @@ func (c *sqliteReductionCache) addTextDistinct(ctx context.Context, batch metric
 				continue
 			}
 		}
-		if p.reduction == nil || p.Scope != "allMatching" || spec.ExpressionY != "" || spec.Distribution != nil || spec.MinCount.Measure() != "" {
+		if p.reduction == nil || p.Scope != "allMatching" {
 			continue
 		}
-		n, err := parseExpression(metricExpression(spec))
-		if err != nil || !strings.EqualFold(n.op, "count_distinct") || len(n.args) != 1 || n.args[0].op != "field" || !eligible(n.args[0].text) {
-			continue
-		}
-		valid := true
-		for _, name := range spec.GroupBy {
-			valid = valid && eligible(name)
-		}
-		// Computed filters require the full compiler's transitive definition plan.
-		for _, terms := range [][]WhereTerm{q.Where, spec.Where} {
-			for _, term := range terms {
-				for _, pred := range term.Predicates() {
-					valid = valid && !strings.HasPrefix(pred.Field, "@computed/")
-				}
-			}
-		}
+		n, valid := sqliteTextDistinctExpression(spec, s)
 		if !valid {
 			continue
 		}

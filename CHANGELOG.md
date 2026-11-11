@@ -13,6 +13,13 @@
   group limits and execution-local cleanup remain in force. Singleton,
   computed, sampled and page-scoped plans retain their existing paths.
   See [the synthetic benchmark and profiling report](docs/sqlite-text-distinct-performance.md).
+- SQLite metric-only V3 requests can share one stored-source read across
+  counts, distinct counts, scalar reductions, distributions and calendar
+  percentiles with different grouping keys and clause filters. The scan also
+  supplies the request total; compatible percentiles share samples and sorting,
+  and calendar keys are assigned without temporary tables. Unsupported shapes
+  retain the SQL executor and its diagnostics and budgets. See
+  [shared clause scans](docs/sqlite-shared-clause-scans.md).
 
 ## 1.0.5 — 2026-11-10
 

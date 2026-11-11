@@ -2,6 +2,7 @@ package sqlitetests
 
 import (
 	"context"
+	"database/sql"
 	"database/sql/driver"
 	"errors"
 	"fmt"
@@ -52,6 +53,7 @@ func TestTextDistinctBatchParity(t *testing.T) {
 				}
 			}
 			_, d, q := labelTrendFixture(t, 1)
+			d.PopulationCounter = labelTrendPopulationCounter()
 			switch scenario {
 			case "invalid-key":
 				exec("UPDATE observations SET family=40+CAST(id AS INTEGER) WHERE id IN ('2','3')")
@@ -422,10 +424,17 @@ func TestTextDistinctMixedBatchReductionReuse(t *testing.T) {
 	assertNoReductions(t, tx)
 }
 
+func labelTrendPopulationCounter() qt.PopulationCounter {
+	return qt.PopulationCounterFunc(func(ctx context.Context, _ *sql.Tx, _ qt.PopulationCount, count func(context.Context) (int64, error)) (int64, error) {
+		return count(ctx)
+	})
+}
+
 func TestTextDistinctPreservesMixedAggregateFusion(t *testing.T) {
 	log := &statementLog{}
 	db := hookedDB(t, log, labelTrendRows)
 	_, d, q := labelTrendFixture(t, 1)
+	d.PopulationCounter = labelTrendPopulationCounter()
 	q.Metrics = append(q.Metrics, qt.AggSpec{ID: "present", Op: "count", Field: "message_id", GroupBy: []string{"day", "family"}})
 	want := []qt.MetricResult{}
 	for _, spec := range q.Metrics {
@@ -455,6 +464,35 @@ func TestTextDistinctPreservesMixedAggregateFusion(t *testing.T) {
 	}
 	if log.count(" AS WITH qt_text_distinct_input") != 0 {
 		t.Fatal("existing mixed aggregate fusion was replaced")
+	}
+	assertNoReductions(t, tx)
+}
+
+func TestTextDistinctAvoidsSpeculativeStream(t *testing.T) {
+	log := &statementLog{}
+	db := hookedDB(t, log, labelTrendRows)
+	_, d, q := labelTrendFixture(t, 1)
+	log.reset(nil)
+	for _, c := range sqliteCalls {
+		c.Store(0)
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	got, err := d.ExecuteIn(context.Background(), tx, q, qt.PlanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Total != 9 || len(got.Metrics) != 2 {
+		t.Fatal(got)
+	}
+	if log.count("WITH qt_shared_source") != 0 || log.count(" AS WITH qt_text_distinct_input") != 1 {
+		t.Fatal("text distinct grouping sets did not select the shared SQL input")
+	}
+	if n := sqliteCalls["qt_v2_field_error"].Load(); n != 27 {
+		t.Fatalf("text input checked %d fields, want 27", n)
 	}
 	assertNoReductions(t, tx)
 }
