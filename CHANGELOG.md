@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Performance
+
+- SQLite shared metric reads accept numeric group keys, preserving numeric
+  identity across INTEGER and REAL storage, ordering, NULLs, and binary text
+  keys. Go hosts can set `QueryDatasetV3.SQLiteSharedMetricsSource` to certify
+  deterministic source SQL and bindings, allowing shared reads over derived
+  `UNION ALL` sources and host-defined day/hour fields. The narrow projection
+  evaluates each binding once per matching row and supplies all eligible
+  clauses and their total. Internal aliases keep case-sensitive field names
+  distinct, and projections preserve binding affinity for clause filters.
+  Window bindings keep their original population before request filtering.
+  Existing diagnostics, budgets, and fallback remain in force. See
+  [shared clause scans](docs/sqlite-shared-clause-scans.md).
+
 ## 1.0.7 — 2026-11-11
 
 Version 1.0.6 was tagged but no libraries were published: the release gate

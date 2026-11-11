@@ -182,7 +182,7 @@ func rowMetricShape(spec AggSpec, s Schema, bound func(string, FieldSpec) bool) 
 	m.binding = s.Fields[m.field]
 	for _, name := range spec.GroupBy {
 		f := s.Fields[name]
-		if !bound(name, f) || f.Kind != FieldText && f.Kind != FieldEnum && f.Kind != FieldBool {
+		if !bound(name, f) || f.Kind != FieldText && f.Kind != FieldEnum && f.Kind != FieldBool && f.Kind != FieldNumber {
 			return m, fmt.Errorf("%w: grouping %s", errRowsUnsupported, name)
 		}
 	}
@@ -387,16 +387,21 @@ func (c *rowMetricCohort) group(row map[string]any, limit int) (*rowMetricGroup,
 	c.keyBuf = c.keyBuf[:0]
 	for i := range c.groupFields {
 		field := &c.groupFields[i]
-		// Length-prefixed text and separate NULL/boolean markers preserve the
+		// Length-prefixed text and separate NULL/boolean/number markers preserve the
 		// typed tuple identity without JSON or allocations on group hits.
 		switch value := row[field.name].(type) {
 		case nil:
 			c.keyBuf = append(c.keyBuf, 0)
 		case float64:
-			if !math.IsNaN(value) { // SQLite stores NaN as NULL.
+			if math.IsNaN(value) { // SQLite stores NaN as NULL.
+				c.keyBuf = append(c.keyBuf, 0)
+			} else if field.binding.Kind == FieldNumber {
+				if err := c.numberKey(value); err != nil {
+					return nil, err
+				}
+			} else {
 				return c.newGroup(row, limit)
 			}
-			c.keyBuf = append(c.keyBuf, 0)
 		case bool:
 			if field.binding.Kind != FieldBool {
 				return c.newGroup(row, limit)
@@ -407,6 +412,12 @@ func (c *rowMetricCohort) group(row map[string]any, limit int) (*rowMetricGroup,
 			}
 			c.keyBuf = append(c.keyBuf, marker)
 		case int64:
+			if field.binding.Kind == FieldNumber {
+				if err := c.numberKey(float64(value)); err != nil {
+					return nil, err
+				}
+				continue
+			}
 			if field.binding.Kind != FieldBool || value < 0 || value > 1 {
 				return c.newGroup(row, limit)
 			}
@@ -431,6 +442,21 @@ func (c *rowMetricCohort) group(row map[string]any, limit int) (*rowMetricGroup,
 	return c.newGroup(row, limit)
 }
 
+// SQLite groups equal INTEGER/REAL values together, including both signed
+// zeros. Restrict the float key to the exact numeric domain; unsafe integers
+// need SQL's storage-aware comparison and retain the original executor.
+func (c *rowMetricCohort) numberKey(value float64) error {
+	if sqliteNumericError(value) != "" || sqliteUnsafe(value) {
+		return fmt.Errorf("%w: numeric grouping domain", errRowsUnsupported)
+	}
+	if value == 0 {
+		value = 0
+	}
+	c.keyBuf = append(c.keyBuf, 4)
+	c.keyBuf = binary.LittleEndian.AppendUint64(c.keyBuf, math.Float64bits(value))
+	return nil
+}
+
 func (c *rowMetricCohort) newGroup(row map[string]any, limit int) (*rowMetricGroup, error) {
 	// Validate in field order before enforcing the budget, retaining fallback
 	// diagnostics even when a row could not be encoded by the lookup path.
@@ -446,6 +472,9 @@ func (c *rowMetricCohort) newGroup(row map[string]any, limit int) (*rowMetricGro
 		}
 		if field.binding.Kind == FieldBool && v != nil {
 			v = v.(int64) != 0
+		}
+		if field.binding.Kind == FieldNumber && v != nil {
+			v, _ = sqliteFloat(v)
 		}
 		keys[i] = v
 	}

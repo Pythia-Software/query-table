@@ -17,11 +17,11 @@ import (
 // percentiles of the same input share samples and their sort. Calendar keys
 // are computed once per configuration per row, without a scratch relation.
 //
-// This is speculative only over proved stored sources. Unsupported shapes,
-// storage or memory requirements decline the entire batch to the SQL executor,
-// which retains its diagnostics and budget precedence. No host expression is
-// evaluated by a failed speculation. Rows and host population counters keep
-// their existing execution paths.
+// Speculation requires a proved stored source or an explicit host assertion
+// of determinism. Unsupported shapes, storage or memory requirements decline
+// the batch to the SQL executor, retaining diagnostics and budget precedence.
+// Without the assertion, a failed proof never evaluates host expressions.
+// Rows and host population counters keep their existing execution paths.
 func (d QueryDatasetV3) sqliteSharedMetrics(ctx context.Context, tx *sql.Tx, request QueryRequestV3, o PlanOptions, maxGroups int) ([]MetricResult, int64, bool, error) {
 	if d.Dialect != "sqlite" || request.Rows || len(request.Metrics) < 2 || d.PopulationCounter != nil || sqliteTextDistinctPreferSQL(request, d.Schema) {
 		return nil, 0, false, nil
@@ -121,6 +121,18 @@ func (d QueryDatasetV3) sqliteSharedMetrics(ctx context.Context, tx *sql.Tx, req
 	if len(calendars) > 0 {
 		fields[s.IDField] = true
 	}
+	for _, term := range q.Where {
+		for _, predicate := range term.Predicates() {
+			proof = append(proof, predicate.Field)
+		}
+	}
+	if d.SQLiteSharedMetricsSource {
+		// Clause filters run over the materialized bindings too, so include
+		// every reached field even if no reducer reads its value.
+		for _, name := range proof {
+			fields[name] = true
+		}
+	}
 	names := []string{}
 	for name := range fields {
 		if !sqliteDirectBinding(name, s.Fields[name]) {
@@ -130,30 +142,42 @@ func (d QueryDatasetV3) sqliteSharedMetrics(ctx context.Context, tx *sql.Tx, req
 	}
 	sort.Strings(names)
 	proof = append(proof, names...)
-	for _, term := range q.Where {
-		for _, predicate := range term.Predicates() {
-			proof = append(proof, predicate.Field)
-		}
-	}
 	sort.Strings(proof)
 	proof = uniqueStrings(proof)
 	// Prove only the host's bindings. Request predicates are our own compiled
 	// expressions (including datetime conversion), not opaque host SQL.
-	stored, err := d.sqliteStoredFields(ctx, tx, proof, nil, o)
-	if err != nil || !stored {
-		return nil, 0, false, err
+	if !d.SQLiteSharedMetricsSource {
+		stored, err := d.sqliteStoredFields(ctx, tx, proof, nil, o)
+		if err != nil || !stored {
+			return nil, 0, false, err
+		}
 	}
 	args := append([]any{}, d.SourceArgs...)
 	// SQLite assigns anonymous source placeholders in textual order. Keep the
 	// source ahead of the numbered clause-filter parameters in SELECT, as the
 	// compiled executor and direct distribution scan do.
-	sourceName := "qt_shared_source"
-	for strings.Contains(strings.ToLower(d.SourceSQL), sourceName) {
-		sourceName += "_"
-	}
 	projections := []string{}
-	for _, name := range names {
-		projections = append(projections, "+("+s.Fields[name].Expr+")")
+	inputProjections := []string{}
+	filterSchema := d.Schema
+	if d.SQLiteSharedMetricsSource {
+		filterSchema.Fields = make(map[string]FieldSpec, len(names))
+	}
+	for i, name := range names {
+		expr := "+(" + s.Fields[name].Expr + ")"
+		if d.SQLiteSharedMetricsSource {
+			// A materialization fence evaluates each reached binding once for
+			// each matching row, even when several clause flags also use it.
+			// Generated aliases keep case-sensitive schema names distinct in
+			// SQLite. Preserve expression affinity inside the CTE for filters;
+			// only the final driver projection strips the declared type.
+			alias := fmt.Sprintf("f%d", i)
+			inputProjections = append(inputProjections, "("+s.Fields[name].Expr+") AS "+queryIdent(alias))
+			field := s.Fields[name]
+			field.Expr = "r." + queryIdent(alias)
+			filterSchema.Fields[name] = field
+			expr = "+(" + field.Expr + ")"
+		}
+		projections = append(projections, expr)
 	}
 	flags := map[string]int{}
 	var flagErr error
@@ -165,7 +189,7 @@ func (d QueryDatasetV3) sqliteSharedMetrics(ctx context.Context, tx *sql.Tx, req
 		if index, ok := flags[string(key)]; ok {
 			return index
 		}
-		filter, _, e := compileSQLiteWhere(where, d.Schema, sqliteOptions{Now: o.Now}, o.relations)
+		filter, _, e := compileSQLiteWhere(where, filterSchema, sqliteOptions{Now: o.Now}, o.relations)
 		if e != nil {
 			flagErr = e
 			return -1
@@ -183,7 +207,7 @@ func (d QueryDatasetV3) sqliteSharedMetrics(ctx context.Context, tx *sql.Tx, req
 	if err != nil || flagErr != nil {
 		return nil, 0, false, ctx.Err()
 	}
-	filter, _, err := compileSQLiteWhere(q.Where, d.Schema, sqliteOptions{Now: o.Now}, o.relations)
+	filter, _, err := compileSQLiteWhere(q.Where, filterSchema, sqliteOptions{Now: o.Now}, o.relations)
 	if err != nil {
 		return nil, 0, false, ctx.Err()
 	}
@@ -191,17 +215,56 @@ func (d QueryDatasetV3) sqliteSharedMetrics(ctx context.Context, tx *sql.Tx, req
 	if len(projections) == 0 {
 		projections = append(projections, "1")
 	}
-	statement := "WITH " + sourceName + " AS NOT MATERIALIZED (" + d.SourceSQL + ") SELECT " + strings.Join(projections, ",") + " FROM " + sourceName + " AS r"
+	_, _, maxPopulation, maxBytes, _ := d.limits()
+	// Host bindings and predicate relations can name relations too. Avoid
+	// shadowing any of their names with our statement-local CTEs.
+	hostSQL := strings.ToLower(d.SourceSQL + " " + strings.Join(inputProjections, ",") + " " + strings.Join(projections, ",") + " " + filter.SQL)
+	sourceName := "qt_shared_source"
+	for strings.Contains(hostSQL, sourceName) {
+		sourceName += "_"
+	}
+	statement := "WITH " + sourceName + " AS NOT MATERIALIZED (" + d.SourceSQL + ")"
+	input := " FROM " + sourceName + " AS r"
+	if d.SQLiteSharedMetricsSource {
+		bindingsName := "qt_shared_bindings"
+		for strings.Contains(hostSQL, bindingsName) {
+			bindingsName += "_"
+		}
+		if len(inputProjections) == 0 {
+			inputProjections = append(inputProjections, "1")
+		}
+		// Match the compiler's binding-before-filter boundary. SQLite may
+		// flatten row-local scalar projections, but a window binding must see
+		// the full authorized source before either population or clause filters.
+		statement += "," + bindingsName + " AS NOT MATERIALIZED (SELECT " + strings.Join(inputProjections, ",") + input + ")"
+		input = " FROM " + bindingsName + " AS r"
+	}
 	if filter.SQL != "" {
-		statement += " WHERE " + sqliteNumberParameters(filter.SQL, len(args))
+		input += " WHERE " + sqliteNumberParameters(filter.SQL, len(args))
 		args = append(args, filter.Args...)
 	}
+	if d.SQLiteSharedMetricsSource {
+		valuesName := "qt_shared_values"
+		for strings.Contains(hostSQL, valuesName) {
+			valuesName += "_"
+		}
+		// Retain one sentinel row so a truncated projection always declines
+		// rather than returning a partial total. Bound the materialization
+		// before SQLite builds it, not just while Go consumes its rows.
+		limit := sqliteDirectPopulation
+		if len(calendars) > 0 {
+			limit = min(limit, maxPopulation)
+		}
+		statement += "," + valuesName + " AS MATERIALIZED (SELECT *" + input + " LIMIT " + strconv.Itoa(limit+1) + ")"
+		input = " FROM " + valuesName + " AS r"
+	}
+	statement += " SELECT " + strings.Join(projections, ",") + input
 	scanError := func(err error) ([]MetricResult, int64, bool, error) {
-		// A clause filter may throw while opening the cursor or advancing it.
-		// Its error cannot be attributed inside the shared statement. Discard
+		// A clause filter or declared binding may throw while opening the cursor
+		// or advancing it. Its error cannot be attributed here. Discard
 		// speculation and let the original executor count the population and
 		// isolate each clause. Cancellation and request diagnostics still fail.
-		if len(flags) > 0 {
+		if len(flags) > 0 || d.SQLiteSharedMetricsSource {
 			if _, _, clause := metricClauseError(ctx, err); clause {
 				return nil, 0, false, nil
 			}
@@ -220,7 +283,6 @@ func (d QueryDatasetV3) sqliteSharedMetrics(ctx context.Context, tx *sql.Tx, req
 	}
 	row := make(map[string]any, len(names)+len(calendars))
 	matches := make([]bool, len(flags))
-	_, _, maxPopulation, maxBytes, _ := d.limits()
 	var total, calendarBytes int64
 	for rows.Next() {
 		if err = rows.Scan(targets...); err != nil {
