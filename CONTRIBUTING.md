@@ -15,22 +15,41 @@ Requirements:
 - npm 11.5.1 or newer
 - Go 1.25 or newer for the backend package
 
-Install exact dependencies and run the normal development gate:
+Install exact dependencies and run the development gate:
 
 ```bash
 npm ci
-npm run check
+npm run check:fast
 ```
 
-Useful commands:
+The gate has three tiers:
+
+```bash
+npm run check:fast       # about 30 seconds: wire codegen, type checks, unit tests, Go tests, SQLite parity
+npm run check            # check:fast plus the SQLite race suite (several minutes)
+npm run release:check    # complete pre-release gate, including packaging and audits
+```
+
+The pre-push hook runs the tier that matches the pushed files: documentation
+changes run only the wire codegen check; backend, schema, wire codegen and
+lockfile changes run `npm run check`; everything else runs `npm run check:fast`.
+Set `QT_PUSH_CHECK=docs`, `fast` or `full` to choose a tier yourself. Pull
+requests run the full `npm run check` in GitHub Actions.
+
+Type checks and unit tests resolve workspace packages to their source, so they
+need no package build.
+
+Other useful commands:
 
 ```bash
 npm test                 # JavaScript and React unit tests
-npm run typecheck        # declarations plus source/example/demo type checks
+npm run test:changed     # unit tests affected by changes since origin/main
+npm run typecheck        # all TypeScript projects; add a name to check one: npm run typecheck -- ui
 npm run build:demo       # production Vite build
 npm run package:check    # tarballs, exports, types, runtime imports, CLI
-npm run release:check    # complete pre-release gate, including audits
 npm run demo             # local playground on http://localhost:5179
+npm run test:demo -- menu dnd   # browser checks against a private demo server
+npm run demo:screenshot -- /menus   # screenshot of a demo page
 npm run check:showcase   # DuckDB tests, static showcase build and browser checks
 ```
 
@@ -45,8 +64,9 @@ go vet ./...
 For showcase changes, install the browser with `npx playwright install chromium`
 and run `npm run check:showcase`. Demo verification runs locally; it is not
 triggered by pushes to `main`. See [the public demo guide](docs/public-demo.md)
-for static hosting and Linux browser dependencies. Only version tags trigger
-the GitHub Actions npm release workflow.
+for static hosting and Linux browser dependencies. Pull requests and pushes to
+`main` run the `Check` workflow; only version tags trigger the npm release
+workflow.
 
 ## Pull requests
 
@@ -57,8 +77,8 @@ the GitHub Actions npm release workflow.
   storage must remain explicit opt-ins.
 - Keep TypeScript and Go validation rules in sync when changing the wire format,
   operators, aggregation capabilities, or resource limits.
-- Run `npm run check` before requesting review. Packaging changes must also pass
-  `npm run package:check`.
+- Run `npm run check:fast` before requesting review; CI runs the full
+  `npm run check`. Packaging changes must also pass `npm run package:check`.
 
 Maintainers may ask to split broad changes or revise an API before merging. A
 merged contribution may be included in a later release rather than published

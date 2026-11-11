@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Development
+
+- The development gate has tiers. `npm run check:fast` covers wire codegen,
+  type checks, unit tests, Go tests and SQLite parity in about 30 seconds;
+  `npm run check` adds the SQLite race suite. The pre-push hook chooses a tier
+  from the pushed paths, and a new `Check` workflow runs the full gate on pull
+  requests and on `main`.
+- Type checks and unit tests resolve workspace packages to source, so
+  `npm run typecheck` no longer builds packages or writes `dist`.
+- `npm run test:demo -- <check>` and `npm run demo:screenshot -- <page>` run
+  browser checks against a private demo server on a free port.
+- `QueryBuilder.tsx` and `MetricsEditor.tsx` are split into smaller modules
+  with unchanged exports.
+- Added `AGENTS.md`, a workspace setup script and Conductor repository
+  settings.
+
 ## 1.0.8 — 2026-11-11
 
 ### Performance

@@ -35,7 +35,7 @@ try {
   assert(feedback.includes(comment));
   assert.match(feedback, /\*\*App:\*\* query-table playground/);
   assert.match(feedback, /qt-qb-section-header/);
-  assert.match(feedback, /QueryBuilder\.tsx/);
+  assert.match(feedback, /(QueryBuilder|queryBuilder\/\w+)\.tsx/);
   await page.reload();
   await page.getByRole("button", { name: "Start feedback mode", exact: true }).click();
   assert((await copy()).includes(comment), "Saved notes survive reloads");
@@ -77,7 +77,7 @@ try {
   const sheetFeedback = await copy();
   assert(sheetFeedback.includes(sheetComment));
   const sheetAnnotation = sheetFeedback.slice(sheetFeedback.lastIndexOf("### "));
-  assert.match(sheetAnnotation, /\*\*Source:\*\* .*QueryBuilder\.tsx/);
+  assert.match(sheetAnnotation, /\*\*Source:\*\* .*(QueryBuilder|queryBuilder\/\w+)\.tsx/);
   assert.match(sheetAnnotation, /qt-mobile-form-field/);
   assert.equal(await sheet.count(), 1, "Annotating does not close the sheet");
   await page.getByRole("button", { name: "Exit", exact: true }).click();

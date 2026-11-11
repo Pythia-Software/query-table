@@ -1,12 +1,23 @@
 {
-  "extends": "../tsconfig.base.json",
+  "extends": [
+    "../tsconfig.base.json",
+    "../tsconfig.source-paths.json"
+  ],
   "compilerOptions": {
     "noEmit": true,
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2020",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "resolveJsonModule": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["*.tsx"]
+  "include": [
+    "*.tsx"
+  ]
 }
