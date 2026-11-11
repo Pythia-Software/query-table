@@ -18,10 +18,11 @@ import (
 // metrics that consume it. Statement failures disable sharing and retry the
 // ordinary independently compiled plans inside their metric savepoints.
 type sqliteTextDistinctInput struct {
-	key, sql string
-	args     []any
-	fields   map[string]ValueSQL
-	disabled bool
+	key, sql    string
+	nativeProof string
+	args        []any
+	fields      map[string]ValueSQL
+	disabled    bool
 }
 
 type sqliteTextDistinctMetric struct {
@@ -190,6 +191,17 @@ func (c *sqliteReductionCache) addTextDistinct(ctx context.Context, batch metric
 			input.fields[name] = ValueSQL{Value: "CASE WHEN " + errorAlias + " IS NULL THEN " + alias + " END COLLATE BINARY", Error: errorAlias, Type: "text"}
 		}
 		rawPlan := builder.finish("SELECT "+strings.Join(raw, ",")+" FROM "+builder.rel, "allMatching", nil)
+		// If every member already has a compact native reduction, prove the
+		// shared raw projection before adding population-sized materialization.
+		// Successful stored-read proof preserves those smaller existing plans.
+		native := true
+		for _, p := range members {
+			f := c.cross[sqliteReductionKey(p)]
+			native = native && f != nil && f.integer != nil
+		}
+		if native {
+			input.nativeProof = rawPlan.SQL
+		}
 		input.args = rawPlan.Args
 		rawName := "qt_text_distinct_input"
 		for strings.Contains(strings.ToLower(rawPlan.SQL), rawName) {
@@ -206,6 +218,17 @@ func (c *sqliteReductionCache) textDistinctPlan(ctx context.Context, tx *sql.Tx,
 	input := m.input
 	table, ok := c.tables[input.key]
 	if !ok {
+		if input.nativeProof != "" {
+			direct, err := sqliteStoredProjection(ctx, tx, input.nativeProof, input.args)
+			if err != nil {
+				return p, err
+			}
+			input.nativeProof = "" // A declined proof need not be repeated.
+			if direct {
+				input.disabled = true
+				return c.plan(ctx, tx, p)
+			}
+		}
 		table = fmt.Sprintf("_qt_reduction_%d", sqliteReductionSequence.Add(1))
 		c.tables[input.key] = table // Register ownership before interruptible DDL.
 		if _, err := tx.ExecContext(ctx, "CREATE TEMP TABLE "+table+" AS "+input.sql, input.args...); err != nil {

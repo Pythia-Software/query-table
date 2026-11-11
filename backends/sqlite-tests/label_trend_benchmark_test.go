@@ -24,9 +24,14 @@ func labelTrendFixture(tb testing.TB, messages int) (*sql.DB, qt.QueryDatasetV3,
 	if err != nil {
 		tb.Fatal(err)
 	}
+	return labelTrendFixtureWithDB(tb, messages, db)
+}
+
+func labelTrendFixtureWithDB(tb testing.TB, messages int, db *sql.DB) (*sql.DB, qt.QueryDatasetV3, qt.QueryRequestV3) {
+	tb.Helper()
 	db.SetMaxOpenConns(1)
 	tb.Cleanup(func() { db.Close() })
-	_, err = db.Exec(fmt.Sprintf(`PRAGMA temp_store=MEMORY;
+	_, err := db.Exec(fmt.Sprintf(`PRAGMA temp_store=MEMORY;
  CREATE TABLE observations(id TEXT PRIMARY KEY,message_id TEXT,day TEXT,family TEXT,occurred_at TEXT);
  WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<%d), labels(j) AS (VALUES(0),(1))
  INSERT INTO observations SELECT printf('%%064d:%%d',i,j),printf('%%064d',i),date('2026-08-13','+'||(i%%90)||' days'),

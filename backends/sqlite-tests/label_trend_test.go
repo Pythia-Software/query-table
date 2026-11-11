@@ -496,3 +496,37 @@ func TestTextDistinctAvoidsSpeculativeStream(t *testing.T) {
 	}
 	assertNoReductions(t, tx)
 }
+
+func TestTextDistinctPreservesCompactStoredPlans(t *testing.T) {
+	log := &statementLog{}
+	db := hookedDB(t, log, labelTrendRows)
+	_, d, q := labelTrendFixture(t, 1)
+	q.Result.Where = nil
+	want := []qt.MetricResult{}
+	for _, spec := range q.Metrics {
+		single := q
+		single.Metrics = []qt.AggSpec{spec}
+		got, err := d.Execute(context.Background(), db, single, qt.PlanOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want = append(want, got.Metrics[0])
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	log.reset(nil)
+	got, err := d.ExecuteIn(context.Background(), tx, q, qt.PlanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual([]qt.MetricResult(got.Metrics), want) {
+		t.Fatal("compact stored plans changed results")
+	}
+	if log.count(" AS WITH qt_text_distinct_input") != 0 || log.count("qt_integer_input") != 2 {
+		t.Fatal("stored columns lost their compact reductions")
+	}
+	assertNoReductions(t, tx)
+}
