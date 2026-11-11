@@ -194,6 +194,15 @@ type QueryDatasetV3 struct {
 	// example from a host cache keyed by data generation. Nil runs every count.
 	// See PopulationCounter.
 	PopulationCounter PopulationCounter
+	// SQLiteSharedMetricsSource certifies that SourceSQL, its schema bindings
+	// and predicate relations are deterministic and side-effect-free within the
+	// authorized transaction. Eligible metric-only batches may then share a
+	// materialized narrow projection even when the stored-source proof fails
+	// (for example a UNION ALL or a host-defined calendar expression).
+	// A declined scan can re-read the source to preserve SQL diagnostics and
+	// budgets, so volatile expressions must never opt in. False keeps the
+	// automatic stored-source proof. This is a host assertion, never query input.
+	SQLiteSharedMetricsSource bool
 	// stageUngrouped sends ungrouped requests through the staged executor;
 	// see TestOnlyStageUngrouped.
 	stageUngrouped bool
