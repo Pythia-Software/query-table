@@ -1,6 +1,6 @@
 # SQLite text distinct metric batches
 
-Version 1.0.6 shares filtered, validated inputs for exact text `COUNT_DISTINCT`
+Version 1.0.7 shares filtered, validated inputs for exact text `COUNT_DISTINCT`
 metrics across different grouping lists. A `[day,family]` count and a `[day]`
 count each reduce the shared observations independently. Overlapping labels
 therefore never inflate the denominator.
@@ -103,8 +103,10 @@ was a shared development machine with other processes active: repeated timings
 are local observations, not an idle-machine latency guarantee or a production
 forecast.
 
-The baseline is v1.0.5 (`279284c`); the candidate is the v1.0.6 executor.
-The driver, fixture and benchmark source are identical between them.
+The baseline is v1.0.5 (`279284c`); the candidate is the v1.0.7 executor.
+The driver, fixture and benchmark source are identical between them. Measurements
+used the executor tree merged in `e168e7a` for the unshipped v1.0.6 tag; v1.0.7
+changes release metadata and CI toolchain selection only.
 
 ### Alternating control on the integrated implementation
 
@@ -132,7 +134,7 @@ The four-execution means were 8.392 / 6.139 s wall and 8.382 / 5.482 s CPU
 
 ### Separate-version repetitions
 
-The following serial runs use separately compiled v1.0.5 and integrated v1.0.6
+The following serial runs use separately compiled v1.0.5 and integrated v1.0.7
 binaries, identical modernc/fixtures, and no driver fault hook. Under the later
 changing machine load, CPU work decreased while wall medians increased. These
 wall figures do **not** establish an end-to-end latency improvement; they are
@@ -142,13 +144,13 @@ Small fixtures used 50 executions, measured earlier in the session.
 | Workload | Version | First wall / CPU | Subsequent median wall / CPU |
 | --- | --- | --- | --- |
 | 972,298 observations | 1.0.5 | 15.342 / 9.402 s | 14.460 / 9.563 s |
-| 972,298 observations | 1.0.6 | 9.781 / 6.048 s | 16.368 / 6.289 s |
+| 972,298 observations | 1.0.7 | 9.781 / 6.048 s | 16.368 / 6.289 s |
 | Selective: 21,604 observations | 1.0.5 | 2.645 / 2.576 s | 3.246 / 2.606 s |
-| Selective: 21,604 observations | 1.0.6 | 5.719 / 1.966 s | 4.546 / 1.883 s |
+| Selective: 21,604 observations | 1.0.7 | 5.719 / 1.966 s | 4.546 / 1.883 s |
 | Small: 4,000 observations | 1.0.5 | 38.309 / 37.950 ms | 32.655 / 34.701 ms |
-| Small: 4,000 observations | 1.0.6 | 22.793 / 22.587 ms | 30.425 / 28.811 ms |
+| Small: 4,000 observations | 1.0.7 | 22.793 / 22.587 ms | 30.425 / 28.811 ms |
 | Small selective: 88 observations | 1.0.5 | 18.954 / 19.189 ms | 18.478 / 15.036 ms |
-| Small selective: 88 observations | 1.0.6 | 8.807 / 7.851 ms | 13.102 / 8.610 ms |
+| Small selective: 88 observations | 1.0.7 | 8.807 / 7.851 ms | 13.102 / 8.610 ms |
 
 Full-fixture CPU median fell 34.2%; the selective CPU median fell
 27.7%. CPU sums all threads and can exceed wall time for a short execution.
@@ -157,18 +159,18 @@ Full-fixture final repetitions (seconds, first then three subsequent):
 
 - v1.0.5 wall: `15.341857, 17.376245, 14.459723, 13.404681`;
   CPU: `9.401982, 9.437225, 9.570146, 9.562821`.
-- v1.0.6 wall: `9.780711, 13.223745, 16.368077, 19.818278`;
+- v1.0.7 wall: `9.780711, 13.223745, 16.368077, 19.818278`;
   CPU: `6.047924, 6.025331, 6.289122, 6.295699`.
 - Selective v1.0.5 wall: `2.645411, 3.015084, 3.245959, 4.025920`;
   CPU: `2.576309, 2.424251, 2.685030, 2.605736`.
-- Selective v1.0.6 wall: `5.718775, 4.546017, 2.942051, 5.163670`;
+- Selective v1.0.7 wall: `5.718775, 4.546017, 2.942051, 5.163670`;
   CPU: `1.965918, 1.933536, 1.733064, 1.883189`.
 
 The final native references took 3.481 / 2.859 s in the baseline process and
 4.059 / 2.103 s in the candidate process (day/family, then day). They omit the
 executor's validation/response contract and are not alternative implementations.
 
-| Work per full executor execution | 1.0.5 | 1.0.6 |
+| Work per full executor execution | 1.0.5 | 1.0.7 |
 | --- | ---: | ---: |
 | Authorized-source reads, including population count | 3 | 2 |
 | Datetime scalar calls | 5,833,788 | 3,889,192 |
@@ -199,7 +201,7 @@ reference. Minimum-count variants and mixed aggregate fusion have separate
 regression tests.
 
 Raw logs, CPU profiles and text summaries are attached to the
-[v1.0.6 release](https://github.com/Pythia-Software/query-table/releases/tag/v1.0.6).
+[v1.0.7 release](https://github.com/Pythia-Software/query-table/releases/tag/v1.0.7).
 The changing shared-machine wall times are an explicit limitation. The
 alternating control and lower CPU/allocation/callback work support the executor
 improvement; no production latency forecast is made.
