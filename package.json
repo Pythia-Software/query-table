@@ -1,6 +1,6 @@
 {
   "name": "query-table-monorepo",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "private": true,
   "description": "Schema-driven data table \u2014 core, react, and ui packages.",
   "license": "MIT",

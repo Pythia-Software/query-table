@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 1.0.9 — 2026-11-11
+
+No library behaviour changes. This release carries the reorganised UI source
+and the development tooling below.
+
 ### Development
 
 - The development gate has tiers. `npm run check:fast` covers wire codegen,
