@@ -1,3 +1,4 @@
 #!/usr/bin/env sh
 
-npm run check
+. scripts/use-node.sh
+node scripts/pre-push-check.mjs

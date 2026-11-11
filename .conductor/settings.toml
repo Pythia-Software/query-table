@@ -1,0 +1,11 @@
+"$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
+
+[scripts]
+setup = "sh scripts/setup-workspace.sh"
+run_mode = "concurrent"
+
+[scripts.run.demo]
+available_in = [ "local" ]
+command = ". scripts/use-node.sh && npm run dev --workspace @pythia-software/query-table-demo -- --port $CONDUCTOR_PORT --strictPort"
+default = true
+icon = "play"

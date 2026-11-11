@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "compilerOptions": {
+    "paths": {
+      "@pythia-software/query-table-core": ["./packages/core/src/index.ts"],
+      "@pythia-software/query-table-react": ["./packages/react/src/index.ts"],
+      "@pythia-software/query-table-ui": ["./packages/ui/src/index.ts"],
+      "@pythia-software/query-table-duckdb": ["./packages/duckdb/src/index.ts"]
+    }
+  }
+}

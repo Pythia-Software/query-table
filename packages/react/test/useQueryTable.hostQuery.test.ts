@@ -274,7 +274,17 @@ describe("hostQuery: URL", () => {
   });
 
   it("refuses an owned parameter that is the table's own", () => {
-    expect(() => mount({ syncUrl: true, hostQuery: { ...hostQuery, ownedParameters: ["q"] } })).toThrow(/cannot include the table's own "q"/);
+    // The throw is the assertion. Keep React's and jsdom's reports of it out
+    // of the test output, where they read as a failure.
+    const quiet = (event: ErrorEvent) => event.preventDefault();
+    window.addEventListener("error", quiet);
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect(() => mount({ syncUrl: true, hostQuery: { ...hostQuery, ownedParameters: ["q"] } })).toThrow(/cannot include the table's own "q"/);
+    } finally {
+      consoleError.mockRestore();
+      window.removeEventListener("error", quiet);
+    }
     root = undefined;
   });
 });

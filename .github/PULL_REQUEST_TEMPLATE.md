@@ -6,7 +6,7 @@
 
 <!-- List the exact checks you ran. -->
 
-- [ ] `npm run check`
+- [ ] `npm run check:fast` (CI runs the full `npm run check`)
 - [ ] `npm run package:check` (required for packaging/export changes)
 - [ ] Documentation and `CHANGELOG.md` updated for user-visible changes
 
