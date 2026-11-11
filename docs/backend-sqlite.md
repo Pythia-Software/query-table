@@ -544,6 +544,14 @@ set-based update, using the same Go timezone boundaries as the per-row fallback.
 See [real Pharos performance measurements](sqlite-pharos-performance.md) for
 workloads, guarantees, remaining costs and opt-in reproduction commands.
 
+Metric-only requests can also combine stored-field scalar and distribution
+clauses, different groupings and clause filters, and scalar calendar metrics
+with `includeEmpty: false` in one streamed read. That read supplies the total,
+shares percentile samples and computes calendar keys without scratch tables.
+Calendar population and byte budgets still apply. See
+[shared clause scans](sqlite-shared-clause-scans.md) for eligibility,
+conservative fallbacks and the synthetic 19-clause benchmark.
+
 Stored-source inspection also permits cheap typed source checks to be inlined,
 while retaining a single materialized datetime value and its error sidecar.
 The complete `SQLiteV2Functions()` registration includes the direct datetime
