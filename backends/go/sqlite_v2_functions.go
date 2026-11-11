@@ -255,11 +255,24 @@ func sqliteV2Datetime(value driver.Value, format string) (any, string) {
 	if value == nil {
 		return nil, ""
 	}
+	if value == "" && format != "unix-millis" && format != "unix-seconds" {
+		return nil, ""
+	}
+	stamp, code := sqliteV2DatetimeInstant(value, format)
+	if code != "" {
+		return nil, code
+	}
+	return stamp.UTC().Format("2006-01-02T15:04:05.000000000Z"), ""
+}
+
+// sqliteV2DatetimeInstant decodes a non-NULL, nonempty storage value without
+// formatting it. Calendar reducers can use the same validation directly.
+func sqliteV2DatetimeInstant(value driver.Value, format string) (time.Time, string) {
 	var stamp time.Time
 	var err error
 	if format == "unix-millis" || format == "unix-seconds" {
 		if _, ok := sqliteFloat(value); !ok {
-			return nil, "storage_type"
+			return stamp, "storage_type"
 		}
 		scale := int64(1)
 		if format == "unix-millis" {
@@ -269,10 +282,7 @@ func sqliteV2Datetime(value driver.Value, format string) (any, string) {
 	} else {
 		text, ok := value.(string)
 		if !ok {
-			return nil, "storage_type"
-		}
-		if text == "" {
-			return nil, ""
+			return stamp, "storage_type"
 		}
 		stamp, err = sqliteParseTime(text)
 		if err == nil && format == "utc-millis" && text != stamp.UTC().Format("2006-01-02T15:04:05.000Z") {
@@ -280,9 +290,9 @@ func sqliteV2Datetime(value driver.Value, format string) (any, string) {
 		}
 	}
 	if err != nil {
-		return nil, "datetime_invalid"
+		return stamp, "datetime_invalid"
 	}
-	return stamp.UTC().Format("2006-01-02T15:04:05.000000000Z"), ""
+	return stamp, ""
 }
 
 // SQLiteV2Aggregates uses exact decimal accumulators for SUM/AVG, independent of

@@ -101,7 +101,13 @@ func (d QueryDatasetV3) executeUngrouped(ctx context.Context, tx *sql.Tx, q Quer
 	if q.ExpectedRevisions != nil {
 		o.ExpectedRevisions = q.ExpectedRevisions
 	}
-	total, err := d.countPopulation(ctx, tx, q.Result.Where, o)
+	shared, total, sharedOK, err := d.sqliteSharedMetrics(ctx, tx, q, o, maxGroups)
+	if err != nil {
+		return out, err
+	}
+	if !sharedOK {
+		total, err = d.countPopulation(ctx, tx, q.Result.Where, o)
+	}
 	if err != nil {
 		return out, err
 	}
@@ -119,6 +125,10 @@ func (d QueryDatasetV3) executeUngrouped(ctx context.Context, tx *sql.Tx, q Quer
 		out.Schema.Fields = append(out.Schema.Fields, ProjectedField{column.Field, schemaFieldType(field.Kind)})
 	}
 	out.Execution = queryExecution(q, plan)
+	if sharedOK {
+		out.Metrics = shared
+		return out, ctx.Err()
+	}
 	resultQuery := q.Result
 	if q.Rows {
 		selected := append([]string{}, resultQuery.Select...)

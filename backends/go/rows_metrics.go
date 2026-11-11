@@ -39,15 +39,22 @@ func rowMetricComputedField(spec AggSpec) string {
 	return ""
 }
 
-// rowMetrics reduces metrics over rows keyed by schema field name, for the
-// direct SQLite distribution path.
+// rowMetrics reduces compatible SQLite clauses over rows keyed by schema name.
 type rowMetrics struct {
-	result    sqliteMetricsV2Result
-	cohorts   []*rowMetricCohort
-	maxGroups int
+	result                sqliteMetricsV2Result
+	cohorts               []*rowMetricCohort
+	maxGroups             int
+	sampleLimit           int
+	retained, maxRetained int64
 }
 
 type rowMetricsOptions struct {
+	// sampleLimit bounds group rows before minCount or groupLimit. Zero means
+	// the caller has already checked the budget.
+	sampleLimit int
+	// maxRetained bounds an estimate of retained groups, distinct keys and
+	// samples. Exceeding it declines speculation rather than changing results.
+	maxRetained int64
 	// include selects metrics by index; nil selects every metric.
 	include []bool
 	// bound reports whether rows carry the field's stored value.
@@ -60,7 +67,7 @@ type rowMetricsOptions struct {
 // newRowMetrics prepares the selected metrics, or returns errRowsUnsupported
 // for a metric shape or binding the row reducers cannot compute exactly.
 func newRowMetrics(ctx context.Context, q metricRequest, s Schema, o PlanOptions, failures []error, maxGroups int, options rowMetricsOptions) (*rowMetrics, error) {
-	r := &rowMetrics{result: sqliteMetricsV2Result{Metrics: make([]MetricResult, len(q.Metrics))}, maxGroups: maxGroups}
+	r := &rowMetrics{result: sqliteMetricsV2Result{Metrics: make([]MetricResult, len(q.Metrics))}, maxGroups: maxGroups, sampleLimit: options.sampleLimit, maxRetained: options.maxRetained}
 	byPopulation := map[string]*rowMetricCohort{}
 	for i, spec := range q.Metrics {
 		if options.include != nil && !options.include[i] {
@@ -142,12 +149,25 @@ func rowMetricShape(spec AggSpec, s Schema, bound func(string, FieldSpec) bool) 
 		}
 	} else {
 		m.op = strings.ToLower(n.op)
-		if len(n.args) == 1 && n.args[0].op == "field" {
+		if m.op == "percentile" && len(n.args) == 2 && n.args[0].op == "field" {
+			m.field = n.args[0].text
+			if m.probability, e = percentileProbability(n); e != nil {
+				return m, e
+			}
+		} else if len(n.args) == 1 && n.args[0].op == "field" {
 			m.field = n.args[0].text
 		} else if m.op != "count" || len(n.args) != 0 {
 			return m, fmt.Errorf("%w: metric %s expression", errRowsUnsupported, spec.ID)
 		}
 		switch m.op {
+		case "median":
+			m.probability = 0.5
+			fallthrough
+		case "percentile":
+			if s.Fields[m.field].Kind != FieldNumber {
+				return m, fmt.Errorf("%w: sampled binding %s", errRowsUnsupported, m.field)
+			}
+			m.op = "samples"
 		case "count", "count_distinct", "sum", "avg", "min", "max":
 		default:
 			return m, fmt.Errorf("%w: metric %s operation", errRowsUnsupported, spec.ID)
@@ -190,6 +210,7 @@ func (r *rowMetrics) add(row map[string]any, flags []bool) error {
 		if !matches {
 			continue
 		}
+		beforeGroups := len(c.groups)
 		g, e := c.group(row, r.maxGroups)
 		if e != nil {
 			return e
@@ -197,10 +218,29 @@ func (r *rowMetrics) add(row map[string]any, flags []bool) error {
 		if g == nil {
 			continue
 		}
+		if r.maxRetained > 0 && len(c.groups) > beforeGroups {
+			r.retained += int64(len(c.keyBuf)*2 + len(c.reducers)*256 + 128)
+			if r.retained > r.maxRetained {
+				return fmt.Errorf("%w: shared group memory", errRowsUnsupported)
+			}
+		}
 		g.count++
 		for j := range c.reducers {
+			beforeSamples, beforeDistinct := len(g.reductions[j].samples), len(g.reductions[j].seen)
 			if e = g.reductions[j].step(row, &c.reducers[j]); e != nil {
 				return e
+			}
+			if r.maxRetained > 0 {
+				r.retained += int64(max(0, len(g.reductions[j].samples)-beforeSamples)) * 8
+				if len(g.reductions[j].seen) > beforeDistinct {
+					r.retained += 64
+					if text, ok := row[c.reducers[j].field].(string); ok {
+						r.retained += int64(len(text))
+					}
+				}
+				if r.retained > r.maxRetained {
+					return fmt.Errorf("%w: shared reducer memory", errRowsUnsupported)
+				}
 			}
 		}
 	}
@@ -220,9 +260,19 @@ func (r *rowMetrics) finish(total int64) (sqliteMetricsV2Result, error) {
 				result.Metrics[m.index] = failedMetric(m.spec.ID, m.spec.Scope, ErrorCodeResourceLimit, "group population exceeds host budget")
 				continue
 			}
+			if m.op == "samples" && r.sampleLimit > 0 {
+				tooMany := false
+				for _, g := range c.groups {
+					tooMany = tooMany || g.count > int64(r.sampleLimit)
+				}
+				if tooMany {
+					result.Metrics[m.index] = failedMetric(m.spec.ID, m.spec.Scope, ErrorCodeResourceLimit, sampleBudgetMessage(m.spec, r.sampleLimit))
+					continue
+				}
+			}
 			metric := MetricResult{ID: m.spec.ID, Scope: "allMatching", ProcessedRows: total, Coverage: "exact", Buckets: []MetricBucket{}}
 			var histogram *rowHistogram
-			if m.op == "samples" && m.spec.Distribution.Kind == "histogram" {
+			if m.op == "samples" && m.spec.Distribution != nil && m.spec.Distribution.Kind == "histogram" {
 				histogram = c.histogram(&m)
 			}
 			hidden := int64(0)
@@ -241,7 +291,7 @@ func (r *rowMetrics) finish(total int64) (sqliteMetricsV2Result, error) {
 					continue
 				}
 				var bucket MetricBucket
-				if m.op == "samples" {
+				if m.op == "samples" && m.spec.Distribution != nil {
 					bucket = g.reductions[m.reduction].distribution(&m, histogram)
 				} else {
 					value, code, e := g.reductions[m.reduction].value(&m)
@@ -259,6 +309,8 @@ func (r *rowMetrics) finish(total int64) (sqliteMetricsV2Result, error) {
 			}
 			sortRowMetric(metric.Buckets, m.spec)
 			if m.spec.GroupLimit > 0 && len(metric.Buckets) > m.spec.GroupLimit {
+				shape := metricOtherShape(m.spec)
+				metric.Other = shape.remainder(m.spec, otherSumsFromBuckets(metric.Buckets[m.spec.GroupLimit:], len(shape.columns())))
 				metric.Buckets = metric.Buckets[:m.spec.GroupLimit]
 			}
 			if (m.op == "min" || m.op == "max") && m.binding.Kind == FieldDatetime {
@@ -284,8 +336,9 @@ func rowExpressionFields(n *exprNode) []string {
 }
 
 type rowMetricSpec struct {
-	index     int
-	reduction int
+	probability float64
+	index       int
+	reduction   int
 	// threshold is the reducer of a measured minCount (or -1), read as measure.
 	threshold int
 	measure   *rowMetricSpec
@@ -518,6 +571,19 @@ func (r *rowMetricReduction) value(m *rowMetricSpec) (any, string, error) {
 		return nil, r.err, nil
 	}
 	switch m.op {
+	case "samples":
+		if len(r.samples) == 0 {
+			return nil, "", nil
+		}
+		if !r.sorted {
+			sort.Float64s(r.samples)
+			r.sorted = true
+		}
+		value, code := sqlitePercentile(r.samples, m.probability)
+		if code != "" {
+			return nil, code, nil
+		}
+		return value, "", nil
 	case "count":
 		return float64(r.count), "", nil
 	case "count_distinct":
