@@ -114,6 +114,7 @@ func (d sqliteV2Dataset) executeMetrics(ctx context.Context, tx *sql.Tx, metrics
 	memo := map[string]MetricResult{}
 	reductions := newSQLiteReductionCache(batch)
 	reductions.addCrossFields(ctx, batch, metrics, d.Schema, o)
+	reductions.addTextDistinct(batch, metrics, d.Schema, o)
 	defer func() {
 		if cleanupErr := reductions.close(tx); cleanupErr != nil {
 			out = nil

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 1.0.6 — 2026-11-11
+
+### Performance
+
+- SQLite text `COUNT_DISTINCT` metric batches share a narrow filtered input
+  and field validation across different grouping lists. Each metric still
+  computes its own exact distinct count, so overlapping memberships do not
+  inflate coarser denominators. Field error sidecars, metric savepoint fallback,
+  group limits and execution-local cleanup remain in force. Singleton,
+  computed, sampled and page-scoped plans retain their existing paths.
+  See [the synthetic benchmark and profiling report](docs/sqlite-text-distinct-performance.md).
+
 ## 1.0.5 — 2026-11-10
 
 ### Added
