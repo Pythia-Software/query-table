@@ -3,7 +3,7 @@
 The Go V3 executor can answer an eligible metric-only request with one streamed
 read of its authorized SQLite source. The read supplies `total` and
 `sourceTotal`, as well as every clause. No host API, request format, dependency
-patch or persistent cache is required. This change is unreleased.
+patch or persistent cache is required. This change is available in 1.0.6.
 
 ## Eligible requests
 
@@ -26,6 +26,11 @@ The reducer shares state by group keys and clause filter, and shares samples
 and their sort across percentiles/distributions of the same field in a cohort.
 Clause predicates remain compiled SQL. Typed group identity remains binary,
 including on a source column declared COLLATE NOCASE.
+
+Homogeneous text `COUNT_DISTINCT` clauses over the same field and filters but
+different grouping sets use the [shared SQL input](sqlite-text-distinct-performance.md).
+That path avoids a discarded speculative scan when large distinct sets exceed
+the streamed reducer's retained-memory bound.
 
 Scalar-only batches with identical populations retain existing SQL fusion;
 distribution-only batches retain the existing distribution scan. Requests

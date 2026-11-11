@@ -23,7 +23,7 @@ import (
 // evaluated by a failed speculation. Rows and host population counters keep
 // their existing execution paths.
 func (d QueryDatasetV3) sqliteSharedMetrics(ctx context.Context, tx *sql.Tx, request QueryRequestV3, o PlanOptions, maxGroups int) ([]MetricResult, int64, bool, error) {
-	if d.Dialect != "sqlite" || request.Rows || len(request.Metrics) < 2 || d.PopulationCounter != nil {
+	if d.Dialect != "sqlite" || request.Rows || len(request.Metrics) < 2 || d.PopulationCounter != nil || sqliteTextDistinctPreferSQL(request, d.Schema) {
 		return nil, 0, false, nil
 	}
 	// Existing SQL fusion is cheaper for scalar clauses with one population,

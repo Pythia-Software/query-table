@@ -14,13 +14,15 @@ import (
 // identical validated input stages or a combined cross-field compiler plan.
 // Distributions retain their own streaming and sampling behavior.
 // All plans and revision envelopes have already validated. The temporary tables
-// contain bounded grouped results, belong to this execution, and are dropped
-// before returning the caller's transaction. No cache crosses snapshots.
+// contain grouped results or narrow validated text inputs, belong to this
+// execution, and are dropped before returning the caller's transaction. No
+// cache crosses snapshots.
 type sqliteReductionCache struct {
-	shared  map[string]bool
-	fusions map[string]*sqliteReductionFusion
-	cross   map[string]*sqliteCrossFieldReduction
-	tables  map[string]string
+	shared       map[string]bool
+	fusions      map[string]*sqliteReductionFusion
+	cross        map[string]*sqliteCrossFieldReduction
+	textDistinct map[string]sqliteTextDistinctMetric
+	tables       map[string]string
 }
 
 var sqliteReductionSequence atomic.Uint64
@@ -107,7 +109,7 @@ func sqliteFusionKey(p metricSQLPlan) string {
 	return rowKey + "\x00" + p.SQLiteReductionFrom
 }
 func newSQLiteReductionCache(batch metricBatchPlan) *sqliteReductionCache {
-	c := &sqliteReductionCache{shared: map[string]bool{}, fusions: map[string]*sqliteReductionFusion{}, cross: map[string]*sqliteCrossFieldReduction{}, tables: map[string]string{}}
+	c := &sqliteReductionCache{shared: map[string]bool{}, fusions: map[string]*sqliteReductionFusion{}, cross: map[string]*sqliteCrossFieldReduction{}, tables: map[string]string{}, textDistinct: map[string]sqliteTextDistinctMetric{}}
 	first := map[string]string{}
 	for _, p := range batch.Metrics {
 		key := sqliteReductionKey(p)
@@ -142,6 +144,9 @@ func (c *sqliteReductionCache) plan(ctx context.Context, tx *sql.Tx, p metricSQL
 	key := sqliteReductionKey(p)
 	if key == "" {
 		return p, nil
+	}
+	if m, ok := c.textDistinct[key]; ok && !m.input.disabled {
+		return c.textDistinctPlan(ctx, tx, p, m)
 	}
 	if f := c.cross[key]; f != nil && !f.disabled {
 		return c.crossFieldPlan(ctx, tx, p, f)
