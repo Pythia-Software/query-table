@@ -3,7 +3,7 @@
 The Go V3 executor can answer an eligible metric-only request with one streamed
 read of its authorized SQLite source. The read supplies `total` and
 `sourceTotal`, as well as every clause. No host API, request format, dependency
-patch or persistent cache is required. This change is available in 1.0.6.
+patch or persistent cache is required. This change is available in 1.0.7.
 
 ## Eligible requests
 

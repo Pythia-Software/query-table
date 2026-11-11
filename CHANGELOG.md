@@ -2,7 +2,11 @@
 
 ## Unreleased
 
-## 1.0.6 — 2026-11-11
+## 1.0.7 — 2026-11-11
+
+Version 1.0.6 was tagged but no libraries were published: the release gate
+installed Go 1.25 while the SQLite test driver requires Go 1.26. This release
+selects the test module's toolchain and includes the same executor improvements.
 
 ### Performance
 
