@@ -419,8 +419,10 @@ export class DuckDBBackend {
       Object.entries(row).map(([name, value]) => {
         const field = schema.fields.find((field) => field.name === name);
         if (value != null && field?.type === "datetime") {
-          // DuckDB's textual native TIMESTAMP has no suffix; our session profile
-          // interprets that storage as UTC, independently of the JS host timezone.
+          // DuckDB's textual native TIMESTAMP has no suffix. The backend does not
+          // set the session TimeZone; hosts must `SET TimeZone='UTC'` (README),
+          // which the SQL's TIMESTAMPTZ casts and EXTRACT/DATE_TRUNC rely on.
+          // Read that storage as UTC, independently of the JS host timezone.
           const text = String(value);
           const canonical =
             /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(text)

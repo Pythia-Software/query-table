@@ -399,7 +399,7 @@ Unextended v1/v2 transports still reject grouping before fetching. Passing a
 server page as `clientRows` does not make it complete. There is no bulk-download
 fallback for unsupported remote queries. Backend draft previews
 use the same versioned executor. See the
-[host integration guide](host-integration-next-release.md) for setup, budgets,
+[host integration guide](host-integration.md) for setup, budgets,
 source dependency planning and simultaneous-checkout development.
 
 There are no nested stages, joins, arbitrary SQL, or calendar bucketing of table

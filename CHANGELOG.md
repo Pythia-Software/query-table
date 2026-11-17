@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Documentation
+
+- The host integration guide moved from
+  `docs/host-integration-next-release.md` to `docs/host-integration.md` and now
+  describes 1.x: the v3-only `Transport`, `QueryDatasetV3` as the only Go query
+  API (no `SQLiteV2Dataset` or `DescribeComputedIn`), the full SQLite function
+  registration, opt-in remote field statistics and matching release pins.
+- The DuckDB backend's UTC timestamp handling comment names the
+  `SET TimeZone='UTC'` requirement it depends on; the demo README names the
+  **From representative row** picker group.
+
 ## 1.0.9 — 2026-11-11
 
 No library behaviour changes. This release carries the reorganised UI source

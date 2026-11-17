@@ -317,7 +317,7 @@ With a transport, each metric batch is one `fetchQueryV3` request with
 `rows: false`, including calendar metrics, metrics over grouped results and
 shown-row clauses (the server pages the same ordered result). Unsupported
 features fail explicitly; an all-matching metric never falls back to an
-incomplete page. See the [host integration guide](host-integration-next-release.md).
+incomplete page. See the [host integration guide](host-integration.md).
 
 Without a transport, shown-row metrics reduce the committed page when all required inputs are present. Regex inputs use workers. Automatic local evaluation waits in a loading state while that page is being prepared; a failed page ends that wait and surfaces the row error. Applying such metrics adds their input dependencies to row projections. A draft referencing an unloaded field explains that the author must select it.
 

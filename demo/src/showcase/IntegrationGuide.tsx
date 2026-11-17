@@ -79,7 +79,7 @@ function IntegrationPaths() {
   const [platform, setPlatform] = useState<"react" | "mac">("react");
   const [database, setDatabase] = useState<"postgres" | "sqlite" | "duckdb">("duckdb");
   const backends = {
-    postgres: { name: "PostgreSQL", note: "The Go backend compiles allowed fields and query expressions into parameterized SQL. Your server executes the plans.", path: "blob/main/docs/host-integration-next-release.md" },
+    postgres: { name: "PostgreSQL", note: "The Go backend compiles allowed fields and query expressions into parameterized SQL. Your server executes the plans.", path: "blob/main/docs/host-integration.md" },
     sqlite: { name: "SQLite", note: "The Go backend includes SQLite planning and function registration. Your app supplies the driver, connection, and authorized source.", path: "blob/main/docs/backend-sqlite.md" },
     duckdb: { name: "DuckDB", note: "The TypeScript backend works with native DuckDB or DuckDB-Wasm. This demo executes its queries in the browser.", path: "tree/main/packages/duckdb" },
   };
@@ -131,7 +131,7 @@ function Ownership({ api }: { api: QueryTableApi<ExampleOrder> }) {
     <p className="build-caption">Here, the browser is the host: DuckDB executes, local storage keeps views. A server-backed app supplies those adapters and its own access rules.</p>
     <button type="button" className="qt-btn" onClick={() => setShowRequest(value => !value)} aria-expanded={showRequest}>Inspect an example request</button>
     {showRequest && <Code label="Readable row-query contract" text={JSON.stringify(toServerQuery(api.query, EXAMPLE_SCHEMA), null, 2)} />}
-    <DocLink path="blob/main/docs/host-integration-next-release.md">Host integration guide</DocLink>
+    <DocLink path="blob/main/docs/host-integration.md">Host integration guide</DocLink>
   </>;
 }
 
