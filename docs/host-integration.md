@@ -1,9 +1,10 @@
-# Integrating Query Table 0.7.0
+# Integrating Query Table
 
-This guide covers consumers moving from the 0.6.0 release to 0.7.0. Existing
-row transports remain compatible. The v3 query executor is an
-opt-in capability for grouped result rows and calendar metrics; URL/query state
-still uses the `2j.`/`2d.` codec and immutable `@code` references.
+This guide covers wiring a host application to Query Table 1.x. A remote
+`Transport` is exactly `{ queryCapabilities, fetchQueryV3 }`: rows, grouped
+result rows, metrics, filter suggestions, item lookups and field statistics are
+all v3 requests. URL/query state uses the `2j.`/`2d.` codec and immutable
+`@code` references.
 
 ## Choose an execution mode
 
@@ -31,8 +32,9 @@ controller and grouped-column preview use this transport automatically.
 The Go adapter exports `QueryDatasetV3`, `DecodeQueryRequestV3` and
 `NewQueryV3Handler`. Set `Dialect` to `sqlite` or `postgres`; provide the trusted
 schema, authorized source SELECT, bound arguments, tenant scope and dataset.
-SQLite needs the existing `SQLiteFunctions` and `SQLiteV2Functions` registered
-on each physical connection. PostgreSQL uses its native exact reductions.
+SQLite needs the `SQLiteFunctions()` and `SQLiteV2Functions()` scalar
+descriptors and the `SQLiteV2Aggregates()` aggregates registered on each
+physical connection (see [SQLite + Go integration](backend-sqlite.md)). PostgreSQL uses its native exact reductions.
 
 ```go
 dataset := querytable.QueryDatasetV3{
@@ -59,8 +61,8 @@ when identical dataset contents across those requests are required.
 
 The defaults are 10,000 result rows, 2,000 groups, 250,000 matching source rows,
 64 MiB of staged values and 100,000 exact samples per group. Since 0.9.1, trusted
-hosts may explicitly set `MaxGroups` from 1 through 100,000 for either dialect
-(and for `SQLiteV2Dataset`). Zero retains the 2,000-group default advertised by
+hosts may explicitly set `MaxGroups` from 1 through 100,000 for either dialect.
+Zero retains the 2,000-group default advertised by
 `Capabilities()`. Request `groupLimit` and result paging cannot hide an exceeded
 host group budget. Budgets fail rather than returning partial groups. Source,
 staging, row and grouped-summary budgets fail the request. A metric's sample, group or calendar budget, an invalid metric
@@ -90,8 +92,9 @@ database storage overhead and query scratch space use the host's database limits
 ### Server execution example
 
 Use `withServerExecution` from [server-execution.tsx](../examples/server-execution.tsx)
-to build the transport over the v3 query endpoint; rows, items, filter
-suggestions and field statistics all use it.
+to build the transport over the v3 query endpoint; rows, items and filter
+suggestions all use it. Remote field statistics reduce the whole dataset, so
+they are opt-in with `useQueryTable({ remoteFieldStats: true })`.
 Keep the transport and storage objects stable. The controller sends query
 configuration and receives result pages and metric buckets; it has no bulk
 population loader or automatic download fallback. Unsupported server operations
@@ -109,11 +112,10 @@ Computed predicates now remain in normalized and encoded query state. Hosts
 must validate their execution capabilities; unapproved predicates stay editable
 and fail exact grouping/metric execution rather than widening the population.
 
-`DescribeComputedPartialIn` returns healthy execution capabilities and per-ID
-diagnostics without hiding broken definitions in the full store catalogue. Both
-`SQLiteV2Dataset` and `QueryDatasetV3` provide this API; the latter supports the
-PostgreSQL profile too. Infrastructure/context failures fail the request.
-`DescribeComputedIn` retains its all-or-error behavior. Hosts can keep the full
+`QueryDatasetV3.DescribeComputedPartialIn` returns healthy execution
+capabilities and per-ID diagnostics without hiding broken definitions in the
+full store catalogue, for both the SQLite and PostgreSQL dialects.
+Infrastructure/context failures fail the request. Hosts can keep the full
 catalogue editable while advertising only valid transitive graphs.
 
 SQLite source regex predicates use the existing bounded Go/RE2 backend profile
@@ -207,8 +209,9 @@ regeneration. `npm ci` removes local links, so relink afterward.
 
 Run `npm run package:check` to install packed artifacts into a clean consumer
 and check exports/types without local links. For deployed consumers, pin the
-core/react/ui/codegen packages to `0.7.0` and the Go module to `v0.7.0`; an
-unchanged registry 0.6.0 pin does not contain the new APIs. A browser/native
+core/react/ui/codegen packages and the Go module
+(`github.com/Pythia-Software/query-table/backends/go`, tagged
+`backends/go/vX.Y.Z`) to the same release. A browser/native
 bookmark copies a URL, not the local cache, so use an explicit durable Bookmark
 action for portable references.
 

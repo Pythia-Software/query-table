@@ -220,7 +220,7 @@ async function integrationGuide(page, mobile = false) {
     await dialog.getByText("See the Swift integration", { exact: true }).click();
   assert((await dialog.locator("pre").innerText()).includes("QueryTableView(controller: table)"));
   assert((await dialog.getByRole("link", { name: "Native setup & compatibility" }).getAttribute("href")).endsWith("/native/macos"));
-  for (const [label, suffix] of [["PostgreSQL", "docs/host-integration-next-release.md"], ["SQLite", "docs/backend-sqlite.md"], ["DuckDB", "packages/duckdb"]]) {
+  for (const [label, suffix] of [["PostgreSQL", "docs/host-integration.md"], ["SQLite", "docs/backend-sqlite.md"], ["DuckDB", "packages/duckdb"]]) {
     await dialog.getByRole("button", { name: label, exact: true }).click();
     assert((await dialog.getByRole("link", { name: `${label} integration`, exact: true }).getAttribute("href")).endsWith(suffix));
   }

@@ -3,9 +3,9 @@
 `QueryDatasetV3{Dialect: "sqlite"}` executes every v3 request over SQLite:
 rows, totals, grouped result rows, metrics (including calendar/timezone
 metrics) and distinct filter values. See the
-[next-release host integration guide](host-integration-next-release.md) for the
-transport, transaction/budget contract and migration examples. The v1/v2 SQLite
-datasets, compilers and request types were removed in this release; their
+[host integration guide](host-integration.md) for the
+transport, transaction/budget contract and examples. The v1/v2 SQLite
+datasets, compilers and request types were removed in 1.0.0; their
 features are served by `QueryRequestV3` as described below.
 
 The dependency-free `github.com/Pythia-Software/query-table/backends/go` module

@@ -176,7 +176,7 @@ Try these paths:
   All ROW columns read from that same record. The shared ordering is independent
   of the final ORDER BY; aggregates still summarize every source match.
 - After configuring a representative rule in GROUP BY, **Add column** → **Job**
-  offers **Representative row** under **From one row**, separate from aggregates.
+  offers **Representative row** under **From representative row**, separate from aggregates.
   Column selection only uses that shared rule; configure it through GROUP BY.
   Removing the rule explicitly removes its row columns; Undo restores both.
 - **Add column** → **Duration** → **Custom aggregate…** opens a formula draft.
